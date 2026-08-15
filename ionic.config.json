@@ -1,0 +1,7 @@
+{
+  "name": "BairaqGate6",
+  "integrations": {
+    "capacitor": {}
+  },
+  "type": "react"
+}

@@ -1,0 +1,6 @@
+{
+  "name": "منصة المنظومة التعليمية الذكية",
+  "description": "منصة تعليمية متكاملة تدير أدوار الطالب، الأستاذ، ولي الأمر، ومدير المدرسة",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

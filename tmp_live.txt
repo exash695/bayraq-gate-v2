@@ -1,0 +1,253 @@
+953-  const handleBack = async () => {
+954-    if (isTeacher && isLiveActive) {
+955-      try {
+956:        const docRef = doc(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`);
+957-        await setDoc(docRef, {
+958-          isLiveActive: false,
+959-          isLive: false,
+960-          activeLiveQuizStr: null
+961-        }, { merge: true });
+962-        sessionStorage.removeItem("s6_is_broadcasting");
+963-      } catch (e) {
+964-        console.error("Error stopping live on back:", e);
+965-      }
+966-    }
+--
+1215-        const strokeStr = JSON.stringify(whiteboardStrokes);
+1216-        if (lastSyncedStrokesRef.current === strokeStr) return;
+1217-        lastSyncedStrokesRef.current = strokeStr;
+1218:        await setDoc(doc(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`), {
+1219-          whiteboardStrokes: strokeStr
+1220-        }, { merge: true });
+1221-      } catch (err) {
+1222-        console.error("Sync stroke error:", err);
+1223-      }
+1224-    }, 4000);
+1225-
+1226-    return () => clearTimeout(timer);
+1227-  }, [whiteboardStrokes, isLiveActive, isTeacher, resolvedSchoolId, targetBroadcastGrade]);
+1228-
+1229-  // 1) Subscription to live broadcast viewers/attendees (subcollection "viewers")
+1230-  useEffect(() => {
+1231-    if ((!isTeacher && userProfile?.role !== 'admin') || !resolvedSchoolId || !targetBroadcastGrade) return;
+1232:    const viewersColRef = collection(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`, "viewers");
+1233-    const unsub = onSnapshot(viewersColRef, (snap) => {
+1234-      const list: any[] = [];
+1235-      snap.forEach((docSnap) => {
+1236-        list.push({ id: docSnap.id, ...docSnap.data() });
+1237-      });
+1238-      setRealLiveAttendees(list);
+1239-    }, (err) => {
+1240-      console.error("Failed to fetch live broadcast watchers:", err);
+1241-    });
+1242-    return () => unsub();
+--
+1260-
+1261-  useEffect(() => {
+1262-    if ((!isTeacher && userProfile?.role !== 'admin') || !resolvedSchoolId || !targetBroadcastGrade) return;
+1263:    const refPath = collection(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`, "responses");
+1264-    const unsubQuiz = onSnapshot(refPath, (snapshot) => {
+1265-      const list: any[] = [];
+1266-      snapshot.forEach((doc) => {
+1267-        list.push(doc.data());
+1268-      });
+1269-      setQuizResponses(list);
+1270-    }, (err) => {
+1271-      console.error("Failed to fetch live quiz responses:", err);
+1272-    });
+1273-    return () => {
+--
+1277-
+1278-  useEffect(() => {
+1279-    if (!resolvedSchoolId || !targetBroadcastGrade) return;
+1280:    const docRef = doc(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`);
+1281-    const unsub = onSnapshot(docRef, (docSnap) => {
+1282-      if (docSnap.exists()) {
+1283-        const data = docSnap.data();
+1284-        
+1285-        // Compute heartbeat check safely to avoid NaN issues with clock alignment
+1286-        const hbTime = data.heartbeat?.toMillis
+1287-          ? data.heartbeat.toMillis()
+1288-          : (typeof data.heartbeat === 'number' ? data.heartbeat : 0);
+1289-
+1290-        const upTime = data.updatedAt?.toMillis
+--
+1708-    }
+1709-    if (isLiveActive) {
+1710-      try {
+1711:        await setDoc(doc(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`), {
+1712-          whiteboardImage: img,
+1713-          ...(img !== "pdf_viewer" ? { sharedPdfPageBase64: null } : {})
+1714-        }, { merge: true });
+1715-      } catch (err) {
+1716-        console.error(err);
+1717-      }
+1718-    }
+1719-  };
+1720-
+1721-  const lastSyncedPdfMetaRef = useRef<string | null>(null);
+--
+1737-        if (dataUrl) {
+1738-          try {
+1739-            lastSyncedPdfMetaRef.current = currentMeta;
+1740:            await setDoc(doc(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`), {
+1741-               sharedPdfPageBase64: dataUrl,
+1742-               pdfScale: pdfScale
+1743-            }, { merge: true });
+1744-          } catch (err) {
+1745-            console.error("Failed to sync PDF page image", err);
+1746-          }
+1747-        }
+1748-      }
+1749-    }, 1500); // short delay to ensure canvas is painted
+1750-  };
+--
+2192-        if (isTeacher && resolvedSchoolId && targetBroadcastGrade) {
+2193-          const currentSecs = Math.floor(Date.now() / 1000);
+2194-          if (currentSecs % 15 === 0) {
+2195:            setDoc(doc(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`), {
+2196-              heartbeat: Date.now()
+2197-            }, { merge: true }).catch(err => {
+2198-              // Document might not exist if stopped concurrently
+2199-            });
+2200-          }
+2201-        }
+2202-      }, 1000);
+2203-    } else {
+2204-      setLiveSeconds(0);
+2205-    }
+--
+2272-    
+2273-    if (isLiveActive && !isTeacher && activeTab === ("live_watch" as any) && resolvedSchoolId && targetBroadcastGrade) {
+2274-      const myUserId = getCurrentUserId();
+2275:      const viewerDocRef = doc(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`, "viewers", myUserId);
+2276-      const studentName = userProfile?.studentName || userProfile?.name || userProfile?.fullName || "الفارس المتميز";
+2277-
+2278-      const updateViewerStatus = () => {
+2279-        setDoc(viewerDocRef, {
+2280-          id: myUserId,
+2281-          name: studentName,
+2282-          lastActive: Date.now(),
+2283-          studentCode: userProfile?.studentCode || userProfile?.code || myUserId
+2284-        }, { merge: true }).catch(console.error);
+2285-      };
+--
+2338-        // Clean up from the broadcast viewers list instantly when leaving
+2339-        if (resolvedSchoolId && targetBroadcastGrade) {
+2340-          const myUserId = getCurrentUserId();
+2341:          const viewerDocRef = doc(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`, "viewers", myUserId);
+2342-          deleteDoc(viewerDocRef).catch(console.error);
+2343-        }
+2344-      }
+2345-    };
+2346-  }, [isLiveActive, isTeacher, activeTab, resolvedSchoolId, targetBroadcastGrade, userProfile]);
+2347-
+2348-  // Floating emojis fade out lifecycle timer
+2349-  useEffect(() => {
+2350-    let emojiInterval: any = null;
+2351-    if (floatingEmojis.length > 0) {
+--
+7575-                                    // Submit response asynchronously to Firestore so everyone gets it real-time
+7576-                                    const myUserId = getCurrentUserId();
+7577-                                    const timeSpentValue = 60 - activeLiveQuiz.secondsRemaining;
+7578:                                    setDoc(doc(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`, "responses", myUserId), {
+7579-                                      userId: myUserId,
+7580-                                      studentId: myUserId,
+7581-                                      studentName: studentName,
+7582-                                      name: studentName,
+7583-                                      answerIndex: idx,
+7584-                                      isCorrect: isCorrect,
+7585-                                      timeSpent: timeSpentValue,
+7586-                                      submittedAt: Date.now()
+7587-                                    }).catch(console.error);
+7588-
+--
+9028-                                      console.log("[Broadcast DEBUG] Removed sessionStorage s6_is_broadcasting (pre-write to database)");
+9029-                                    }
+9030-
+9031:                                    await setDoc(doc(db, "live_sessions", liveSessionId), {
+9032-                                      liveId: `live_${Date.now()}`,
+9033-                                      isLiveActive: nextState,
+9034-                                      isLive: nextState,
+9035-                                      title: liveTitle,
+9036-                                      heartbeat: nextState ? Date.now() : null,
+9037-                                      updatedAt: serverTimestamp(),
+9038-                                      startTime: serverTimestamp(),
+9039-                                      teacherId: teacherId,
+9040-                                      teacherName: teacherData?.name || "الأستاذ",
+9041-                                      subjectId: subjectStr,
+--
+9124-                                    setCameraLayout(nextLayout);
+9125-                                    if (isLiveActive) {
+9126-                                      try {
+9127:                                        await setDoc(doc(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`), {
+9128-                                          cameraLayout: nextLayout,
+9129-                                        }, { merge: true });
+9130-                                      } catch (err) {
+9131-                                        console.error(err);
+9132-                                      }
+9133-                                    }
+9134-                                  }}
+9135-                                  className={`px-3 py-1 rounded-full text-[9px] font-black transition-all shadow-md ${cameraLayout === "pip" ? "bg-purple-500/20 text-purple-300 border border-purple-500/30" : "bg-zinc-800 text-white/50 border border-white/10 hover:text-white"}`}
+9136-                                >
+9137-                                  تفعيل الكاميرا PiP 🎥
+--
+9142-                                    setIsWhiteboardActive(nextState);
+9143-                                    if (isLiveActive) {
+9144-                                      try {
+9145:                                        await setDoc(doc(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`), {
+9146-                                          isWhiteboardActive: nextState,
+9147-                                        }, { merge: true });
+9148-                                      } catch (err) {
+9149-                                        console.error(err);
+9150-                                      }
+9151-                                    }
+9152-                                  }}
+9153-                                  className={`px-3 py-1 rounded-full text-[9px] font-black transition-all shadow-md ${isWhiteboardActive ? "bg-red-500/20 text-red-300 border border-red-500/30" : "bg-[#00E5FF]/10 text-[#00E5FF] border border-[#00E5FF]/20"}`}
+9154-                                >
+9155-                                  {isWhiteboardActive
+--
+9564-                                    setActiveLiveQuiz((prev) => {
+9565-                                      const next = prev ? { ...prev, isActive: false } : null;
+9566-                                      if (resolvedSchoolId && targetBroadcastGrade && isLiveActive) {
+9567:                                        setDoc(doc(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`), {
+9568-                                          activeLiveQuizStr: null
+9569-                                        }, { merge: true }).catch(console.error);
+9570-                                      }
+9571-                                      return next;
+9572-                                    });
+9573-                                    setQuizTimerActive(false);
+9574-                                    showToast(
+9575-                                      "تم إنهاء وتجميد الاختبار الفوري وعرض الإحصائيات بنجاح 🏆",
+9576-                                      "success",
+9577-                                    );
+--
+9686-                                        // Asynchronously delete previous responses from last quiz
+9687-                                        const deleteOldResponses = async () => {
+9688-                                          try {
+9689:                                            const snap = await getDocs(collection(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`, "responses"));
+9690-                                            snap.forEach((docSnap) => {
+9691-                                              deleteDoc(docSnap.ref);
+9692-                                            });
+9693-                                          } catch (e) {
+9694-                                            console.error("Error clearing old responses:", e);
+9695-                                          }
+9696-                                        };
+9697-                                        deleteOldResponses();
+9698-
+9699-                                        setQuizResponses([]);
+--
+9709-                                        setActiveLiveQuiz(quizPayload);
+9710-                                        setQuizTimerActive(true);
+9711-                                        if (resolvedSchoolId && targetBroadcastGrade && isLiveActive) {
+9712:                                          setDoc(doc(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`), {
+9713-                                            activeLiveQuizStr: JSON.stringify(quizPayload)
+9714-                                          }, { merge: true }).catch(console.error);
+9715-                                        }
+9716-                                        showToast(
+9717-                                          "تم إطلاق الاختبار الفوري للفرسان فوراً! ⚡⏱️",
+9718-                                          "success",
+9719-                                        );
+9720-                                      }}
+9721-                                      className="px-4 py-2 bg-[#00E5FF] hover:bg-[#00E5FF]/90 text-black font-black text-[10px] rounded-xl flex items-center gap-1 transition-all active:scale-97 cursor-pointer shadow-lg hover:shadow-[#00E5FF]/10"
+9722-                                    >

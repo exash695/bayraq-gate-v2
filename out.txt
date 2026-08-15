@@ -1,0 +1,79 @@
+388-      if (status === 'accepted') {
+389-        if (notif.type === 'battalion_invite') {
+390-          await updateDoc(doc(db, 'battalions', notif.battalionId), {
+391-            members: arrayUnion(user.uid)
+392-          });
+393:          await updateDoc(doc(db, 'users', user.uid), {
+394-            battalionId: notif.battalionId,
+395-            battalionName: notif.battalionName
+396-          });
+397-        } else if (notif.type === 'battalion_join_request') {
+398-          await updateDoc(doc(db, 'battalions', notif.battalionId), {
+399-            members: arrayUnion(notif.requesterId)
+400-          });
+401:          await updateDoc(doc(db, 'users', notif.requesterId), {
+402-            battalionId: notif.battalionId,
+403-            battalionName: notif.battalionName
+404-          });
+405-          await addDoc(collection(db, 'notifications'), {
+406-            userId: notif.requesterId,
+--
+869-  const resetProgress = () => {
+870-    setProgress(INITIAL_PROGRESS);
+871-    localStorage.removeItem('s6_progress');
+872-    // Also reset progress in Firestore
+873-    if (user) {
+874:      updateDoc(doc(db, 'users', user.uid), { progress: INITIAL_PROGRESS }).catch(console.error);
+875-    }
+876-  };
+877-
+878-  const clearNotes = () => {
+879-    // Implement or leave as is if not needed
+--
+945-                      setPortalType(branch === 'boys' ? 'admin-boys' : 'admin-girls');
+946-                      
+947-                      // Permanent upgrade if user is logged in
+948-                      if (user) {
+949-                        try {
+950:                          await updateDoc(doc(db, 'users', user.uid), {
+951-                            isAdmin: true,
+952-                            role: 'admin',
+953-                            adminBranch: branch,
+954-                            schoolName: institutionName,
+955-                            schoolId: selectedSchoolId
+--
+994-                        studentCode
+995-                      });
+996-
+997-                      // Non-blocking update
+998-                      if (user) {
+999:                        updateDoc(doc(db, 'users', user.uid), {
+1000-                          role: 'parent',
+1001-                          parentCode: code,
+1002-                          studentCode: studentCode,
+1003-                          verifiedAt: serverTimestamp()
+1004-                        }).catch(err => console.error("Error updating parent profile:", err));
+--
+1018-                      });
+1019-
+1020-                      // Non-blocking update
+1021-                      if (user) {
+1022-                        try {
+1023:                          await updateDoc(doc(db, 'users', user.uid), {
+1024-                            role: 'parent',
+1025-                            parentCode: code,
+1026-                            studentCode: studentCode,
+1027-                            verifiedAt: serverTimestamp()
+1028-                          });
+--
+1174-                        setVerifiedStudentInfo(sData);
+1175-                        setSelectedStudentGrade(sData.grade || 'غير محدد');
+1176-
+1177-                        // Update user profile with student code
+1178-                        if (user) {
+1179:                          updateDoc(doc(db, 'users', user.uid), {
+1180-                            role: 'student',
+1181-                            studentCode: studentCode,
+1182-                            verifiedAt: serverTimestamp()
+1183-                          }).catch(err => console.error("Error updating student profile:", err));
+1184-                        }

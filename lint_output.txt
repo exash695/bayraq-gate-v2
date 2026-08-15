@@ -1,0 +1,67 @@
+
+> react-example@0.0.0 lint
+> tsc --noEmit
+
+src/App.tsx(216,73): error TS2345: Argument of type '() => unknown[]' is not assignable to parameter of type 'AppNotification[] | (() => AppNotification[])'.
+  Type '() => unknown[]' is not assignable to type '() => AppNotification[]'.
+    Type 'unknown[]' is not assignable to type 'AppNotification[]'.
+      Type '{}' is missing the following properties from type 'AppNotification': id, title, message, timestamp, and 2 more.
+src/App.tsx(925,37): error TS2339: Property 'targetRole' does not exist on type 'AppNotification'.
+src/App.tsx(1587,41): error TS2345: Argument of type '"admin-observer"' is not assignable to parameter of type 'SetStateAction<"student" | "parent" | "teacher" | "admin-boys" | "admin-girls">'.
+src/App.tsx(2152,13): error TS2367: This comparison appears to be unintentional because the types '"student" | "teacher"' and '"admin-observer"' have no overlap.
+src/App.tsx(2216,19): error TS2367: This comparison appears to be unintentional because the types '"student" | "teacher"' and '"admin-observer"' have no overlap.
+src/App.tsx(2734,47): error TS2345: Argument of type 'number' is not assignable to parameter of type 'SetStateAction<UnitId>'.
+src/App.tsx(2741,12): error TS2741: Property 'onResetSettings' is missing in type '{ unitId: UnitId; onBack: () => void; themeColor: string; progress: UserProgress; setProgress: (updater: (prev: UserProgress) => UserProgress) => void; settings: AppSettings; setSettings: Dispatch<...>; onResetProgress: () => void; onClearNotes: () => void; }' but required in type 'UnitDetailProps'.
+src/components/AdminDashboard.tsx(1404,12): error TS2367: This comparison appears to be unintentional because the types '"radar" | "control" | "support" | "broadcast" | "attendance" | "finance" | "codes" | "ideas" | "hall" | "teachers" | "grades" | "students" | "resources" | "pulse" | "archive" | "audit" | "academy"' and '"ideabank"' have no overlap.
+src/components/AdminDashboard.tsx(1507,29): error TS2353: Object literal may only specify known properties, and 'method' does not exist in type 'SetStateAction<{ adminName: string; studentName: string; amount: number; time: Date; }>'.
+src/components/AuthPage.tsx(233,21): error TS2322: Type '{ type: "tel"; required: boolean; maxLength: number; value: string; onChange: (e: ChangeEvent<HTMLInputElement, HTMLInputElement>) => void; placeholder: string; className: string; dir: string; align: string; }' is not assignable to type 'DetailedHTMLProps<InputHTMLAttributes<HTMLInputElement>, HTMLInputElement>'.
+  Property 'align' does not exist on type 'DetailedHTMLProps<InputHTMLAttributes<HTMLInputElement>, HTMLInputElement>'.
+src/components/DigitalReceiptModal.tsx(43,24): error TS2339: Property 'isSyncedToParent' does not exist on type '{ id?: string; adminName: string; studentName: string; amount: number; time: string | Date; schoolName?: string; schoolId?: string; studentId?: string; installmentName?: string; method?: string; isStamped?: boolean; stampTime?: string; }'.
+src/components/DigitalReceiptModal.tsx(193,28): error TS2551: Property 'toISOString' does not exist on type 'string | Date'. Did you mean 'toString'?
+  Property 'toISOString' does not exist on type 'string'.
+src/components/DigitalReceiptModal.tsx(231,32): error TS2551: Property 'toISOString' does not exist on type 'string | Date'. Did you mean 'toString'?
+  Property 'toISOString' does not exist on type 'string'.
+src/components/DigitalReceiptModal.tsx(441,91): error TS18047: 'receipt.time' is possibly 'null'.
+src/components/DigitalReceiptModal.tsx(727,106): error TS18047: 'receipt.time' is possibly 'null'.
+src/components/IdeaBank.tsx(14,3): error TS2300: Duplicate identifier 'senderId'.
+src/components/IdeaBank.tsx(19,3): error TS2300: Duplicate identifier 'senderId'.
+src/components/ParentPortal.tsx(2598,35): error TS2339: Property 'schoolName' does not exist on type '{ adminPhone?: string; adminWhatsapp?: string; }'.
+src/components/ParentPortal.tsx(2598,61): error TS2339: Property 'name' does not exist on type '{ adminPhone?: string; adminWhatsapp?: string; }'.
+src/components/PortalPulseDashboard.tsx(575,12): error TS2339: Property 'schoolId' does not exist on type 'UserData'.
+src/components/PortalPulseDashboard.tsx(1496,64): error TS2339: Property 'name' does not exist on type 'UserData'.
+src/components/PortalPulseDashboard.tsx(1525,64): error TS2339: Property 'name' does not exist on type 'UserData'.
+src/components/PortalPulseDashboard.tsx(1589,64): error TS2339: Property 'name' does not exist on type 'UserData'.
+src/components/PortalPulseDashboard.tsx(2238,31): error TS2339: Property 'type' does not exist on type 'PostData'.
+src/components/PortalPulseDashboard.tsx(2246,35): error TS2339: Property 'type' does not exist on type 'PostData'.
+src/components/PortalPulseDashboard.tsx(2251,36): error TS2339: Property 'type' does not exist on type 'PostData'.
+src/components/PortalPulseDashboard.tsx(2252,37): error TS2339: Property 'stageIcon' does not exist on type 'PostData'.
+src/components/PortalPulseDashboard.tsx(2253,103): error TS2339: Property 'stageIcon' does not exist on type 'PostData'.
+src/components/PortalPulseDashboard.tsx(2257,39): error TS2339: Property 'userPhotoURL' does not exist on type 'PostData'.
+src/components/PortalPulseDashboard.tsx(2258,47): error TS2339: Property 'userPhotoURL' does not exist on type 'PostData'.
+src/components/PortalPulseDashboard.tsx(2260,64): error TS2339: Property 'type' does not exist on type 'PostData'.
+src/components/PortalPulseDashboard.tsx(2268,38): error TS2339: Property 'type' does not exist on type 'PostData'.
+src/components/PortalPulseDashboard.tsx(2269,38): error TS2339: Property 'type' does not exist on type 'PostData'.
+src/components/PortalPulseDashboard.tsx(2344,31): error TS2339: Property 'reportsCount' does not exist on type 'PostData'.
+src/components/PortalPulseDashboard.tsx(2344,52): error TS2339: Property 'reportsCount' does not exist on type 'PostData'.
+src/components/PortalPulseDashboard.tsx(2347,124): error TS2339: Property 'reportsCount' does not exist on type 'PostData'.
+src/components/PortalPulseDashboard.tsx(2353,31): error TS2339: Property 'mediaUrl' does not exist on type 'PostData'.
+src/components/PortalPulseDashboard.tsx(2355,44): error TS2339: Property 'mediaUrl' does not exist on type 'PostData'.
+src/components/PortalPulseDashboard.tsx(2362,67): error TS2339: Property 'likes' does not exist on type 'PostData'.
+src/components/PortalPulseDashboard.tsx(2363,53): error TS2339: Property 'likes' does not exist on type 'PostData'.
+src/components/PortalPulseDashboard.tsx(2363,93): error TS2339: Property 'likes' does not exist on type 'PostData'.
+src/components/PortalPulseDashboard.tsx(2370,43): error TS2339: Property 'comments' does not exist on type 'PostData'.
+src/components/PortalPulseDashboard.tsx(2373,64): error TS2339: Property 'shares' does not exist on type 'PostData'.
+src/components/PortalPulseDashboard.tsx(2378,31): error TS2339: Property 'reactions' does not exist on type 'PostData'.
+src/components/PortalPulseDashboard.tsx(2378,61): error TS2339: Property 'reactions' does not exist on type 'PostData'.
+src/components/PortalPulseDashboard.tsx(2382,52): error TS2339: Property 'reactions' does not exist on type 'PostData'.
+src/components/PortalPulseDashboard.tsx(2383,45): error TS2339: Property 'reactions' does not exist on type 'PostData'.
+src/components/PortalPulseDashboard.tsx(2392,34): error TS2322: Type 'unknown' is not assignable to type 'ReactNode'.
+src/components/PortalPulseDashboard.tsx(2392,54): error TS2339: Property 'reactions' does not exist on type 'PostData'.
+src/components/PortalPulseDashboard.tsx(2515,45): error TS2367: This comparison appears to be unintentional because the types '"parent" | "staff" | "cadre"' and '"student"' have no overlap.
+src/components/PortalPulseDashboard.tsx(2574,59): error TS2367: This comparison appears to be unintentional because the types '"student" | "parent"' and '"staff"' have no overlap.
+src/components/PortalPulseDashboard.tsx(2581,56): error TS2367: This comparison appears to be unintentional because the types '"student" | "parent"' and '"staff"' have no overlap.
+src/components/PortalPulseDashboard.tsx(2587,55): error TS2367: This comparison appears to be unintentional because the types '"student" | "parent"' and '"staff"' have no overlap.
+src/components/SchoolPlatform.tsx(2438,9): error TS2304: Cannot find name 'userData'.
+src/components/Station1Viewer.tsx(1137,18): error TS2322: Type '(customQuiz?: any[]) => void' is not assignable to type 'MouseEventHandler<HTMLButtonElement>'.
+  Types of parameters 'customQuiz' and 'event' are incompatible.
+    Type 'MouseEvent<HTMLButtonElement, MouseEvent>' is missing the following properties from type 'any[]': length, pop, push, concat, and 29 more.

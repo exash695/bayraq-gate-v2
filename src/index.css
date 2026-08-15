@@ -1,0 +1,424 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Noto+Sans+Arabic:wght@400;500;600;700&family=Cairo:wght@400;500;600;700;900&family=Tajawal:wght@400;500;700;900&family=Montserrat:wght@700;800&family=Amiri:wght@400;700&family=Reem+Kufi:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+@keyframes neon-pulse {
+  0% { box-shadow: 0 0 5px var(--theme-glow), inset 0 0 5px var(--theme-glow); border-color: var(--theme-primary); }
+  50% { box-shadow: 0 0 30px var(--theme-glow), inset 0 0 15px var(--theme-glow); border-color: #fff; }
+  100% { box-shadow: 0 0 5px var(--theme-glow), inset 0 0 5px var(--theme-glow); border-color: var(--theme-primary); }
+}
+
+.neon-highlight-pulse {
+  animation: neon-pulse 1s ease-in-out infinite;
+  z-index: 50;
+  position: relative;
+  border-width: 2px !important;
+}
+
+@keyframes gold-ring-pulse {
+  0% { box-shadow: 0 0 12px rgba(251, 191, 36, 0.5), inset 0 0 12px rgba(251, 191, 36, 0.3); border-color: rgba(251, 191, 36, 0.6); }
+  50% { box-shadow: 0 0 35px rgba(251, 191, 36, 1), inset 0 0 20px rgba(251, 191, 36, 0.6); border-color: #ffd700; }
+  100% { box-shadow: 0 0 12px rgba(251, 191, 36, 0.5), inset 0 0 12px rgba(251, 191, 36, 0.3); border-color: rgba(251, 191, 36, 0.6); }
+}
+
+.gold-glow-ring {
+  animation: gold-ring-pulse 1.2s ease-in-out infinite !important;
+  z-index: 40 !important;
+  position: relative !important;
+  border-width: 4px !important;
+  border-style: solid !important;
+  border-color: #ffd700 !important;
+  transition: all 0.3s ease-in-out !important;
+}
+
+@theme {
+  --font-sans: "Inter", "Noto Sans Arabic", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Space Grotesk", "Noto Sans Arabic", sans-serif;
+  --font-cairo: "Cairo", sans-serif;
+  --font-tajawal: "Tajawal", sans-serif;
+  --font-montserrat: "Montserrat", sans-serif;
+  --font-noto: "Noto Sans Arabic", sans-serif;
+  --font-amiri: "Amiri", serif;
+  --font-reem: "Reem Kufi", sans-serif;
+  
+  --color-charcoal: #020617;
+  --color-deep-indigo: #1a1a2e;
+  --color-neon-purple: #bc13fe;
+  --color-neon-blue: #00d2ff;
+  --color-neon-gold: #ffd700;
+  --color-neon-emerald: #00ff88;
+  --color-neon-rose: #ff0077;
+  
+  --color-gold-50: #fffdf0;
+  --color-gold-100: #fff9c2;
+  --color-gold-200: #fff085;
+  --color-gold-300: #ffe147;
+  --color-gold-400: #ffd700;
+  --color-gold-500: #e6c200;
+  --color-gold-600: #bf9b00;
+  --color-gold-700: #997700;
+  --color-gold-800: #735500;
+  --color-gold-900: #4d3300;
+  
+  --color-theme-primary: var(--theme-primary);
+  --color-theme-glow: var(--theme-glow);
+
+  /* No changes actually needed in this file to fix oklab as it was not present. */
+  --color-blue-500: #3b82f6;
+  --color-cyan-500: #06b6d4;
+  --color-purple-500: #a855f7;
+  --color-pink-500: #ec4899;
+  --color-emerald-500: #10b981;
+  --color-teal-500: #14b8a6;
+  --color-orange-500: #f97316;
+  --color-red-500: #ef4444;
+  --color-indigo-500: #6366f1;
+  --color-rose-500: #f43f5e;
+  --color-slate-500: #64748b;
+  --color-gray-500: #6b7280;
+}
+
+@layer base {
+  :root {
+    --theme-primary: #38bdf8;
+    --theme-glow: rgba(56, 189, 248, 0.5);
+  }
+
+  .theme-blue {
+    --theme-primary: #38bdf8;
+    --theme-glow: rgba(56, 189, 248, 0.5);
+  }
+
+  .theme-purple {
+    --theme-primary: #bc13fe;
+    --theme-glow: rgba(188, 19, 254, 0.5);
+  }
+
+  .theme-gold {
+    --theme-primary: #ffd700;
+    --theme-glow: rgba(255, 215, 0, 0.5);
+  }
+
+  .theme-emerald {
+    --theme-primary: #00ff88;
+    --theme-glow: rgba(0, 255, 136, 0.5);
+  }
+
+  .theme-rose {
+    --theme-primary: #ff0077;
+    --theme-glow: rgba(255, 0, 119, 0.5);
+  }
+
+body {
+  @apply bg-[#020617] text-white font-sans antialiased overflow-x-hidden transition-colors duration-500;
+  direction: rtl;
+  min-height: 100vh;
+  padding: 0;
+  margin: 0;
+  box-sizing: border-box;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  touch-action: manipulation;
+}
+
+@media (min-width: 1024px) {
+  body {
+    padding: 0;
+  }
+}
+
+.glass-panel {
+  @apply bg-white/5 backdrop-blur-[10px] border border-white/10;
+  transform: translateZ(0);
+}
+
+.glass-card {
+  @apply bg-white/5 backdrop-blur-[8px] border border-white/10 rounded-3xl overflow-hidden shadow-2xl;
+  transform: translateZ(0);
+}
+
+.gold-glow {
+  text-shadow: 0 0 15px rgba(212, 175, 55, 0.4);
+}
+
+.gold-border {
+  border-color: rgba(212, 175, 55, 0.3);
+}
+
+.phosphor-text {
+  @apply text-emerald-400;
+  text-shadow: 0 0 10px rgba(52, 211, 153, 0.3);
+}
+
+.station-button {
+  @apply relative overflow-hidden rounded-2xl p-4 transition-all duration-500 border border-white/5 bg-white/5;
+}
+
+.station-button:hover {
+  @apply border-indigo-500/30 bg-white/10;
+  transform: translateY(-2px);
+}
+
+.station-button.active {
+  @apply border-indigo-500/50 bg-indigo-500/20 text-white shadow-[0_0_20px_rgba(99,102,241,0.2)];
+}
+
+/* ضبط مقاسات شبكة الأيقونات (الميادين) */
+.grid-container {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr); /* عرض أيقونتين في الصف الواحد */
+  gap: 15px; /* مسافة متساوية بين الأيقونات */
+  padding: 10px;
+  margin-bottom: 80px; /* مساحة في الأسفل لضمان عدم التداخل مع شريط نادي الفرسان */
+}
+
+/* تحسين استجابة الأيقونات داخل المربعات */
+.grid-item img {
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+  padding: 10px;
+}
+
+/* شريط نادي الفرسان في الأسفل */
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 65px;
+  background: rgba(0, 0, 0, 0.9);
+  border-top: 1px solid #d4af37; /* الخط الذهبي الفخم */
+  z-index: 1000;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  padding-bottom: env(safe-area-inset-bottom); /* حماية من شريط التنقل في الأندرويد */
+}
+
+  html[data-font="cairo"] {
+    --font-sans: "Cairo", sans-serif !important;
+  }
+  html[data-font="cairo"] body {
+    font-family: "Cairo", sans-serif !important;
+  }
+
+  html[data-font="tajawal"] {
+    --font-sans: "Tajawal", sans-serif !important;
+  }
+  html[data-font="tajawal"] body {
+    font-family: "Tajawal", sans-serif !important;
+  }
+
+  html[data-font="noto-sans"] {
+    --font-sans: "Noto Sans Arabic", sans-serif !important;
+  }
+  html[data-font="noto-sans"] body {
+    font-family: "Noto Sans Arabic", sans-serif !important;
+  }
+
+  html[data-font="inter"] {
+    --font-sans: "Inter", "Noto Sans Arabic", sans-serif !important;
+  }
+  html[data-font="inter"] body {
+    font-family: "Inter", "Noto Sans Arabic", sans-serif !important;
+  }
+
+  .light-mode {
+    @apply bg-[#f8fafc] text-slate-900;
+  }
+
+  .light-mode .glass-card {
+    @apply bg-white/70 backdrop-blur-xl border-slate-200 shadow-sm;
+  }
+
+  .light-mode .neon-button {
+    @apply bg-[#38bdf8]/10 border-[#38bdf8]/30 text-[#38bdf8];
+    @apply hover:bg-[#38bdf8] hover:text-white;
+  }
+
+  .light-mode .neon-text {
+    @apply text-[#38bdf8] drop-shadow-none;
+  }
+
+  .light-mode .markdown-body {
+    @apply text-slate-700;
+  }
+
+  .light-mode .station-title {
+    @apply text-slate-800;
+  }
+
+  .light-mode .text-white\/40 {
+    @apply text-slate-400;
+  }
+
+  .light-mode .text-white\/60 {
+    @apply text-slate-500;
+  }
+
+  .light-mode .text-white\/80 {
+    @apply text-slate-600;
+  }
+
+  .light-mode .bg-white\/5 {
+    @apply bg-slate-100;
+  }
+
+  .light-mode .border-white\/10 {
+    @apply border-slate-200;
+  }
+
+  /* Knights Radar Bar Light Mode */
+  .light-mode #knights-radar-bar {
+    @apply bg-white/95 border-slate-200 shadow-[0_-5px_20px_rgba(0,0,0,0.05)];
+  }
+
+  .light-mode #knights-radar-bar .text-white\/80 {
+    @apply text-slate-600;
+  }
+
+  .light-mode #knights-radar-bar .bg-\[\#020617\]\/95 {
+    @apply bg-white/95;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl;
+  }
+  
+  .neon-border {
+    @apply border-[#38bdf8]/30 shadow-[0_0_15px_rgba(0,0,0,0.2),0_0_5px_rgba(56,189,248,0.5)];
+  }
+
+  .neon-text {
+    @apply text-[#38bdf8] drop-shadow-[0_0_8px_rgba(56,189,248,0.5)];
+  }
+
+  .neon-button {
+    @apply relative overflow-hidden transition-all duration-300 hover:scale-105 active:scale-95;
+    @apply bg-[#38bdf8]/10 border border-[#38bdf8]/40 rounded-xl px-6 py-3;
+    @apply hover:bg-[#38bdf8]/20 hover:border-[#38bdf8] hover:shadow-[0_0_20px_rgba(56,189,248,0.5)];
+  }
+
+  .neon-card-interactive {
+    @apply relative p-6 rounded-2xl border border-white/10 bg-white/5 backdrop-blur-md transition-all duration-500;
+    @apply hover:bg-white/10 hover:border-[#38bdf8]/50 hover:shadow-[0_0_30px_rgba(56,189,248,0.5)];
+    @apply cursor-pointer overflow-hidden;
+  }
+
+  .station-title {
+    @apply text-[#f1f5f9] text-2xl font-extrabold my-10 mr-6 text-right;
+  }
+}
+
+@layer utilities {
+  .font-cairo { font-family: var(--font-cairo); }
+  .font-tajawal { font-family: var(--font-tajawal); }
+  .font-noto { font-family: var(--font-noto); }
+  .font-sans { font-family: var(--font-sans); }
+}
+
+@media print {
+  html, body {
+    background: #111827 !important; /* Keep original dark */
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-white/30 rounded-full hover:bg-white/50 transition-colors;
+}
+
+[dir="auto"], .dir-auto {
+  unicode-bidi: plaintext;
+  text-align: start;
+}
+
+.markdown-body {
+  @apply text-white leading-relaxed;
+}
+
+.markdown-body h1, .markdown-body h2, .markdown-body h3 {
+  @apply font-bold mb-4 text-theme-primary;
+}
+
+.markdown-body p {
+  @apply mb-4;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@keyframes marquee {
+  0% { transform: translateX(100%); }
+  100% { transform: translateX(-100%); }
+}
+
+.animate-marquee {
+  animation: marquee 20s linear infinite;
+}
+
+.eye-care-mode {
+  filter: sepia(0.4) contrast(0.9) brightness(0.9);
+}
+
+#header-section {
+  animation: fadeInDown 1s ease-out;
+}
+@keyframes fadeInDown {
+  from { opacity: 0; transform: translateY(-20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes shimmer {
+  100% { transform: translateX(100%); }
+}
+
+/* Leaflet Customizations */
+.custom-glowing-icon {
+  background: transparent;
+  border: none;
+}
+
+.leaflet-popup-content-wrapper {
+  background: #ffffff;
+  border-radius: 0.75rem;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+}
+
+.leaflet-popup-tip {
+  background: #ffffff;
+}
+
+.leaflet-container {
+  /* Font inherited from body */
+}
+
+body {
+  -webkit-user-select: none; /* Safari */
+  -ms-user-select: none; /* IE 10 and IE 11 */
+  user-select: none; /* Standard syntax */
+}
+
+/* Ensure React-PDF scales correctly on mobile */
+.react-pdf__Page__canvas {
+  max-width: 100% !important;
+  height: auto !important;
+}
+
+/* Custom Leaflet Filter to make standard OpenStreetMap dark but keep details */
+.map-tiles-dark-filter {
+  filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+}

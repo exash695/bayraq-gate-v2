@@ -1,0 +1,475 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { X, Send, Image as ImageIcon, Smile, MoreVertical, Coffee, Search, Check, CheckCheck, User, MessageCircle, ArrowRight } from 'lucide-react';
+import { db, auth } from '../lib/firebase';
+import { collection, query, where, orderBy, getDocs, addDoc, updateDoc, doc, serverTimestamp, onSnapshot, limit } from 'firebase/firestore';
+
+interface StudentLoungeProps {
+  onClose: () => void;
+  userProfile: any;
+  schoolId: string;
+  grade: string | null;
+  isTeacher: boolean;
+  teacherData?: any;
+  initialSelectedUser?: any;
+}
+
+interface LoungeMessage {
+  id: string;
+  text: string;
+  userId: string;
+  userName: string;
+  userPhoto: string | null;
+  userRole: string; // 'student', 'teacher', 'admin'
+  schoolId: string;
+  createdAt: any;
+  recipientId?: string;
+  read?: boolean;
+}
+
+export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps>(({
+  onClose,
+  userProfile,
+  schoolId,
+  grade,
+  isTeacher,
+  teacherData,
+  initialSelectedUser
+}, ref) => {
+  const [messages, setMessages] = useState<LoungeMessage[]>([]);
+  const [newMessage, setNewMessage] = useState('');
+  const [knights, setKnights] = useState<any[]>([]); 
+  const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
+  const [activeTab, setActiveTab] = useState<'chat' | 'knights'>(initialSelectedUser ? 'chat' : 'knights');
+  const [selectedChatUser, setSelectedChatUser] = useState<any>(initialSelectedUser || null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const currentUserUid = auth.currentUser?.uid;
+  
+  const currentChatRoomId = selectedChatUser && currentUserUid 
+    ? [currentUserUid, selectedChatUser.id].sort().join('_') 
+    : null;
+
+  // Auto-scroll to bottom
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [messages]);
+
+  // Load knights
+  useEffect(() => {
+    if (!schoolId) return;
+    const fetchKnights = () => {
+       try {
+          // Query users active in the last 5 minutes
+          const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+          
+          const q = query(
+             collection(db, 'users'), 
+             where('schoolId', '==', schoolId),
+             where('lastActive', '>=', fiveMinutesAgo),
+             orderBy('lastActive', 'desc'),
+             limit(100)
+          );
+          
+          const unsubscribe = onSnapshot(q, (snapshot) => {
+            let users = snapshot.docs.map(doc => ({
+               id: doc.id, 
+               name: doc.data().name || doc.data().fullName || 'مستخدم',
+               photo: doc.data().photo || doc.data().photoURL || null,
+               role: doc.data().role || 'student',
+               grade: doc.data().grade || 'غير محدد',
+               schoolId: doc.data().schoolId || 'unassigned',
+               lastActive: doc.data().lastActive
+            }));
+            
+            // Filter out current user
+            users = users.filter(u => u.id !== currentUserUid);
+            setKnights(users);
+          }, (err) => {
+            console.error("Error subscribing to active knights", err);
+            // Fallback for missing index or other errors
+            const simpleQ = query(
+              collection(db, 'users'),
+              where('schoolId', '==', schoolId),
+              limit(100)
+            );
+            getDocs(simpleQ).then(snap => {
+               const users = snap.docs
+                .map(doc => ({
+                  id: doc.id,
+                  name: doc.data().name || doc.data().fullName || 'مستخدم',
+                  photo: doc.data().photo || doc.data().photoURL || null,
+                  role: doc.data().role || 'student',
+                  grade: doc.data().grade || 'غير محدد',
+                  schoolId: doc.data().schoolId || 'unassigned',
+                  lastActive: doc.data().lastActive
+                }))
+                .filter(u => u.id !== currentUserUid);
+               setKnights(users);
+            });
+          });
+
+          return unsubscribe;
+       } catch (err) {
+          console.error("Error setting up knights subscription", err);
+       }
+    };
+    const unsub = fetchKnights();
+    return () => { if (unsub) unsub(); };
+  }, [schoolId, currentUserUid]);
+
+
+  // Track unread messages per user
+  useEffect(() => {
+    if (!currentUserUid) return;
+    const q = query(
+      collection(db, 'lounge_messages'),
+      where('recipientId', '==', currentUserUid)
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      const counts: Record<string, number> = {};
+      snap.docs.forEach(doc => {
+        const data = doc.data();
+        if (data.read === false) {
+           const sender = data.userId;
+           if (sender) {
+              counts[sender] = (counts[sender] || 0) + 1;
+           }
+        }
+      });
+      setUnreadCounts(counts);
+    }, (err) => {
+       console.error("Error loading unread counts:", err);
+    });
+    return () => unsub();
+  }, [currentUserUid]);
+
+  // Load private messages
+  useEffect(() => {
+    if (!currentChatRoomId) {
+       setMessages([]);
+       return;
+    }
+    const q = query(
+      collection(db, 'lounge_messages'),
+      where('schoolId', '==', currentChatRoomId) // using schoolId field as room id to reuse index
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const msgs: LoungeMessage[] = [];
+      snapshot.docs.forEach(docSnap => {
+        const data = docSnap.data() as Omit<LoungeMessage, 'id'>;
+        msgs.push({ id: docSnap.id, ...data });
+
+        // Auto-mark as read removed to prevent infinite quota exhaustion loop
+        // if (data.recipientId === currentUserUid && data.read === false) {
+        //    updateDoc(doc(db, 'lounge_messages', docSnap.id), { read: true }).catch(console.error);
+        // }
+      });
+      // Sort on client side since we removed orderBy
+      msgs.sort((a, b) => {
+         const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
+         const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
+         return timeA - timeB;
+      });
+      // Limit to last 100 on client
+      setMessages(msgs.slice(-100));
+    }, (error) => {
+        console.error("Error loading lounge messages", error);
+    });
+
+    return () => unsubscribe();
+  }, [currentChatRoomId]);
+
+  const handleSendMessage = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!newMessage.trim() || !auth.currentUser || !currentChatRoomId) return;
+
+    try {
+      const currentName = isTeacher ? (teacherData?.name || auth.currentUser.displayName) : (userProfile?.name || userProfile?.fullName || 'طالب');
+      const currentPhoto = isTeacher ? teacherData?.photoURL : userProfile?.photoURL;
+      const currentRole = isTeacher ? 'teacher' : (userProfile?.role === 'admin' ? 'admin' : 'student');
+      
+      const msgText = newMessage.trim();
+      setNewMessage(''); // optimistic clear
+      
+      await addDoc(collection(db, 'lounge_messages'), {
+        text: msgText,
+        userId: auth.currentUser.uid,
+        userName: currentName || 'مستخدم',
+        userPhoto: currentPhoto || null,
+        userRole: currentRole,
+        schoolId: currentChatRoomId,
+        realSchoolId: schoolId,
+        recipientId: selectedChatUser.id,
+        read: false,
+        grade: grade || 'all',
+        createdAt: serverTimestamp(),
+      });
+    } catch (err) {
+      console.error("Error sending message", err);
+    }
+  };
+
+  return (
+    <motion.div 
+      ref={ref}
+      initial={{ opacity: 0, scale: 0.95, y: 20 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.95, y: 20 }}
+      transition={{ duration: 0.2, ease: "easeOut" }}
+      className="fixed inset-0 bg-[#050A18] z-[9999] flex flex-col overflow-hidden" dir="rtl"
+    >
+      {/* Header */}
+      <div className="h-16 px-4 flex justify-between items-center bg-[#0D142A]/80 backdrop-blur-xl shrink-0 z-20">
+        <div className="flex items-center gap-3">
+          {activeTab === 'chat' && selectedChatUser ? (
+            <button 
+              onClick={() => setActiveTab('knights')}
+              className="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center transition-colors text-white/70"
+            >
+               <ArrowRight size={20} />
+            </button>
+          ) : (
+            <div className="w-10 h-10 rounded-full bg-amber-500/10 flex items-center justify-center border border-amber-500/20 relative">
+              <Coffee size={20} className="text-amber-400" />
+              <div className="absolute 0 top-0 left-0 w-3 h-3 bg-green-500 border-2 border-[#0D142A] rounded-full"></div>
+            </div>
+          )}
+          
+          <div>
+             {activeTab === 'chat' && selectedChatUser ? (
+                 <>
+                   <h2 className="text-sm font-black text-white leading-tight">{selectedChatUser.name}</h2>
+                   <p className="text-[#00E5FF] text-[10px] font-bold">متصل الآن</p>
+                 </>
+             ) : (
+                 <>
+                   <h2 className="text-lg font-black text-white leading-tight">المجلس</h2>
+                   <p className="text-white/40 text-[10px] font-bold">
+                       {knights.length} من الأبطال النشطين
+                   </p>
+                 </>
+             )}
+          </div>
+        </div>
+        <button 
+          onClick={onClose}
+          className="w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 text-white/50 hover:text-white flex items-center justify-center transition-all cursor-pointer border border-white/10 shadow-lg"
+        >
+          <X size={20} />
+        </button>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex border-b border-white/5 bg-[#0D142A] shrink-0">
+        <button 
+          onClick={() => setActiveTab('knights')}
+          className={`flex-1 py-3 text-sm font-bold text-center border-b-2 transition-colors ${activeTab === 'knights' ? 'border-amber-400 text-amber-400' : 'border-transparent text-white/50 hover:text-white/80'}`}
+        >
+          الفرسان النشطين
+        </button>
+        <button 
+          onClick={() => setActiveTab('chat')}
+          className={`flex-1 py-3 text-sm font-bold text-center border-b-2 transition-colors ${activeTab === 'chat' ? 'border-[#00E5FF] text-[#00E5FF]' : 'border-transparent text-white/50 hover:text-white/80'}`}
+        >
+          الدردشة
+        </button>
+      </div>
+      
+      {/* Content Area */}
+      {activeTab === 'knights' && (
+          <div className="flex-1 overflow-y-auto px-4 py-6 bg-[#050A18] flex flex-col gap-2">
+              <div className="mb-4 relative">
+                 <input 
+                    type="text" 
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="ابحث عن فرسان (بالاسم)..." 
+                    className="w-full bg-[#1A233A] text-white text-sm rounded-xl px-4 py-3 pr-10 border border-white/10 outline-none focus:border-amber-400 focus:bg-[#0D142A] transition-all"
+                 />
+                 <Search size={18} className="absolute right-3 top-3.5 text-white/40" />
+              </div>
+              
+              {(() => {
+                const currentGrade = grade || 'غير محدد';
+                const gradeMatch = (k: any) => {
+                   if (isTeacher || !grade) return true;
+                   const kg = k.grade || 'غير محدد';
+                   if (kg === 'غير محدد' || kg === 'all') return true;
+                   return kg === currentGrade || kg.includes(currentGrade) || currentGrade.includes(kg);
+                };
+                
+                const filteredKnights = knights.filter(k => k.name.includes(searchQuery) && gradeMatch(k));
+
+                return filteredKnights.length === 0 ? (
+                    <div className="flex-1 flex flex-col items-center justify-center opacity-50 grayscale mt-10">
+                        <User size={48} className="text-white/20 mb-4" />
+                        <p className="text-white/40 text-sm font-bold">لا يوجد فرسان نشطين في صفك حالياً</p>
+                    </div>
+                ) : (
+                    filteredKnights.map((user) => (
+                        <div 
+                          key={user.id} 
+                        onClick={() => {
+                          setSelectedChatUser(user);
+                          setActiveTab('chat');
+                        }}
+                        className="flex items-center justify-between p-3 bg-white/[0.02] hover:bg-white/5 border border-white/5 rounded-2xl cursor-pointer transition-colors group"
+                      >
+                          <div className="flex items-center gap-3">
+                              <div className="relative">
+                                  <div className={`w-11 h-11 rounded-full border border-white/10 overflow-hidden ${user.role === 'teacher' ? 'ring-1 ring-amber-400/50' : ''}`}>
+                                      {user.photo ? (
+                                         <img src={user.photo} alt={user.name} className="w-full h-full object-cover" />
+                                      ) : (
+                                         <div className="w-full h-full bg-white/5 flex items-center justify-center">
+                                             <User size={18} className="text-white/30" />
+                                         </div>
+                                      )}
+                                  </div>
+                                  <div className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-[#050A18] rounded-full"></div>
+                                  {unreadCounts[user.id] > 0 && (
+                                     <div className="absolute -top-1 -left-1 bg-red-600 rounded-full min-w-[16px] h-[16px] px-1 flex items-center justify-center shadow-lg border-2 border-[#050A18]">
+                                        <span className="text-[9px] font-black text-white">{unreadCounts[user.id]}</span>
+                                     </div>
+                                  )}
+                              </div>
+                              <div className="flex flex-col text-right">
+                                  <span className="text-[13px] text-white/90 font-bold">{user.name}</span>
+                                  <span className={`text-[9px] font-bold ${user.role === 'teacher' ? 'text-amber-400' : (user.role === 'admin' ? 'text-blue-400' : 'text-white/40')}`}>
+                                      {user.role === 'teacher' ? 'إشراف' : (user.role === 'admin' ? 'إدارة' : 'طالب')}
+                                  </span>
+                              </div>
+                          </div>
+                          <button 
+                            className="w-10 h-10 rounded-full bg-[#00E5FF]/10 text-[#00E5FF] flex items-center justify-center opacity-50 group-hover:opacity-100 transition-all shrink-0 ml-1"
+                          >
+                            <MessageCircle size={18} />
+                          </button>
+                      </div>
+                  ))
+              );
+              })()}
+          </div>
+      )}
+
+      {activeTab === 'chat' && (
+        <>
+          {selectedChatUser ? (
+             <>
+                <div 
+                  ref={scrollRef}
+                  className="flex-1 overflow-y-auto px-4 py-6 space-y-4 no-scrollbar bg-[#050A18] flex flex-col"
+                  style={{ backgroundImage: 'radial-gradient(circle at center, rgba(255,214,0,0.02) 0%, transparent 70%)' }}
+                >
+                    {messages.length === 0 ? (
+                        <div className="flex-1 flex flex-col items-center justify-center opacity-50 grayscale">
+                            <MessageCircle size={48} className="text-white/20 mb-4" />
+                            <p className="text-white/40 text-sm font-bold">بادر بإرسال أول رسالة!</p>
+                        </div>
+                    ) : (
+                        messages.map((msg, index) => {
+                            const isMe = msg.userId === currentUserUid;
+                            const showAvatar = !isMe && (index === 0 || messages[index - 1].userId !== msg.userId);
+                            const isTeacherMode = msg.userRole === 'teacher';
+                            const isAdminMode = msg.userRole === 'admin';
+                            
+                            return (
+                              <motion.div 
+                                  key={msg.id}
+                                  initial={{ opacity: 0, y: 10 }}
+                                  animate={{ opacity: 1, y: 0 }}
+                                  className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'} ${!showAvatar && !isMe ? 'mt-1' : 'mt-4'}`}
+                              >
+                                  {!isMe && (
+                                      <div className="w-8 shrink-0 ml-2 flex flex-col justify-end pb-1">
+                                          {showAvatar && (
+                                              <div className={`w-8 h-8 rounded-full overflow-hidden border ${isTeacherMode ? 'border-amber-500/50' : (isAdminMode ? 'border-blue-500/50' : 'border-white/10')}`}>
+                                                  {msg.userPhoto ? (
+                                                      <img src={msg.userPhoto} alt={msg.userName} className="w-full h-full object-cover" />
+                                                  ) : (
+                                                      <div className="w-full h-full bg-white/5 flex items-center justify-center">
+                                                          <User size={14} className="text-white/30" />
+                                                      </div>
+                                                  )}
+                                              </div>
+                                          )}
+                                      </div>
+                                  )}
+                                  
+                                  <div className={`flex flex-col max-w-[85%] ${isMe ? 'items-end' : 'items-start'}`}>
+                                      <div className={`px-4 py-2.5 rounded-2xl relative group ${
+                                          isMe 
+                                            ? 'bg-blue-600 text-white rounded-br-sm shadow-[0_4px_15px_rgba(37,99,235,0.2)]' 
+                                            : 'bg-[#1A233A] text-white/90 rounded-bl-sm border border-white/5 shadow-sm'
+                                      }`}>
+                                          <p className="text-[13px] leading-relaxed whitespace-pre-wrap break-words">{msg.text}</p>
+                                          
+                                          {/* Timestamp */}
+                                          <div className={`text-[9px] mt-1 flex items-center gap-1 ${isMe ? 'text-blue-200/70 justify-end' : 'text-white/30 justify-start'}`}>
+                                              {msg.createdAt?.toDate ? msg.createdAt.toDate().toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' }) : 'الآن'}
+                                              {isMe && <CheckCheck size={12} className="text-blue-300" />}
+                                          </div>
+                                      </div>
+                                  </div>
+                              </motion.div>
+                            );
+                        })
+                    )}
+                </div>
+
+                {/* Input Area */}
+                <div className="h-auto min-h-[70px] bg-[#0D142A]/90 backdrop-blur-xl border-t border-white/10 px-4 py-3 shrink-0 z-20 flex items-end gap-3 pb-8 md:pb-4">
+                    <form onSubmit={handleSendMessage} className="w-full flex items-end gap-2 bg-[#050A18] rounded-3xl border border-white/10 p-1 pl-4">
+                        
+                        <textarea 
+                            value={newMessage}
+                            onChange={(e) => setNewMessage(e.target.value)}
+                            dir="auto"
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && !e.shiftKey) {
+                                    e.preventDefault();
+                                    handleSendMessage();
+                                }
+                            }}
+                            placeholder="اكتب رسالتك..."
+                            className="w-full bg-transparent border-none outline-none text-white text-sm py-2.5 max-h-32 min-h-[40px] resize-none no-scrollbar font-sans"
+                            rows={1}
+                        />
+                        
+                        <button 
+                            type="submit"
+                            disabled={!newMessage.trim()}
+                            className="w-10 h-10 rounded-full bg-blue-600 hover:bg-blue-500 disabled:bg-white/5 disabled:text-white/30 text-white flex items-center justify-center transition-all shrink-0 shadow-lg mb-0.5"
+                        >
+                            <div dir="ltr" className="flex items-center justify-center mr-0.5 mt-0.5" style={{ transform: 'rotate(225deg)' }}>
+                                <Send size={18} />
+                            </div>
+                        </button>
+                    </form>
+                </div>
+             </>
+          ) : (
+             <div className="flex-1 flex flex-col items-center justify-center px-4 bg-[#050A18]">
+                <div className="w-20 h-20 bg-blue-500/10 rounded-full flex items-center justify-center mb-4">
+                  <MessageCircle size={32} className="text-blue-400" />
+                </div>
+                <h3 className="text-white font-bold text-lg mb-2">محادثة خاصة</h3>
+                <p className="text-white/50 text-sm text-center mb-6 max-w-xs">يرجى اختيار فارس من قائمة الفرسان النشطين لبدء محادثة خاصة ومعزولة.</p>
+                <button 
+                  onClick={() => setActiveTab('knights')}
+                  className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-full font-bold text-sm transition-colors"
+                >
+                  العودة لقائمة الفرسان
+                </button>
+             </div>
+          )}
+        </>
+      )}
+    </motion.div>
+  );
+});
+StudentLounge.displayName = 'StudentLounge';

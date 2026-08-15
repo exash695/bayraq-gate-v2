@@ -1,0 +1,566 @@
+import React from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { Megaphone, Bell, History, AlertCircle, Trash2 } from 'lucide-react';
+import { ConfirmDialog } from './ConfirmDialog';
+import { collection, query, orderBy, limit, onSnapshot, where, deleteDoc, doc } from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import { logActivity } from '../utils/auditLogger';
+
+interface VerticalScrollPickerProps {
+  value: number;
+  onChange: (val: number) => void;
+  min: number;
+  max: number;
+  label: string;
+}
+
+const VerticalScrollPicker: React.FC<VerticalScrollPickerProps> = ({ value, onChange, min, max, label }) => {
+  const [isDragging, setIsDragging] = React.useState(false);
+  const startY = React.useRef(0);
+  const startValue = React.useRef(0);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    setIsDragging(true);
+    startY.current = e.clientY;
+    startValue.current = value;
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!isDragging) return;
+    const deltaY = startY.current - e.clientY;
+    const step = Math.round(deltaY / 15);
+    let newValue = startValue.current + step;
+    if (newValue < min) newValue = min;
+    if (newValue > max) newValue = max;
+    if (newValue !== value) {
+      onChange(newValue);
+    }
+  };
+
+  const handleMouseUpOrLeave = () => {
+    setIsDragging(false);
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    setIsDragging(true);
+    startY.current = e.touches[0].clientY;
+    startValue.current = value;
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (!isDragging) return;
+    const deltaY = startY.current - e.touches[0].clientY;
+    const step = Math.round(deltaY / 15);
+    let newValue = startValue.current + step;
+    if (newValue < min) newValue = min;
+    if (newValue > max) newValue = max;
+    if (newValue !== value) {
+      onChange(newValue);
+    }
+  };
+
+  const increment = () => {
+    if (value < max) onChange(value + 1);
+  };
+
+  const decrement = () => {
+    if (value > min) onChange(value - 1);
+  };
+
+  const handleWheel = (e: React.WheelEvent) => {
+    if (e.deltaY < 0) {
+      if (value < max) onChange(value + 1);
+    } else {
+      if (value > min) onChange(value - 1);
+    }
+  };
+
+  const getVisibleNumbers = () => {
+    const nums = [];
+    for (let i = -2; i <= 2; i++) {
+      const v = value + i;
+      if (v >= min && v <= max) {
+        nums.push({ val: v, offset: i });
+      } else {
+        nums.push({ val: null, offset: i });
+      }
+    }
+    return nums;
+  };
+
+  return (
+    <div 
+      className="flex flex-col items-center select-none"
+      onWheel={handleWheel}
+    >
+      <span className="text-[10px] font-black text-white/40 mb-1">{label}</span>
+      <div 
+        className={`w-20 h-28 bg-[#090D1E]/90 border ${isDragging ? 'border-rose-500 shadow-[0_0_15px_rgba(239,68,68,0.25)]' : 'border-white/5'} rounded-2xl flex flex-col items-center justify-between py-1 relative overflow-hidden transition-all touch-none cursor-ns-resize`}
+        onMouseDown={handleMouseDown}
+        onMouseMove={handleMouseMove}
+        onMouseUp={handleMouseUpOrLeave}
+        onMouseLeave={handleMouseUpOrLeave}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleMouseUpOrLeave}
+      >
+        <div className="absolute top-0 left-0 right-0 h-8 bg-gradient-to-b from-[#090D1E] to-transparent pointer-events-none z-10" />
+        <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-[#090D1E] to-transparent pointer-events-none z-10" />
+
+        <button 
+          type="button"
+          onClick={(e) => { e.stopPropagation(); increment(); }}
+          className="text-white/30 hover:text-rose-400 p-1 transition-colors z-20 cursor-pointer"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 15l7-7 7 7" />
+          </svg>
+        </button>
+
+        <div className="flex-1 flex flex-col justify-center items-center relative h-12 w-full">
+          <div className="absolute inset-y-2 inset-x-1 border-y border-rose-500/30 bg-rose-500/5 pointer-events-none rounded" />
+
+          <div className="flex flex-col items-center justify-center gap-1 py-0.5">
+            {getVisibleNumbers().map((item, idx) => {
+              if (item.val === null) {
+                return <div key={`empty-${idx}`} className="h-4 w-4" />;
+              }
+              const isActive = item.offset === 0;
+              return (
+                <div 
+                  key={item.val}
+                  onClick={(e) => { e.stopPropagation(); onChange(item.val as number); }}
+                  className={`text-center transition-all duration-150 cursor-pointer ${
+                    isActive 
+                      ? "text-rose-400 font-extrabold text-sm scale-110 drop-shadow-[0_0_8px_rgba(239,68,68,0.5)]" 
+                      : "text-white/20 font-bold text-[10px]"
+                  }`}
+                >
+                  {item.val}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <button 
+          type="button"
+          onClick={(e) => { e.stopPropagation(); decrement(); }}
+          className="text-white/30 hover:text-rose-400 p-1 transition-colors z-20 cursor-pointer"
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M19 9l-7 7-7-7" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  );
+};
+
+interface BroadcastSectionProps {
+  onSendMessage: (message: string, targetGrades: string[], duration: number) => void;
+  onUpdateMessage?: (broadcastId: string, newMessage: string) => void;
+  onDeleteMessage?: (id: string) => void;
+  showToast: (message: string, type?: 'success' | 'error') => void;
+}
+
+export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
+  onSendMessage,
+  onUpdateMessage,
+  onDeleteMessage,
+  showToast
+}) => {
+  const [message, setMessage] = React.useState('');
+  const [editingId, setEditingId] = React.useState<string | null>(null);
+  const [editValue, setEditValue] = React.useState('');
+  const [level, setLevel] = React.useState<'primary' | 'intermediate' | 'preparatory'>('preparatory');
+  const [selectedGrades, setSelectedGrades] = React.useState<string[]>(['الجميع']);
+  const [selectedBranches, setSelectedBranches] = React.useState<string[]>(['علمي', 'أدبي']);
+  const [durationHours, setDurationHours] = React.useState<number>(0);
+  const [durationDays, setDurationDays] = React.useState<number>(1);
+  const [history, setHistory] = React.useState<any[]>([]);
+  const [confirmDelete, setConfirmDelete] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    const q = query(
+      collection(db, 'broadcasts')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const data = snapshot.docs
+        .map(doc => {
+          const docData = doc.data();
+          const tMs = docData.timestamp?.toMillis ? docData.timestamp.toMillis() : (docData.timestamp || 0);
+          return {
+            id: doc.id,
+            ...docData,
+            expiryDate: docData.expiryDate || 0,
+            timestampMs: tMs,
+            timestamp: docData.timestamp
+          };
+        })
+        .filter(b => b.expiryDate > Date.now())
+        .sort((a, b) => b.timestampMs - a.timestampMs)
+        .slice(0, 10);
+      setHistory(data as any);
+    }, (error) => console.warn("BroadcastSection error:", error));
+
+    return () => unsubscribe();
+  }, []);
+
+  const levels = [
+    { id: 'primary', name: 'ابتدائي' },
+    { id: 'intermediate', name: 'متوسط' },
+    { id: 'preparatory', name: 'إعدادي' }
+  ];
+
+  const gradeMap = {
+    primary: ['أول', 'ثاني', 'ثالث', 'رابع', 'خامس', 'سادس'],
+    intermediate: ['أول', 'ثاني', 'ثالث'],
+    preparatory: ['رابع', 'خامس', 'سادس']
+  };
+
+  const branches = ['علمي', 'أدبي'];
+
+  const toggleGrade = (grade: string) => {
+    if (grade === 'الجميع') {
+      setSelectedGrades(['الجميع']);
+      return;
+    }
+    
+    setSelectedGrades(prev => {
+      const filtered = prev.filter(g => g !== 'الجميع');
+      if (filtered.includes(grade)) {
+        const next = filtered.filter(g => g !== grade);
+        return next.length === 0 ? ['الجميع'] : next;
+      }
+      return [...filtered, grade];
+    });
+  };
+
+  const toggleBranch = (branch: string) => {
+    setSelectedBranches(prev => 
+      prev.includes(branch) 
+        ? prev.filter(b => b !== branch) 
+        : [...prev, branch]
+    );
+  };
+
+  const handleDelete = async () => {
+    if (!confirmDelete) return;
+    if (onDeleteMessage) {
+      onDeleteMessage(confirmDelete);
+      
+      logActivity({
+        action: 'حذف بث إذاعي',
+        details: 'تم طلب حذف بث إذاعي من خلال النظام الخارجي',
+        targetId: confirmDelete,
+        targetType: 'broadcast'
+      });
+    } else {
+      try {
+        setHistory(prev => prev.filter(br => br.id !== confirmDelete));
+        showToast('تم الحذف بنجاح');
+        await deleteDoc(doc(db, 'broadcasts', confirmDelete));
+
+        logActivity({
+          action: 'حذف بث إذاعي',
+          details: 'تم حذف بث إذاعي نهائياً من قاعدة البيانات',
+          targetId: confirmDelete,
+          targetType: 'broadcast'
+        });
+      } catch (e: any) {
+        console.error("Error deleting broadcast: ", e);
+        alert('حدث خطأ أثناء الحذف: ' + e.message);
+      }
+    }
+    setConfirmDelete(null);
+  };
+
+  const handleSend = () => {
+    let finalSelection: string[] = [];
+    const currentLevelGrades = gradeMap[level];
+
+    if (selectedGrades.includes('الجميع')) {
+      if (level === 'primary') {
+        finalSelection = currentLevelGrades.map(g => `${g} ابتدائي`);
+      } else if (level === 'intermediate') {
+        finalSelection = currentLevelGrades.map(g => `${g} متوسط`);
+      } else if (level === 'preparatory') {
+        currentLevelGrades.forEach(g => {
+          branches.forEach(b => finalSelection.push(`${g} ${b}`));
+        });
+      }
+    } else {
+      if (level === 'primary') {
+        finalSelection = selectedGrades.map(g => `${g} ابتدائي`);
+      } else if (level === 'intermediate') {
+        finalSelection = selectedGrades.map(g => `${g} متوسط`);
+      } else if (level === 'preparatory') {
+        selectedGrades.forEach(g => {
+          selectedBranches.forEach(b => {
+             finalSelection.push(`${g} ${b}`);
+          });
+        });
+      }
+    }
+
+    const durationInHours = (durationDays * 24) + durationHours || 1;
+    onSendMessage(message, finalSelection, durationInHours);
+    
+    logActivity({
+      action: 'إطلاق بث إذاعي',
+      details: `تم إرسال رسالة إذاعية للفئات: ${finalSelection.join(', ')}`,
+      targetType: 'broadcast'
+    });
+
+    setMessage('');
+    showToast('تم إرسال الرسالة بنجاح');
+  };
+
+  const currentGrades = gradeMap[level];
+
+  return (
+    <div className="space-y-6 px-4 md:px-0">
+      <ConfirmDialog 
+         isOpen={!!confirmDelete}
+         onClose={() => setConfirmDelete(null)}
+         onConfirm={handleDelete}
+         title="تأكيد الحذف"
+         message="هل أنت متأكد من حذف هذا البث الإذاعي نهائياً؟"
+      />
+      <div className="bg-gradient-to-br from-rose-500/20 to-rose-600/10 border-b md:border border-rose-500/20 rounded-none md:rounded-[40px] p-8 text-center space-y-6 shadow-2xl -mx-4 md:mx-0">
+         <div className="w-20 h-20 bg-rose-500 rounded-[30px] flex items-center justify-center text-white mx-auto shadow-xl shadow-rose-900/40 animate-pulse">
+            <Megaphone size={40} />
+         </div>
+         <div>
+           <h3 className="text-white font-black text-xl mb-2">رادار الذكاء الإذاعي</h3>
+           <p className="text-white/40 text-xs leading-relaxed max-w-sm mx-auto font-bold px-4">
+              أرسل تنبيهات ذكية، استنتاجات من الملازم، أو إعلانات عاجلة لطلابك بكل احترافية.
+           </p>
+         </div>
+
+         {/* Level Selector */}
+         <div className="flex items-center justify-center gap-2 bg-black/20 p-2 rounded-2xl border border-white/5 mx-auto w-fit">
+            {levels.map(l => (
+              <button 
+                key={l.id}
+                onClick={() => {
+                  setLevel(l.id as any);
+                  setSelectedGrades(['الجميع']);
+                }}
+                className={`px-5 py-2.5 rounded-xl font-black text-[10px] transition-all ${
+                  level === l.id ? 'bg-white text-black shadow-lg scale-105' : 'text-white/40 hover:text-white/60'
+                }`}
+              >
+                {l.name}
+              </button>
+            ))}
+         </div>
+
+         <div className="bg-black/20 p-6 rounded-[35px] border border-white/5 space-y-5">
+            <div className="space-y-4">
+              <p className="text-white/30 text-[10px] font-black text-right uppercase tracking-[0.2em] mr-2">تحديد الفئة المستهدفة:</p>
+              <div className="flex flex-wrap justify-center gap-2">
+                <button 
+                  onClick={() => toggleGrade('الجميع')}
+                  className={`px-5 py-2.5 rounded-xl font-black text-[10px] transition-all border ${
+                    selectedGrades.includes('الجميع') 
+                    ? 'bg-rose-500 border-rose-400 text-white shadow-lg shadow-rose-500/20' 
+                    : 'bg-white/5 border-transparent text-white/40 hover:bg-white/10 hover:text-white/60'
+                  }`}
+                >
+                  كل المرحلة
+                </button>
+                {currentGrades.map(grade => (
+                  <button 
+                    key={grade}
+                    onClick={() => toggleGrade(grade)}
+                    className={`px-5 py-2.5 rounded-xl font-black text-[10px] transition-all border ${
+                      selectedGrades.includes(grade) 
+                      ? 'bg-rose-500 border-rose-400 text-white shadow-lg shadow-rose-500/20' 
+                      : 'bg-white/5 border-transparent text-white/40 hover:bg-white/10 hover:text-white/60'
+                    }`}
+                  >
+                    {grade}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Branch Selector for Preparatory Grades */}
+            {level === 'preparatory' && !selectedGrades.includes('الجميع') && (
+              <motion.div 
+                initial={{ opacity: 0, y: -10 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="pt-4 border-t border-white/5 space-y-3"
+              >
+                <p className="text-rose-400 text-[10px] font-black text-right mr-2 flex items-center justify-end gap-2">
+                  <span>اختر الفرع الدراسي:</span>
+                  <AlertCircle size={12} />
+                </p>
+                <div className="flex justify-center gap-3">
+                  {branches.map(branch => (
+                    <button 
+                      key={branch}
+                      onClick={() => toggleBranch(branch)}
+                      className={`px-10 py-3 rounded-2xl font-black text-[11px] transition-all border-2 ${
+                        selectedBranches.includes(branch) 
+                        ? 'bg-rose-500 border-rose-400 text-white shadow-lg shadow-rose-500/30' 
+                        : 'bg-white/5 border-transparent text-white/20 hover:text-white/40'
+                      }`}
+                    >
+                      {branch}
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+            )}
+            
+            {/* Duration Selector */}
+            <div className="space-y-3 pt-4 border-t border-white/5 bg-black/10 rounded-3xl p-4">
+                <label className="text-rose-300 text-[10px] font-extrabold block text-center">تحديد مدة بقاء الإعلان وتوقيت الاختفاء التلقائي ⏱️</label>
+                <div className="flex justify-center items-center gap-12 py-2">
+                  <VerticalScrollPicker 
+                    value={durationHours} 
+                    onChange={setDurationHours} 
+                    min={0} 
+                    max={23} 
+                    label="ساعات" 
+                  />
+                  <VerticalScrollPicker 
+                    value={durationDays} 
+                    onChange={setDurationDays} 
+                    min={0} 
+                    max={30} 
+                    label="أيام" 
+                  />
+                </div>
+                <p className="text-[9px] text-white/40 text-center font-bold leading-normal">
+                  💡 متبقي البث: 
+                  <span className="text-rose-400 mx-1 font-extrabold">
+                    {durationDays > 0 ? `${durationDays} يوم ` : ""}
+                    {durationHours > 0 ? `${durationHours} ساعة` : ""}
+                    {durationDays === 0 && durationHours === 0 ? "ساعة واحدة (حد أدنى تلقائي)" : ""}
+                  </span>
+                  ثم يختفي تماماً من شاشات الطلاب.
+                </p>
+            </div>
+         </div>
+         
+         <div className="space-y-4 pt-2">
+            <textarea 
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              className="w-full h-36 bg-black/40 border border-white/10 rounded-[30px] p-6 text-white font-bold text-sm outline-none focus:border-rose-500 transition-all resize-none text-right placeholder:text-white/10 leading-relaxed shadow-inner"
+              placeholder="اكتب رسالتك الذكية هنا ليعلق في أذهان الأبطال..."
+            ></textarea>
+            <button 
+              disabled={!message.trim() || (level === 'preparatory' && !selectedGrades.includes('الجميع') && selectedBranches.length === 0)}
+              onClick={handleSend}
+              className="w-full h-20 bg-rose-500 rounded-[30px] text-white font-black text-lg shadow-2xl shadow-rose-900/60 active:scale-[0.98] transition-all flex items-center justify-center gap-4 disabled:opacity-50 disabled:grayscale disabled:scale-100 group"
+            >
+               <Bell size={28} className="group-hover:rotate-12 transition-transform" />
+               {selectedGrades.includes('الجميع') ? 'إطلاق بث لكافة صفوف المرحلة' : `إرسال لـ (${selectedGrades.length}) صفوف مخصصة`}
+            </button>
+         </div>
+      </div>
+      
+      <div className="bg-[#101935] p-6 md:p-8 rounded-none md:rounded-[40px] border-t md:border border-white/5 space-y-6 shadow-2xl min-h-[300px] -mx-4 md:mx-0">
+         <div className="flex items-center justify-between px-2">
+           <h4 className="text-white font-black text-sm uppercase tracking-widest text-white/50">سجل البث الذكي</h4>
+           <History className="text-white/20" size={18} />
+         </div>
+         <div className="space-y-4">
+           {history.map((br) => (
+             <div key={br.id} className="p-5 bg-white/[0.03] rounded-3xl md:rounded-[2rem] border border-white/5 flex flex-col md:flex-row items-start md:items-center justify-between group hover:border-rose-500/30 transition-all cursor-default relative overflow-hidden">
+                <div className="flex gap-4 w-full">
+                   <div className="w-12 h-12 rounded-2xl bg-rose-500/10 text-rose-500 flex items-center justify-center border border-rose-500/10 shrink-0">
+                      <Bell size={20} />
+                   </div>
+                   <div className="text-right w-full">
+                      {editingId === br.id ? (
+                        <div className="flex flex-col gap-2">
+                            <textarea 
+                              value={editValue}
+                              onChange={(e) => setEditValue(e.target.value)}
+                              className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white font-bold text-sm outline-none focus:border-rose-500 transition-all resize-none text-right"
+                              rows={3}
+                            />
+                            <div className="flex gap-2">
+                                <button 
+                                  onClick={() => {
+                                    if (onUpdateMessage) onUpdateMessage(br.id, editValue);
+                                    setEditingId(null);
+                                  }}
+                                  className="px-6 py-2 bg-rose-500 text-white rounded-xl text-xs font-black shadow-lg shadow-rose-900/20"
+                                >حفظ التعديل</button>
+                                <button 
+                                  onClick={() => setEditingId(null)}
+                                  className="px-6 py-2 bg-white/10 text-white/50 rounded-xl text-xs font-black hover:bg-white/20"
+                                >إلغاء</button>
+                            </div>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                            <p className="text-white text-base font-black leading-snug">{br.message}</p>
+                            <div className="flex items-center gap-3 flex-wrap">
+                                <span className="text-[10px] bg-white/5 text-white/40 px-3 py-1 rounded-full font-black uppercase tracking-widest">
+                                    {br.targetGrades?.includes('الجميع') ? 'للجميع' : br.targetGrades?.join(', ')}
+                                </span>
+                                <span className="text-[10px] text-white/20 font-bold">
+                                    {(() => {
+                                      if (!br.timestamp) return '...';
+                                      const date = typeof br.timestamp.toDate === 'function' ? br.timestamp.toDate() : new Date(br.timestamp);
+                                      return isNaN(date.getTime()) ? '...' : new Intl.DateTimeFormat('ar-EG', { hour: 'numeric', minute: 'numeric', day: 'numeric', month: 'short' }).format(date);
+                                    })()}
+                                </span>
+                            </div>
+                        </div>
+                      )}
+                   </div>
+                </div>
+                
+                {/* Actions Section - Only show when NOT editing */}
+                {editingId !== br.id && (
+                  <div className="flex items-center gap-3 mt-4 md:mt-0 w-full md:w-auto justify-end border-t md:border-0 border-white/5 pt-3 md:pt-0">               
+                      {(onUpdateMessage || onDeleteMessage) && (
+                          <div className="flex items-center gap-2">
+                              {onUpdateMessage && (
+                                <button 
+                                    onClick={() => {
+                                        setEditingId(br.id);
+                                        setEditValue(br.message);
+                                    }}
+                                    className="h-10 px-6 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center border border-blue-500/10 hover:bg-blue-500 hover:text-white transition-all text-[11px] font-black"
+                                >
+                                    تعديل
+                                </button>
+                              )}
+                              {onDeleteMessage && (
+                                 <button 
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        setConfirmDelete(br.id);
+                                    }}
+                                    className="w-10 h-10 bg-rose-500/10 text-rose-500 rounded-xl hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center border border-rose-500/10"
+                                >
+                                    <Trash2 size={20} />
+                                </button>
+                              )}
+                          </div>
+                      )}
+                  </div>
+                )}
+             </div>
+           ))}
+           {history.length === 0 && (
+             <div className="py-20 text-center text-white/5 font-black text-xs italic">
+               لا يوجد سجل بث حالياً..
+             </div>
+           )}
+         </div>
+      </div>
+    </div>
+  );
+};

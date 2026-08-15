@@ -1,0 +1,7 @@
+const config = {
+  appId: 'com.bairaq.gate6',
+  appName: 'BairaqGate6',
+  webDir: 'dist'
+};
+
+export default config;

@@ -1,0 +1,125 @@
+312:  grade?: string;
+318:  grade: string;
+319:  gradeName: string | null;
+937:  grade,
+938:  gradeName,
+956:        const docRef = doc(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`);
+1183:  const mapGradeForDocument = (raw: string) => {
+1202:  const targetBroadcastGrade = mapGradeForDocument(
+1207:      : gradeName || grade || "",
+1211:    if (!resolvedSchoolId || !targetBroadcastGrade) return;
+1218:        await setDoc(doc(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`), {
+1227:  }, [whiteboardStrokes, isLiveActive, isTeacher, resolvedSchoolId, targetBroadcastGrade]);
+1231:    if ((!isTeacher && userProfile?.role !== 'admin') || !resolvedSchoolId || !targetBroadcastGrade) return;
+1232:    const viewersColRef = collection(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`, "viewers");
+1243:  }, [resolvedSchoolId, targetBroadcastGrade, isTeacher, userProfile?.role]);
+1262:    if ((!isTeacher && userProfile?.role !== 'admin') || !resolvedSchoolId || !targetBroadcastGrade) return;
+1263:    const refPath = collection(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`, "responses");
+1276:  }, [resolvedSchoolId, targetBroadcastGrade, isTeacher, userProfile?.role]);
+1279:    if (!resolvedSchoolId || !targetBroadcastGrade) return;
+1280:    const docRef = doc(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`);
+1309:        console.log("[DEBUG Student/Teacher Live] docPath:", `${resolvedSchoolId}_${targetBroadcastGrade}`, "session stats: ", { hbTime, upTime, stTime, isSessionStale, dataIsLiveActive: data.isLiveActive });
+1379:  }, [resolvedSchoolId, targetBroadcastGrade, isTeacher]);
+1572:    grade: string;
+1711:        await setDoc(doc(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`), {
+1740:            await setDoc(doc(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`), {
+2192:        if (isTeacher && resolvedSchoolId && targetBroadcastGrade) {
+2195:            setDoc(doc(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`), {
+2209:  }, [isLiveActive, isTeacher, resolvedSchoolId, targetBroadcastGrade]);
+2257:        grade: gradeName || userProfile?.grade || ""
+2266:  }, [isTeacher, resolvedSchoolId, userProfile, gradeName]);
+2273:    if (isLiveActive && !isTeacher && activeTab === ("live_watch" as any) && resolvedSchoolId && targetBroadcastGrade) {
+2275:      const viewerDocRef = doc(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`, "viewers", myUserId);
+2339:        if (resolvedSchoolId && targetBroadcastGrade) {
+2341:          const viewerDocRef = doc(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`, "viewers", myUserId);
+2346:  }, [isLiveActive, isTeacher, activeTab, resolvedSchoolId, targetBroadcastGrade, userProfile]);
+2378:    if (!schoolId || !grade) return;
+2384:          where("grade", "==", grade),
+2400:            where("classes", "array-contains", grade),
+2422:  }, [schoolId, grade]);
+2515:  const getStageFromGrade = (studentGrade: string): string => {
+2516:    const trimmed = (studentGrade || "").trim();
+3147:        grade: grade,
+3657:        // Only display stories <= 24 hours old and matching of the same level/grade!
+3661:          // Grade filter check
+3662:          if (story.grade && grade && story.grade !== grade) return false;
+3676:  }, [schoolId, grade]);
+3757:              grade: data.grade || "",
+3771:          // If it's a student/teacher post, only show to the same grade
+3773:            return post.grade === grade;
+3777:          const postGrade = post.grade || "";
+3779:            postGrade === "جميع الصفوف" ||
+3780:            postGrade === "all" ||
+3781:            !postGrade
+3797:          if (postGrade.includes("الإعدادية") && isStudentPrep(grade))
+3799:          if (postGrade.includes("المتوسطة") && isStudentInter(grade))
+3801:          if (postGrade.includes("الابتدائية") && isStudentPrimary(grade))
+3806:            postGrade === grade ||
+3807:            grade.includes(postGrade) ||
+3808:            postGrade.includes(grade)
+3833:  }, [schoolId, grade]);
+4001:          grade: grade,
+4027:          grade: grade,
+4090:        grade: grade,
+4168:    const g = targetBroadcastGrade || "";
+4386:  }, [targetBroadcastGrade]);
+4445:    grade: grade || "الصف السادس العلمي",
+4447:    grades: {
+4545:            grade: grade || "all",
+4609:            grade: grade || "all",
+4680:        // Fuzzy matching for grades (ignore strict filter for teachers to allow cross-class selection)
+4681:        if (grade && !isTeacher) {
+4688:          const platformGradeNorm = normalize(grade);
+4691:            const sGrade = (s.grade || "").toString().trim();
+4692:            if (!sGrade) return false;
+4694:            const sGradeNorm = normalize(sGrade);
+4697:              sGradeNorm === platformGradeNorm ||
+4698:              platformGradeNorm.includes(sGradeNorm) ||
+4699:              sGradeNorm.includes(platformGradeNorm) ||
+4700:              sGrade.includes(grade) ||
+4701:              grade.includes(sGrade)
+4711:          // Calculate average grade
+4712:          let avgGrade = 0;
+4713:          if (s.grades) {
+4724:              const g = s.grades[p];
+4730:                  avgGrade = Math.round(
+4744:            averagePercent: avgGrade,
+4774:  }, [schoolId, grade, subjectMapping]);
+5008:                            ? `شارك إعلان أو توجيه كإدارة المدرسة للصف ${grade}...`
+5034:                              ? `شارك إعلان أو توجيه كإدارة المدرسة للصف ${grade}...`
+5347:                                              grade: grade || "All",
+5664:          const lGrad = normalize(lesson.grade);
+5665:          const sGrad = normalize(grade || userProfile?.grade || "");
+5882:                          <p className="text-[#00E5FF] text-[9px] font-bold mb-1">{lesson.subject} | {lesson.grade}</p>
+6029:                  {gradeName || grade}
+7578:                                    setDoc(doc(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`, "responses", myUserId), {
+7978:              grade={grade}
+8024:        const activeWorkingClass = targetBroadcastGrade;
+8036:          const studentGrade = (student.grade || "").toString().trim();
+8037:          const sGradNorm = normalize(studentGrade);
+8971:                                      grade: activeWorkingClass,
+9000:                                    const classId = targetBroadcastGrade;
+9001:                                    const liveSessionId = `${resolvedSchoolId}_${targetBroadcastGrade}`;
+9005:                                      targetBroadcastGrade,
+9017:                                    if (!targetBroadcastGrade) {
+9018:                                      throw new Error("تنبيه: الصف المستهدف غير معرّف (targetBroadcastGrade is missing).");
+9053:                                        userId: `class_${resolvedSchoolId}_${targetBroadcastGrade}`,
+9127:                                        await setDoc(doc(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`), {
+9145:                                        await setDoc(doc(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`), {
+9566:                                      if (resolvedSchoolId && targetBroadcastGrade && isLiveActive) {
+9567:                                        setDoc(doc(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`), {
+9689:                                            const snap = await getDocs(collection(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`, "responses"));
+9711:                                        if (resolvedSchoolId && targetBroadcastGrade && isLiveActive) {
+9712:                                          setDoc(doc(db, "live_sessions", `${resolvedSchoolId}_${targetBroadcastGrade}`), {
+10575:                            gradePercent: "95%",
+10581:                            gradePercent: "105%",
+10587:                            gradePercent: "92%",
+10593:                            gradePercent: "100%",
+10611:                                {student.gradePercent}
+10907:        grade={grade}
+10950:                      {gradeName && (
+10952:                          {gradeName}
+11017:                  grade={grade}
+11056:          grade={gradeName || grade}
+12507:            grade={grade}
+12530:                     <p className="text-white/40 text-[10px] uppercase font-bold">{viewingRecordedLesson.subject} • {viewingRecordedLesson.grade}</p>

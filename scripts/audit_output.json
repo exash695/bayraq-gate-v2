@@ -1,0 +1,801 @@
+{
+  "imageMap": {
+    "GeneralPoses": "/mascot/sliced_bairaq_sheet5_main_standing_pose.png",
+    "standing_arms_crossed": "/mascot/sliced_bairaq_sheet1_full_body_standing_arms_crossed.png",
+    "main_mascot_full_body": "/mascot/sliced_bairaq_sheet2_main_mascot_full_body.png",
+    "pose_crossed_arms": "/mascot/sliced_bairaq_sheet2_pose_crossed_arms.png",
+    "pose_thumbs_up": "/mascot/sliced_bairaq_sheet2_pose_thumbs_up.png",
+    "pose_holding_tablet": "/mascot/sliced_bairaq_sheet2_pose_holding_tablet.png",
+    "pose_waving_hand": "/mascot/sliced_bairaq_sheet2_pose_waving_hand.png",
+    "captain_bairaq_guardian": "/mascot/sliced_bairaq_sheet3_captain_bairaq_guardian.png",
+    "general_pose_encouragement": "/mascot/sliced_bairaq_sheet3_general_pose_encouragement.png",
+    "general_pose_diligent_student": "/mascot/sliced_bairaq_sheet3_general_pose_diligent_student.png",
+    "general_pose_explanation_guidance": "/mascot/sliced_bairaq_sheet3_general_pose_explanation_guidance.png",
+    "general_pose_excellence_achievement": "/mascot/sliced_bairaq_sheet3_general_pose_excellence_achievement.png",
+    "general_pose_notifications": "/mascot/sliced_bairaq_sheet3_general_pose_notifications.png",
+    "general_pose_protection_followup": "/mascot/sliced_bairaq_sheet3_general_pose_protection_followup.png",
+    "logo_mascot": "/mascot/sliced_bairaq_sheet5_logo_mascot.png",
+    "Characters": "/mascot/sliced_bairaq_sheet5_main_standing_pose.png",
+    "character_student": "/mascot/sliced_bairaq_sheet2_character_student.png",
+    "character_teacher": "/mascot/sliced_bairaq_sheet2_character_teacher.png",
+    "character_driver": "/mascot/sliced_bairaq_sheet2_character_driver.png",
+    "character_guardian": "/mascot/sliced_bairaq_sheet2_character_guardian.png",
+    "character_administrator": "/mascot/sliced_bairaq_sheet2_character_administrator.png",
+    "Expressions": "/mascot/sliced_bairaq_sheet5_main_standing_pose.png",
+    "face_neutral": "/mascot/sliced_bairaq_sheet2_face_neutral.png",
+    "face_wink_left": "/mascot/sliced_bairaq_sheet2_face_wink_left.png",
+    "face_happy": "/mascot/sliced_bairaq_sheet2_face_happy.png",
+    "face_surprised": "/mascot/sliced_bairaq_sheet2_face_surprised.png",
+    "face_laughing": "/mascot/sliced_bairaq_sheet2_face_laughing.png",
+    "face_wink_right": "/mascot/sliced_bairaq_sheet2_face_wink_right.png",
+    "face_thinking": "/mascot/sliced_bairaq_sheet4_face_thinking.png",
+    "face_excited": "/mascot/sliced_bairaq_sheet4_face_excited.png",
+    "face_winking": "/mascot/sliced_bairaq_sheet4_face_winking.png",
+    "face_encouraging": "/mascot/sliced_bairaq_sheet4_face_encouraging.png",
+    "face_sad": "/mascot/sliced_bairaq_sheet4_face_sad.png",
+    "face_anxious": "/mascot/sliced_bairaq_sheet4_face_anxious.png",
+    "face_angry": "/mascot/sliced_bairaq_sheet4_face_angry.png",
+    "face_tired": "/mascot/sliced_bairaq_sheet4_face_tired.png",
+    "face_focused": "/mascot/sliced_bairaq_sheet4_face_focused.png",
+    "face_proud": "/mascot/sliced_bairaq_sheet4_face_proud.png",
+    "face_shocked": "/mascot/sliced_bairaq_sheet4_face_shocked.png",
+    "face_reassured": "/mascot/sliced_bairaq_sheet4_face_reassured.png",
+    "face_grateful": "/mascot/sliced_bairaq_sheet4_face_grateful.png",
+    "face_welcoming": "/mascot/sliced_bairaq_sheet4_face_welcoming.png",
+    "face_celebrating": "/mascot/sliced_bairaq_sheet4_face_celebrating.png",
+    "face_sleeping": "/mascot/sliced_bairaq_sheet5_face_sleeping.png",
+    "face_very_happy": "/mascot/sliced_bairaq_sheet5_face_very_happy.png",
+    "face_astonished": "/mascot/sliced_bairaq_sheet5_face_astonished.png",
+    "face_mildly_angry": "/mascot/sliced_bairaq_sheet5_face_mildly_angry.png",
+    "face_playful": "/mascot/sliced_bairaq_sheet5_face_playful.png",
+    "InAppUse": "/mascot/sliced_bairaq_sheet5_main_standing_pose.png",
+    "app_notification_delivery_reached": "/mascot/sliced_bairaq_sheet2_app_notification_delivery_reached.png",
+    "app_notification_award_received": "/mascot/sliced_bairaq_sheet2_app_notification_award_received.png",
+    "app_notification_study_time": "/mascot/sliced_bairaq_sheet2_app_notification_study_time.png",
+    "app_menu_guide": "/mascot/sliced_bairaq_sheet2_app_menu_guide.png",
+    "in_app_use_drives_buses": "/mascot/sliced_bairaq_sheet3_in_app_use_drives_buses.png",
+    "in_app_use_welcomes_students": "/mascot/sliced_bairaq_sheet3_in_app_use_welcomes_students.png",
+    "in_app_use_accompanies_student": "/mascot/sliced_bairaq_sheet3_in_app_use_accompanies_student.png",
+    "in_app_use_helps_teachers": "/mascot/sliced_bairaq_sheet3_in_app_use_helps_teachers.png",
+    "in_app_use_reassures_parents": "/mascot/sliced_bairaq_sheet3_in_app_use_reassures_parents.png",
+    "in_app_use_safety_first": "/mascot/sliced_bairaq_sheet3_in_app_use_safety_first.png",
+    "in_app_use_awards_medals": "/mascot/sliced_bairaq_sheet3_in_app_use_awards_medals.png",
+    "use_driving_bus": "/mascot/sliced_bairaq_sheet5_use_driving_bus.png",
+    "use_studying": "/mascot/sliced_bairaq_sheet5_use_studying.png",
+    "use_smart_education": "/mascot/sliced_bairaq_sheet5_use_smart_education.png",
+    "use_safety_protection": "/mascot/sliced_bairaq_sheet5_use_safety_protection.png",
+    "use_notifications_alerts": "/mascot/sliced_bairaq_sheet5_use_notifications_alerts.png",
+    "use_achievement_excellence": "/mascot/sliced_bairaq_sheet5_use_achievement_excellence.png",
+    "use_tracking_trips": "/mascot/sliced_bairaq_sheet5_use_tracking_trips.png",
+    "use_parental_supervision": "/mascot/sliced_bairaq_sheet5_use_parental_supervision.png",
+    "main_standing_pose": "/mascot/sliced_bairaq_sheet5_main_standing_pose.png",
+    "Greetings": "/mascot/sliced_bairaq_sheet5_main_standing_pose.png",
+    "greeting_welcome": "/mascot/sliced_bairaq_sheet3_greeting_welcome.png",
+    "greet_hello": "/mascot/sliced_bairaq_sheet5_greet_hello.png",
+    "greet_well_done": "/mascot/sliced_bairaq_sheet5_greet_well_done.png",
+    "greet_congratulations": "/mascot/sliced_bairaq_sheet5_greet_congratulations.png",
+    "greet_lets_go": "/mascot/sliced_bairaq_sheet5_greet_lets_go.png",
+    "9NewVideoPosesforAdminDashboard": "/mascot/sliced_bairaq_sheet5_main_standing_pose.png",
+    "pose_finance_officer": "/mascot/sliced_bairaq_sheet5_pose_finance_officer.png",
+    "pose_key_master": "/mascot/sliced_bairaq_sheet5_pose_key_master.png",
+    "pose_student_manager": "/mascot/sliced_bairaq_sheet5_pose_student_manager.png",
+    "pose_broadcaster": "/mascot/sliced_bairaq_sheet5_pose_broadcaster.png",
+    "pose_discipline_shield": "/mascot/sliced_bairaq_sheet5_pose_discipline_shield.png",
+    "pose_school_uniform": "/mascot/sliced_bairaq_sheet5_pose_school_uniform.png",
+    "pose_staff_leader": "/mascot/sliced_bairaq_sheet5_pose_staff_leader.png",
+    "pose_bus_captain": "/mascot/sliced_bairaq_sheet5_pose_bus_captain.png",
+    "pose_idea_genius": "/mascot/sliced_bairaq_sheet5_pose_idea_genius.png",
+    "pose_customer_support": "/mascot/sliced_bairaq_sheet5_pose_customer_support.png",
+    "pose_portal_pulse": "/mascot/sliced_bairaq_sheet5_pose_portal_pulse.png",
+    "pose_content_control": "/mascot/sliced_bairaq_sheet5_pose_content_control.png",
+    "pose_activity_logs": "/mascot/sliced_bairaq_sheet5_pose_activity_logs.png",
+    "pose_transport_manager": "/mascot/sliced_bairaq_sheet5_pose_transport_manager.png",
+    "pose_parent_dashboard": "/mascot/sliced_bairaq_sheet5_pose_parent_dashboard.png",
+    "9NewVideoPosesforStudentPortal": "/mascot/sliced_bairaq_sheet5_main_standing_pose.png",
+    "pose_gateway_guardian": "/mascot/sliced_bairaq_sheet5_main_standing_pose.png",
+    "pose_academic_scholar": "/mascot/sliced_bairaq_sheet5_pose_academic_scholar.png",
+    "pose_sixty_seconds_challenger": "/mascot/sliced_bairaq_sheet5_pose_sixty_seconds_challenger.png",
+    "pose_radar_navigator": "/mascot/sliced_bairaq_sheet5_pose_radar_navigator.png",
+    "pose_champion_laureate": "/mascot/sliced_bairaq_sheet5_pose_champion_laureate.png",
+    "pose_control_mechanic": "/mascot/sliced_bairaq_sheet5_pose_control_mechanic.png",
+    "pose_idea_creator": "/mascot/sliced_bairaq_sheet5_pose_idea_creator.png",
+    "pose_ai_companion": "/mascot/sliced_bairaq_sheet5_pose_ai_companion.png",
+    "pose_sovereign_leader": "/mascot/sliced_bairaq_sheet5_pose_sovereign_leader.png",
+    "pose_digital_broadcaster": "/mascot/sliced_bairaq_sheet5_pose_digital_broadcaster.png",
+    "pose_homework_master": "/mascot/sliced_bairaq_sheet5_pose_homework_master.png",
+    "pose_live_announcer": "/mascot/sliced_bairaq_sheet5_pose_live_announcer.png",
+    "pose_schedule_planner": "/mascot/sliced_bairaq_sheet5_pose_schedule_planner.png",
+    "pose_questions_bank": "/mascot/sliced_bairaq_sheet5_pose_questions_bank.png",
+    "pose_excellence_champion": "/mascot/sliced_bairaq_sheet5_pose_excellence_champion.png",
+    "mayadeen_tab_bairaq": "/mascot/sliced_bairaq_sheet5_main_standing_pose.png",
+    "excellence_tab_bairaq": "/mascot/sliced_bairaq_sheet5_main_standing_pose.png"
+  },
+  "videoMap": {
+    "captain_bairaq_guardian": "/mascot/sliced_bairaq_sheet3_captain_bairaq_guardian.mp4",
+    "pose_finance_officer": "/mascot/sliced_bairaq_sheet5_pose_finance_officer.mp4",
+    "pose_key_master": "/mascot/sliced_bairaq_sheet5_pose_key_master.mp4",
+    "pose_student_manager": "/mascot/sliced_bairaq_sheet5_pose_student_manager.mp4",
+    "pose_broadcaster": "/mascot/sliced_bairaq_sheet5_pose_broadcaster.mp4",
+    "pose_discipline_shield": "/mascot/sliced_bairaq_sheet5_pose_discipline_shield.mp4",
+    "pose_school_uniform": "/mascot/sliced_bairaq_sheet5_pose_school_uniform.mp4",
+    "pose_staff_leader": "/mascot/sliced_bairaq_sheet5_pose_staff_leader.mp4",
+    "pose_bus_captain": "/mascot/sliced_bairaq_sheet5_pose_bus_captain.mp4",
+    "pose_idea_genius": "/mascot/sliced_bairaq_sheet5_pose_idea_genius.mp4",
+    "pose_customer_support": "/mascot/sliced_bairaq_sheet5_pose_customer_support.mp4",
+    "pose_portal_pulse": "/mascot/sliced_bairaq_sheet5_pose_portal_pulse.mp4",
+    "pose_content_control": "/mascot/sliced_bairaq_sheet5_pose_content_control.mp4",
+    "pose_activity_logs": "/mascot/sliced_bairaq_sheet5_pose_activity_logs.mp4",
+    "pose_transport_manager": "/mascot/sliced_bairaq_sheet5_pose_transport_manager.mp4",
+    "pose_parent_dashboard": "/mascot/sliced_bairaq_sheet5_pose_parent_dashboard.mp4",
+    "pose_academic_scholar": "/mascot/sliced_bairaq_sheet5_pose_academic_scholar.mp4",
+    "pose_sixty_seconds_challenger": "/mascot/sliced_bairaq_sheet5_pose_sixty_seconds_challenger.mp4",
+    "pose_radar_navigator": "/mascot/sliced_bairaq_sheet5_pose_radar_navigator.mp4",
+    "pose_champion_laureate": "/mascot/sliced_bairaq_sheet5_pose_champion_laureate.mp4",
+    "pose_control_mechanic": "/mascot/sliced_bairaq_sheet5_pose_control_mechanic.mp4",
+    "pose_idea_creator": "/mascot/sliced_bairaq_sheet5_pose_idea_creator.mp4",
+    "pose_ai_companion": "/mascot/sliced_bairaq_sheet5_pose_ai_companion.mp4",
+    "pose_sovereign_leader": "/mascot/sliced_bairaq_sheet5_pose_sovereign_leader.mp4",
+    "pose_digital_broadcaster": "/mascot/sliced_bairaq_sheet5_pose_digital_broadcaster.mp4",
+    "pose_homework_master": "/mascot/sliced_bairaq_sheet5_pose_homework_master.mp4",
+    "pose_live_announcer": "/mascot/sliced_bairaq_sheet5_pose_live_announcer.mp4",
+    "pose_schedule_planner": "/mascot/sliced_bairaq_sheet5_pose_schedule_planner.mp4",
+    "pose_questions_bank": "/mascot/sliced_bairaq_sheet5_pose_questions_bank.mp4",
+    "pose_excellence_champion": "/mascot/sliced_bairaq_sheet5_pose_excellence_champion.mp4"
+  },
+  "auditReport": [
+    {
+      "poseKey": "GeneralPoses",
+      "imageFile": "mascot/sliced_bairaq_sheet5_main_standing_pose.png",
+      "videoFile": "",
+      "exactMatch": false
+    },
+    {
+      "poseKey": "standing_arms_crossed",
+      "imageFile": "mascot/sliced_bairaq_sheet1_full_body_standing_arms_crossed.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "main_mascot_full_body",
+      "imageFile": "mascot/sliced_bairaq_sheet2_main_mascot_full_body.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_crossed_arms",
+      "imageFile": "mascot/sliced_bairaq_sheet2_pose_crossed_arms.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_thumbs_up",
+      "imageFile": "mascot/sliced_bairaq_sheet2_pose_thumbs_up.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_holding_tablet",
+      "imageFile": "mascot/sliced_bairaq_sheet2_pose_holding_tablet.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_waving_hand",
+      "imageFile": "mascot/sliced_bairaq_sheet2_pose_waving_hand.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "captain_bairaq_guardian",
+      "imageFile": "mascot/sliced_bairaq_sheet3_captain_bairaq_guardian.png",
+      "videoFile": "mascot/sliced_bairaq_sheet3_captain_bairaq_guardian.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "general_pose_encouragement",
+      "imageFile": "mascot/sliced_bairaq_sheet3_general_pose_encouragement.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "general_pose_diligent_student",
+      "imageFile": "mascot/sliced_bairaq_sheet3_general_pose_diligent_student.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "general_pose_explanation_guidance",
+      "imageFile": "mascot/sliced_bairaq_sheet3_general_pose_explanation_guidance.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "general_pose_excellence_achievement",
+      "imageFile": "mascot/sliced_bairaq_sheet3_general_pose_excellence_achievement.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "general_pose_notifications",
+      "imageFile": "mascot/sliced_bairaq_sheet3_general_pose_notifications.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "general_pose_protection_followup",
+      "imageFile": "mascot/sliced_bairaq_sheet3_general_pose_protection_followup.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "logo_mascot",
+      "imageFile": "mascot/sliced_bairaq_sheet5_logo_mascot.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "Characters",
+      "imageFile": "mascot/sliced_bairaq_sheet5_main_standing_pose.png",
+      "videoFile": "",
+      "exactMatch": false
+    },
+    {
+      "poseKey": "character_student",
+      "imageFile": "mascot/sliced_bairaq_sheet2_character_student.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "character_teacher",
+      "imageFile": "mascot/sliced_bairaq_sheet2_character_teacher.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "character_driver",
+      "imageFile": "mascot/sliced_bairaq_sheet2_character_driver.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "character_guardian",
+      "imageFile": "mascot/sliced_bairaq_sheet2_character_guardian.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "character_administrator",
+      "imageFile": "mascot/sliced_bairaq_sheet2_character_administrator.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "Expressions",
+      "imageFile": "mascot/sliced_bairaq_sheet5_main_standing_pose.png",
+      "videoFile": "",
+      "exactMatch": false
+    },
+    {
+      "poseKey": "face_neutral",
+      "imageFile": "mascot/sliced_bairaq_sheet2_face_neutral.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "face_wink_left",
+      "imageFile": "mascot/sliced_bairaq_sheet2_face_wink_left.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "face_happy",
+      "imageFile": "mascot/sliced_bairaq_sheet2_face_happy.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "face_surprised",
+      "imageFile": "mascot/sliced_bairaq_sheet2_face_surprised.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "face_laughing",
+      "imageFile": "mascot/sliced_bairaq_sheet2_face_laughing.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "face_wink_right",
+      "imageFile": "mascot/sliced_bairaq_sheet2_face_wink_right.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "face_thinking",
+      "imageFile": "mascot/sliced_bairaq_sheet4_face_thinking.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "face_excited",
+      "imageFile": "mascot/sliced_bairaq_sheet4_face_excited.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "face_winking",
+      "imageFile": "mascot/sliced_bairaq_sheet4_face_winking.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "face_encouraging",
+      "imageFile": "mascot/sliced_bairaq_sheet4_face_encouraging.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "face_sad",
+      "imageFile": "mascot/sliced_bairaq_sheet4_face_sad.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "face_anxious",
+      "imageFile": "mascot/sliced_bairaq_sheet4_face_anxious.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "face_angry",
+      "imageFile": "mascot/sliced_bairaq_sheet4_face_angry.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "face_tired",
+      "imageFile": "mascot/sliced_bairaq_sheet4_face_tired.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "face_focused",
+      "imageFile": "mascot/sliced_bairaq_sheet4_face_focused.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "face_proud",
+      "imageFile": "mascot/sliced_bairaq_sheet4_face_proud.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "face_shocked",
+      "imageFile": "mascot/sliced_bairaq_sheet4_face_shocked.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "face_reassured",
+      "imageFile": "mascot/sliced_bairaq_sheet4_face_reassured.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "face_grateful",
+      "imageFile": "mascot/sliced_bairaq_sheet4_face_grateful.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "face_welcoming",
+      "imageFile": "mascot/sliced_bairaq_sheet4_face_welcoming.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "face_celebrating",
+      "imageFile": "mascot/sliced_bairaq_sheet4_face_celebrating.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "face_sleeping",
+      "imageFile": "mascot/sliced_bairaq_sheet5_face_sleeping.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "face_very_happy",
+      "imageFile": "mascot/sliced_bairaq_sheet5_face_very_happy.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "face_astonished",
+      "imageFile": "mascot/sliced_bairaq_sheet5_face_astonished.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "face_mildly_angry",
+      "imageFile": "mascot/sliced_bairaq_sheet5_face_mildly_angry.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "face_playful",
+      "imageFile": "mascot/sliced_bairaq_sheet5_face_playful.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "InAppUse",
+      "imageFile": "mascot/sliced_bairaq_sheet5_main_standing_pose.png",
+      "videoFile": "",
+      "exactMatch": false
+    },
+    {
+      "poseKey": "app_notification_delivery_reached",
+      "imageFile": "mascot/sliced_bairaq_sheet2_app_notification_delivery_reached.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "app_notification_award_received",
+      "imageFile": "mascot/sliced_bairaq_sheet2_app_notification_award_received.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "app_notification_study_time",
+      "imageFile": "mascot/sliced_bairaq_sheet2_app_notification_study_time.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "app_menu_guide",
+      "imageFile": "mascot/sliced_bairaq_sheet2_app_menu_guide.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "in_app_use_drives_buses",
+      "imageFile": "mascot/sliced_bairaq_sheet3_in_app_use_drives_buses.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "in_app_use_welcomes_students",
+      "imageFile": "mascot/sliced_bairaq_sheet3_in_app_use_welcomes_students.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "in_app_use_accompanies_student",
+      "imageFile": "mascot/sliced_bairaq_sheet3_in_app_use_accompanies_student.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "in_app_use_helps_teachers",
+      "imageFile": "mascot/sliced_bairaq_sheet3_in_app_use_helps_teachers.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "in_app_use_reassures_parents",
+      "imageFile": "mascot/sliced_bairaq_sheet3_in_app_use_reassures_parents.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "in_app_use_safety_first",
+      "imageFile": "mascot/sliced_bairaq_sheet3_in_app_use_safety_first.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "in_app_use_awards_medals",
+      "imageFile": "mascot/sliced_bairaq_sheet3_in_app_use_awards_medals.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "use_driving_bus",
+      "imageFile": "mascot/sliced_bairaq_sheet5_use_driving_bus.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "use_studying",
+      "imageFile": "mascot/sliced_bairaq_sheet5_use_studying.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "use_smart_education",
+      "imageFile": "mascot/sliced_bairaq_sheet5_use_smart_education.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "use_safety_protection",
+      "imageFile": "mascot/sliced_bairaq_sheet5_use_safety_protection.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "use_notifications_alerts",
+      "imageFile": "mascot/sliced_bairaq_sheet5_use_notifications_alerts.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "use_achievement_excellence",
+      "imageFile": "mascot/sliced_bairaq_sheet5_use_achievement_excellence.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "use_tracking_trips",
+      "imageFile": "mascot/sliced_bairaq_sheet5_use_tracking_trips.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "use_parental_supervision",
+      "imageFile": "mascot/sliced_bairaq_sheet5_use_parental_supervision.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "main_standing_pose",
+      "imageFile": "mascot/sliced_bairaq_sheet5_main_standing_pose.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "Greetings",
+      "imageFile": "mascot/sliced_bairaq_sheet5_main_standing_pose.png",
+      "videoFile": "",
+      "exactMatch": false
+    },
+    {
+      "poseKey": "greeting_welcome",
+      "imageFile": "mascot/sliced_bairaq_sheet3_greeting_welcome.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "greet_hello",
+      "imageFile": "mascot/sliced_bairaq_sheet5_greet_hello.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "greet_well_done",
+      "imageFile": "mascot/sliced_bairaq_sheet5_greet_well_done.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "greet_congratulations",
+      "imageFile": "mascot/sliced_bairaq_sheet5_greet_congratulations.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "greet_lets_go",
+      "imageFile": "mascot/sliced_bairaq_sheet5_greet_lets_go.png",
+      "videoFile": "",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "9NewVideoPosesforAdminDashboard",
+      "imageFile": "mascot/sliced_bairaq_sheet5_main_standing_pose.png",
+      "videoFile": "",
+      "exactMatch": false
+    },
+    {
+      "poseKey": "pose_finance_officer",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_finance_officer.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_finance_officer.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_key_master",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_key_master.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_key_master.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_student_manager",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_student_manager.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_student_manager.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_broadcaster",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_broadcaster.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_broadcaster.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_discipline_shield",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_discipline_shield.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_discipline_shield.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_school_uniform",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_school_uniform.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_school_uniform.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_staff_leader",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_staff_leader.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_staff_leader.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_bus_captain",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_bus_captain.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_bus_captain.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_idea_genius",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_idea_genius.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_idea_genius.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_customer_support",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_customer_support.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_customer_support.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_portal_pulse",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_portal_pulse.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_portal_pulse.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_content_control",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_content_control.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_content_control.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_activity_logs",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_activity_logs.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_activity_logs.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_transport_manager",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_transport_manager.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_transport_manager.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_parent_dashboard",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_parent_dashboard.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_parent_dashboard.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "9NewVideoPosesforStudentPortal",
+      "imageFile": "mascot/sliced_bairaq_sheet5_main_standing_pose.png",
+      "videoFile": "",
+      "exactMatch": false
+    },
+    {
+      "poseKey": "pose_gateway_guardian",
+      "imageFile": "mascot/sliced_bairaq_sheet5_main_standing_pose.png",
+      "videoFile": "",
+      "exactMatch": false
+    },
+    {
+      "poseKey": "pose_academic_scholar",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_academic_scholar.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_academic_scholar.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_sixty_seconds_challenger",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_sixty_seconds_challenger.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_sixty_seconds_challenger.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_radar_navigator",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_radar_navigator.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_radar_navigator.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_champion_laureate",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_champion_laureate.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_champion_laureate.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_control_mechanic",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_control_mechanic.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_control_mechanic.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_idea_creator",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_idea_creator.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_idea_creator.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_ai_companion",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_ai_companion.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_ai_companion.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_sovereign_leader",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_sovereign_leader.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_sovereign_leader.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_digital_broadcaster",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_digital_broadcaster.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_digital_broadcaster.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_homework_master",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_homework_master.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_homework_master.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_live_announcer",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_live_announcer.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_live_announcer.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_schedule_planner",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_schedule_planner.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_schedule_planner.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_questions_bank",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_questions_bank.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_questions_bank.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "pose_excellence_champion",
+      "imageFile": "mascot/sliced_bairaq_sheet5_pose_excellence_champion.png",
+      "videoFile": "mascot/sliced_bairaq_sheet5_pose_excellence_champion.mp4",
+      "exactMatch": true
+    },
+    {
+      "poseKey": "mayadeen_tab_bairaq",
+      "imageFile": "mascot/sliced_bairaq_sheet5_main_standing_pose.png",
+      "videoFile": "",
+      "exactMatch": false
+    },
+    {
+      "poseKey": "excellence_tab_bairaq",
+      "imageFile": "mascot/sliced_bairaq_sheet5_main_standing_pose.png",
+      "videoFile": "",
+      "exactMatch": false
+    }
+  ]
+}

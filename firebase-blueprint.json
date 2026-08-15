@@ -1,0 +1,339 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Represents a user (student, teacher, or parent) in the system.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["student", "teacher", "admin", "parent"] },
+        "studentCode": { "type": "string" },
+        "parentCode": { "type": "string" },
+        "schoolId": { "type": "string" },
+        "grade": { "type": "string" },
+        "grades": { "type": "object" },
+        "lastSyncedPeriod": { "type": "string" },
+        "isTopStudent": { "type": "boolean" },
+        "topStudentPeriod": { "type": "string" }
+      },
+      "required": ["userId", "role"]
+    },
+    "SchoolStudent": {
+      "title": "School Student Record",
+      "description": "A student record managed by a school or admin.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "grade": { "type": "string" },
+        "schoolId": { "type": "string" },
+        "code": { "type": "string" },
+        "parentCode": { "type": "string" },
+        "paidAmount": { "type": "number" },
+        "totalAmount": { "type": "number" },
+        "isTopStudent": { "type": "boolean" },
+        "topStudentPeriod": { "type": "string" },
+        "grades": { "type": "object" },
+        "lastSyncedPeriod": { "type": "string" },
+        "attendance": { "type": "object" },
+        "behavior": { "type": "object" },
+        "excellencePoints": { "type": "number" },
+        "achievements": { "type": "array" }
+      },
+      "required": ["id", "code", "schoolId"]
+    },
+    "AcademicList": {
+      "title": "Academic List",
+      "description": "A batch of students with grades for a specific period.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "schoolId": { "type": "string" },
+        "date": { "type": "string" },
+        "students": { "type": "array" },
+        "lastSyncedPeriod": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["name", "schoolId"]
+    },
+    "SchoolConfig": {
+      "title": "School Configuration",
+      "description": "Settings for a specific school.",
+      "type": "object",
+      "properties": {
+        "schoolName": { "type": "string" },
+        "logo": { "type": "string" },
+        "primaryColor": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
+    },
+    "AcademyPage": {
+      "title": "Academy Page",
+      "description": "An AI-extracted page from a study material.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "unit": { "type": "string" },
+        "content": { "type": "string" },
+        "extractedText": { "type": "string" },
+        "schoolId": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "order": { "type": "number" }
+      },
+      "required": ["title", "schoolId"]
+    },
+    "Notification": {
+      "title": "App Notification",
+      "description": "A notification sent to a specific user or group.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "parentCode": { "type": "string" },
+        "studentId": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "isRead": { "type": "boolean" }
+      },
+      "required": ["title", "message"]
+    },
+    "FinanceRecord": {
+      "title": "Finance Record",
+      "description": "Financial summary for a student.",
+      "type": "object",
+      "properties": {
+        "studentCode": { "type": "string" },
+        "studentName": { "type": "string" },
+        "schoolId": { "type": "string" },
+        "totalRequired": { "type": "number" },
+        "totalPaid": { "type": "number" },
+        "transactions": { "type": "array" }
+      },
+      "required": ["studentCode"]
+    },
+    "Payment": {
+      "title": "Payment Record",
+      "description": "Individual payment submission from a parent/student.",
+      "type": "object",
+      "properties": {
+        "amount": { "type": "number" },
+        "studentCode": { "type": "string" },
+        "transactionId": { "type": "string" },
+        "method": { "type": "string" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "schoolId": { "type": "string" }
+      },
+      "required": ["amount", "studentCode", "transactionId"]
+    },
+    "SchoolFile": {
+      "title": "School File/Supplement",
+      "description": "Represents study materials, brochures, and worksheets uploaded by teachers.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "title": { "type": "string" },
+        "size": { "type": "string" },
+        "downloads": { "type": "number" },
+        "tag": { "type": "string" },
+        "subject": { "type": "string" },
+        "grade": { "type": "string" },
+        "schoolId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["name", "title", "schoolId"]
+    },
+    "RecordedLesson": {
+      "title": "Recorded Lesson Video",
+      "description": "Represents video lectures uploaded by teachers for the students.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "subject": { "type": "string" },
+        "grade": { "type": "string" },
+        "duration": { "type": "string" },
+        "date": { "type": "string" },
+        "videoUrl": { "type": "string" },
+        "description": { "type": "string" },
+        "schoolId": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["title", "videoUrl", "schoolId"]
+    },
+    "TransportRoute": {
+      "title": "Transport Route",
+      "description": "Represents a school bus route and its current tracking status.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "driverId": { "type": "string" },
+        "busPlate": { "type": "string" },
+        "stops": { "type": "array" },
+        "schoolId": { "type": "string" },
+        "startTime": { "type": "string" },
+        "status": { "type": "string", "enum": ["idle", "in_transit", "delayed", "completed"] },
+        "currentLocation": { "type": "object" }
+      },
+      "required": ["name", "schoolId"]
+    },
+    "StudentTransportStatus": {
+      "title": "Student Transport Status",
+      "description": "Represents the live tracking and boarding status of a student.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentName": { "type": "string" },
+        "routeId": { "type": "string" },
+        "status": { "type": "string", "enum": ["waiting", "picked_up", "dropped_off", "absent"] },
+        "timestamp": { "type": "number" },
+        "stopName": { "type": "string" },
+        "parentId": { "type": "string" }
+      },
+      "required": ["studentName", "routeId", "status"]
+    },
+    "TransportFee": {
+      "title": "Transport Fee",
+      "description": "Represents a school bus monthly subscription fee.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "parentId": { "type": "string" },
+        "amount": { "type": "number" },
+        "dueDate": { "type": "number" },
+        "status": { "type": "string", "enum": ["paid", "pending", "overdue"] },
+        "month": { "type": "string" }
+      },
+      "required": ["studentId", "parentId", "amount", "status"]
+    },
+    "BusDriver": {
+      "title": "Bus Driver",
+      "description": "Represents a registered school bus driver.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "routeId": { "type": "string" },
+        "schoolId": { "type": "string" }
+      },
+      "required": ["name", "phone", "schoolId"]
+    },
+    "AIAnalytics": {
+      "title": "AI Analytics Log",
+      "description": "Log entry for AI usage analytics.",
+      "type": "object",
+      "properties": {
+        "endpoint": { "type": "string" },
+        "model": { "type": "string" },
+        "isCacheHit": { "type": "boolean" },
+        "processingTimeMs": { "type": "number" },
+        "timestamp": { "type": "string" },
+        "metadata": { "type": "object" }
+      },
+      "required": ["endpoint", "model", "isCacheHit", "processingTimeMs", "timestamp"]
+    },
+    "RemoteConfig": {
+      "title": "Remote Configuration",
+      "description": "Cloud remote control settings and feature flags.",
+      "type": "object",
+      "properties": {
+        "maintenanceMode": { "type": "boolean" },
+        "maintenanceMessage": { "type": "string" },
+        "aiFeaturesEnabled": { "type": "boolean" },
+        "liveRadioEnabled": { "type": "boolean" },
+        "onlinePaymentsEnabled": { "type": "boolean" },
+        "newRegistrationsEnabled": { "type": "boolean" },
+        "minRequiredVersion": { "type": "string" },
+        "latestVersion": { "type": "string" },
+        "playStoreUrl": { "type": "string" },
+        "appStoreUrl": { "type": "string" },
+        "updateChangelog": { "type": "string" },
+        "forceUpdateActive": { "type": "boolean" },
+        "tickerEnabled": { "type": "boolean" },
+        "tickerText": { "type": "string" },
+        "tickerSpeed": { "type": "string" },
+        "seasonalTheme": { "type": "string" },
+        "seasonalHeroText": { "type": "string" },
+        "supportWhatsapp": { "type": "string" },
+        "supportTelegram": { "type": "string" },
+        "supportChannelUrl": { "type": "string" },
+        "supportButtonEnabled": { "type": "boolean" }
+      }
+    }
+  },
+  "firestore": {
+    "ai_analytics/{logId}": {
+      "schema": "AIAnalytics",
+      "description": "Logs of AI usage and performance."
+    },
+    "transport_routes/{routeId}": {
+      "schema": "TransportRoute",
+      "description": "School bus routes and tracking."
+    },
+    "transport_drivers/{driverId}": {
+      "schema": "BusDriver",
+      "description": "Registered school bus drivers."
+    },
+    "transport_students_status/{statusId}": {
+      "schema": "StudentTransportStatus",
+      "description": "Live student transport tracking status."
+    },
+    "transport_fees/{feeId}": {
+      "schema": "TransportFee",
+      "description": "Monthly transport fee subscriptions."
+    },
+    "school_files/{fileId}": {
+      "schema": "SchoolFile",
+      "description": "Study files, brochures and worksheets."
+    },
+    "recorded_lessons/{lessonId}": {
+      "schema": "RecordedLesson",
+      "description": "Recorded lesson lectures video feeds."
+    },
+    "notifications/{notifId}": {
+      "schema": "Notification",
+      "description": "App-wide notifications for users."
+    },
+    "users/{userId}": {
+      "schema": "User",
+      "description": "User profiles for auth-linked data."
+    },
+    "school_students/{studentId}": {
+      "schema": "SchoolStudent",
+      "description": "Master student records for schools."
+    },
+    "academic_lists/{listId}": {
+      "schema": "AcademicList",
+      "description": "Lists of academic records for synchronization."
+    },
+    "school_configs/{schoolId}": {
+      "schema": "SchoolConfig",
+      "description": "Configuration settings for each school."
+    },
+    "academy_pages/{pageId}": {
+      "schema": "AcademyPage",
+      "description": "AI-processed study material pages."
+    },
+    "finance/{financeId}": {
+      "schema": "FinanceRecord",
+      "description": "Student financial summaries."
+    },
+    "payments/{paymentId}": {
+      "schema": "Payment",
+      "description": "Payment submissions."
+    },
+    "schools/{schoolId}": {
+      "schema": "SchoolConfig",
+      "description": "School details collection (aliased as schools)."
+    },
+    "system_config/{configId}": {
+      "schema": "RemoteConfig",
+      "description": "Cloud remote control settings and feature flags."
+    }
+  }
+}

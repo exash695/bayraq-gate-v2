@@ -1,0 +1,11 @@
+{
+  "name": "بوابة بيرق BAYRAQ: Gate 6",
+  "description": "منصة تعليمية متطورة مع ميزات الذكاء الاصطناعي والتحديات التفاعلية.",
+  "requestFramePermissions": [
+    "microphone",
+    "camera"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

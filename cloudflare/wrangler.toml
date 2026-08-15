@@ -1,0 +1,17 @@
+name = "bairaq-portal-gateway"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+
+[vars]
+AI_PROVIDER = "gemini"
+ENVIRONMENT = "production"
+
+# Cloudflare R2 Bucket Binding for heavy media assets (videos, pose images, school logos)
+[[r2_buckets]]
+binding = 'BAIRAQ_MEDIA_BUCKET'
+bucket_name = 'al-sadis-academy'
+
+# Trigger routes (optional custom domain mapping)
+# routes = [
+#   { pattern = "api.bairaq.app/*", zone_name = "bairaq.app" }
+# ]
