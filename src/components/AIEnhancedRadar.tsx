@@ -5,7 +5,7 @@ import {
   ChevronLeft, ChevronRight, ShieldCheck, Crown, BookOpen, 
   Award, Activity, FileCheck, RefreshCw, Play, Check, HelpCircle 
 } from 'lucide-react';
-import { collection, getDocs, doc, setDoc, increment } from 'firebase/firestore';
+import { collection, getDocs, doc, setDoc, increment } from '@/src/lib/firebase';
 import { db } from '../lib/firebase';
 import { UserProgress } from '../types';
 import { sounds } from '../lib/sounds';
@@ -583,7 +583,7 @@ export const AIEnhancedRadar: React.FC<AIEnhancedRadarProps> = ({
       // Also try to save to Firestore permanently
       if (userProfile?.uid) {
         try {
-          const userRef = doc(db, "users", userProfile.uid);
+          const userRef = doc(db, "users", userProfile?.uid);
           await setDoc(userRef, {
             badges: {
               [bId]: new Date().toLocaleDateString('ar-IQ')

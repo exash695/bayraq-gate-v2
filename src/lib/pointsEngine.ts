@@ -1,4 +1,4 @@
-import { doc, updateDoc, increment, getDoc, setDoc } from 'firebase/firestore';
+import { doc, updateDoc, increment, getDoc, setDoc } from '@/src/lib/firebase';
 import { db } from './firebase';
 
 export const calculateRank = (points: number, isTop100: boolean = false) => {

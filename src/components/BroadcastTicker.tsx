@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, orderBy, limit, onSnapshot } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { broadcastService } from '../services/broadcastService';
 import { Megaphone } from 'lucide-react';
 import { useRemoteConfig } from '../services/remoteConfig';
+import { matchesTargetGrades, isSchoolMatch } from '../utils/gradeMatcher';
 
 interface BroadcastTickerProps {
   schoolId: string;
@@ -16,55 +16,51 @@ export const BroadcastTicker: React.FC<BroadcastTickerProps> = ({ schoolId, grad
   const [broadcasts, setBroadcasts] = useState<{ message: string; id: string }[]>([]);
 
   useEffect(() => {
-    if (!schoolId || !isVisible) return;
+    if (!isVisible) return;
+    const currentSchoolId = schoolId || 'school1';
 
-    const q = query(
-      collection(db, 'broadcasts'),
-      orderBy('timestampMs', 'desc'),
-      limit(40)
-    );
+    const unsub = broadcastService.subscribeToBroadcasts(currentSchoolId, (allData) => {
+      try {
+        const filtered = (allData || [])
+          .filter((b: any) => {
+            // Exclude global celebration items that are solely for the celebrations popup modal
+            if (b.type === 'global_celebration' && b.targetLocation === 'popup') return false;
+            // Include ticker, both, all, or unspecified locations
+            return b.targetLocation === 'ticker' || b.targetLocation === 'both' || b.targetLocation === 'all' || !b.targetLocation;
+          })
+          .filter((b: any) => {
+            // School check
+            const bSchool = b.schoolId || b.school_id;
+            if (!isSchoolMatch(currentSchoolId, bSchool)) {
+              return false;
+            }
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const allBroadcasts = snapshot.docs
-        .map(doc => {
-          const docData = doc.data();
-          const timestampMs = docData.timestampMs || ((docData.timestamp && typeof docData.timestamp.toMillis === 'function')
-            ? docData.timestamp.toMillis()
-            : Date.now());
-          return {
-            message: docData.message,
-            id: doc.id,
-            author: docData.author || '',
-            subject: docData.subject || '',
-            targetGrades: docData.targetGrades as string[],
-            schoolId: docData.schoolId || '',
-            targetLocation: docData.targetLocation || 'both',
-            expiryDate: docData.expiryDate || 0,
-            timestampMs
-          };
-        })
-        .filter(b => b.expiryDate > Date.now())
-        .filter(b => b.targetLocation === 'ticker' || b.targetLocation === 'both' || b.targetLocation === 'all' || !b.targetLocation)
-        .filter(b => b.schoolId === '' || b.schoolId === schoolId)
-        .filter(b => isTeacher || b.targetGrades.includes('الجميع') || (grade && b.targetGrades.includes(grade)))
-        .sort((a, b) => {
-          // 1. Prioritize school radio / admin broadcasts (author is empty)
-          const isAAdmin = !a.author;
-          const isBAdmin = !b.author;
-          if (isAAdmin && !isBAdmin) return -1;
-          if (!isAAdmin && isBAdmin) return 1;
-          
-          // 2. If both are same type, sort by timestampMs descending (newest first)
-          return b.timestampMs - a.timestampMs;
-        })
-        .slice(0, 5);
-      
-      setBroadcasts(allBroadcasts);
-    }, (error) => {
-      console.error("Ticker Listener Error:", error);
+            // Target audience check
+            const rawGrades = b.targetGrades || b.target_grades;
+            let grades: string[] = [];
+            if (Array.isArray(rawGrades)) grades = rawGrades;
+            else if (typeof rawGrades === 'string') grades = [rawGrades];
+            
+            if (grades.includes('parent_only')) return false; // Handled by ParentPortal
+            if (grades.includes('teacher_only') && !isTeacher) return false;
+            if (isTeacher) return true;
+
+            // Grade / stage matching
+            return matchesTargetGrades(grade, grades);
+          })
+          .sort((a: any, b: any) => {
+            const timeA = a.timestampMs || a.timestamp_ms || (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+            const timeB = b.timestampMs || b.timestamp_ms || (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+            return timeB - timeA;
+          })
+          .slice(0, 10);
+        setBroadcasts(filtered);
+      } catch (err) {
+        console.warn("Ticker filter error:", err);
+      }
     });
 
-    return () => unsubscribe();
+    return () => unsub();
   }, [schoolId, grade, isVisible, isTeacher]);
 
   if (!remoteConfig.tickerEnabled) {

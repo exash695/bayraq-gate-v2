@@ -1,4 +1,4 @@
-import { doc, getDoc, updateDoc, runTransaction, arrayUnion } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, runTransaction, arrayUnion } from '@/src/lib/firebase';
 import { db } from '../lib/firebase';
 
 /**

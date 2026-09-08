@@ -15,14 +15,6 @@ export const SchoolAccessGate: React.FC<SchoolAccessGateProps> = ({ schoolName, 
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
 
-  React.useEffect(() => {
-    if (savedCode) {
-      const cleanCode = savedCode.trim().toUpperCase();
-      const isParent = cleanCode.startsWith('PAR-');
-      onVerify(cleanCode, isParent);
-    }
-  }, [savedCode]);
-
   const handleVerify = () => {
     const cleanCode = code.trim().toUpperCase();
     
@@ -30,31 +22,9 @@ export const SchoolAccessGate: React.FC<SchoolAccessGateProps> = ({ schoolName, 
       setError('يرجى إدخال الكود أولاً');
       return;
     }
-
-    if (cleanCode.startsWith('PAR-') || cleanCode.startsWith('PCODE-')) {
-      onVerify(cleanCode, true);
-    } else if (
-      cleanCode.startsWith('STU-') || 
-      cleanCode.startsWith('PRI-') || 
-      cleanCode.startsWith('INT-') || 
-      cleanCode.startsWith('SCI-') || 
-      cleanCode.startsWith('LIT-') ||
-      cleanCode.startsWith('DRI-') ||
-      cleanCode.startsWith('TCH-') ||
-      /^P\d/i.test(cleanCode) ||
-      /^M\d/i.test(cleanCode) ||
-      /^S\d/i.test(cleanCode) ||
-      cleanCode.startsWith('P-') ||
-      cleanCode.startsWith('M-') ||
-      cleanCode.startsWith('S-')
-    ) {
-      onVerify(cleanCode, false);
-    } else if (cleanCode.startsWith('ADM-')) {
-      onVerify(cleanCode, false); // Admin flag is routed in App.tsx
-    } else {
-      // Pass general code to onVerify so App.tsx can check Firestore database
-      onVerify(cleanCode, false);
-    }
+    
+    // We send to App.tsx via onVerify, which will now use customAuth.loginWithCode
+    onVerify(cleanCode, false);
   };
 
   const getActivePortal = () => {
@@ -94,27 +64,6 @@ export const SchoolAccessGate: React.FC<SchoolAccessGateProps> = ({ schoolName, 
     { id: 'driver', label: 'بوابة سائق الباص', icon: Bus, color: 'from-[#FF9100] to-[#FF3D00]', glowColor: '#FF9100' },
     { id: 'admin', label: 'بوابة الإدارة', icon: LockIcon, color: 'from-[#FFD600] to-[#FF8F00]', glowColor: '#FFD600' }
   ];
-
-  if (savedCode && isVerifying) {
-    return (
-      <div className="fixed inset-0 bg-[#02040A] flex flex-col items-center justify-center p-6 text-center z-[110]" dir="rtl">
-        <div className="space-y-6 max-w-md">
-          <div className="relative mx-auto w-24 h-24 flex items-center justify-center">
-            <motion.div 
-              animate={{ rotate: 360 }}
-              transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
-              className="absolute inset-0 border-2 border-[#00E5FF] border-t-transparent rounded-full shadow-[0_0_20px_rgba(0,229,255,0.2)]"
-            />
-            <LockIcon size={32} className="text-[#00E5FF] animate-pulse" />
-          </div>
-          <div className="space-y-2">
-            <h3 className="text-xl font-black text-white">{schoolName}</h3>
-            <p className="text-[#00E5FF] text-xs font-bold tracking-widest animate-pulse">جاري تسجيل الدخول التلقائي والتحقق من الحساب...</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="fixed inset-0 bg-[#050A18] flex flex-col items-center justify-center p-6 text-center z-[110]" dir="rtl">
@@ -166,6 +115,12 @@ export const SchoolAccessGate: React.FC<SchoolAccessGateProps> = ({ schoolName, 
               onChange={(e) => {
                 setCode(e.target.value.toUpperCase());
                 setError('');
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !isVerifying) {
+                  e.preventDefault();
+                  handleVerify();
+                }
               }}
               placeholder="أدخل كود العبور"
               className="w-full h-14 px-6 bg-[#101935] border-2 border-transparent focus:border-[#FFD600] rounded-full text-center text-white placeholder:text-white/20 text-lg font-bold tracking-wider placeholder:tracking-normal outline-none transition-all shadow-xl"

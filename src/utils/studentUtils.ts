@@ -22,8 +22,9 @@ export const SUBJECT_KEYWORDS: [string, string][] = [
 export const getSanitizedSubCode = (subject: string) => {
   const clean = subject
     .trim()
-    .replace(/[أإآ]/g, 'ا')
-    .replace(/ال/g, '')
+    .replace(/[\u064B-\u065F\u0670]/g, '')
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/(?:^|\s)ال/g, ' ')
     .replace(/\s+/g, '');
   
   for (const [keyword, code] of SUBJECT_KEYWORDS) {
@@ -38,31 +39,146 @@ export const getSanitizedSubCode = (subject: string) => {
   return 'SUB'; 
 };
 
-export const getPrefixForGrade = (grade: string) => {
-  const g = grade.trim();
+export const normalizeGradeName = (grade: string) => {
+  if (!grade) return '';
+  const norm = normalizeArabicText(grade);
+  if (norm.includes('اولابتدائي') || norm === 'p1' || norm === '1ابتدائي') return 'أول ابتدائي';
+  if (norm.includes('ثانيابتدائي') || norm === 'p2' || norm === '2ابتدائي') return 'ثاني ابتدائي';
+  if (norm.includes('ثالثابتدائي') || norm === 'p3' || norm === '3ابتدائي') return 'ثالث ابتدائي';
+  if (norm.includes('رابعابتدائي') || norm === 'p4' || norm === '4ابتدائي') return 'رابع ابتدائي';
+  if (norm.includes('خامسابتدائي') || norm === 'p5' || norm === '5ابتدائي') return 'خامس ابتدائي';
+  if (norm.includes('سادسابتدائي') || norm === 'p6' || norm === '6ابتدائي') return 'سادس ابتدائي';
   
+  if (norm.includes('اولمتوسط') || norm === 'm1' || norm === '1متوسط') return 'أول متوسط';
+  if (norm.includes('ثانيمتوسط') || norm === 'm2' || norm === '2متوسط') return 'ثاني متوسط';
+  if (norm.includes('ثالثمتوسط') || norm === 'm3' || norm === '3متوسط') return 'ثالث متوسط';
+  
+  if (norm.includes('رابععلمي') || norm === 's4s') return 'رابع علمي';
+  if (norm.includes('رابعادبي') || norm === 's4a') return 'رابع أدبي';
+  if (norm.includes('خامسعلمي') || norm === 's5s') return 'خامس علمي';
+  if (norm.includes('خامسادبي') || norm === 's5a') return 'خامس أدبي';
+  if (norm.includes('سادسعلمي') || norm === 's6s') return 'سادس علمي';
+  if (norm.includes('سادسادبي') || norm === 's6a') return 'سادس أدبي';
+  return grade;
+};
+
+export const normalizeArabicText = (text: string) => {
+  if (!text) return '';
+  return text
+    .trim()
+    .replace(/[\u064B-\u065F\u0670]/g, '')
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/[ىي]/g, 'ي')
+    .replace(/(?:^|\s)ال/g, ' ')
+    .replace(/\s+/g, '');
+};
+
+export const getPrefixForGrade = (grade: string): string => {
+  if (!grade) return 'STU';
+  const g = String(grade).trim();
+  const upper = g.toUpperCase();
+
+  // Already standard code prefix
+  if (/^P[1-6]$/.test(upper)) return upper;
+  if (/^M[1-3]$/.test(upper)) return upper;
+  if (/^S[4-6][SA]?$/.test(upper)) return upper;
+
+  // English/numeric shorthand like 1M, 2M, 3M, M1, M2, M3, 1P...
+  if (/^3\s*M$/i.test(g) || /^M\s*3$/i.test(g) || /^3\s*م$/i.test(g) || /^م\s*3$/i.test(g)) return 'M3';
+  if (/^2\s*M$/i.test(g) || /^M\s*2$/i.test(g) || /^2\s*م$/i.test(g) || /^م\s*2$/i.test(g)) return 'M2';
+  if (/^1\s*M$/i.test(g) || /^M\s*1$/i.test(g) || /^1\s*م$/i.test(g) || /^م\s*1$/i.test(g)) return 'M1';
+
+  if (/^1\s*P$/i.test(g) || /^P\s*1$/i.test(g)) return 'P1';
+  if (/^2\s*P$/i.test(g) || /^P\s*2$/i.test(g)) return 'P2';
+  if (/^3\s*P$/i.test(g) || /^P\s*3$/i.test(g)) return 'P3';
+  if (/^4\s*P$/i.test(g) || /^P\s*4$/i.test(g)) return 'P4';
+  if (/^5\s*P$/i.test(g) || /^P\s*5$/i.test(g)) return 'P5';
+  if (/^6\s*P$/i.test(g) || /^P\s*6$/i.test(g)) return 'P6';
+
+  const s = g
+    .replace(/[\u064B-\u065F\u0670]/g, '')
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/[ىي]/g, 'ي')
+    .toLowerCase();
+
   // Primary (P1-P6)
-  if (g.includes('أول ابتدائي') || g.includes('الأول الابتدائي')) return 'P1';
-  if (g.includes('ثاني ابتدائي') || g.includes('الثاني الابتدائي')) return 'P2';
-  if (g.includes('ثالث ابتدائي') || g.includes('الثالث الابتدائي')) return 'P3';
-  if (g.includes('رابع ابتدائي') || g.includes('الرابع الابتدائي')) return 'P4';
-  if (g.includes('خامس ابتدائي') || g.includes('الخامس الابتدائي')) return 'P5';
-  if (g.includes('سادس ابتدائي') || g.includes('السادس الابتدائي')) return 'P6';
-  
+  if (s.includes('ابتدائ') || s.includes('ابتدائي')) {
+    if (s.includes('اول') || s.includes('1')) return 'P1';
+    if (s.includes('ثاني') || s.includes('2')) return 'P2';
+    if (s.includes('ثالث') || s.includes('3')) return 'P3';
+    if (s.includes('رابع') || s.includes('4')) return 'P4';
+    if (s.includes('خامس') || s.includes('5')) return 'P5';
+    if (s.includes('سادس') || s.includes('6')) return 'P6';
+  }
+
   // Intermediate (M1-M3)
-  if (g.includes('أول متوسط') || g.includes('الأول المتوسط')) return 'M1';
-  if (g.includes('ثاني متوسط') || g.includes('الثاني المتوسط')) return 'M2';
-  if (g.includes('ثالث متوسط') || g.includes('الثالث المتوسط')) return 'M3';
-  
-  // Preparatory/Secondary (S4-S6)
-  if (g.includes('رابع علمي') || g.includes('الرابع العلمي')) return 'S4S';
-  if (g.includes('رابع أدبي') || g.includes('الرابع الأدبي')) return 'S4A';
-  if (g.includes('خامس علمي') || g.includes('الخامس العلمي')) return 'S5S';
-  if (g.includes('خامس أدبي') || g.includes('الخامس الأدبي')) return 'S5A';
-  if (g.includes('سادس علمي') || g.includes('السادس العلمي')) return 'S6S';
-  if (g.includes('سادس أدبي') || g.includes('السادس الأدبي')) return 'S6A';
-  
+  if (s.includes('متوسط') || s.includes('اعدادي') || s.includes('مرحله متوسطه')) {
+    if (s.includes('اول') || s.includes('1')) return 'M1';
+    if (s.includes('ثاني') || s.includes('2')) return 'M2';
+    if (s.includes('ثالث') || s.includes('3')) return 'M3';
+  }
+
+  // Secondary / Preparatory (S4-S6)
+  if (s.includes('علمي') || s.includes('احيائي') || s.includes('تطبيقي')) {
+    if (s.includes('رابع') || s.includes('4')) return 'S4S';
+    if (s.includes('خامس') || s.includes('5')) return 'S5S';
+    if (s.includes('سادس') || s.includes('6')) return 'S6S';
+    return 'S6S';
+  }
+  if (s.includes('ادبي')) {
+    if (s.includes('رابع') || s.includes('4')) return 'S4A';
+    if (s.includes('خامس') || s.includes('5')) return 'S5A';
+    if (s.includes('سادس') || s.includes('6')) return 'S6A';
+    return 'S6A';
+  }
+  if (s.includes('ثانوي')) {
+    if (s.includes('رابع') || s.includes('4')) return 'S4S';
+    if (s.includes('خامس') || s.includes('5')) return 'S5S';
+    if (s.includes('سادس') || s.includes('6')) return 'S6S';
+  }
+
+  // Normalized Arabic check
+  const norm = normalizeArabicText(g);
+  if (norm.includes('اولابتدائي')) return 'P1';
+  if (norm.includes('ثانيابتدائي')) return 'P2';
+  if (norm.includes('ثالثابتدائي')) return 'P3';
+  if (norm.includes('رابعابتدائي')) return 'P4';
+  if (norm.includes('خامسابتدائي')) return 'P5';
+  if (norm.includes('سادسابتدائي')) return 'P6';
+
+  if (norm.includes('اولمتوسط')) return 'M1';
+  if (norm.includes('ثانيمتوسط')) return 'M2';
+  if (norm.includes('ثالثمتوسط')) return 'M3';
+
+  if (norm.includes('رابععلمي')) return 'S4S';
+  if (norm.includes('رابعادبي')) return 'S4A';
+  if (norm.includes('خامسعلمي')) return 'S5S';
+  if (norm.includes('خامسادبي')) return 'S5A';
+  if (norm.includes('سادسعلمي')) return 'S6S';
+  if (norm.includes('سادسادبي')) return 'S6A';
+
+  // Fallback for standalone ordinals
+  if (s.includes('ثالث') && !s.includes('ابتدائ')) return 'M3';
+  if (s.includes('ثاني') && !s.includes('ابتدائ')) return 'M2';
+  if (s.includes('اول') && !s.includes('ابتدائ')) return 'M1';
+
   return 'STU';
+};
+
+export const healStudentCodePrefix = (studentCode: string, grade: string): string => {
+  if (!studentCode) return studentCode;
+  const targetPrefix = getPrefixForGrade(grade);
+  if (targetPrefix === 'STU') return studentCode.toUpperCase();
+  
+  const parts = studentCode.split('-');
+  if (parts.length >= 3) {
+    return `${targetPrefix}-${parts[1].toUpperCase()}-${parts.slice(2).join('-')}`;
+  } else if (parts.length === 2) {
+    return `${targetPrefix}-${parts[0].toUpperCase()}-${parts[1]}`;
+  }
+  return studentCode.toUpperCase();
 };
 
 export const getSubjectCode = (subject: string): string => {
@@ -93,6 +209,57 @@ export const getStageFromGrade = (grade: string) => {
   if (g.includes('متوسط')) return 'intermediate';
   if (g.includes('علمي') || g.includes('أدبي') || g.includes('إعدادي') || g.includes('اعدادي')) return 'preparatory';
   return '';
+};
+
+export const normalizeGradeCanonical = (raw: string): string => {
+  if (!raw) return '';
+  const s = raw
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/[ىي]/g, 'ي')
+    .replace(/^(الصف|صف)\s+/g, '')
+    .trim();
+
+  // Primary
+  if (s.includes('ابتدائي')) {
+    if (s.includes('اول')) return 'الأول ابتدائي';
+    if (s.includes('ثاني')) return 'الثاني ابتدائي';
+    if (s.includes('ثالث')) return 'الثالث ابتدائي';
+    if (s.includes('رابع')) return 'الرابع ابتدائي';
+    if (s.includes('خامس')) return 'الخامس ابتدائي';
+    if (s.includes('سادس')) return 'السادس ابتدائي';
+    return 'المرحلة الابتدائية';
+  }
+
+  // Intermediate
+  if (s.includes('متوسط')) {
+    if (s.includes('اول')) return 'الأول متوسط';
+    if (s.includes('ثاني')) return 'الثاني متوسط';
+    if (s.includes('ثالث')) return 'الثالث متوسط';
+    return 'المرحلة المتوسطة';
+  }
+
+  // Preparatory
+  if (s.includes('علمي') || s.includes('احيائي') || s.includes('تطبيقي')) {
+    if (s.includes('رابع')) return 'الرابع علمي';
+    if (s.includes('خامس')) return 'الخامس علمي';
+    if (s.includes('سادس')) return 'السادس علمي';
+    return 'الفرع العلمي';
+  }
+  if (s.includes('ادبي')) {
+    if (s.includes('رابع')) return 'الرابع أدبي';
+    if (s.includes('خامس')) return 'الخامس أدبي';
+    if (s.includes('سادس')) return 'السادس أدبي';
+    return 'الفرع الأدبي';
+  }
+  if (s.includes('اعدادي') || s.includes('ثانوي')) {
+    if (s.includes('رابع')) return 'الرابع إعدادي';
+    if (s.includes('خامس')) return 'الخامس إعدادي';
+    if (s.includes('سادس')) return 'السادس إعدادي';
+  }
+
+  // Strip section suffixes like " أ", " ب", " ج", " - شعبة أ"
+  return raw.replace(/(\s+[-–—/]\s*|\s+)(شعبة\s*)?[أ-يA-Za-z0-9]$/, '').trim();
 };
 
 export const getGradePriority = (grade: string): number => {
@@ -126,27 +293,32 @@ export const generateStudentCodes = (
   tuitionFee: number, 
   discountRates: Record<string, number>,
   schoolName: string,
-  installmentPlan: any[]
+  installmentPlan: any[],
+  tuitionFeesByGrade?: Record<string, number>
 ) => {
-  const branchSuffix = adminBranch === 'girls' ? 'G' : 'B';
-
   return bulkStudents.map(s => {
+    const branchSuffix = s.gender === 'female' ? 'G' : s.gender === 'male' ? 'B' : (adminBranch === 'girls' ? 'G' : 'B');
     const prefix = getPrefixForGrade(s.grade);
     const randomNum = Math.floor(1000 + Math.random() * 9000);
     
     const studentCode = `${prefix}-${branchSuffix}-${randomNum}`;
     const parentCode = `PAR-${branchSuffix}-${randomNum}`;
     
+    const baseGradeTuition = (tuitionFeesByGrade && s.grade && tuitionFeesByGrade[s.grade] !== undefined) ? tuitionFeesByGrade[s.grade] : tuitionFee;
     const discountRate = s.discountType ? (discountRates[s.discountType] || 0) : 0;
-    const discountAmount = (tuitionFee * discountRate) / 100;
-    const totalAmount = tuitionFee - discountAmount;
+    const discountAmount = (baseGradeTuition * discountRate) / 100;
+    const totalAmount = baseGradeTuition - discountAmount;
     
-    // Scale installments based on student's discount
     const discountFactor = (100 - discountRate) / 100;
+    const installmentSum = installmentPlan.reduce((sum, inst) => sum + (inst.amount || 0), 0);
+    const gradeProportion = installmentSum > 0 ? (baseGradeTuition / installmentSum) : 1;
+    const combinedFactor = gradeProportion * discountFactor;
+
+    // Scale installments based on student's discount and grade proportion
     const installments = installmentPlan.map(inst => ({
       ...inst,
       id: crypto.randomUUID(),
-      amount: Math.round((inst.amount || 0) * discountFactor),
+      amount: Math.round((inst.amount || 0) * combinedFactor),
       paid: false
     }));
 
@@ -240,14 +412,30 @@ export const generateSingleStudentPDF = (student: any) => {
 
 export const getSubjectsForGrade = (grade: string, removedIds: string[] = [], customMapping: any = null) => {
   if (customMapping) {
-    let base = [];
-    if (grade.includes('ابتدائي')) base = customMapping.primary || [];
-    else if (grade.includes('متوسط')) base = customMapping.intermediate || [];
-    else if (grade.includes('علمي')) base = customMapping.scientific || [];
-    else if (grade.includes('أدبي')) base = customMapping.literary || [];
-    else base = customMapping.scientific || [];
+    const stage = getStageFromGrade(grade);
+    let base: any[] = [];
     
-    if (base.length > 0) return base.filter((s: any) => !removedIds.includes(s.id));
+    // Check if there's a specific mapping for this exact grade first (normalized)
+    const normalizedGrade = normalizeArabicText(grade);
+    const mappingKey = Object.keys(customMapping).find(k => normalizeArabicText(k) === normalizedGrade);
+
+    if (mappingKey && Array.isArray(customMapping[mappingKey])) {
+      base = customMapping[mappingKey];
+    } else if (stage && customMapping[stage] && Array.isArray(customMapping[stage])) {
+      // Fallback to stage-level mapping
+      base = customMapping[stage];
+    } else {
+      // Compatibility with older structure or direct stage names as keys
+      if (grade.includes('ابتدائي')) base = customMapping.primary;
+      else if (grade.includes('متوسط')) base = customMapping.intermediate;
+      else if (grade.includes('علمي')) base = customMapping.scientific;
+      else if (grade.includes('أدبي')) base = customMapping.literary;
+      else base = customMapping.scientific;
+    }
+    
+    if (Array.isArray(base) && base.length > 0) {
+      return base.filter((s: any) => s && s.id && !removedIds.includes(s.id));
+    }
   }
 
   // Subjects based on Iraqi curriculum standards - EXACT ORDER REQUESTED
@@ -333,44 +521,73 @@ export const calculateStudentFinancials = (stu: any, tuitionFee: number, discoun
         discountFactor: 1
       };
   }
-  // Ensure we have numbers
-  const fee = Number(tuitionFee) || 1000000;
-  
+  // Default standard discount rates dictionary
+  const defaultDiscountRates: Record<string, number> = {
+    SIBLINGS: 15,
+    EARLY_REGISTRATION: 10,
+    ORPHAN: 50,
+    STAFF: 50,
+    EXCELLENCE: 10,
+    FULL_EXEMPTION: 100
+  };
+
+  const effectiveDiscountRates = {
+    ...defaultDiscountRates,
+    ...discountRates
+  };
+
   // High-precision discount detection: 
   // 1. Check for manual rate override (discountRate)
   // 2. Check for category-based rate (discountType)
   // 3. Check for specific status indicators
-  let discountRate = Number(stu.discountRate ?? (stu.discountType ? (discountRates[stu.discountType] || 0) : 0));
+  let discountRate = Number(stu.discountRate ?? (stu.discountType ? (effectiveDiscountRates[stu.discountType] || 0) : 0));
   
   // Status-based overrides
   if (stu.status === 'إعفاء تام' || stu.discountType === 'FULL_EXEMPTION' || stu.discountRate === 100) {
     discountRate = 100;
   }
 
-  const discountAmount = Math.round((fee * discountRate) / 100);
-  const expectedTotal = fee - discountAmount;
-  
   // Support both top-level and nested structure
   const installments = stu.finance?.installments || stu.installments || [];
-  const installmentsTotal = installments.reduce((sum: number, inst: any) => sum + Number(inst.amount), 0);
+  const installmentsTotal = installments.reduce((sum: number, inst: any) => sum + (Number(inst.amount) || 0), 0);
+
+  // Base tuition determination (Gross price before discount)
+  let fee = Number(tuitionFee) || 0;
+  if (fee === 0) {
+    if (installmentsTotal > 0) {
+      fee = installmentsTotal;
+    } else if (stu.totalAmount && Number(stu.totalAmount) > 0) {
+      if (discountRate > 0 && discountRate < 100) {
+        fee = Math.round(Number(stu.totalAmount) / ((100 - discountRate) / 100));
+      } else {
+        fee = Number(stu.totalAmount);
+      }
+    } else if (stu.finance?.totalTuition && Number(stu.finance.totalTuition) > 0) {
+      fee = Number(stu.finance.totalTuition);
+    }
+  }
+
+  const discountFactor = (100 - discountRate) / 100;
+  const discountAmount = Math.round((fee * discountRate) / 100);
+  const expectedTotal = fee - discountAmount;
 
   // Determine if installments are likely at gross price (pre-discount)
-  // We allow a small tolerance for rounding
-  const isInstallmentsAtGross = discountRate > 0 && discountRate < 100 && Math.abs(installmentsTotal - fee) <= 100;
-  const discountFactor = (100 - discountRate) / 100;
+  const isInstallmentsAtGross = discountRate > 0 && discountRate < 100 && (Math.abs(installmentsTotal - fee) <= 1000 || installmentsTotal > expectedTotal);
 
   // Final Required Amount Logic:
-  // 1. If explicit totalAmount is set AND it's not equal to gross (unless gross is actually intended), prioritize it.
-  // 2. If installments match the gross fee but there's a discount, use expectedTotal.
-  // 3. Otherwise use installmentsTotal if present, else expectedTotal.
+  // 1. If full exemption or 100% discount, required is 0
+  // 2. If student has discountRate > 0, requiredAmount is strictly expectedTotal
+  // 3. If explicit totalAmount is set and no discount or already matching, prioritize it
+  // 4. Otherwise use installmentsTotal if present, else expectedTotal
   let requiredAmount = expectedTotal;
-  if (stu.status === 'إعفاء تام') {
+  if (stu.status === 'إعفاء تام' || discountRate === 100) {
     requiredAmount = 0;
-  } else if (stu.totalAmount !== undefined && Number(stu.totalAmount) >= 0 && Number(stu.totalAmount) !== fee) {
-    // If totalAmount is set and it's different from gross, assume it's the refined intended total
+  } else if (discountRate > 0) {
+    requiredAmount = expectedTotal;
+  } else if (stu.totalAmount !== undefined && Number(stu.totalAmount) > 0) {
     requiredAmount = Number(stu.totalAmount);
   } else if (installmentsTotal > 0) {
-    requiredAmount = isInstallmentsAtGross ? expectedTotal : installmentsTotal;
+    requiredAmount = installmentsTotal;
   }
       
   const paidFromInstallments = installments.reduce((sum: number, inst: any) => {
@@ -395,7 +612,7 @@ export const calculateStudentFinancials = (stu: any, tuitionFee: number, discoun
   
   const remainingAmount = Math.max(0, requiredAmount - paidAmount);
   const isPaidInFull = (requiredAmount > 0 && remainingAmount <= 5) || (stu.status === 'إعفاء تام') || (discountRate === 100);
-  
+
   return { 
     requiredAmount, 
     paidAmount, 
@@ -580,20 +797,28 @@ export const computeAcademicIdentity = (student: any, list: any, subjectMapping:
 
        if (scores.length > 0) {
            const subjSum = scores.reduce((a, b) => a + b, 0);
-            let subjAvg = 0;
+            let subjAvg = Math.ceil(subjSum / scores.length);
             const aqVal = student.grades?.['annual_quest']?.[subj.id];
             const fgVal = student.grades?.['final_grade']?.[subj.id];
+            const hasAnnualGrade = (aqVal !== undefined && aqVal !== null && aqVal !== '' && !isNaN(Number(aqVal))) ||
+                                   (fgVal !== undefined && fgVal !== null && fgVal !== '' && !isNaN(Number(fgVal)));
+
+            let annualScore: number | null = null;
             if (aqVal !== undefined && aqVal !== null && aqVal !== '' && !isNaN(Number(aqVal))) {
-                subjAvg = Number(aqVal);
+                annualScore = Number(aqVal);
+                subjAvg = annualScore;
             } else if (fgVal !== undefined && fgVal !== null && fgVal !== '' && !isNaN(Number(fgVal))) {
-                subjAvg = Number(fgVal);
-            } else {
-                subjAvg = Math.ceil(subjSum / scores.length);
+                annualScore = Number(fgVal);
+                subjAvg = annualScore;
             }
+
            subjectAverages.push({ name: subj.name, id: subj.id, avg: subjAvg });
            
-           if (subjAvg >= 90) {
-               individualExemptions.push(subj.name);
+           // Exemption is STRICTLY calculated ONLY after Annual Quest (السعي السنوي) is determined
+           if (hasAnnualGrade && annualScore !== null) {
+               if (annualScore >= 90) {
+                   individualExemptions.push(subj.name);
+               }
            }
 
            const latestObj = periodsWithScores[periodsWithScores.length - 1];
@@ -658,10 +883,17 @@ export const computeAcademicIdentity = (student: any, list: any, subjectMapping:
        }
    });
 
+   const allSubjectsHaveAnnualQuest = studentSubjects.length > 0 && studentSubjects.every(subj => {
+       const aqVal = student.grades?.['annual_quest']?.[subj.id];
+       const fgVal = student.grades?.['final_grade']?.[subj.id];
+       return (aqVal !== undefined && aqVal !== null && aqVal !== '' && !isNaN(Number(aqVal))) ||
+              (fgVal !== undefined && fgVal !== null && fgVal !== '' && !isNaN(Number(fgVal)));
+   });
+
    const totalAvg = subjectAverages.length > 0 ? Math.ceil(subjectAverages.reduce((a,b) => a + b.avg, 0) / subjectAverages.length) : 0;
    const minSubjAvg = subjectAverages.length > 0 ? Math.min(...subjectAverages.map(s => s.avg)) : 0;
 
-   if (subjectAverages.length > 0 && totalAvg >= 85 && minSubjAvg >= 75) {
+   if (allSubjectsHaveAnnualQuest && totalAvg >= 85 && minSubjAvg >= 75) {
        generalExemption = true;
    }
 
@@ -711,6 +943,9 @@ export const computeAcademicIdentity = (student: any, list: any, subjectMapping:
    // Optional manual badges built-in or custom 
    if (student.outstandingBadges && Array.isArray(student.outstandingBadges)) {
        student.outstandingBadges.forEach((bId: string) => {
+           if (bId === 'honor_exemption' && !generalExemption && individualExemptions.length === 0) {
+               return; // Exemption badge is strictly withheld until annual quest is calculated
+           }
            const bDetails = OUTSTANDING_BADGES.find(b => b.id === bId);
            if (bDetails && !generalBadges.find((gb: any) => gb?.id === bId)) {
                generalBadges.push(bDetails);

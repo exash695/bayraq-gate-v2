@@ -1,0 +1,101 @@
+                          usedCount: cData.usedCount || 0,
+                          maxUses: maxUsesNum !== null ? maxUsesNum : "unlimited",
+                          rejectionReason: null
+                        });
+
+                        // Check security rules
+                        if (cData.status === "disabled" || cData.status === "expired" || cData.status === "معطل") {
+                          console.warn("[RUNTIME DEBUG - Parent Code Rejected]", {
+                            enteredCode: code,
+                            dbCode: cData.code || cData.parentCode,
+                            status: cData.status,
+                            rejectionReason: "كود ملغى أو معطل أو منتهي الصلاحية"
+                          });
+                          addNotification(
+                            "خطأ في التحقق",
+                            "هذا الكود غير فعال أو تم تعطيله",
+                            "alarm",
+                          );
+                          setIsVerifying(false);
+                          return;
+                        }
+                        if (cData.expiresAt) {
+                          const expiresDate = new Date(cData.expiresAt);
+                          if (expiresDate < new Date()) {
+                            console.warn("[RUNTIME DEBUG - Parent Code Rejected]", {
+                              enteredCode: code,
+                              expiresAt: cData.expiresAt,
+                              rejectionReason: "انتهت فترة صلاحية الكود"
+                            });
+                            addNotification(
+                              "خطأ في التحقق",
+                              "هذا الكود انتهت صلاحيته",
+                              "alarm",
+                            );
+                            setIsVerifying(false);
+                            return;
+                          }
+                        }
+                        if (maxUsesNum !== null && cData.usedCount !== undefined) {
+                          if (cData.usedCount >= maxUsesNum) {
+                            console.warn("[RUNTIME DEBUG - Parent Code Rejected]", {
+                              enteredCode: code,
+                              usedCount: cData.usedCount,
+                              maxUses: maxUsesNum,
+                              rejectionReason: "تجاوز الحد الأقصى لمرات الاستخدام"
+                            });
+                            addNotification(
+                              "خطأ في التحقق",
+                              "تجاوز هذا الكود الحد الأقصى للاستخدام",
+                              "alarm",
+                            );
+                            setIsVerifying(false);
+                            return;
+                          }
+                        }
+
+                        // update usedCount & log safely without setting status="expired" if maxUses is not defined
+                        const codeRef = doc(db, "activation_codes", codeDoc.id);
+                        const newUsedCount = (cData.usedCount || 0) + 1;
+                        const updates: any = { usedCount: newUsedCount, lastUsedAt: serverTimestamp() };
+                        if (maxUsesNum !== null && newUsedCount >= maxUsesNum) {
+                          updates.status = "expired";
+                        }
+                        await setDoc(codeRef, updates, { merge: true }).catch(console.error);
+
+                        await addDoc(collection(db, "developer_logs"), {
+                          action: `استخدام كود ولي الأمر: ${code}`,
+                          code: code,
+                          schoolId: cData.schoolId || selectedSchoolId,
+                          schoolName: institutionName,
+                          userEmail: user?.email || auth.currentUser?.email || "غير معروف",
+                          timestamp: serverTimestamp(),
+                          status: "success"
+                        }).catch(console.error);
+
+                        const studentCode =
+                          cData.studentCode || cData.student || cData.code;
+
+                        setPortalType("parent");
+                        setVerifiedStudentInfo({
+                          ...cData,
+                          parentCode: safeCode,
+                          studentCode,
+                        });
+
+                        // Non-blocking update
+                        if (user) {
+                          setDoc(
+                            doc(db, "users", user.uid),
+                            {
+                              role: "parent",
+                              parentCode: safeCode,
+                              studentCode: studentCode,
+                              schoolId: cData.schoolId || selectedSchoolId,
+                              verifiedAt: serverTimestamp(),
+                            },
+                            { merge: true },
+                          ).catch((err) =>
+                            console.error(
+                              "Error updating parent profile:",
+                              err,

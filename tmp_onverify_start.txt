@@ -1,0 +1,56 @@
+              onVerify={async (code, isParent) => {
+                setIsVerifying(true);
+                let succeeded = false;
+                const setVerified = (val: boolean) => {
+                  if (val) succeeded = true;
+                  setIsSchoolVerified(val);
+                };
+                try {
+                  const docMatchesSchool = (docData: any) => {
+                    if (!selectedSchoolId) return true;
+                    
+                    const docSchoolId = String(docData.schoolId || docData.school_id || '').trim().toLowerCase();
+                    const docSchoolName = String(docData.schoolName || docData.school || docData.academyName || '').trim();
+                    
+                    if (!docSchoolId && !docSchoolName) {
+                      return true;
+                    }
+
+                    if (docSchoolId && docSchoolId === selectedSchoolId.trim().toLowerCase()) {
+                      return true;
+                    }
+                    
+                    if (currentSchool) {
+                      const normalizeFuzzy = (str: string) => {
+                        if (!str) return '';
+                        return str
+                          .replace(/[أإآ]/g, 'ا')
+                          .replace(/ة/g, 'ه')
+                          .replace(/[ىي]/g, 'ي')
+                          .replace(/\s+/g, '')
+                          .trim()
+                          .toLowerCase();
+                      };
+                      
+                      const normalizedFilter = normalizeFuzzy(currentSchool.name);
+                      const normalizedDoc = normalizeFuzzy(docSchoolName);
+                      
+                      if (normalizedFilter && normalizedDoc === normalizedFilter) {
+                        return true;
+                      }
+                      
+                      if (!docSchoolId && normalizedFilter && (normalizedDoc.includes(normalizedFilter) || normalizedFilter.includes(normalizedDoc))) {
+                        return true;
+                      }
+                    }
+                    return false;
+                  };
+
+                  const isAdminCode =
+                    code.startsWith("ADM-") || code === "112233";
+
+                  if (isAdminCode) {
+                    try {
+                      // Test/Master Codes for verification/bypass during development
+                      const isMasterCode =
+                        code === "ADM-G-MASTER" ||

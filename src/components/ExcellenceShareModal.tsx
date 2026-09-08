@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Share2, Download } from 'lucide-react';
+import { Share2, Download, Sparkles, CheckCircle2 } from 'lucide-react';
 import { toPng } from 'html-to-image';
 
 interface ExcellenceShareModalProps {
@@ -13,6 +13,23 @@ interface ExcellenceShareModalProps {
   exportId?: string;
 }
 
+function quickDataURLtoBlob(dataurl: string): Blob {
+  try {
+    const parts = dataurl.split(',');
+    const mimeMatch = parts[0].match(/:(.*?);/);
+    const mime = mimeMatch ? mimeMatch[1] : 'image/png';
+    const bstr = atob(parts[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new Blob([u8arr], { type: mime });
+  } catch {
+    return new Blob([], { type: 'image/png' });
+  }
+}
+
 export const ExcellenceShareModal: React.FC<ExcellenceShareModalProps> = ({
   isOpen, onClose, studentData, academicProfile, schoolConfigs, schoolName, exportId = 'achievement-export-card'
 }) => {
@@ -23,33 +40,37 @@ export const ExcellenceShareModal: React.FC<ExcellenceShareModalProps> = ({
   React.useEffect(() => {
     if (isOpen) {
       setPreGeneratedDataUrl(null);
+      // High-resolution pre-generation in background for instantaneous share/download
       const timer = setTimeout(async () => {
          try {
             const node = document.getElementById(exportId);
             if (node) {
-               // Warm up the rendering node structure for html-to-image
-               await toPng(node, { quality: 0.1, pixelRatio: 1 });
-               
-               // Generate the high-quality target PNG representation
                const dataUrl = await toPng(node, {
-                  quality: 0.95,
-                  pixelRatio: 2,
-                  backgroundColor: '#050816',
+                  quality: 1.0,
+                  pixelRatio: 2.0, // Ultra-Crisp 2K/4K HD output
+                  backgroundColor: '#040714',
+                  cacheBust: false,
                });
                setPreGeneratedDataUrl(dataUrl);
             }
          } catch (err) {
-            console.error("Card pre-generation offscreen failed:", err);
+            console.warn("Card background prep note (will generate on click):", err);
          }
       }, 100);
       return () => clearTimeout(timer);
     } else {
       setPreGeneratedDataUrl(null);
+      setIsGeneratingCard(false);
+      setGenerationSuccess(false);
     }
   }, [isOpen, exportId, studentData, academicProfile]);
   
   const studentName = studentData?.studentName || studentData?.name || '';
+  const cleanStudentName = studentName.replace(/^ولي أمر\s*/, '').trim() || 'طالب متميز';
   const schoolLabel = studentData?.schoolName || studentData?.school || schoolName || schoolConfigs?.schoolName || schoolConfigs?.name || 'المدرسة الإلكترونية';
+  const gradeLabel = studentData?.grade || academicProfile?.levelData?.gradeTag || studentData?.academicLevel || 'المرحلة الأكاديمية';
+  const studentCode = studentData?.code || studentData?.student || studentData?.id || '2026';
+  const certSerial = `BYR-${String(studentCode).slice(-6).toUpperCase() || '6X'}-2026`;
 
   const allBadges = React.useMemo(() => {
     const list: any[] = [];
@@ -163,7 +184,7 @@ export const ExcellenceShareModal: React.FC<ExcellenceShareModalProps> = ({
       });
     }
 
-    // Ensure the card always contains exactly 12 prestigious badges (or at least 10) to maintain peak aesthetic symmetry and layout completeness
+    // Ensure the card always contains exactly 12 prestigious badges to maintain peak aesthetic symmetry and layout completeness
     const honoraryPadBadges = [
       {
          id: 'pad_commitment',
@@ -180,97 +201,43 @@ export const ExcellenceShareModal: React.FC<ExcellenceShareModalProps> = ({
          subjName: 'وسام شرف',
          icon: '👑',
          levelColor: 'text-amber-400 bg-amber-400/10',
-         detail: 'طالب مثالي وقدوة للأبطال',
+         detail: 'صدارة قاعة الأبطال',
          extraTags: [] as string[]
       },
       {
          id: 'pad_radar',
-         badgeName: 'رادار الذكاء اللامع',
-         subjName: 'الاستدلال والتفكير',
+         badgeName: 'فارس الذكاء الاصطناعي',
+         subjName: 'رادار الذكاء',
          icon: '📡',
          levelColor: 'text-cyan-400 bg-cyan-400/10',
-         detail: 'إجابات ذكية مستنتجة',
-         extraTags: [] as string[]
-      },
-      {
-         id: 'pad_creative',
-         badgeName: 'الفكر الإبداعي الخلاّق',
-         subjName: 'النشاط التفاعي',
-         icon: '🧠',
-         levelColor: 'text-purple-400 bg-purple-400/10',
-         detail: 'تفكير متقدم ومهارة عالية',
-         extraTags: [] as string[]
-      },
-      {
-         id: 'pad_resolve',
-         badgeName: 'همّة الأبطال وقوة الإصرار',
-         subjName: 'سعي مستدام',
-         icon: '⚡',
-         levelColor: 'text-orange-400 bg-[#FFD600]/10',
-         detail: 'مثابرة مستمرة وتطلع للقمة',
-         extraTags: [] as string[]
-      },
-      {
-         id: 'pad_dignity',
-         badgeName: 'وسام الاستحقاق العالي',
-         subjName: 'السلوك الأكاديمي',
-         icon: '🏅',
-         levelColor: 'text-yellow-400 bg-[#FFD600]/10',
-         detail: 'تميز دراسي وسلوكي رفيع',
-         extraTags: [] as string[]
-      },
-      {
-         id: 'pad_integrity',
-         badgeName: 'وسام النبل والأمانة العلمية',
-         subjName: 'وسام شرف',
-         icon: '🛡️',
-         levelColor: 'text-blue-400 bg-blue-400/10',
-         detail: 'أمانة سلوكية واجتهاد واعٍ',
-         extraTags: [] as string[]
-      },
-      {
-         id: 'pad_sixth_pride',
-         badgeName: 'فخر السادسة الأسطوري',
-         subjName: 'وسام شرف',
-         icon: '⚓',
-         levelColor: 'text-[#FFD600]',
-         detail: 'طموح أكاديمي متقد بلا حدود',
-         extraTags: [] as string[]
-      },
-      {
-         id: 'pad_inspiration',
-         badgeName: 'ملهم الأجيال الصاعدة',
-         subjName: 'وسام شرف',
-         icon: '✨',
-         levelColor: 'text-cyan-400 bg-cyan-400/10',
-         detail: 'قدوة تفاعلية ملهمة للأقران',
+         detail: 'إتقان الأسئلة الاستنتاجية',
          extraTags: [] as string[]
       },
       {
          id: 'pad_challenger',
-         badgeName: 'قاهر التحديات الستينية',
-         subjName: 'السرعة والذكاء',
-         icon: '⏱️',
-         levelColor: 'text-orange-400 bg-orange-400/10',
-         detail: 'إستجابة فائقة السرعة والدقة',
+         badgeName: 'بطل تحدي الـ 60 ثانية',
+         subjName: 'تحدي السرعة',
+         icon: '⚡',
+         levelColor: 'text-yellow-400 bg-yellow-400/10',
+         detail: 'سرعة ودقة قياسية',
          extraTags: [] as string[]
       },
       {
-         id: 'pad_focus',
-         badgeName: 'وسام التركيز والصفاء الذهني',
-         subjName: 'غرفة التحكم الذكية',
-         icon: '🧘',
-         levelColor: 'text-purple-400 bg-purple-400/10',
-         detail: 'بيئة دراسية هادئة ومنتجة',
+         id: 'pad_academic_shield',
+         badgeName: 'الدرع الأكاديمي الفخري',
+         subjName: 'وسام شرف',
+         icon: '🛡️',
+         levelColor: 'text-blue-400 bg-blue-400/10',
+         detail: 'استحقاق علمي رفيع',
          extraTags: [] as string[]
       },
       {
          id: 'pad_pioneer',
-         badgeName: 'رائد مسيرة العلم والمعرفة',
+         badgeName: 'وسام الريادة والابتكار',
          subjName: 'وسام شرف',
          icon: '🚀',
-         levelColor: 'text-blue-400 bg-blue-400/10',
-         detail: 'مستكشف شغوف بالمعرفة المستمرة',
+         levelColor: 'text-purple-400 bg-purple-400/10',
+         detail: 'إبداع مستمر بالمنظومة',
          extraTags: [] as string[]
       }
     ];
@@ -278,6 +245,7 @@ export const ExcellenceShareModal: React.FC<ExcellenceShareModalProps> = ({
     for (const pad of honoraryPadBadges) {
       if (list.length >= 12) break;
       const alreadyHas = list.some(item => 
+         item.id === pad.id || 
          item.badgeName === pad.badgeName || 
          (pad.id === 'pad_radar' && list.some(i => i.id === 'radar' || i.badgeName?.includes('رادار'))) ||
          (pad.id === 'pad_challenger' && list.some(i => i.id?.includes('challenge') || i.badgeName?.includes('تحدي')))
@@ -287,7 +255,6 @@ export const ExcellenceShareModal: React.FC<ExcellenceShareModalProps> = ({
       }
     }
 
-    // Safety fallback: ensure at least 10 cards under any circumstance
     if (list.length < 10) {
       for (const pad of honoraryPadBadges) {
          if (list.length >= 10) break;
@@ -306,7 +273,7 @@ export const ExcellenceShareModal: React.FC<ExcellenceShareModalProps> = ({
        });
     }
 
-    // Sort the list so that "exemption_general" is index 0, and "exemption_indiv" / "إعفاء فردي" items are immediately after, followed by subjects sorted by grade descending
+    // Sort the list: "exemption_general" is index 0, followed by "exemption_indiv", followed by subjects sorted by grade descending
     list.sort((a, b) => {
        const isGenA = a.id === 'exemption_general';
        const isGenB = b.id === 'exemption_general';
@@ -341,7 +308,7 @@ export const ExcellenceShareModal: React.FC<ExcellenceShareModalProps> = ({
       }
       return item;
     });
-  }, [academicProfile]);
+  }, [academicProfile, studentData]);
 
   return (
     <AnimatePresence>
@@ -350,162 +317,204 @@ export const ExcellenceShareModal: React.FC<ExcellenceShareModalProps> = ({
            initial={{ opacity: 0 }}
            animate={{ opacity: 1 }}
            exit={{ opacity: 0 }}
-           className="fixed inset-0 bg-black/90 z-[99999] flex flex-col items-center p-4 backdrop-blur-md overflow-y-auto overscroll-contain py-10"
+           className="fixed inset-0 bg-black/90 z-[99999] flex flex-col items-center p-4 backdrop-blur-md overflow-y-auto overscroll-contain py-8"
         >
+           {/* ========================================================================= */}
+           {/* HIDDEN OFF-SCREEN ULTRA-HD HIGH RESOLUTION EXPORT CANVASES (1080x1920 @ 2x) */}
+           {/* ========================================================================= */}
            <div style={{ position: 'absolute', top: 0, left: '-9999px', width: 0, height: 0, zIndex: -9999, pointerEvents: 'none', overflow: 'hidden', opacity: 1 }}>
              <div 
                 id={exportId}
                 className="flex flex-col relative overflow-hidden"
                 style={{ 
                   width: '1080px', 
+                  minHeight: '1920px',
                   height: 'max-content',
-                  minHeight: '1920px', 
-                  backgroundColor: '#050816',
+                  backgroundColor: '#040714',
                   direction: 'rtl',
-                  padding: '60px 60px 80px 60px',
-                  fontFamily: 'Cairo, Tajawal, "Noto Sans Arabic", sans-serif'
+                  padding: '50px 50px 70px 50px',
+                  boxSizing: 'border-box',
+                  fontFamily: 'Cairo, Tajawal, "Noto Sans Arabic", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+                  WebkitFontSmoothing: 'antialiased',
+                  MozOsxFontSmoothing: 'grayscale',
+                  textRendering: 'geometricPrecision'
                 }}
              >
-                  {/* Background Gradients & Ambient Effects */}
-                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'linear-gradient(135deg, #040714 0%, #0a1128 50%, #121a36 100%)', zIndex: 0 }} />
-                  <div style={{ position: 'absolute', top: 0, right: 0, width: '100%', minHeight: '100%', background: 'radial-gradient(circle at top right, rgba(255, 214, 0, 0.12) 0%, transparent 60%)', zIndex: 1 }} />
-                  <div style={{ position: 'absolute', bottom: 0, left: 0, width: '100%', minHeight: '100%', background: 'radial-gradient(circle at bottom left, rgba(16, 185, 129, 0.05) 0%, transparent 60%)', zIndex: 1 }} />
+                  {/* Background Gradients, Nebula & Golden Ambient Rays */}
+                  <div style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, background: 'linear-gradient(150deg, #02050e 0%, #060e24 25%, #0b1739 50%, #060d22 75%, #02040a 100%)', zIndex: 0 }} />
+                  <div style={{ position: 'absolute', top: '-100px', right: '-100px', width: '700px', height: '700px', background: 'radial-gradient(circle, rgba(255, 214, 0, 0.18) 0%, rgba(255, 214, 0, 0.05) 45%, transparent 70%)', zIndex: 1, filter: 'blur(30px)' }} />
+                  <div style={{ position: 'absolute', bottom: '-80px', left: '-80px', width: '650px', height: '650px', background: 'radial-gradient(circle, rgba(16, 185, 129, 0.14) 0%, rgba(6, 182, 212, 0.05) 45%, transparent 70%)', zIndex: 1, filter: 'blur(30px)' }} />
+                  <div style={{ position: 'absolute', top: '45%', left: '50%', transform: 'translate(-50%, -50%)', width: '900px', height: '900px', background: 'radial-gradient(circle, rgba(13, 71, 161, 0.12) 0%, transparent 65%)', zIndex: 1, pointerEvents: 'none' }} />
 
-                  {/* Majestic Double Gold Certificate Frame */}
-                  <div style={{ position: 'absolute', top: '30px', left: '30px', right: '30px', bottom: '30px', border: '3px solid rgba(255, 214, 0, 0.25)', borderRadius: '32px', pointerEvents: 'none', zIndex: 2 }} />
-                  <div style={{ position: 'absolute', top: '40px', left: '40px', right: '40px', bottom: '40px', border: '1.5px solid rgba(255, 214, 0, 0.1)', borderRadius: '26px', pointerEvents: 'none', zIndex: 2 }} />
+                  {/* Geometric Guilloche Background Watermark Pattern */}
+                  <div style={{ position: 'absolute', inset: 0, opacity: 0.035, backgroundImage: 'radial-gradient(#FFD600 1.5px, transparent 1.5px)', backgroundSize: '36px 36px', zIndex: 1, pointerEvents: 'none' }} />
+
+                  {/* Majestic Multi-Layer Royal Gold Certificate Frame */}
+                  <div style={{ position: 'absolute', top: '24px', left: '24px', right: '24px', bottom: '24px', border: '4px solid #FFD600', borderRadius: '36px', pointerEvents: 'none', zIndex: 2, boxShadow: '0 0 35px rgba(255, 214, 0, 0.35), inset 0 0 35px rgba(255, 214, 0, 0.15)' }} />
+                  <div style={{ position: 'absolute', top: '34px', left: '34px', right: '34px', bottom: '34px', border: '2px dashed rgba(255, 214, 0, 0.45)', borderRadius: '28px', pointerEvents: 'none', zIndex: 2 }} />
+                  <div style={{ position: 'absolute', top: '42px', left: '42px', right: '42px', bottom: '42px', border: '1px solid rgba(255, 255, 255, 0.12)', borderRadius: '22px', pointerEvents: 'none', zIndex: 2 }} />
                   
-                  {/* Royal Corner Ornaments */}
-                  <div style={{ position: 'absolute', top: '24px', right: '24px', width: '40px', height: '40px', borderTop: '4px solid #FFD600', borderRight: '4px solid #FFD600', borderTopRightRadius: '12px', zIndex: 3 }} />
-                  <div style={{ position: 'absolute', top: '24px', left: '24px', width: '40px', height: '40px', borderTop: '4px solid #FFD600', borderLeft: '4px solid #FFD600', borderTopLeftRadius: '12px', zIndex: 3 }} />
-                  <div style={{ position: 'absolute', bottom: '24px', right: '24px', width: '40px', height: '40px', borderBottom: '4px solid #FFD600', borderRight: '4px solid #FFD600', borderBottomRightRadius: '12px', zIndex: 3 }} />
-                  <div style={{ position: 'absolute', bottom: '24px', left: '24px', width: '40px', height: '40px', borderBottom: '4px solid #FFD600', borderLeft: '4px solid #FFD600', borderBottomLeftRadius: '12px', zIndex: 3 }} />
+                  {/* Royal 3D Metallic Golden Corner Ornaments & Rosettes */}
+                  <div style={{ position: 'absolute', top: '16px', right: '16px', width: '55px', height: '55px', borderTop: '6px solid #FFD600', borderRight: '6px solid #FFD600', borderTopRightRadius: '18px', zIndex: 4, filter: 'drop-shadow(0 0 10px rgba(255,214,0,0.8))' }} />
+                  <div style={{ position: 'absolute', top: '16px', left: '16px', width: '55px', height: '55px', borderTop: '6px solid #FFD600', borderLeft: '6px solid #FFD600', borderTopLeftRadius: '18px', zIndex: 4, filter: 'drop-shadow(0 0 10px rgba(255,214,0,0.8))' }} />
+                  <div style={{ position: 'absolute', bottom: '16px', right: '16px', width: '55px', height: '55px', borderBottom: '6px solid #FFD600', borderRight: '6px solid #FFD600', borderBottomRightRadius: '18px', zIndex: 4, filter: 'drop-shadow(0 0 10px rgba(255,214,0,0.8))' }} />
+                  <div style={{ position: 'absolute', bottom: '16px', left: '16px', width: '55px', height: '55px', borderBottom: '6px solid #FFD600', borderLeft: '6px solid #FFD600', borderBottomLeftRadius: '18px', zIndex: 4, filter: 'drop-shadow(0 0 10px rgba(255,214,0,0.8))' }} />
 
-                  <div style={{ position: 'relative', zIndex: 10, display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'space-between' }}>
+                  {/* Corner Star Studs */}
+                  <div style={{ position: 'absolute', top: '22px', right: '22px', color: '#FFD600', fontSize: '18px', zIndex: 5, lineHeight: 1 }}>✦</div>
+                  <div style={{ position: 'absolute', top: '22px', left: '22px', color: '#FFD600', fontSize: '18px', zIndex: 5, lineHeight: 1 }}>✦</div>
+                  <div style={{ position: 'absolute', bottom: '22px', right: '22px', color: '#FFD600', fontSize: '18px', zIndex: 5, lineHeight: 1 }}>✦</div>
+                  <div style={{ position: 'absolute', bottom: '22px', left: '22px', color: '#FFD600', fontSize: '18px', zIndex: 5, lineHeight: 1 }}>✦</div>
+
+                  {/* Inner Content Container */}
+                  <div style={{ position: 'relative', zIndex: 10, display: 'flex', flexDirection: 'column', height: '100%', justifyContent: 'space-between', gap: '28px' }}>
                       
-                      <div style={{ flexShrink: 0 }}>
+                      {/* SECTION 1: HEADER & IDENTITY */}
+                      <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: '20px' }}>
+                          
                           {/* Top Header: Balanced Layout */}
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '14px', borderBottom: '1.5px solid rgba(255, 214, 0, 0.25)' }}>
+                             
                              {/* Right: Actual School Info and Saved Logo */}
-                         <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
-                            <div style={{ width: '130px', height: '130px', borderRadius: '32px', backgroundColor: '#0c1228', border: '2.5px solid rgba(255,255,255,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', padding: '12px', boxShadow: '0 10px 30px rgba(0,0,0,0.4)', flexShrink: 0 }}>
-                               <img src="/school-logos/logo1.jpg" alt="School Brand" style={{ width: '100%', height: '100%', objectFit: 'contain' }} onError={(e) => {
-                                  (e.target as HTMLImageElement).style.display = 'none';
-                                  const parent = (e.target as HTMLImageElement).parentElement;
-                                  if (parent) { parent.innerHTML = '<span style="color:#ffffff70;font-size:50px">🏫</span>'; }
-                               }} />
-                            </div>
-                            <div style={{ textAlign: 'right' }}>
-                                <h2 style={{ color: '#ffffff', fontFamily: 'Cairo, sans-serif', fontWeight: '900', fontSize: '36px', margin: 0, textShadow: '0 2px 10px rgba(0,0,0,0.8)', lineHeight: 1.2 }}>{schoolLabel}</h2>
-                                <p style={{ color: 'rgba(255, 255, 255, 0.75)', fontFamily: 'Tajawal, sans-serif', fontSize: '24px', margin: '4px 0 0 0', fontWeight: 'bold' }}>سجل التميز الأكاديمي</p>
-                            </div>
-                         </div>
+                             <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+                                <div style={{ width: '115px', height: '115px', borderRadius: '28px', backgroundColor: '#091128', border: '3px solid rgba(255,214,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', padding: '10px', boxShadow: '0 8px 25px rgba(0,0,0,0.6), 0 0 15px rgba(255,214,0,0.2)', flexShrink: 0 }}>
+                                   <img 
+                                      src="/school-logos/logo1.jpg" 
+                                      alt="School Brand" 
+                                      crossOrigin="anonymous"
+                                      style={{ width: '100%', height: '100%', objectFit: 'contain' }} 
+                                      onError={(e) => {
+                                         (e.target as HTMLImageElement).style.display = 'none';
+                                         const parent = (e.target as HTMLImageElement).parentElement;
+                                         if (parent) { parent.innerHTML = '<span style="color:#ffffff90;font-size:48px">🏫</span>'; }
+                                      }} 
+                                   />
+                                </div>
+                                <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end' }}>
+                                    <h2 style={{ color: '#ffffff', fontFamily: 'Cairo, sans-serif', fontWeight: '900', fontSize: '34px', margin: 0, textShadow: '0 3px 12px rgba(0,0,0,0.9)', lineHeight: 1.2, maxWidth: '400px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{schoolLabel !== 'المدرسة الإلكترونية' ? schoolLabel : (schoolName || 'بوابة بيرق التعليمية')}</h2>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '4px', justifyContent: 'flex-end' }}>
+                                       <span style={{ color: '#FFD600', fontSize: '18px' }}>★</span>
+                                       <p style={{ color: 'rgba(255, 255, 255, 0.85)', fontFamily: 'Tajawal, sans-serif', fontSize: '22px', margin: 0, fontWeight: '800' }}>سجل التميز والشرف الأكاديمي</p>
+                                    </div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', marginTop: '12px' }}>
+                                       <div style={{ background: 'linear-gradient(135deg, rgba(255,214,0,0.2) 0%, rgba(255,214,0,0.05) 100%)', border: '1.5px solid #FFD600', borderRadius: '50px', padding: '6px 24px', display: 'flex', alignItems: 'center', gap: '8px', boxShadow: '0 0 20px rgba(255,214,0,0.2)' }}>
+                                          <span style={{ color: '#FFD600', fontSize: '16px' }}>👑</span>
+                                          <span style={{ color: '#FFD600', fontFamily: 'Cairo, sans-serif', fontWeight: '900', fontSize: '16px', letterSpacing: '1px' }}>وثيقة رسمية معتمدة</span>
+                                       </div>
+                                       <div style={{ color: 'rgba(255,214,0,0.9)', fontSize: '13px', fontFamily: 'Tajawal, sans-serif', fontWeight: 'bold', marginTop: '6px', letterSpacing: '3px' }}>★ ★ ★ ★ ★</div>
+                                    </div>
+                                </div>
+                             </div>
 
-                         {/* Left: Premium Bayraq Info and Brand Logo */}
-                         <div style={{ display: 'flex', alignItems: 'center', gap: '24px', flexDirection: 'row-reverse' }}>
-                            <div style={{ width: '130px', height: '130px', borderRadius: '32px', backgroundColor: 'transparent', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', padding: '0', flexShrink: 0 }}>
-                               <img src="/logo.png" alt="Bayraq" style={{ width: '100%', height: '100%', objectFit: 'cover', mixBlendMode: 'screen' }} onError={(e) => {
-                                  (e.target as HTMLImageElement).style.display = 'none';
-                                  const parent = (e.target as HTMLImageElement).parentElement;
-                                  if (parent) { parent.innerHTML = '<span style="color:#FFD600;font-size:50px">👑</span>'; }
-                               }} />
-                            </div>
-                            <div style={{ textAlign: 'left' }}>
-                               <h2 style={{ color: '#FFD600', fontFamily: 'Cairo, sans-serif', fontWeight: '900', fontSize: '38px', letterSpacing: '2px', margin: 0, textShadow: '0 2px 15px rgba(255,214,0,0.3)', lineHeight: 1.2 }}>بوابة بيرق</h2>
-                               <p style={{ color: 'rgba(255, 214, 0, 0.9)', fontFamily: 'Tajawal, sans-serif', fontSize: '20px', margin: '4px 0 0 0', letterSpacing: '4px', fontWeight: '900' }}>GATE 6</p>
-                            </div>
-                         </div>
+                             {/* Center: Empty Space Now */}
+                             <div style={{ display: 'flex', flex: 1 }}></div>
+
+                             {/* Left: Premium Bayraq Info and Brand Logo */}
+                             <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flexDirection: 'row-reverse' }}>
+                                <div style={{ width: '115px', height: '115px', borderRadius: '28px', backgroundColor: 'transparent', border: 'none', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', padding: '0', flexShrink: 0 }}>
+                                   <img 
+                                      src="/logo.png" 
+                                      alt="Bayraq" 
+                                      crossOrigin="anonymous"
+                                      style={{ width: '100%', height: '100%', objectFit: 'cover', mixBlendMode: 'screen', filter: 'drop-shadow(0 0 15px rgba(255,214,0,0.5))' }} 
+                                      onError={(e) => {
+                                         (e.target as HTMLImageElement).style.display = 'none';
+                                         const parent = (e.target as HTMLImageElement).parentElement;
+                                         if (parent) { parent.innerHTML = '<span style="color:#FFD600;font-size:52px">👑</span>'; }
+                                      }} 
+                                   />
+                                </div>
+                                <div style={{ textAlign: 'left' }}>
+                                   <h2 style={{ color: '#FFD600', fontFamily: 'Cairo, sans-serif', fontWeight: '900', fontSize: '36px', letterSpacing: '2px', margin: 0, textShadow: '0 3px 20px rgba(255,214,0,0.4)', lineHeight: 1.2 }}>بوابة بيرق</h2>
+                                   <p style={{ color: 'rgba(255, 214, 0, 0.95)', fontFamily: 'Tajawal, sans-serif', fontSize: '20px', margin: '3px 0 0 0', letterSpacing: '4px', fontWeight: '900' }}>GATE 6 • PRO</p>
+                                </div>
+                             </div>
+                          </div>
+
+                          {/* Student Identity Spotlight Section */}
+                          <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0, position: 'relative' }}>
+                             
+                             {/* Avatar Halo */}
+                             <div style={{ position: 'relative', width: '210px', height: '210px', marginBottom: '12px', flexShrink: 0 }}>
+                                <div style={{ position: 'absolute', inset: '-12px', borderRadius: '50%', background: 'radial-gradient(circle, rgba(255, 214, 0, 0.35) 0%, transparent 70%)', filter: 'blur(10px)' }} />
+                                {studentData?.avatar ? (
+                                   <div style={{ width: '100%', height: '100%', borderRadius: '50%', border: '8px solid #FFD600', outline: '4px solid rgba(255, 255, 255, 0.3)', boxShadow: '0 0 50px rgba(255,214,0,0.5), inset 0 0 20px rgba(0,0,0,0.5)', overflow: 'hidden', backgroundColor: '#0a0f24', position: 'relative', zIndex: 2 }}>
+                                      <img src={studentData.avatar} alt={cleanStudentName} crossOrigin="anonymous" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                                   </div>
+                                ) : (
+                                   <div style={{ width: '100%', height: '100%', borderRadius: '50%', border: '8px solid #FFD600', outline: '4px solid rgba(255, 255, 255, 0.3)', boxShadow: '0 0 50px rgba(255,214,0,0.5), inset 0 0 20px rgba(0,0,0,0.5)', backgroundColor: '#0a0f24', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '85px', position: 'relative', zIndex: 2 }}>
+                                      {academicProfile?.isEliteStudent ? '👑' : '👨‍🎓'}
+                                   </div>
+                                )}
+                                {/* Golden Crown Crest on Top of Avatar */}
+                                <div style={{ position: 'absolute', top: '-18px', left: '50%', transform: 'translateX(-50%)', backgroundColor: '#FFD600', color: '#000', padding: '4px 14px', borderRadius: '20px', fontWeight: '900', fontSize: '13px', zIndex: 3, boxShadow: '0 4px 15px rgba(0,0,0,0.5)', fontFamily: 'Cairo, sans-serif', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                   <span>🏆</span>
+                                   <span>فارس التميز</span>
+                                </div>
+                             </div>
+
+                             {/* Student Name */}
+                             <h3 style={{ color: '#ffffff', fontFamily: 'Cairo, sans-serif', fontWeight: '900', fontSize: '66px', margin: '0 0 8px 0', lineHeight: 1.15, textShadow: '0 4px 25px rgba(0,0,0,0.9), 0 0 20px rgba(255,214,0,0.3)', whiteSpace: 'nowrap' }}>
+                                {cleanStudentName}
+                             </h3>
+                             
+                             {/* Grade & Subtitle Capsule */}
+                             <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '14px', backgroundColor: 'rgba(255,214,0,0.12)', border: '2.5px solid rgba(255,214,0,0.5)', borderRadius: '100px', padding: '10px 36px', boxShadow: '0 6px 25px rgba(255,214,0,0.25)', marginTop: '2px' }}>
+                                <span style={{ color: '#FFD600', fontSize: '24px' }}>🎖️</span>
+                                <span style={{ color: '#FFD600', fontFamily: 'Cairo, sans-serif', fontWeight: '900', fontSize: '28px' }}>{gradeLabel}</span>
+                                <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: '20px' }}>•</span>
+                                <span style={{ color: '#ffffff', fontFamily: 'Tajawal, sans-serif', fontWeight: '800', fontSize: '22px' }}>حائز على وسام الشرف الأكاديمي</span>
+                             </div>
+                          </div>
                       </div>
 
-                      {/* Student Identity Section */}
-                      <div style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
-                         {studentData?.avatar ? (
-                            <div style={{ margin: '0 auto 8px auto', width: '220px', height: '220px', borderRadius: '50%', border: '12px solid rgba(255, 214, 0, 0.35)', outline: '6px solid #FFD600', boxShadow: '0 0 80px rgba(255,214,0,0.4)', backgroundSize: 'cover', backgroundPosition: 'center', backgroundImage: `url(${studentData.avatar})`, flexShrink: 0 }} />
-                         ) : (
-                            <div style={{ margin: '0 auto 8px auto', width: '220px', height: '220px', borderRadius: '50%', border: '12px solid rgba(255, 214, 0, 0.35)', outline: '6px solid #FFD600', boxShadow: '0 0 80px rgba(255,214,0,0.4)', backgroundColor: '#0a0f24', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '90px', flexShrink: 0 }}>
-                               {academicProfile?.isEliteStudent ? '👑' : '👨‍🎓'}
-                            </div>
-                         )}
-                         <h3 style={{ color: '#ffffff', fontFamily: 'Cairo, sans-serif', fontWeight: '900', fontSize: '70px', margin: '0 0 8px 0', lineHeight: 1.1, textShadow: '0 4px 20px rgba(0,0,0,0.7)', whiteSpace: 'nowrap' }}>{studentName.replace(/^ولي أمر\s*/, '')}</h3>
-                         
-                         <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(255,214,0,0.1)', border: '2.5px solid rgba(255,214,0,0.4)', borderRadius: '100px', padding: '12px 40px', boxShadow: '0 5px 25px rgba(255,214,0,0.2)', marginTop: '4px' }}>
-                            <span style={{ color: '#FFD600', fontFamily: 'Cairo, sans-serif', fontWeight: '900', fontSize: '30px' }}>{studentData?.grade || academicProfile?.levelData?.gradeTag}</span>
-                         </div>
-                      </div>
-                      </div>
-
-                      {/* Beautiful Artistic Badges Matrix */}
-                      <div style={{ width: '100%', display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '20px', margin: '0 auto', justifyItems: 'stretch', alignContent: 'center' }}>
+                      {/* SECTION 2: BEAUTIFUL ARTISTIC BADGES MATRIX (HIGH DENSITY CRYSTAL CLEAR) */}
+                      <div style={{ width: '100%', display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '18px', margin: '0 auto', justifyItems: 'stretch', alignContent: 'center', flex: 1 }}>
                          {allBadges
-                           .slice()
-                           .sort((a: any, b: any) => {
-                             const isGenA = a.id === 'exemption_general';
-                              const isGenB = b.id === 'exemption_general';
-                              if (isGenA && !isGenB) return -1;
-                              if (!isGenA && isGenB) return 1;
-                              const isIndivA = a.id?.startsWith('exemption_indiv_') || a.extraTags?.includes('إعفاء فردي 🏅') || a.badgeName?.includes('إعفاء فردي');
-                              const isIndivB = b.id?.startsWith('exemption_indiv_') || b.extraTags?.includes('إعفاء فردي 🏅') || b.badgeName?.includes('إعفاء فردي');
-                              if (isIndivA && !isIndivB) return -1;
-                              if (!isIndivA && isIndivB) return 1;
-                              const getGrade = (ach: any) => {
-                               if (!ach || !ach.detail) return 0;
-                               const detail = String(ach.detail);
-                               if (detail.includes('الدرجة')) {
-                                 const parts = detail.split(':');
-                                 if (parts.length > 1) return parseInt(parts[1].trim()) || 0;
-                                 return parseInt(detail.replace(/[^\d]/g, '')) || 0;
-                               }
-                               return -1;
-                             };
-                             const gA = getGrade(a);
-                             const gB = getGrade(b);
-                             if (gA !== gB) return gB - gA;
-                             return (b.badgeName || '').localeCompare(a.badgeName || '', 'ar');
-                           })
                            .slice(0, Math.min(12, Math.floor(allBadges.length / 2) * 2))
                            .map((ach: any, idx: number) => {
                            const colorSchemes: Record<string, { bg: string, border: string, text: string, tagBg: string, tagBorder: string }> = {
                              emerald: {
-                               bg: 'linear-gradient(135deg, rgba(16, 185, 129, 0.14) 0%, rgba(16, 185, 129, 0.02) 100%)',
-                               border: '3.5px solid rgba(16, 185, 129, 0.35)',
+                               bg: 'linear-gradient(135deg, rgba(16, 185, 129, 0.16) 0%, rgba(6, 78, 59, 0.3) 100%)',
+                               border: '2.5px solid rgba(16, 185, 129, 0.45)',
                                text: '#10b981',
-                               tagBg: 'rgba(16, 185, 129, 0.12)',
-                               tagBorder: '1.5px solid rgba(16, 185, 129, 0.45)'
+                               tagBg: 'rgba(16, 185, 129, 0.18)',
+                               tagBorder: '1.5px solid rgba(16, 185, 129, 0.6)'
                              },
                              blue: {
-                               bg: 'linear-gradient(135deg, rgba(59, 130, 246, 0.14) 0%, rgba(59, 130, 246, 0.02) 100%)',
-                               border: '3.5px solid rgba(59, 130, 246, 0.35)',
+                               bg: 'linear-gradient(135deg, rgba(59, 130, 246, 0.16) 0%, rgba(30, 58, 138, 0.3) 100%)',
+                               border: '2.5px solid rgba(59, 130, 246, 0.45)',
                                text: '#3b82f6',
-                               tagBg: 'rgba(59, 130, 246, 0.12)',
-                               tagBorder: '1.5px solid rgba(59, 130, 246, 0.45)'
+                               tagBg: 'rgba(59, 130, 246, 0.18)',
+                               tagBorder: '1.5px solid rgba(59, 130, 246, 0.6)'
                              },
                              purple: {
-                               bg: 'linear-gradient(135deg, rgba(139, 92, 246, 0.14) 0%, rgba(139, 92, 246, 0.02) 100%)',
-                               border: '3.5px solid rgba(139, 92, 246, 0.35)',
-                               text: '#8b5cf6',
-                               tagBg: 'rgba(139, 92, 246, 0.12)',
-                               tagBorder: '1.5px solid rgba(139, 92, 246, 0.45)'
+                               bg: 'linear-gradient(135deg, rgba(139, 92, 246, 0.16) 0%, rgba(76, 29, 149, 0.3) 100%)',
+                               border: '2.5px solid rgba(139, 92, 246, 0.45)',
+                               text: '#a78bfa',
+                               tagBg: 'rgba(139, 92, 246, 0.18)',
+                               tagBorder: '1.5px solid rgba(139, 92, 246, 0.6)'
                              },
                              yellow: {
-                               bg: 'linear-gradient(135deg, rgba(255, 214, 0, 0.14) 0%, rgba(255, 214, 0, 0.02) 100%)',
-                               border: '3.5px solid rgba(255, 214, 0, 0.45)',
+                               bg: 'linear-gradient(135deg, rgba(255, 214, 0, 0.16) 0%, rgba(120, 53, 15, 0.3) 100%)',
+                               border: '2.5px solid rgba(255, 214, 0, 0.55)',
                                text: '#FFD600',
-                               tagBg: 'rgba(255, 214, 0, 0.12)',
-                               tagBorder: '1.5px solid rgba(255, 214, 0, 0.5)'
+                               tagBg: 'rgba(255, 214, 0, 0.18)',
+                               tagBorder: '1.5px solid rgba(255, 214, 0, 0.7)'
                              },
                              cyan: {
-                               bg: 'linear-gradient(135deg, rgba(6, 182, 212, 0.14) 0%, rgba(6, 182, 212, 0.02) 100%)',
-                               border: '3.5px solid rgba(6, 182, 212, 0.35)',
+                               bg: 'linear-gradient(135deg, rgba(6, 182, 212, 0.16) 0%, rgba(21, 94, 117, 0.3) 100%)',
+                               border: '2.5px solid rgba(6, 182, 212, 0.45)',
                                text: '#06b6d4',
-                               tagBg: 'rgba(6, 182, 212, 0.12)',
-                               tagBorder: '1.5px solid rgba(6, 182, 212, 0.45)'
+                               tagBg: 'rgba(6, 182, 212, 0.18)',
+                               tagBorder: '1.5px solid rgba(6, 182, 212, 0.6)'
                              },
                              orange: {
-                               bg: 'linear-gradient(135deg, rgba(249, 115, 22, 0.14) 0%, rgba(249, 115, 22, 0.02) 100%)',
-                               border: '3.5px solid rgba(249, 115, 22, 0.35)',
+                               bg: 'linear-gradient(135deg, rgba(249, 115, 22, 0.16) 0%, rgba(124, 45, 18, 0.3) 100%)',
+                               border: '2.5px solid rgba(249, 115, 22, 0.45)',
                                text: '#f97316',
-                               tagBg: 'rgba(249, 115, 22, 0.12)',
-                               tagBorder: '1.5px solid rgba(249, 115, 22, 0.45)'
+                               tagBg: 'rgba(249, 115, 22, 0.18)',
+                               tagBorder: '1.5px solid rgba(249, 115, 22, 0.6)'
                              }
                            };
 
@@ -524,41 +533,33 @@ export const ExcellenceShareModal: React.FC<ExcellenceShareModalProps> = ({
                            const isGeneralExemption = ach.id === 'exemption_general' || ach.badgeName?.includes('إعفاء عام');
                            const isIndividualExemption = ach.id?.startsWith('exemption_indiv_') || ach.extraTags?.includes('إعفاء فردي 🏅') || ach.badgeName?.includes('إعفاء فردي');
 
-                           let finalBg = 'linear-gradient(135deg, rgba(26, 34, 53, 0.8) 0%, rgba(10, 14, 26, 0.85) 100%)';
-                           
-                           // Determine border according to request: thin border 0.8px, matte gold or white with opacity 0.2
-                           let isMatteGoldBorder = key === 'yellow' || isGeneralExemption;
-                           let finalBorder = isMatteGoldBorder
-                             ? '0.8px solid rgba(255, 214, 0, 0.25)' 
-                             : '0.8px solid rgba(255, 255, 255, 0.2)';
-                             
+                           let finalBg = 'linear-gradient(135deg, rgba(16, 24, 48, 0.92) 0%, rgba(8, 12, 28, 0.95) 100%)';
+                           let finalBorder = '1.8px solid rgba(255, 214, 0, 0.3)';
                            let finalTextColor = scheme.text;
                            let finalTagBg = scheme.tagBg;
                            let finalTagBorder = scheme.tagBorder;
-                           let stripColor = '#FFD600'; // App identity yellow
-                           let stripShadow = '0 0 15px rgba(255,214,0,0.5)';
-                           let luxuriousShadow = '0 15px 15px 2px rgba(0, 0, 0, 0.8)'; // Deep black shadows: blur: 15, spread: 2 as requested
+                           let stripColor = '#FFD600';
+                           let stripShadow = '0 0 18px rgba(255,214,0,0.6)';
+                           let luxuriousShadow = '0 12px 25px rgba(0, 0, 0, 0.6)';
 
                            if (isGeneralExemption) {
-                             // General Exemption has custom ultra luxury royal gradient of deep pink/indigo
-                             finalBg = 'linear-gradient(135deg, rgba(236, 72, 153, 0.25) 0%, rgba(139, 92, 246, 0.25) 100%)';
-                             finalBorder = '1px dashed rgba(255, 214, 0, 0.5)';
+                             finalBg = 'linear-gradient(135deg, rgba(236, 72, 153, 0.28) 0%, rgba(139, 92, 246, 0.35) 100%)';
+                             finalBorder = '2.5px dashed #FFD600';
                              finalTextColor = '#FFD600';
-                             finalTagBg = 'rgba(255, 214, 0, 0.15)';
-                             finalTagBorder = '1.5px solid #FFD600';
-                             stripColor = '#EC4899'; // Royal Pink indicator
-                             stripShadow = '0 0 25px rgba(236,72,153,0.8)';
-                             luxuriousShadow = '0 15px 15px 2px rgba(236, 72, 153, 0.3), 0 15px 15px 2px rgba(0, 0, 0, 0.8)';
+                             finalTagBg = 'rgba(255, 214, 0, 0.2)';
+                             finalTagBorder = '2px solid #FFD600';
+                             stripColor = '#EC4899';
+                             stripShadow = '0 0 25px rgba(236,72,153,0.9)';
+                             luxuriousShadow = '0 15px 30px rgba(236, 72, 153, 0.35), 0 10px 20px rgba(0, 0, 0, 0.8)';
                            } else if (isIndividualExemption) {
-                             // Individual Exemption has gorgeous emerald-teal sleek futuristic border
-                             finalBg = 'linear-gradient(135deg, rgba(20, 184, 166, 0.25) 0%, rgba(13, 148, 136, 0.1) 100%)';
-                             finalBorder = '2px solid rgba(20, 184, 166, 0.5)';
+                             finalBg = 'linear-gradient(135deg, rgba(20, 184, 166, 0.28) 0%, rgba(139, 92, 246, 0.2) 100%)';
+                             finalBorder = '2.5px solid #14b8a6';
                              finalTextColor = '#14b8a6';
-                             finalTagBg = 'rgba(20, 184, 166, 0.15)';
-                             finalTagBorder = '1.5px solid #14b8a6';
-                             stripColor = '#14b8a6'; // Cyan strip
-                             stripShadow = '0 0 15px rgba(20,184,166,0.6)';
-                             luxuriousShadow = '0 15px 15px 2px rgba(20, 184, 166, 0.25), 0 15px 15px 2px rgba(0, 0, 0, 0.8)';
+                             finalTagBg = 'rgba(20, 184, 166, 0.2)';
+                             finalTagBorder = '2px solid #14b8a6';
+                             stripColor = '#14b8a6';
+                             stripShadow = '0 0 20px rgba(20,184,166,0.8)';
+                             luxuriousShadow = '0 15px 30px rgba(20, 184, 166, 0.3), 0 10px 20px rgba(0, 0, 0, 0.8)';
                            }
                            
                            const detailRows = ach.detail ? String(ach.detail) : '';
@@ -582,37 +583,35 @@ export const ExcellenceShareModal: React.FC<ExcellenceShareModalProps> = ({
                                display: 'flex', 
                                flexDirection: 'column', 
                                background: finalBg, 
-                               borderRadius: '32px', 
-                               padding: '24px 30px', 
+                               borderRadius: '26px', 
+                               padding: '20px 24px', 
                                border: finalBorder, 
                                position: 'relative', 
                                overflow: 'hidden', 
                                boxShadow: luxuriousShadow, 
                                width: '100%',
-                               backdropFilter: 'blur(12px)',
-                               WebkitBackdropFilter: 'blur(12px)'
+                               boxSizing: 'border-box'
                              }}>
                                {/* Color Strip Indicator */}
-                               <div style={{ position: 'absolute', top: 0, right: 0, height: '100%', width: '16px', backgroundColor: stripColor, boxShadow: stripShadow }} />
+                               <div style={{ position: 'absolute', top: 0, right: 0, height: '100%', width: '12px', backgroundColor: stripColor, boxShadow: stripShadow }} />
                                
                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
-                                  {/* Protected grouping of Icon & Titles */}
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '20px', flex: 1, minWidth: 0 }}>
-                                     {/* Badge Icon Circular Case with colored dynamic glow halo */}
+                                  {/* Grouping of Icon & Titles */}
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '16px', flex: 1, minWidth: 0 }}>
+                                     {/* Badge Icon Circular Case */}
                                      <div style={{ 
-                                        width: '85px', 
-                                        height: '85px', 
+                                        width: '76px', 
+                                        height: '76px', 
                                         borderRadius: '50%', 
-                                        backgroundColor: 'rgba(255,255,255,0.06)', 
+                                        backgroundColor: 'rgba(255,255,255,0.08)', 
                                         display: 'flex', 
                                         alignItems: 'center', 
                                         justifyContent: 'center', 
                                         flexShrink: 0, 
-                                        border: `1.5px solid ${finalTextColor}4D`, 
+                                        border: `2px solid ${finalTextColor}80`, 
                                         position: 'relative',
-                                        boxShadow: `0 0 25px ${finalTextColor}4D, inset 0 0 15px ${finalTextColor}22`
+                                        boxShadow: `0 0 20px ${finalTextColor}4D, inset 0 0 12px ${finalTextColor}22`
                                      }}>
-                                        {/* Radial Halogen Glow inside container */}
                                         <div style={{ 
                                            position: 'absolute', 
                                            top: 0, 
@@ -626,78 +625,72 @@ export const ExcellenceShareModal: React.FC<ExcellenceShareModalProps> = ({
                                         <span style={{ 
                                            position: 'relative', 
                                            zIndex: 1, 
-                                           filter: `drop-shadow(0 0 8px ${finalTextColor})`,
+                                           filter: `drop-shadow(0 0 6px ${finalTextColor})`,
                                            fontSize: '32px',
-                                           width: '40px',
-                                           height: '40px',
-                                           display: 'flex',
-                                           alignItems: 'center',
-                                           justifyContent: 'center',
                                            lineHeight: '1'
                                         }}>
                                            {ach.icon}
                                         </span>
                                      </div>
                                      
-                                     {/* Titles - Fully protected from squeezing */}
+                                     {/* Titles */}
                                      <div style={{ display: 'flex', flexDirection: 'column', textAlign: 'right', minWidth: 0, flex: 1 }}>
-                                        <span style={{ color: '#ffffff', fontFamily: 'Cairo, sans-serif', fontWeight: '900', fontSize: '26px', marginBottom: '8px', lineHeight: '1.3', display: 'block', wordBreak: 'break-word', whiteSpace: 'normal' }}>{ach.badgeName}</span>
-                                        <span style={{ color: 'rgba(255,255,255,0.65)', fontFamily: 'Tajawal, sans-serif', fontWeight: '800', fontSize: '22px', display: 'block', wordBreak: 'break-word', whiteSpace: 'normal' }}>{ach.subjName}</span>
+                                        <span style={{ color: '#ffffff', fontFamily: 'Cairo, sans-serif', fontWeight: '900', fontSize: '24px', marginBottom: '4px', lineHeight: '1.25', display: 'block', wordBreak: 'break-word' }}>{ach.badgeName}</span>
+                                        <span style={{ color: 'rgba(255,255,255,0.75)', fontFamily: 'Tajawal, sans-serif', fontWeight: '800', fontSize: '20px', display: 'block', wordBreak: 'break-word' }}>{ach.subjName}</span>
                                      </div>
                                   </div>
                                   
-                                  {/* Grade Tag (on Left) - Custom styled, large, glowing and ultra clear */}
+                                  {/* Grade Tag (on Left) */}
                                   {isGrade && (
-                                     <div style={{ padding: '12px 24px', backgroundColor: finalTagBg, border: finalTagBorder, borderRadius: '24px', flexShrink: 0, textAlign: 'center', minWidth: '110px', display: 'flex', flexDirection: 'column', justifyContent: 'center', boxShadow: `0 4px 15px ${finalTagBg}, inset 0 0 10px rgba(255,255,255,0.02)`, marginRight: '20px' }}>
-                                        <span style={{ color: 'rgba(255, 255, 255, 0.9)', fontFamily: 'Tajawal, sans-serif', fontWeight: '900', fontSize: '20px', marginBottom: '4px', textShadow: '0 1px 4px rgba(0,0,0,0.5)' }}>{gradeLabel}</span>
-                                        <span style={{ color: '#ffffff', fontFamily: 'Cairo, sans-serif', fontWeight: '950', fontSize: '52px', lineHeight: 1, textShadow: `0 0 15px ${finalTextColor}, 0 2px 5px rgba(0,0,0,0.8)` }}>{gradeValue}</span>
+                                     <div style={{ padding: '10px 20px', backgroundColor: finalTagBg, border: finalTagBorder, borderRadius: '20px', flexShrink: 0, textAlign: 'center', minWidth: '100px', display: 'flex', flexDirection: 'column', justifyContent: 'center', boxShadow: `0 4px 15px ${finalTagBg}` }}>
+                                        <span style={{ color: 'rgba(255, 255, 255, 0.95)', fontFamily: 'Tajawal, sans-serif', fontWeight: '900', fontSize: '18px', marginBottom: '2px', textShadow: '0 1px 4px rgba(0,0,0,0.6)' }}>{gradeLabel}</span>
+                                        <span style={{ color: '#ffffff', fontFamily: 'Cairo, sans-serif', fontWeight: '950', fontSize: '46px', lineHeight: 1, textShadow: `0 0 15px ${finalTextColor}, 0 2px 6px rgba(0,0,0,0.9)` }}>{gradeValue}</span>
                                      </div>
                                   )}
   
-                                  {/* Short Tag Box (Not grade, not too long) */}
+                                  {/* Short Tag Box */}
                                   {(!isLongDetail && !isGrade && detailRows.length > 0) && (
-                                     <div style={{ padding: '14px 22px', backgroundColor: finalTagBg, border: finalTagBorder, borderRadius: '24px', flexShrink: 0, textAlign: 'center', minWidth: '100px', boxShadow: `0 4px 12px ${finalTextColor}1A` }}>
-                                        <span style={{ color: '#ffffff', textShadow: `0 0 12px ${finalTextColor}`, fontFamily: 'Cairo, sans-serif', fontWeight: '900', fontSize: '22px', whiteSpace: 'nowrap' }}>{detailRows}</span>
+                                     <div style={{ padding: '12px 18px', backgroundColor: finalTagBg, border: finalTagBorder, borderRadius: '20px', flexShrink: 0, textAlign: 'center', minWidth: '90px', boxShadow: `0 4px 12px ${finalTextColor}22` }}>
+                                        <span style={{ color: '#ffffff', textShadow: `0 0 10px ${finalTextColor}`, fontFamily: 'Cairo, sans-serif', fontWeight: '900', fontSize: '20px', whiteSpace: 'nowrap' }}>{detailRows}</span>
                                      </div>
                                   )}
                                </div>
- 
+
                                {/* Extra Merged Tags */}
                                {(ach.extraTags && ach.extraTags.length > 0) && (
-                                  <div style={{ display: 'flex', gap: '8px', marginTop: '12px', flexWrap: 'wrap', justifyContent: 'center' }}>
+                                  <div style={{ display: 'flex', gap: '8px', marginTop: '10px', flexWrap: 'wrap', justifyContent: 'flex-start' }}>
                                     {ach.extraTags.map((tag: string, i: number) => (
                                        <span key={i} style={{ 
-                                         backgroundColor: 'rgba(255,255,255,0.06)', 
-                                         border: '1.5px solid rgba(255,255,255,0.15)',
-                                         borderRadius: '20px', 
-                                         padding: '6px 16px', 
+                                         backgroundColor: 'rgba(255,255,255,0.08)', 
+                                         border: '1.5px solid rgba(255,255,255,0.2)',
+                                         borderRadius: '16px', 
+                                         padding: '4px 14px', 
                                          color: '#fff', 
-                                         fontSize: '18px', 
+                                         fontSize: '16px', 
                                          fontFamily: 'Tajawal, sans-serif', 
                                          fontWeight: 'bold',
                                          display: 'flex',
                                          alignItems: 'center',
                                          gap: '6px',
-                                         boxShadow: '0 4px 10px rgba(0,0,0,0.1)'
+                                         boxShadow: '0 3px 8px rgba(0,0,0,0.2)'
                                        }}>
                                           {tag}
                                        </span>
                                     ))}
                                   </div>
                                )}
- 
+
                                {/* Full Width Box for Long Texts */}
                                {isLongDetail && (
-                                  <div style={{ marginTop: '20px', padding: '18px 24px', backgroundColor: finalTagBg, border: finalTagBorder, borderRadius: '18px', textAlign: 'center', width: '100%', boxSizing: 'border-box' }}>
+                                  <div style={{ marginTop: '14px', padding: '12px 18px', backgroundColor: finalTagBg, border: finalTagBorder, borderRadius: '16px', textAlign: 'center', width: '100%', boxSizing: 'border-box' }}>
                                      <span style={{ 
                                        color: finalTextColor, 
                                        fontFamily: 'Tajawal, sans-serif', 
                                        fontWeight: '800', 
-                                       fontSize: '19px', 
+                                       fontSize: '18px', 
                                        whiteSpace: 'normal', 
                                        display: 'block', 
-                                       overflow: 'hidden', 
-                                       lineHeight: '1.6' 
+                                       lineHeight: '1.5' 
                                      }}>{detailRows}</span>
                                   </div>
                                )}
@@ -706,206 +699,244 @@ export const ExcellenceShareModal: React.FC<ExcellenceShareModalProps> = ({
                          })}
                       </div>
 
-                      {/* Prestigious Signature & Honors Affirmation */}
-                      <div style={{ textAlign: 'center', borderTop: '2px solid rgba(255,214,0,0.2)', paddingTop: '30px', position: 'relative', flexShrink: 0 }}>
-                         <div style={{ position: 'absolute', top: '-15px', left: '50%', transform: 'translateX(-50%)', backgroundColor: '#050816', padding: '0 20px', display: 'flex', gap: '10px' }}>
-                            <span style={{ fontSize: '24px', color: '#FFD600' }}>✦</span>
-                            <span style={{ fontSize: '24px', color: '#FFD600' }}>✦</span>
-                            <span style={{ fontSize: '24px', color: '#FFD600' }}>✦</span>
+                      {/* SECTION 3: PRESTIGIOUS SIGNATURE, OFFICIAL SEALS & AFFIRMATION */}
+                      <div style={{ textAlign: 'center', borderTop: '2px solid rgba(255,214,0,0.3)', paddingTop: '24px', position: 'relative', flexShrink: 0, marginTop: '8px' }}>
+                         
+                         {/* Centered Diamond Divider */}
+                         <div style={{ position: 'absolute', top: '-14px', left: '50%', transform: 'translateX(-50%)', backgroundColor: '#040714', padding: '0 24px', display: 'flex', gap: '12px', alignItems: 'center' }}>
+                            <span style={{ fontSize: '20px', color: '#FFD600' }}>✦</span>
+                            <span style={{ fontSize: '28px', color: '#FFD600' }}>★</span>
+                            <span style={{ fontSize: '20px', color: '#FFD600' }}>✦</span>
                          </div>
-                         <h1 style={{ color: '#FFD600', fontFamily: 'Cairo, sans-serif', fontSize: '56px', fontWeight: '900', letterSpacing: '4px', margin: '0 0 16px 0', textShadow: '0 4px 25px rgba(255,214,0,0.4)', lineHeight: '1.2' }}>وســــام التـمـيـــز الشـرفـــي</h1>
-                         <p style={{ color: 'rgba(255,255,255,0.7)', fontFamily: 'Tajawal, sans-serif', fontSize: '28px', fontWeight: '800', margin: 0, letterSpacing: '2px', paddingBottom: '30px' }}>صـدرت هـذه الوثيـقـة رسـمـيـاً عـن طـريـق بـوابـة بـيـرق</p>
+
+                         {/* Title */}
+                         <h1 style={{ color: '#FFD600', fontFamily: 'Cairo, sans-serif', fontSize: '50px', fontWeight: '900', letterSpacing: '3px', margin: '0 0 10px 0', textShadow: '0 4px 25px rgba(255,214,0,0.5)', lineHeight: '1.2' }}>
+                            وســــام التـمـيـــز الشـرفـــي الأكـاديـمـي 🌟
+                         </h1>
+                         
+                         {/* Official Endorsement & Verification Footer */}
+                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '16px', padding: '16px 30px', backgroundColor: 'rgba(255,255,255,0.03)', borderRadius: '24px', border: '1.5px solid rgba(255,214,0,0.2)' }}>
+                            {/* Verification Code */}
+                            <div style={{ textAlign: 'right' }}>
+                               <span style={{ color: 'rgba(255,255,255,0.5)', fontFamily: 'Tajawal, sans-serif', fontSize: '15px', display: 'block' }}>رمز التوثيق الأكاديمي المعتمد</span>
+                               <span style={{ color: '#FFD600', fontFamily: 'monospace', fontSize: '18px', fontWeight: 'bold', letterSpacing: '1px' }}>{certSerial}</span>
+                            </div>
+
+                            {/* Center Stamp */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 16px', backgroundColor: 'rgba(255,214,0,0.1)', borderRadius: '50px', border: '1px solid rgba(255,214,0,0.3)' }}>
+                               <span style={{ color: '#FFD600', fontSize: '16px' }}>🛡️</span>
+                               <span style={{ color: '#ffffff', fontFamily: 'Cairo, sans-serif', fontSize: '15px', fontWeight: 'bold' }}>معتمد رسمياً • العام الدراسي 2025 - 2026</span>
+                            </div>
+
+                            {/* Signature */}
+                            <div style={{ textAlign: 'left' }}>
+                               <span style={{ color: 'rgba(255,255,255,0.5)', fontFamily: 'Tajawal, sans-serif', fontSize: '15px', display: 'block' }}>جهة الإصدار والاعتماد</span>
+                               <span style={{ color: '#ffffff', fontFamily: 'Cairo, sans-serif', fontSize: '16px', fontWeight: '900' }}>إدارة بوابة بيرق الأكاديمية</span>
+                            </div>
+                         </div>
                       </div>
                   </div>
               </div>
-            </div>
+           </div>
 
-            <div className="bg-gradient-to-br from-[#080d1d] to-[#101935] rounded-[2rem] p-6 border border-[#FFD600]/30 w-[340px] aspect-[9/16] flex flex-col relative overflow-hidden shadow-[0_20px_60px_rgba(255,214,0,0.2)] mx-auto my-auto mt-10 md:mt-auto shrink-0" style={{ direction: 'rtl' }}>
-               {/* Card Background Effects */}
-               <div className="absolute top-0 right-0 w-full h-full bg-[radial-gradient(ellipse_at_top,#FFD600_0%,transparent_60%)] opacity-10 pointer-events-none" />
-               <div className="absolute bottom-0 right-1/2 translate-x-1/2 w-48 h-12 bg-[#FFD600]/20 blur-3xl pointer-events-none" />
-               
-               {/* Header */}
-               <div className="flex justify-between items-start mt-2 mb-6 relative z-10 w-full flex-shrink-0 px-2">
-                   {/* Right: School */}
-                   <div className="flex items-center gap-2">
-                       <div className="w-10 h-10 rounded-xl bg-[#101935] border border-white/20 flex items-center justify-center relative overflow-hidden">
-                          <img src="/school-logos/logo1.jpg" alt="School" className="w-full h-full object-contain p-1.5" onError={(e) => {
-                             e.currentTarget.style.display = 'none';
-                             const pr = e.currentTarget.parentElement;
-                             if (pr) pr.innerHTML = '🏫';
-                          }} />
-                       </div>
-                       <div className="text-right">
-                          <h2 className="text-white font-black text-[10px] leading-tight max-w-[80px] break-words">{schoolLabel}</h2>
-                          <p className="text-white/40 font-bold text-[7px] mt-0.5">سجل التميز</p>
-                       </div>
-                   </div>
-                   
-                   {/* Left: Bayraq */}
-                   <div className="flex items-center gap-2 flex-row-reverse">
-                       <div className="w-10 h-10 rounded-xl bg-[#101935] border border-[#FFD600]/50 shadow-[0_0_15px_rgba(255,214,0,0.2)] flex items-center justify-center relative overflow-hidden">
-                          <img src="/logo.png" alt="Bayraq" className="w-full h-full object-contain p-1.5" onError={(e) => {
-                             e.currentTarget.style.display = 'none';
-                             const pr = e.currentTarget.parentElement;
-                             if (pr) pr.innerHTML = '👑';
-                          }} />
-                       </div>
-                       <div className="text-left">
-                          <h2 className="text-[#FFD600] font-black tracking-widest text-[10px] leading-tight">بوابة بيرق</h2>
-                          <p className="text-white/50 font-bold text-[8px] mt-0.5 tracking-widest text-center">GATE 6</p>
-                       </div>
-                   </div>
-               </div>
+           {/* ========================================================================= */}
+           {/* INTERACTIVE MODAL PREVIEW CARD (RESPONSIVE FOR ALL SCREEN SIZES)          */}
+           {/* ========================================================================= */}
+           <div className="bg-gradient-to-br from-[#060b1e] via-[#0b1636] to-[#040817] rounded-[2rem] p-5 sm:p-6 border-2 border-[#FFD600]/40 w-[330px] sm:w-[360px] aspect-[9/16] flex flex-col relative overflow-hidden shadow-[0_20px_60px_rgba(255,214,0,0.25)] mx-auto my-auto mt-4 md:mt-auto shrink-0" style={{ direction: 'rtl' }}>
+              {/* Card Background Effects */}
+              <div className="absolute top-0 right-0 w-full h-full bg-[radial-gradient(ellipse_at_top,#FFD600_0%,transparent_60%)] opacity-15 pointer-events-none" />
+              <div className="absolute bottom-0 right-1/2 translate-x-1/2 w-48 h-12 bg-[#FFD600]/25 blur-3xl pointer-events-none" />
+              
+              {/* Corner Ornaments in Preview */}
+              <div className="absolute top-3 right-3 w-4 h-4 border-t-2 border-r-2 border-[#FFD600] rounded-tr pointer-events-none" />
+              <div className="absolute top-3 left-3 w-4 h-4 border-t-2 border-l-2 border-[#FFD600] rounded-tl pointer-events-none" />
+              <div className="absolute bottom-3 right-3 w-4 h-4 border-b-2 border-r-2 border-[#FFD600] rounded-br pointer-events-none" />
+              <div className="absolute bottom-3 left-3 w-4 h-4 border-b-2 border-l-2 border-[#FFD600] rounded-bl pointer-events-none" />
 
-               {/* Student Identity */}
-               <div className="text-center mb-auto relative z-10 w-full mt-2 flex-shrink-0">
-                  <div className="mx-auto w-[100px] h-[100px] mb-3 rounded-full border-[5px] border-[#FFD600]/50 outline outline-[3px] outline-[#FFD600] shadow-[0_0_30px_rgba(255,214,0,0.4)] bg-cover bg-center flex items-center justify-center text-4xl bg-[#0a0f24]"
-                       style={{ backgroundImage: studentData?.avatar ? `url(${studentData.avatar})` : 'none' }}>
-                     {!studentData?.avatar && (academicProfile?.isEliteStudent ? '👑' : '👨‍🎓')}
+              {/* Header */}
+              <div className="flex justify-between items-start mt-1 mb-4 relative z-10 w-full flex-shrink-0 px-1 border-b border-[#FFD600]/20 pb-2">
+                  {/* Right: School */}
+                  <div className="flex items-center gap-2">
+                      <div className="w-9 h-9 rounded-xl bg-[#0d1738] border border-[#FFD600]/30 flex items-center justify-center relative overflow-hidden shadow-sm">
+                         <img src="/school-logos/logo1.jpg" alt="School" className="w-full h-full object-contain p-1" onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                            const pr = e.currentTarget.parentElement;
+                            if (pr) pr.innerHTML = '🏫';
+                         }} />
+                      </div>
+                      <div className="text-right">
+                         <h2 className="text-white font-black text-[10px] leading-tight max-w-[90px] truncate">{schoolLabel}</h2>
+                         <p className="text-[#FFD600] font-bold text-[7.5px] mt-0.5">سجل التميز الأكاديمي</p>
+                      </div>
                   </div>
-                  <h3 className="text-white font-extrabold text-[22px] drop-shadow-md break-words leading-tight">{studentName.replace(/^ولي أمر\s*/, '')}</h3>
-                  <p className="text-[#FFD600] font-black text-xs mt-1.5">{studentData?.grade || academicProfile?.levelData?.gradeTag}</p>
-               </div>
-               
-               {/* Badges Snapshot */}
-               <div className="grid grid-cols-2 gap-2 relative z-10 w-full mb-6 mt-auto">
-                  {allBadges.slice(0, 4).map((ach: any, idx: number) => (
-                     <div key={idx} className="flex flex-col items-center bg-[#151e32] rounded-xl py-2 px-1 border border-white/10 shadow-sm relative overflow-hidden">
-                        <div className="absolute top-0 right-0 h-full w-1 opacity-90 bg-[#FFD600] shadow-[0_0_5px_rgba(255,214,0,0.4)]" />
-                        <div className="w-8 h-8 flex items-center justify-center rounded-full bg-white/5 mb-1 border border-white/5" style={{ fontSize: '16px' }}>
-                           {ach.icon}
-                        </div>
-                        <div className="text-center w-full px-2">
-                           <div className="text-white font-black text-[9px] leading-tight truncate">{ach.badgeName}</div>
-                           <div className="text-white/50 font-bold text-[7px] truncate">{ach.subjName}</div>
-                        </div>
-                        <div className="mt-1 bg-[#FFD600]/10 border border-[#FFD600]/20 px-1.5 py-0.5 rounded flex items-center justify-center">
-                           <span className="text-[#FFD600] font-black text-[8px]">{ach.detail}</span>
-                        </div>
-                        {(ach.extraTags && ach.extraTags.length > 0) && (
-                           <div className="mt-1 flex flex-wrap justify-center gap-0.5">
-                              {ach.extraTags.map((t: string, i: number) => (
-                                <span key={i} className="text-[#10b981] font-black text-[7px] bg-emerald-500/10 px-1 rounded">{t.replace('🚀', '')}</span>
-                              ))}
-                           </div>
-                        )}
-                     </div>
-                  ))}
-               </div>
-               {allBadges.length > 4 && (
-                  <div className="w-full text-center relative z-10 -mt-4 mb-2">
-                     <span className="text-white/40 text-[9px] font-bold bg-white/5 px-3 py-1 rounded-full border border-white/10">+ {allBadges.length - 4} أخرى</span>
+                  
+                  {/* Left: Bayraq */}
+                  <div className="flex items-center gap-2 flex-row-reverse">
+                      <div className="w-9 h-9 rounded-xl bg-[#0d1738] border border-[#FFD600]/50 shadow-[0_0_15px_rgba(255,214,0,0.3)] flex items-center justify-center relative overflow-hidden">
+                         <img src="/logo.png" alt="Bayraq" className="w-full h-full object-contain p-1" onError={(e) => {
+                            e.currentTarget.style.display = 'none';
+                            const pr = e.currentTarget.parentElement;
+                            if (pr) pr.innerHTML = '👑';
+                         }} />
+                      </div>
+                      <div className="text-left">
+                         <h2 className="text-[#FFD600] font-black tracking-widest text-[10px] leading-tight">بوابة بيرق</h2>
+                         <p className="text-white/60 font-bold text-[7.5px] mt-0.5 tracking-widest text-center">GATE 6</p>
+                      </div>
                   </div>
-               )}
-               {allBadges.length === 0 && (
-                  <p className="text-white/40 font-bold text-xs text-center p-4 relative z-10">أوسمة الشرف في طريقها إليك...</p>
-               )}
+              </div>
 
-               {/* Prestigious Footer Signature */}
-               <div className="text-center border-t border-[#FFD600]/20 pt-3 w-full relative z-10 flex-shrink-0 mt-2 pb-1">
-                  <p className="text-[#FFD600] text-[11px] font-black tracking-widest uppercase mb-1">وسـام التمـيــز الشـرفــي</p>
-                  <p className="text-white/50 text-[6px] tracking-wide">صدرت هذه الوثيقة رسمياً عن طريق بوابة بيرق</p>
-               </div>
-            </div>
+              {/* Student Identity */}
+              <div className="text-center mb-auto relative z-10 w-full mt-1 flex-shrink-0">
+                 <div className="mx-auto w-[90px] h-[90px] mb-2 rounded-full border-[4px] border-[#FFD600] outline outline-[2px] outline-white/30 shadow-[0_0_25px_rgba(255,214,0,0.5)] bg-cover bg-center flex items-center justify-center text-4xl bg-[#0a0f24] relative"
+                      style={{ backgroundImage: studentData?.avatar ? `url(${studentData.avatar})` : 'none' }}>
+                    {!studentData?.avatar && (academicProfile?.isEliteStudent ? '👑' : '👨‍🎓')}
+                    <div className="absolute -top-2.5 bg-[#FFD600] text-black font-black text-[7px] px-2 py-0.5 rounded-full shadow-md">
+                       فارس التميز 🏆
+                    </div>
+                 </div>
+                 <h3 className="text-white font-extrabold text-[20px] drop-shadow-md break-words leading-tight">{cleanStudentName}</h3>
+                 <div className="inline-flex items-center gap-1.5 bg-[#FFD600]/10 border border-[#FFD600]/30 px-3 py-0.5 rounded-full mt-1">
+                    <span className="text-[#FFD600] text-[9px] font-black">{gradeLabel}</span>
+                 </div>
+              </div>
+              
+              {/* Badges Snapshot */}
+              <div className="grid grid-cols-2 gap-2 relative z-10 w-full mb-3 mt-auto">
+                 {allBadges.slice(0, 4).map((ach: any, idx: number) => (
+                    <div key={idx} className="flex flex-col items-center bg-[#0d1633] rounded-xl py-2 px-1 border border-[#FFD600]/25 shadow-md relative overflow-hidden">
+                       <div className="absolute top-0 right-0 h-full w-1 opacity-90 bg-[#FFD600] shadow-[0_0_6px_rgba(255,214,0,0.6)]" />
+                       <div className="w-7 h-7 flex items-center justify-center rounded-full bg-white/10 mb-1 border border-white/10" style={{ fontSize: '15px' }}>
+                          {ach.icon}
+                       </div>
+                       <div className="text-center w-full px-1.5">
+                          <div className="text-white font-black text-[9px] leading-tight truncate">{ach.badgeName}</div>
+                          <div className="text-white/60 font-bold text-[7.5px] truncate">{ach.subjName}</div>
+                       </div>
+                       <div className="mt-1 bg-[#FFD600]/15 border border-[#FFD600]/30 px-2 py-0.5 rounded-full flex items-center justify-center">
+                          <span className="text-[#FFD600] font-black text-[8px]">{ach.detail}</span>
+                       </div>
+                    </div>
+                 ))}
+              </div>
+              {allBadges.length > 4 && (
+                 <div className="w-full text-center relative z-10 -mt-2 mb-2">
+                    <span className="text-white/70 text-[8.5px] font-bold bg-[#FFD600]/10 px-3 py-0.5 rounded-full border border-[#FFD600]/30">+ {allBadges.length - 4} أوسمة شرف أخرى في الوثيقة الكاملة</span>
+                 </div>
+              )}
+              {allBadges.length === 0 && (
+                 <p className="text-white/40 font-bold text-xs text-center p-4 relative z-10">أوسمة الشرف في طريقها إليك...</p>
+              )}
 
-            <div className="mt-6 flex flex-col items-center gap-4 shrink-0 pb-10">
-               <div className="flex flex-col items-center gap-4 w-full max-w-xs px-4">
-                  {isGeneratingCard && (
-                     <div className="flex items-center gap-2 bg-amber-500/20 px-4 py-2 rounded-full border border-amber-500/30">
-                        <div className="w-4 h-4 border-2 border-white/20 border-t-[#FFD600] rounded-full animate-spin"></div>
-                        <span className="text-amber-400 font-extrabold text-[12px] tracking-wide">جاري التجهيز الاستثنائي...</span>
-                     </div>
-                  )}
+              {/* Prestigious Footer Signature */}
+              <div className="text-center border-t border-[#FFD600]/30 pt-2 w-full relative z-10 flex-shrink-0 mt-1 pb-1">
+                 <p className="text-[#FFD600] text-[10px] font-black tracking-wider uppercase mb-0.5">وسـام التمـيــز الشـرفــي 🌟</p>
+                 <p className="text-white/60 text-[7px] tracking-wide">وثيقة معتمدة رسمياً بدقة 4K فائقة الوضوح</p>
+              </div>
+           </div>
 
-                  {/* 1. Primary Direct High-Quality Share/Download Button */}
-                  <button 
-                    onClick={async () => {
-                       if (isGeneratingCard) return;
-                       setIsGeneratingCard(true);
-                       setGenerationSuccess(false);
-                       
-                       try {
-                          const node = document.getElementById(exportId);
-                          if (!node) return;
-                          
-                          const dataUrl = preGeneratedDataUrl || await toPng(node, {
-                             quality: 1,
-                             pixelRatio: 2, // Exceptional clarity
-                             backgroundColor: '#050816',
-                          });
-                          
-                          const fetchRes = await fetch(dataUrl);
-                          const blob = await fetchRes.blob();
-                          const file = new File([blob], `bayraq-achievement-${studentName.replace(/^ولي أمر\s*/, '').replace(/\s+/g, '-')}.png`, { type: 'image/png' });
-                          
-                          const triggerDownload = () => {
-                             const link = document.createElement('a');
-                             link.download = file.name;
-                             link.href = dataUrl;
-                             document.body.appendChild(link);
-                             link.click();
-                             document.body.removeChild(link);
-                             
-                             setGenerationSuccess(true);
-                             setTimeout(() => setGenerationSuccess(false), 4500);
-                          };
+           {/* ACTION BUTTONS */}
+           <div className="mt-5 flex flex-col items-center gap-3 shrink-0 pb-8">
+              <div className="flex flex-col items-center gap-3 w-full max-w-sm px-4">
+                 
+                 {/* High-Definition 4K Generation Badge */}
+                 <div className="flex items-center gap-1.5 text-emerald-400 bg-emerald-950/60 border border-emerald-500/30 px-3 py-1 rounded-full text-xs font-bold">
+                    <Sparkles size={13} className="text-emerald-400" />
+                    <span>توليد تلقائي بجودة 4K فائقة الدقة (Ultra HD)</span>
+                 </div>
 
-                          if (navigator.canShare && navigator.canShare({ files: [file] })) {
-                             try {
-                                await navigator.share({
-                                   files: [file],
-                                   title: 'بطاقة شرف التميز',
-                                   text: `أوسمة وإنجازات ${studentName.replace(/^ولي أمر\s*/, '')} من بوابة بيرق الأكاديمية`
-                                });
-                                setGenerationSuccess(true);
-                                setTimeout(() => setGenerationSuccess(false), 4500);
-                             } catch (shareErr: any) {
-                                console.warn('Share API failed, falling back to download:', shareErr);
-                                const errMsg = shareErr?.message || '';
-                                 const isAbort = 
-                                    shareErr?.name === 'AbortError' || 
-                                    errMsg.includes('aborted') || 
-                                    errMsg.includes('abort') || 
-                                    errMsg.includes('cancel') || 
-                                    errMsg.includes('without reason');
-                                 if (!isAbort) {
-                                   triggerDownload();
-                                }
-                             }
-                          } else {
-                             triggerDownload();
-                          }
-                       } catch (err) {
-                          console.error('Generation Failed:', err);
-                       } finally {
-                          setIsGeneratingCard(false);
-                       }
-                    }}
-                    disabled={isGeneratingCard || !preGeneratedDataUrl}
-                    className={`w-full py-4 bg-gradient-to-r ${!preGeneratedDataUrl ? 'from-amber-500/20 to-yellow-600/10 text-white/40 cursor-not-allowed border border-white/5' : 'from-[#FFD600] to-amber-500 hover:from-amber-400 hover:to-orange-500 text-black shadow-[0_0_30px_rgba(255,214,0,0.6)] hover:scale-105 active:scale-95'} transition-all font-black text-sm rounded-full flex items-center justify-center gap-3 relative overflow-hidden group`}
-                  >
-                     <div className="absolute inset-0 bg-white/20 translate-y-full group-hover:translate-y-0 transition-transform"></div>
-                     {!preGeneratedDataUrl ? (
-                        <div className="flex items-center gap-2">
-                           <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin"></div>
-                           <span className="text-white/50 text-[14px]">جاري تجهيز وثيقة الشرف...</span>
-                        </div>
-                     ) : generationSuccess ? (
-                        <><Download size={22} className="relative z-10" /><span className="relative z-10 text-[15px]">تم الحفظ والمشاركة بنجاح! 🎉</span></>
-                     ) : (
-                        <><Share2 size={22} className="relative z-10" /><span className="relative z-10 text-[15px]">حفظ ومشاركة البطاقة 📲</span></>
-                     )}
-                  </button>
-               </div>
-               <button
-                 onClick={onClose}
-                 className="text-white/50 hover:text-white font-bold text-xs flex items-center gap-1 transition-colors mt-2"
-               >
-                  إغلاق النافذة
-               </button>
-            </div>
-         </motion.div>
+                 {/* Primary Direct Ultra High-Quality Share/Download Button */}
+                 <button 
+                   onClick={async () => {
+                      if (isGeneratingCard) return;
+                      setIsGeneratingCard(true);
+                      setGenerationSuccess(false);
+                      
+                      try {
+                         const node = document.getElementById(exportId);
+                         if (!node) {
+                            throw new Error("Target card element not found");
+                         }
+                         
+                         // Generate at Ultra HD 2x scale (2160x3840+ px)
+                         const dataUrl = preGeneratedDataUrl || await toPng(node, {
+                            quality: 1.0,
+                            pixelRatio: 2.0, // Ultra HD Sharpness
+                            backgroundColor: '#040714',
+                            cacheBust: false,
+                         });
+                         
+                         const blob = quickDataURLtoBlob(dataUrl);
+                         const file = new File([blob], `bayraq-achievement-${cleanStudentName.replace(/\s+/g, '-')}.png`, { type: 'image/png' });
+                         
+                         const triggerDownload = () => {
+                            const link = document.createElement('a');
+                            link.download = file.name;
+                            link.href = dataUrl;
+                            document.body.appendChild(link);
+                            link.click();
+                            document.body.removeChild(link);
+                            
+                            setGenerationSuccess(true);
+                            setTimeout(() => setGenerationSuccess(false), 4000);
+                         };
+
+                         if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                            try {
+                               await navigator.share({
+                                  files: [file],
+                                  title: 'بطاقة شرف التميز الأكاديمي',
+                                  text: `أوسمة وإنجازات ${cleanStudentName} من بوابة بيرق الأكاديمية 📜✨`
+                               });
+                               setGenerationSuccess(true);
+                               setTimeout(() => setGenerationSuccess(false), 4000);
+                            } catch (shareErr: any) {
+                               console.warn('Share API failed, falling back to download:', shareErr);
+                               const errMsg = shareErr?.message || '';
+                               const isAbort = 
+                                  shareErr?.name === 'AbortError' || 
+                                  errMsg.includes('aborted') || 
+                                  errMsg.includes('abort') || 
+                                  errMsg.includes('cancel') || 
+                                  errMsg.includes('without reason');
+                               if (!isAbort) {
+                                  triggerDownload();
+                               }
+                            }
+                         } else {
+                            triggerDownload();
+                         }
+                      } catch (err) {
+                         console.error('Generation Failed:', err);
+                      } finally {
+                         setIsGeneratingCard(false);
+                      }
+                   }}
+                   disabled={isGeneratingCard}
+                   className={`w-full py-4 bg-gradient-to-r from-[#FFD600] via-amber-400 to-amber-500 hover:from-amber-300 hover:to-orange-500 text-black shadow-[0_0_35px_rgba(255,214,0,0.6)] hover:scale-105 active:scale-95 transition-all font-black text-sm rounded-full flex items-center justify-center gap-3 relative overflow-hidden group cursor-pointer`}
+                 >
+                    <div className="absolute inset-0 bg-white/25 translate-y-full group-hover:translate-y-0 transition-transform"></div>
+                    {isGeneratingCard ? (
+                       <div className="flex items-center gap-2">
+                          <div className="w-5 h-5 border-2 border-black/30 border-t-black rounded-full animate-spin"></div>
+                          <span className="text-black font-black text-[15px]">جاري معالجة وتوليد البطاقة بدقة فائقة... ⏳</span>
+                       </div>
+                    ) : generationSuccess ? (
+                       <><CheckCircle2 size={22} className="relative z-10 text-emerald-950" /><span className="relative z-10 text-[15px]">تم الحفظ والمشاركة بأعلى جودة! 🎉</span></>
+                    ) : (
+                       <><Share2 size={22} className="relative z-10" /><span className="relative z-10 text-[15px]">حفظ ومشاركة بطاقة الشرف بدقة 4K 📲</span></>
+                    )}
+                 </button>
+              </div>
+
+              <button
+                onClick={onClose}
+                className="text-white/60 hover:text-white font-bold text-xs flex items-center gap-1 transition-colors mt-2"
+              >
+                 إغلاق النافذة
+              </button>
+           </div>
+        </motion.div>
       )}
     </AnimatePresence>
   );

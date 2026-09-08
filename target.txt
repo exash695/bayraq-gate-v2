@@ -1,0 +1,26 @@
+      {/* Brand New Centered Modern Unified Tabs Selector */}
+      <div className="flex justify-center items-center pb-4 mb-6 border-b border-white/5">
+        <div className="flex bg-[#101935]/80 backdrop-blur-md p-1.5 rounded-[2rem] border border-white/5 shadow-2xl w-full max-w-md justify-stretch">
+          <button
+            onClick={() => { setMainTab('academic'); setSelectedList(null); }}
+            className={`flex-1 py-3 px-6 rounded-2xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
+              (mainTab as string) === 'academic'
+                ? 'bg-gradient-to-b from-blue-500 to-indigo-600 text-white shadow-lg'
+                : 'text-white/40 hover:text-white/80'
+            }`}
+          >
+            <Users size={14} />
+            شؤون ورصد الدرجات
+          </button>
+          <button
+            onClick={() => setMainTab('excellence')}
+            className={`flex-1 py-3 px-6 rounded-2xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
+              (mainTab as string) === 'excellence'
+                ? 'bg-gradient-to-r from-[#FFD600] to-amber-500 text-black shadow-lg border border-amber-400/20'
+                : 'text-white/40 hover:text-white/80'
+            }`}
+          >
+            <Star size={14} fill={(mainTab as string) === 'excellence' ? 'currentColor' : 'none'} />
+            سجل التميز والأوسمة 🏅
+          </button>
+        </div>

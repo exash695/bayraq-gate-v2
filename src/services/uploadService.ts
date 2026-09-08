@@ -4,132 +4,106 @@ export const uploadFileToR2 = async (
   onXhrCreated?: (xhr: XMLHttpRequest) => void
 ): Promise<string> => {
   try {
-    // 1. Get presigned URL
-    const presignRes = await fetch('/api/upload-url', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        fileName: file.name,
-        contentType: file.type || 'application/octet-stream'
-      })
-    });
-
-    if (!presignRes.ok) {
-      throw new Error('Failed to get upload URL');
+    // 1. First Priority: Check if Cloudflare R2 presigned URL is available
+    let presignData: any = null;
+    try {
+      const presignRes = await fetch('/api/upload-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName: file.name,
+          contentType: file.type || 'application/octet-stream'
+        })
+      });
+      if (presignRes.ok) {
+        presignData = await presignRes.json();
+      }
+    } catch (e) {
+      console.warn('[uploadService] Cloudflare R2 presign check skipped:', e);
     }
 
-    const presignData = await presignRes.json();
+    // 2. If R2 is explicitly configured with a real presigned URL, upload directly to R2
+    if (presignData && !presignData.local && presignData.presignedUrl && presignData.publicUrl) {
+      try {
+        return await new Promise<string>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          if (onXhrCreated) onXhrCreated(xhr);
 
-    // 2. Upload using XMLHttpRequest for progress
-    return await new Promise<string>((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      if (onXhrCreated) {
-        onXhrCreated(xhr);
+          xhr.upload.addEventListener('progress', (event) => {
+            if (event.lengthComputable && onProgress) {
+              const progress = Math.round((event.loaded / event.total) * 100);
+              onProgress(progress);
+            }
+          });
+
+          xhr.addEventListener('load', () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              resolve(presignData.publicUrl);
+            } else {
+              reject(new Error(`R2 direct upload failed with status ${xhr.status}`));
+            }
+          });
+
+          xhr.addEventListener('error', () => reject(new Error('Network error during R2 upload')));
+          xhr.addEventListener('abort', () => reject(new Error('Upload aborted')));
+
+          xhr.open('PUT', presignData.presignedUrl, true);
+          xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+          xhr.send(file);
+        });
+      } catch (r2Error) {
+        console.warn('[uploadService] R2 direct upload failed, proceeding to server proxy upload...', r2Error);
       }
+    }
 
-      xhr.upload.addEventListener('progress', (event) => {
+    // 3. Core Permanent Storage: Server-side proxy upload (/api/upload)
+    // Supports Cloudflare R2 on backend or local permanent /uploads storage
+    // Provides real-time progress events and permanent CDN/accessible URL
+    return await new Promise<string>((resolve, reject) => {
+      const fallbackXhr = new XMLHttpRequest();
+      if (onXhrCreated) onXhrCreated(fallbackXhr);
+
+      fallbackXhr.upload.addEventListener('progress', (event) => {
         if (event.lengthComputable && onProgress) {
           const progress = Math.round((event.loaded / event.total) * 100);
           onProgress(progress);
         }
       });
 
-      const performServerUploadFallback = () => {
-        const fallbackXhr = new XMLHttpRequest();
-        if (onXhrCreated) {
-          onXhrCreated(fallbackXhr);
-        }
-
-        fallbackXhr.upload.addEventListener('progress', (event) => {
-          if (event.lengthComputable && onProgress) {
-            const progress = Math.round((event.loaded / event.total) * 100);
-            onProgress(progress);
-          }
-        });
-
-        fallbackXhr.addEventListener('load', () => {
-          if (fallbackXhr.status >= 200 && fallbackXhr.status < 300) {
-            try {
-              const response = JSON.parse(fallbackXhr.responseText);
-              resolve(response.publicUrl || response.url);
-            } catch (e) {
-              reject(new Error('Invalid response from server'));
+      fallbackXhr.addEventListener('load', () => {
+        if (fallbackXhr.status >= 200 && fallbackXhr.status < 300) {
+          try {
+            const response = JSON.parse(fallbackXhr.responseText);
+            const resolvedUrl = response.publicUrl || response.url;
+            if (resolvedUrl && typeof resolvedUrl === 'string' && resolvedUrl.trim().length > 0) {
+              console.log('[uploadService] File upload succeeded. URL:', resolvedUrl);
+              resolve(resolvedUrl);
+            } else {
+              reject(new Error('لم يرجع الخادم رابطاً صالحاً للملف المرفوع'));
             }
-          } else {
-            try {
-              const errorResponse = JSON.parse(fallbackXhr.responseText);
-              reject(new Error(errorResponse.error || `Upload failed: ${fallbackXhr.status} ${fallbackXhr.statusText}`));
-            } catch (e) {
-              reject(new Error(`Failed to upload file: ${fallbackXhr.status} ${fallbackXhr.statusText}`));
-            }
-          }
-        });
-
-        fallbackXhr.addEventListener('error', () => {
-          reject(new Error('Network error occurred during server upload fallback'));
-        });
-
-        fallbackXhr.addEventListener('abort', () => {
-          reject(new Error('Upload aborted'));
-        });
-
-        const formData = new FormData();
-        formData.append('file', file);
-        fallbackXhr.open('POST', '/api/upload', true);
-        fallbackXhr.setRequestHeader('X-Frontend-Origin', window.location.origin);
-        fallbackXhr.send(formData);
-      };
-
-      xhr.addEventListener('load', () => {
-        if (xhr.status >= 200 && xhr.status < 300) {
-          if (presignData.local) {
-            try {
-              const response = JSON.parse(xhr.responseText);
-              resolve(response.publicUrl || response.url);
-            } catch (e) {
-              reject(new Error('Invalid response from server'));
-            }
-          } else {
-            resolve(presignData.publicUrl);
+          } catch (e) {
+            reject(new Error('استجابة غير صالحة من خادم الرفع'));
           }
         } else {
-          if (!presignData.local && presignData.presignedUrl) {
-            console.warn(`[uploadService] Presigned upload HTTP ${xhr.status}. Retrying via backend proxy...`);
-            performServerUploadFallback();
-          } else if (presignData.local) {
-            try {
-              const errorResponse = JSON.parse(xhr.responseText);
-              reject(new Error(errorResponse.error || `Upload failed: ${xhr.status} ${xhr.statusText}`));
-            } catch (e) {
-              reject(new Error(`Failed to upload file: ${xhr.status} ${xhr.statusText}`));
-            }
-          } else {
-            reject(new Error(`Failed to upload file: ${xhr.status} ${xhr.statusText}`));
+          try {
+            const errorResponse = JSON.parse(fallbackXhr.responseText);
+            reject(new Error(errorResponse.error || `فشل الرفع: رمز الخطأ ${fallbackXhr.status}`));
+          } catch (e) {
+            reject(new Error(`فشل رفع الملف إلى السحابة: رمز ${fallbackXhr.status}`));
           }
         }
       });
 
-      xhr.addEventListener('error', () => {
-        if (!presignData.local && presignData.presignedUrl) {
-          console.warn('[uploadService] Presigned direct upload encountered CORS/network error. Retrying via backend proxy...');
-          performServerUploadFallback();
-        } else {
-          reject(new Error('Network error occurred during upload'));
-        }
-      });
-      
-      xhr.addEventListener('abort', () => {
-        reject(new Error('Upload aborted'));
-      });
+      fallbackXhr.addEventListener('error', () => reject(new Error('خطأ في الاتصال بالشبكة أثناء رفع الملف')));
+      fallbackXhr.addEventListener('abort', () => reject(new Error('تم إلغاء رفع الملف')));
 
-      if (presignData.local) {
-        performServerUploadFallback();
-      } else {
-        xhr.open('PUT', presignData.presignedUrl, true);
-        xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
-        xhr.send(file);
-      }
+      const formData = new FormData();
+      formData.append('file', file);
+      fallbackXhr.open('POST', '/api/upload', true);
+      fallbackXhr.setRequestHeader('X-Frontend-Origin', window.location.origin);
+      fallbackXhr.send(formData);
     });
+
   } catch (error: any) {
     const errMsg = error?.message || '';
     const isAbort = error?.name === 'AbortError' || 
@@ -137,8 +111,9 @@ export const uploadFileToR2 = async (
                     errMsg.includes('abort') || 
                     errMsg.includes('cancel') || 
                     errMsg.includes('without reason');
+    
     if (!isAbort) {
-      console.error('Upload error:', error);
+      console.error('[uploadService] Error during upload:', error);
     }
     throw error;
   }

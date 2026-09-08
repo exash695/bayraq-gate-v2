@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Bell, Trash2, Clock, CheckCircle2, Unlock, MessageSquare, AlertTriangle, Swords, Shield, Crown, Megaphone } from 'lucide-react';
 import { AppNotification } from '../types';
@@ -26,6 +26,14 @@ export const NotificationDrawer = ({
 }: NotificationDrawerProps) => {
   const isAr = language === 'ar';
   const unreadCount = notifications.filter(n => !n.read).length;
+
+  useEffect(() => {
+    if (isOpen && unreadCount > 0) {
+      notifications.filter(n => !n.read).forEach(notif => {
+         if (notif.id) onMarkAsRead(notif.id);
+      });
+    }
+  }, [isOpen, unreadCount, notifications, onMarkAsRead]);
 
   const [confirmDelete, setConfirmDelete] = useState(false);
 

@@ -1,0 +1,379 @@
+{
+  "school_info": {
+    "id": "school_info",
+    "adminPhone": "12345",
+    "adminWhatsapp": "07800000000",
+    "communityLockAll": false,
+    "communityLockGrades": [
+      "1p"
+    ],
+    "storiesLock": true,
+    "loungeLock": true,
+    "schoolName": "بوابة بيرق التعليمية",
+    "academicYear": "2025-2026",
+    "gateStatus": "active",
+    "updatedAt": "2026-08-29T16:29:58.267Z"
+  },
+  "subject_mapping": {
+    "id": "subject_mapping",
+    "1p": [
+      {
+        "id": "quran",
+        "name": "القرآن الكريم والتربية الإسلامية"
+      },
+      {
+        "id": "arabic",
+        "name": "اللغة العربية"
+      },
+      {
+        "id": "english",
+        "name": "اللغة الإنكليزية"
+      },
+      {
+        "id": "math",
+        "name": "الرياضيات"
+      },
+      {
+        "id": "science",
+        "name": "العلوم"
+      }
+    ],
+    "2p": [
+      {
+        "id": "quran",
+        "name": "القرآن الكريم والتربية الإسلامية"
+      },
+      {
+        "id": "arabic",
+        "name": "اللغة العربية"
+      },
+      {
+        "id": "english",
+        "name": "اللغة الإنكليزية"
+      },
+      {
+        "id": "math",
+        "name": "الرياضيات"
+      },
+      {
+        "id": "science",
+        "name": "العلوم"
+      }
+    ],
+    "3p": [
+      {
+        "id": "quran",
+        "name": "القرآن الكريم والتربية الإسلامية"
+      },
+      {
+        "id": "arabic",
+        "name": "اللغة العربية"
+      },
+      {
+        "id": "english",
+        "name": "اللغة الإنكليزية"
+      },
+      {
+        "id": "math",
+        "name": "الرياضيات"
+      },
+      {
+        "id": "science",
+        "name": "العلوم"
+      }
+    ],
+    "4p": [
+      {
+        "id": "quran",
+        "name": "القرآن الكريم والتربية الإسلامية"
+      },
+      {
+        "id": "arabic",
+        "name": "اللغة العربية"
+      },
+      {
+        "id": "english",
+        "name": "اللغة الإنكليزية"
+      },
+      {
+        "id": "math",
+        "name": "الرياضيات"
+      },
+      {
+        "id": "science",
+        "name": "العلوم"
+      },
+      {
+        "id": "social",
+        "name": "الاجتماعيات"
+      }
+    ],
+    "5p": [
+      {
+        "id": "quran",
+        "name": "القرآن الكريم والتربية الإسلامية"
+      },
+      {
+        "id": "arabic",
+        "name": "اللغة العربية"
+      },
+      {
+        "id": "english",
+        "name": "اللغة الإنكليزية"
+      },
+      {
+        "id": "math",
+        "name": "الرياضيات"
+      },
+      {
+        "id": "science",
+        "name": "العلوم"
+      },
+      {
+        "id": "social",
+        "name": "الاجتماعيات"
+      }
+    ],
+    "6p": [
+      {
+        "id": "quran",
+        "name": "القرآن الكريم والتربية الإسلامية"
+      },
+      {
+        "id": "arabic",
+        "name": "اللغة العربية"
+      },
+      {
+        "id": "english",
+        "name": "اللغة الإنكليزية"
+      },
+      {
+        "id": "math",
+        "name": "الرياضيات"
+      },
+      {
+        "id": "science",
+        "name": "العلوم"
+      },
+      {
+        "id": "social",
+        "name": "الاجتماعيات"
+      }
+    ],
+    "1i": [
+      {
+        "id": "islamic",
+        "name": "التربية الإسلامية"
+      },
+      {
+        "id": "arabic",
+        "name": "اللغة العربية"
+      },
+      {
+        "id": "english",
+        "name": "اللغة الإنكليزية"
+      },
+      {
+        "id": "math",
+        "name": "الرياضيات"
+      },
+      {
+        "id": "science",
+        "name": "العلوم"
+      },
+      {
+        "id": "social",
+        "name": "الاجتماعيات"
+      },
+      {
+        "id": "computer",
+        "name": "الحاسوب"
+      }
+    ],
+    "2i": [
+      {
+        "id": "islamic",
+        "name": "التربية الإسلامية"
+      },
+      {
+        "id": "arabic",
+        "name": "اللغة العربية"
+      },
+      {
+        "id": "english",
+        "name": "اللغة الإنكليزية"
+      },
+      {
+        "id": "math",
+        "name": "الرياضيات"
+      },
+      {
+        "id": "science",
+        "name": "العلوم"
+      },
+      {
+        "id": "social",
+        "name": "الاجتماعيات"
+      },
+      {
+        "id": "computer",
+        "name": "الحاسوب"
+      }
+    ],
+    "3i": [
+      {
+        "id": "islamic",
+        "name": "التربية الإسلامية"
+      },
+      {
+        "id": "arabic",
+        "name": "اللغة العربية"
+      },
+      {
+        "id": "english",
+        "name": "اللغة الإنكليزية"
+      },
+      {
+        "id": "math",
+        "name": "الرياضيات"
+      },
+      {
+        "id": "physics",
+        "name": "الفيزياء"
+      },
+      {
+        "id": "chemistry",
+        "name": "الكيمياء"
+      },
+      {
+        "id": "biology",
+        "name": "الأحياء"
+      },
+      {
+        "id": "social",
+        "name": "الاجتماعيات"
+      }
+    ],
+    "4s": [
+      {
+        "id": "islamic",
+        "name": "التربية الإسلامية"
+      },
+      {
+        "id": "arabic",
+        "name": "اللغة العربية"
+      },
+      {
+        "id": "english",
+        "name": "اللغة الإنكليزية"
+      },
+      {
+        "id": "math",
+        "name": "الرياضيات"
+      },
+      {
+        "id": "physics",
+        "name": "الفيزياء"
+      },
+      {
+        "id": "chemistry",
+        "name": "الكيمياء"
+      },
+      {
+        "id": "biology",
+        "name": "الأحياء"
+      }
+    ],
+    "5s": [
+      {
+        "id": "islamic",
+        "name": "التربية الإسلامية"
+      },
+      {
+        "id": "arabic",
+        "name": "اللغة العربية"
+      },
+      {
+        "id": "english",
+        "name": "اللغة الإنكليزية"
+      },
+      {
+        "id": "math",
+        "name": "الرياضيات"
+      },
+      {
+        "id": "physics",
+        "name": "الفيزياء"
+      },
+      {
+        "id": "chemistry",
+        "name": "الكيمياء"
+      },
+      {
+        "id": "biology",
+        "name": "الأحياء"
+      }
+    ],
+    "6s": [
+      {
+        "id": "islamic",
+        "name": "التربية الإسلامية"
+      },
+      {
+        "id": "arabic",
+        "name": "اللغة العربية"
+      },
+      {
+        "id": "english",
+        "name": "اللغة الإنكليزية"
+      },
+      {
+        "id": "math",
+        "name": "الرياضيات"
+      },
+      {
+        "id": "physics",
+        "name": "الفيزياء"
+      },
+      {
+        "id": "chemistry",
+        "name": "الكيمياء"
+      },
+      {
+        "id": "biology",
+        "name": "الأحياء"
+      }
+    ]
+  },
+  "tuition": {
+    "id": "tuition",
+    "amount": 1000000,
+    "discountRates": {
+      "brother": 10,
+      "orphan": 50,
+      "martyr": 100,
+      "teacher_son": 25
+    }
+  },
+  "remote_control": {
+    "id": "remote_control",
+    "maintenanceMode": false,
+    "aiFeaturesEnabled": true,
+    "tickerEnabled": true
+  },
+  "seasonal_theme": {
+    "id": "seasonal_theme",
+    "seasonalTheme": "default",
+    "themeActive": false
+  },
+  "schools_config": {
+    "id": "schools_config",
+    "deletedSchoolIds": {
+      "type": "arrayUnion",
+      "value": [
+        "P1-G-6026"
+      ]
+    },
+    "updatedAt": "2026-08-27T08:28:17.827Z"
+  }
+}

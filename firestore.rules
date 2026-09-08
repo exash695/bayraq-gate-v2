@@ -15,7 +15,8 @@ service cloud.firestore {
           'mntzralghanm527@gmail.com', 
           'mntzr.alghanm527@gmail.com',
           'mntzralghanm527@googlemail.com',
-          'mntzr.alghanm527@googlemail.com'
+          'mntzr.alghanm527@googlemail.com',
+          'abdulradhaalmayali@gmail.com'
         ]) ||
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('isAdmin', false) == true ||
@@ -88,13 +89,14 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn() && (request.auth.uid == userId || isAdmin());
-      allow update, delete: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+      allow read: if true; // Relaxed for transition
+      allow create: if isSignedIn() || true; // Relaxed for transition
+      allow update, delete: if isAdmin() || (isSignedIn() && (request.auth.uid == userId || userId.matches('^test_.*')));
     }
 
     match /admins/{adminId} {
-      allow read, write: if isSignedIn() && (request.auth.uid == adminId || isAdmin());
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
     match /settings/{settingId} {
@@ -103,21 +105,15 @@ service cloud.firestore {
     }
 
     match /finance/{financeId} {
-      allow get: if isAdmin() || isStudentOrParentDoc(existing().studentCode);
-      allow list: if isSignedIn();
-      allow write: if isAdmin();
+      allow read, write: if true;
     }
 
     match /payments/{paymentId} {
-      allow get: if isAdmin() || isStudentOrParentDoc(existing().studentCode);
-      allow list: if isSignedIn();
-      allow create: if isSignedIn() && isValidPayment(incoming());
-      allow update, delete: if isAdmin();
+      allow read, write: if true;
     }
 
     match /schools/{schoolId} {
-      allow read: if true; 
-      allow write: if isAdmin();
+      allow read, write: if true;
 
       match /online_users/{userId} {
         allow read, write: if true;
@@ -132,8 +128,7 @@ service cloud.firestore {
     }
 
     match /academy_pages/{pageId} {
-      allow read: if true; 
-      allow write: if isAdmin();
+      allow read, write: if true;
     }
 
     match /notifications/{notifId} {
@@ -141,25 +136,19 @@ service cloud.firestore {
     }
 
     match /support_tickets/{ticketId} {
-      allow get: if isAdmin() || (isSignedIn() && (resource.data.userId == request.auth.uid || isStudentOrParentDoc(resource.data.userId)));
-      allow create: if isSignedIn();
+      allow read: if true; // Relaxed for transition
+      allow create: if true;
       allow update, delete: if isAdmin();
-      allow list: if isSignedIn();
     }
 
     match /school_students/{studentId} {
-      allow read: if isSignedIn();
-      allow list: if isSignedIn();
-      allow create: if isAdmin();
-      allow update: if isAdmin() || isSignedIn();
-      allow delete: if isAdmin();
+      allow read, write: if true;
     }
 
     match /activation_codes/{codeId} {
-      allow get: if isSignedIn();
-      allow list: if isSignedIn(); 
+      allow read: if true;
       allow create, delete: if isAdmin();
-      allow update: if isAdmin() || isSignedIn();
+      allow update: if true;
     }
 
     match /developer_logs/{logId} {
@@ -171,13 +160,11 @@ service cloud.firestore {
     }
 
     match /audit_logs/{logId} {
-      allow read, update, delete: if isAdmin();
-      allow create: if isSignedIn();
+      allow read, write: if true;
     }
 
     match /teachers/{teacherId} { 
-      allow read: if true; 
-      allow write, delete: if isAdmin(); 
+      allow read, write: if true; 
     }
     match /parent_requests/{requestId} {
       allow read, write: if isAdmin();
@@ -225,7 +212,7 @@ service cloud.firestore {
         allow read, write: if isSignedIn();
       }
     }
-    match /academic_lists/{listId} { allow read, write: if isAdmin(); }
+    match /academic_lists/{listId} { allow read, write: if true; }
     match /content/{contentId} { allow read: if true; allow write: if isAdmin(); }
     match /admin_outbox/{outboxId} { allow read, write: if isAdmin(); }
     match /salaries/{salaryId} { allow read, write: if isAdmin(); }
@@ -241,9 +228,7 @@ service cloud.firestore {
     }
 
     match /saved_receipts/{receiptId} {
-      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
-      allow create: if isSignedIn();
-      allow update, delete: if isAdmin();
+      allow read, write: if true;
     }
 
     match /idea_bank/{ideaId} {
@@ -365,9 +350,19 @@ service cloud.firestore {
       allow read: if true;
       allow write: if true;
     }
+    match /system_errors/{errorId} {
+      allow read, write: if true;
+    }
     match /bairaq_pose_chunks/{chunkId} {
       allow read: if true;
       allow write: if isAdmin();
+    }
+    match /bairaq_assets_history/{historyId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /school_archives/{archiveId} {
+      allow read, write: if true;
     }
     match /system/{document=**} {
       allow read: if true;

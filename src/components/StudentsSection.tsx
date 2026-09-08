@@ -4,14 +4,16 @@ import {
   Users, Search, CheckCircle2, GraduationCap, ArrowRight, Save, Printer, FileSpreadsheet, Send, Plus, X, RotateCcw, Trash2, Layout,
   DollarSign, CreditCard, TrendingUp, Star, BookOpen, Award, Camera, Filter, Share2
 } from 'lucide-react';
-import { collection, query, where, getDocs, updateDoc, doc, writeBatch } from 'firebase/firestore';
+import { collection, query, where, getDocs, updateDoc, doc, writeBatch } from '@/src/lib/firebase';
 import { db } from '../lib/firebase';
 import { ConfirmDialog } from './ConfirmDialog';
 import { SubjectManager } from './SubjectManager';
 import { SearchStudentsGlobal } from './SearchStudentsGlobal';
 import { ExcellenceShareModal } from './ExcellenceShareModal';
+import { BookDistributionManager } from './BookDistributionManager';
 import { getSubjectsForGrade, getGradePriority, calculateStudentFinancials, getPrefixForGrade, SUBJECT_BADGES_CONFIG, computeAcademicIdentity, OUTSTANDING_BADGES } from '../utils/studentUtils';
 import { logActivity } from '../utils/auditLogger';
+import { academicService } from '../services/academicService';
 
 export const PRIDE_PRESETS = [
   "نفخر بالتطور الكبير الذي حققه هذا الشهر في مهاراته ودروسه المتميزة. 🌟",
@@ -112,7 +114,7 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
   const [showSubjectManager, setShowSubjectManager] = useState(false);
   const [highlightedStudentId, setHighlightedStudentId] = useState<string | null>(null);
   const [selectedStage, setSelectedStage] = useState<'all' | 'primary' | 'intermediate' | 'high'>('all');
-  const [mainTab, setMainTab] = useState<'academic' | 'excellence'>('academic');
+  const [mainTab, setMainTab] = useState<'academic' | 'excellence' | 'books'>('academic');
   const [excellenceSearch, setExcellenceSearch] = useState('');
   const [activeExcellenceStudentCode, setActiveExcellenceStudentCode] = useState<string | null>(null);
   const [selectedExcellenceStage, setSelectedExcellenceStage] = useState<'all' | 'primary' | 'intermediate' | 'high'>('all');
@@ -125,6 +127,11 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
   const [customPrideMessage, setCustomPrideMessage] = useState<string>('');
   const [showCustomBadgeInput, setShowCustomBadgeInput] = useState(false);
   const [customBadgeTitle, setCustomBadgeTitle] = useState('');
+  const [studentDisplayLimit, setStudentDisplayLimit] = useState<number>(50);
+
+  useEffect(() => {
+    setStudentDisplayLimit(50);
+  }, [selectedExcellenceStage, selectedExcellenceClass, selectedExcellencePeriod, selectedExcellenceExemption, excellenceSearch]);
 
   const getListStage = (list: any): 'primary' | 'intermediate' | 'high' | '' => {
     const nameOrGrade = ((list?.name || '') + ' ' + (list?.students?.[0]?.grade || '')).toLowerCase();
@@ -214,8 +221,7 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
     // Sync to school_students directly for realtime Parent Portal updates
     try {
        const studentDocId = `${selectedList.schoolId}_${studentCode}`.replace(/\s+/g, '_');
-       const docRef = doc(db, 'school_students', studentDocId);
-       await updateDoc(docRef, updates);
+       await academicService.updateStudentDirect(studentDocId, updates);
     } catch (e) {
        console.warn("Could not sync direct update to school_students", e);
     }
@@ -514,8 +520,7 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
 
     try {
        const studentDocId = `${list.schoolId}_${studentCode}`.replace(/\s+/g, '_');
-       const docRef = doc(db, 'school_students', studentDocId);
-       await updateDoc(docRef, updates);
+       await academicService.updateStudentDirect(studentDocId, updates);
     } catch (e) {
        console.warn("Could not sync global update to school_students", e);
     }
@@ -994,13 +999,13 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
 
         {/* Brand New Centered Modern Unified Tabs Selector */}
         <div className="flex justify-center items-center pb-4 mb-6 border-b border-white/5">
-          <div className="flex bg-[#101935]/80 backdrop-blur-md p-1.5 rounded-[2rem] border border-white/5 shadow-2xl w-full max-w-md justify-stretch">
+          <div className="flex bg-[#101935]/80 backdrop-blur-md p-1.5 rounded-[2rem] border border-white/5 shadow-2xl w-full max-w-2xl justify-stretch flex-col md:flex-row gap-2">
             <button
               onClick={() => { setMainTab('academic'); setSelectedList(null); }}
-              className={`flex-1 py-3 px-6 rounded-2xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
+              className={`flex-1 py-3 px-4 rounded-2xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
                 (mainTab as string) === 'academic'
                   ? 'bg-gradient-to-b from-blue-500 to-indigo-600 text-white shadow-lg'
-                  : 'text-white/40 hover:text-white/80'
+                  : 'text-white/40 hover:text-white/80 hover:bg-white/5'
               }`}
             >
               <Users size={14} />
@@ -1008,14 +1013,25 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
             </button>
             <button
               onClick={() => setMainTab('excellence')}
-              className={`flex-1 py-3 px-6 rounded-2xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
+              className={`flex-1 py-3 px-4 rounded-2xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
                 (mainTab as string) === 'excellence'
                   ? 'bg-gradient-to-r from-[#FFD600] to-amber-500 text-black shadow-lg border border-amber-400/20'
-                  : 'text-white/40 hover:text-white/80'
+                  : 'text-white/40 hover:text-white/80 hover:bg-white/5'
               }`}
             >
               <Star size={14} fill={(mainTab as string) === 'excellence' ? 'currentColor' : 'none'} />
               سجل التميز والأوسمة 🏅
+            </button>
+            <button
+              onClick={() => { setMainTab('books'); setSelectedList(null); }}
+              className={`flex-1 py-3 px-4 rounded-2xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
+                (mainTab as string) === 'books'
+                  ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg border border-emerald-400/20'
+                  : 'text-white/40 hover:text-white/80 hover:bg-white/5'
+              }`}
+            >
+              <BookOpen size={14} />
+              جرد وتوزيع الكتب
             </button>
           </div>
         </div>
@@ -1638,7 +1654,7 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
                       </td>
                     </tr>
                  ) : (
-                    finalSortedStudents.slice(0, 30).map((stu: any, idx: number) => {
+                    finalSortedStudents.slice(0, studentDisplayLimit).map((stu: any, idx: number) => {
                        const isSelected = activeExcellenceStudentCode === (stu.student || stu.code);
                        const prof = stu._academicProfile;
                        const ex = stu._excellence;
@@ -1726,10 +1742,10 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
                              <td className="py-2 md:py-3 px-3 md:px-4 text-right pr-4 md:pr-10">
                                 <div className="flex flex-col gap-1 items-start">
                                     <span className="inline-block text-[9px] md:text-[10px] px-2 py-1 rounded-lg bg-black/40 border border-indigo-500/30 text-indigo-300 font-black shadow-inner truncate max-w-full">
-                                       {ex?.dynamicTitle || 'بطل التميز'}
+                                       {ex?.dynamicTitle || "بطل التميز"}
                                     </span>
                                     <span className="inline-block text-[9px] px-2 py-1 text-emerald-400 font-bold truncate max-w-full opacity-60">
-                                       {prof?.strongestSubjectMap?.name !== '---' ? prof.strongestSubjectMap.name : 'قيد التقييم'}
+                                       {prof?.strongestSubjectMap?.name !== "---" ? prof.strongestSubjectMap.name : "قيد التقييم"}
                                     </span>
                                 </div>
                              </td>
@@ -1745,19 +1761,74 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
     );
   }
 
+  if ((mainTab as string) === "books") {
+    return (
+      <div className="space-y-4 animate-in fade-in slide-in-from-left-4 duration-300 -mx-3 sm:mx-0 w-[calc(100%+1.5rem)] sm:w-full">
+        <div className="flex justify-center items-center pb-2 mb-2 px-3 sm:px-0">
+          <div className="flex bg-[#101935]/90 backdrop-blur-md p-1 rounded-2xl border border-white/10 shadow-2xl w-full max-w-2xl justify-stretch flex-col md:flex-row gap-1.5">
+            <button
+              onClick={() => { setMainTab("academic"); setSelectedList(null); }}
+              className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
+                (mainTab as string) === "academic"
+                  ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg"
+                  : "text-white/40 hover:text-white/80 hover:bg-white/5"
+              }`}
+            >
+              <Users size={14} />
+              شؤون ورصد الدرجات
+            </button>
+            <button
+              onClick={() => setMainTab("excellence")}
+              className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
+                (mainTab as string) === "excellence"
+                  ? "bg-gradient-to-r from-[#FFD600] to-amber-500 text-black shadow-lg border border-amber-400/20"
+                  : "text-white/40 hover:text-white/80 hover:bg-white/5"
+              }`}
+            >
+              <Star size={14} fill={(mainTab as string) === "excellence" ? "currentColor" : "none"} />
+              سجل التميز والأوسمة 🏅
+            </button>
+            <button
+              onClick={() => { setMainTab("books"); setSelectedList(null); }}
+              className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
+                (mainTab as string) === "books"
+                  ? "bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg border border-emerald-400/20"
+                  : "text-white/40 hover:text-white/80 hover:bg-white/5"
+              }`}
+            >
+              <BookOpen size={14} />
+              جرد وتوزيع الكتب
+            </button>
+          </div>
+        </div>
+        
+        <BookDistributionManager 
+          savedLists={savedLists}
+          onUpdateList={async (list) => {
+            if (onUpdateList) {
+              await onUpdateList(list);
+            }
+          }}
+          showToast={showToast}
+        />
+      </div>
+    );
+  }
+
   if (selectedList) {
     const subjects = getSubjectsForGrade(selectedList.students[0]?.grade || '', selectedList.removedSubjects || [], subjectMapping);
     
     return (
-      <div className="space-y-6 animate-in fade-in slide-in-from-left-4 duration-300 px-4 md:px-0">
-        <div className="flex justify-center items-center pb-4 mb-6 border-b border-white/5">
-          <div className="flex bg-[#101935]/80 backdrop-blur-md p-1.5 rounded-[2rem] border border-white/5 shadow-2xl w-full max-w-md justify-stretch">
+      <div className="space-y-4 animate-in fade-in slide-in-from-left-4 duration-300 -mx-3 sm:mx-0 w-[calc(100%+1.5rem)] sm:w-full">
+        {/* Top Centered Tabs Selector */}
+        <div className="flex justify-center items-center pb-2 mb-2 px-3 sm:px-0">
+          <div className="flex bg-[#101935]/90 backdrop-blur-md p-1 rounded-2xl border border-white/10 shadow-2xl w-full max-w-2xl justify-stretch flex-col md:flex-row gap-1.5">
             <button
               onClick={() => { setMainTab('academic'); setSelectedList(null); }}
-              className={`flex-1 py-3 px-6 rounded-2xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
+              className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
                 (mainTab as string) === 'academic'
-                  ? 'bg-gradient-to-b from-blue-500 to-indigo-600 text-white shadow-lg'
-                  : 'text-white/40 hover:text-white/80'
+                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg'
+                  : 'text-white/40 hover:text-white/80 hover:bg-white/5'
               }`}
             >
               <Users size={14} />
@@ -1765,110 +1836,117 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
             </button>
             <button
               onClick={() => setMainTab('excellence')}
-              className={`flex-1 py-3 px-6 rounded-2xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
+              className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
                 (mainTab as string) === 'excellence'
                   ? 'bg-gradient-to-r from-[#FFD600] to-amber-500 text-black shadow-lg border border-amber-400/20'
-                  : 'text-white/40 hover:text-white/80'
+                  : 'text-white/40 hover:text-white/80 hover:bg-white/5'
               }`}
             >
               <Star size={14} fill={(mainTab as string) === 'excellence' ? 'currentColor' : 'none'} />
               سجل التميز والأوسمة 🏅
             </button>
+            <button
+              onClick={() => { setMainTab('books'); setSelectedList(null); }}
+              className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
+                (mainTab as string) === 'books'
+                  ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg border border-emerald-400/20'
+                  : 'text-white/40 hover:text-white/80 hover:bg-white/5'
+              }`}
+            >
+              <BookOpen size={14} />
+              جرد وتوزيع الكتب
+            </button>
           </div>
         </div>
-        <div className="bg-gradient-to-br from-[#0f172a]/80 to-[#0a0f1d]/90 border-b md:border border-white/5 rounded-none md:rounded-[3rem] p-6 md:p-8 relative overflow-hidden flex flex-col gap-5 shadow-2xl -mx-4 md:mx-0">
-          <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-blue-500/50 to-transparent" />
-          
-          {/* Elegant Control Toolbar */}
-          <div className="flex flex-col gap-3 w-full">
-              <div className="bg-emerald-500/10 border border-emerald-500/20 px-4 py-2 rounded-xl flex items-center justify-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                <span className="text-emerald-400 text-[10px] font-black tracking-wide">
-                  يتم المزامنة التلقائية مع أولياء الأمور فورياً بعد النقر على حفظ التعديلات النهائية
-                </span>
-              </div>
-            <div className="flex flex-wrap items-center gap-3 w-full">
+
+        {/* Compact Edge-to-Edge Class Header & Live Status */}
+        <div className="bg-[#0b1226]/95 border-y sm:border border-white/10 sm:rounded-2xl p-4 sm:p-5 relative overflow-hidden shadow-2xl space-y-4">
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
               <motion.button 
-                whileHover={{ scale: 1.02, translateY: -2 }}
+                whileHover={{ x: -2 }}
+                whileTap={{ scale: 0.95 }}
+                onClick={() => setSelectedList(null)}
+                className="h-10 px-3 rounded-xl bg-white/5 hover:bg-white/10 text-white/70 hover:text-white flex items-center gap-2 text-xs font-black transition-all border border-white/10 shrink-0"
+              >
+                <ArrowRight size={16} />
+                <span>العودة للشعب</span>
+              </motion.button>
+              
+              <div>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="text-white font-black text-base sm:text-lg tracking-tight">{selectedList.name}</h3>
+                  <span className="bg-blue-500/10 text-blue-300 text-[10px] font-black px-2.5 py-0.5 rounded-full border border-blue-500/20">
+                    {displaySchoolName}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 mt-1">
+                  <span className="flex items-center gap-1.5 text-emerald-400 text-[10px] font-black bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                    متصل بالبث الفوري لأولياء الأمور
+                  </span>
+                  <span className="text-white/40 text-[10px] font-mono">• {selectedList.students.length} طالباً</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Action Buttons Toolbar */}
+            <div className="flex items-center gap-2.5">
+              <motion.button 
+                whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
                 onClick={() => setShowSubjectManager(true)}
-                className="flex-[0.5] min-w-[100px] flex items-center justify-center gap-2.5 h-14 rounded-2xl bg-white/[0.03] border border-white/10 hover:border-amber-500/40 hover:bg-amber-500/5 transition-all group relative overflow-hidden"
+                className="flex-1 sm:flex-initial h-11 px-4 rounded-xl bg-white/[0.04] border border-white/10 hover:border-amber-400/40 hover:bg-amber-400/10 text-amber-300 flex items-center justify-center gap-2 text-xs font-black transition-all"
               >
-                <div className="absolute inset-0 bg-gradient-to-br from-amber-500/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                <div className="w-8 h-8 rounded-lg bg-amber-500/10 flex items-center justify-center text-amber-500 group-hover:scale-110 transition-transform">
-                  <Layout size={18} />
-                </div>
-                <span className="text-white/80 group-hover:text-amber-500 text-[11px] font-black tracking-wide transition-colors">مواد المرحلة</span>
+                <Layout size={16} />
+                <span>مواد المرحلة</span>
               </motion.button>
 
               <motion.button 
                 disabled={isSaving}
-                whileHover={isSaving ? {} : { scale: 1.02, translateY: -2, boxShadow: '0 0 20px rgba(59, 130, 246, 0.3)' }}
+                whileHover={isSaving ? {} : { scale: 1.02 }}
                 whileTap={isSaving ? {} : { scale: 0.98 }}
                 onClick={saveBatchChanges}
-                className={`flex-[1.5] min-w-[140px] flex items-center justify-center gap-2.5 h-14 rounded-2xl text-white shadow-lg border border-white/10 transition-all font-black text-xs relative group overflow-hidden ${
-                  isSaving ? 'bg-blue-800 cursor-not-allowed opacity-80' : 'bg-gradient-to-br from-blue-600 to-indigo-700 shadow-blue-900/20 hover:brightness-110'
+                className={`flex-1 sm:flex-initial h-11 px-5 rounded-xl text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg transition-all border border-white/10 ${
+                  isSaving 
+                    ? 'bg-blue-900/80 cursor-not-allowed opacity-80' 
+                    : 'bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:brightness-110 shadow-blue-900/40'
                 }`}
               >
-                <div className="absolute inset-0 bg-gradient-to-tr from-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
                 {isSaving ? (
-                  <div className="w-5 h-5 border-2 border-white/20 border-t-white rounded-full animate-spin" />
+                  <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                 ) : (
-                  <Save size={18} className="group-hover:rotate-12 transition-transform" />
+                  <Save size={16} />
                 )}
-                <span>{isSaving ? 'جاري الحفظ...' : 'حفظ التعديلات النهائية'}</span>
+                <span>{isSaving ? 'جاري الحفظ...' : 'حفظ ومزامنة الدرجات'}</span>
               </motion.button>
             </div>
           </div>
 
-          {/* List Header Info */}
-          <div className="flex flex-wrap items-center justify-between border-t border-white/5 pt-4">
-            <div className="flex items-center gap-4">
-              <motion.button 
-                whileHover={{ x: -3 }}
-                onClick={() => setSelectedList(null)}
-                className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-white/30 hover:text-white hover:bg-white/10 transition-all border border-white/5"
-              >
-                <ArrowRight size={20} />
-              </motion.button>
-              <div>
-                <h3 className="text-white font-black text-lg tracking-tight leading-tight">{selectedList.name}</h3>
-                <div className="flex items-center gap-2 mt-0.5">
-                  <div className="flex items-center gap-1 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    <span className="text-emerald-500 text-[9px] font-black uppercase">نشط الآن</span>
-                  </div>
-                  <p className="text-white/20 text-[9px] font-bold tracking-widest uppercase">• {selectedList.students.length} طالباً في هذه القائمة</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Emergency Cleanup Tool moved to new location */}
-          </div>
-        </div>
-
-        {/* Period Selector Tabs */}
-        <div className="flex flex-col gap-4">
-            <div className="flex bg-[#101935] p-1.5 rounded-none md:rounded-[2rem] border-b md:border border-white/5 overflow-x-auto no-scrollbar -mx-4 md:mx-0">
+          {/* Periods Selector Pills */}
+          <div className="pt-2 border-t border-white/5">
+            <div className="flex gap-1.5 overflow-x-auto no-scrollbar py-1">
               {periods.map(p => (
                 <button
                   key={p.id}
-                onClick={() => setSelectedPeriod(p.id)}
-                className={`px-6 py-3 rounded-none md:rounded-xl text-[10px] md:text-xs font-black transition-all whitespace-nowrap min-w-[120px] ${
-                  selectedPeriod === p.id 
-                    ? 'bg-blue-600 text-white shadow-lg' 
-                    : 'text-white/30 hover:text-white hover:bg-white/5'
-                }`}
-              >
-                {p.name}
-              </button>
-            ))}
+                  onClick={() => setSelectedPeriod(p.id)}
+                  className={`px-3.5 py-2 rounded-xl text-[11px] font-black transition-all whitespace-nowrap shrink-0 border ${
+                    selectedPeriod === p.id 
+                      ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md border-blue-400/40' 
+                      : 'bg-black/40 text-white/50 hover:text-white hover:bg-white/5 border-white/5'
+                  }`}
+                >
+                  {p.name}
+                </button>
+              ))}
+            </div>
           </div>
 
+          {/* Restorable Removed Subjects (if any) */}
           {(selectedList.removedSubjects || []).length > 0 && (
-            <div className="flex items-center gap-3 px-5 py-4 bg-rose-500/5 rounded-none md:rounded-[2rem] border-y md:border border-rose-500/10 shadow-lg -mx-4 md:mx-0">
-              <span className="text-[10px] font-black text-rose-500 uppercase tracking-tighter shrink-0">مواد محذوفة:</span>
-              <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
+            <div className="flex items-center gap-2 p-2.5 bg-rose-500/10 rounded-xl border border-rose-500/20 text-rose-300 text-xs">
+              <span className="font-black shrink-0 text-[10px]">مواد محذوفة:</span>
+              <div className="flex gap-1.5 overflow-x-auto no-scrollbar">
                 {selectedList.removedSubjects.map((subId: string) => {
                   const subName = getSubjectsForGrade(selectedList.students[0]?.grade || '', [], subjectMapping).find(s => s.id === subId)?.name;
                   return (
@@ -1876,9 +1954,9 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
                       key={subId}
                       type="button"
                       onClick={(e) => restoreSubject(subId, e)}
-                      className="flex items-center gap-2 px-3 py-1.5 bg-rose-500/10 text-rose-500 rounded-xl text-[10px] font-black hover:bg-rose-500 hover:text-white transition-all border border-rose-500/10 whitespace-nowrap"
+                      className="flex items-center gap-1.5 px-2.5 py-1 bg-rose-500/20 text-rose-200 rounded-lg text-[10px] font-black hover:bg-rose-500 hover:text-white transition-all border border-rose-500/30 whitespace-nowrap"
                     >
-                      <RotateCcw size={12} strokeWidth={3} />
+                      <RotateCcw size={10} />
                       {subName}
                     </button>
                   );
@@ -1888,30 +1966,31 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
           )}
         </div>
 
-        <div className="bg-[#101935] border-y md:border border-white/5 md:rounded-[3rem] overflow-hidden shadow-2xl -mx-4 md:mx-0">
+        {/* Grades Table - Edge-to-Edge Slim Rows */}
+        <div className="bg-[#0b1226]/95 border-y sm:border border-white/10 sm:rounded-2xl overflow-hidden shadow-2xl">
           <div className="overflow-x-auto no-scrollbar">
             <table className="w-full text-center border-collapse">
               <thead>
-                <tr className="bg-white/5 border-b border-white/5">
-                  <th className="px-2 py-3 text-[10px] font-black text-white/60 text-right whitespace-nowrap uppercase tracking-widest">اسم الطالب</th>
+                <tr className="bg-white/5 border-b border-white/10 text-[10px] font-black text-white/70">
+                  <th className="px-3 py-3 text-right whitespace-nowrap">اسم الطالب</th>
                   {subjects.map(sub => (
-                    <th key={sub.id} className="px-2 py-3 text-[10px] font-black text-white/60 whitespace-nowrap">
-                      <div className="flex flex-col items-center gap-1">
-                        <span>{sub.name}</span>
+                    <th key={sub.id} className="px-1.5 py-3 whitespace-nowrap min-w-[54px]">
+                      <div className="flex flex-col items-center gap-0.5">
+                        <span className="text-[11px] text-white/90">{sub.name}</span>
                         {(sub.id === 'computer' || sub.id === 'french') && (
                           <button 
                             type="button"
                             onClick={(e) => removeSubject(sub.id, e)}
-                            className="p-1 text-rose-500 hover:text-white hover:bg-rose-500 rounded-md transition-all mt-1"
+                            className="text-[9px] text-rose-400 hover:text-white hover:bg-rose-500 p-0.5 rounded transition-all"
                             title="إخفاء المادة"
                           >
-                            <X size={12} />
+                            <X size={10} />
                           </button>
                         )}
                       </div>
                     </th>
                   ))}
-                  <th className="px-2 py-3 text-[10px] font-black text-white/60 whitespace-nowrap">التميز</th>
+                  <th className="px-3 py-3 whitespace-nowrap text-amber-400 w-16">التميز</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-white/5">
@@ -1920,148 +1999,167 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
                   .filter((stu: any) => stu.name.toLowerCase().includes(searchQuery.toLowerCase()))
                   .sort((a, b) => (a.name || '').localeCompare((b.name || ''), 'ar'))
                   .map((stu: any, idx: number) => {
-                  const studentKey = stu.student || stu.code || stu.id || `stu-${idx}`;
-                  const periodGrades = stu.grades?.[selectedPeriod] || {};
+                    const studentKey = stu.student || stu.code || stu.id || `stu-${idx}`;
+                    const periodGrades = stu.grades?.[selectedPeriod] || {};
 
-                  return (
-                    <tr 
-                      key={studentKey}
-                      id={`student-${stu.student || stu.code}`}
-                      className={`hover:bg-white/[0.03] transition-all group relative ${
-                        highlightedStudentId === (stu.student || stu.code) 
-                          ? 'bg-blue-500/10 ring-inset ring-2 ring-blue-500/50 z-10' 
-                          : ''
-                      }`}
-                    >
-                      <td className="px-2 py-2 text-right relative truncate">
-                        {highlightedStudentId === (stu.student || stu.code) && (
-                          <div className="absolute right-0 top-0 bottom-0 w-1 bg-blue-500 animate-pulse" />
-                        )}
-                        <div className="flex items-center gap-2">
-                          <button 
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setConfirmDelete({ 
-                                id: stu.student, 
-                                name: stu.name, 
-                                type: 'student',
-                                student: stu 
-                              });
-                            }}
-                            className="w-8 h-8 flex items-center justify-center text-rose-500 hover:text-white bg-rose-500/10 rounded-lg hover:bg-rose-500 transition-all border border-rose-500/10 flex-shrink-0"
-                            title="حذف الطالب"
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                          <div className="flex flex-col truncate">
-                             <span className="text-white text-[12px] font-black group-hover:text-amber-400 transition-colors truncate">{stu.name}</span>
-                          </div>
-                        </div>
-                      </td>
-                      {subjects.map(sub => (
-                        <td key={sub.id} className="px-2 py-4">
-                          <input 
-                            type="number"
-                            min="0"
-                            max="100"
-                            value={periodGrades[sub.id] || ''}
-                            onChange={(e) => {
-                              const val = Math.min(100, Math.max(0, parseInt(e.target.value) || 0));
-                              handleUpdateGrade(stu.student, sub.id, val);
-                            }}
-                            className={`w-10 h-8 bg-black/40 border border-white/10 rounded-lg text-center text-xs font-black outline-none focus:border-blue-500 focus:bg-black/60 transition-all ${
-                              (periodGrades[sub.id] || 0) < 50 ? 'text-rose-400' : 'text-emerald-400'
-                            }`}
-                          />
-                        </td>
-                      ))}
-                          <td className="px-6 py-4">
+                    return (
+                      <tr 
+                        key={studentKey}
+                        id={`student-${stu.student || stu.code}`}
+                        className={`hover:bg-white/[0.04] transition-colors group ${
+                          highlightedStudentId === (stu.student || stu.code) 
+                            ? 'bg-blue-500/15 ring-inset ring-1 ring-blue-400' 
+                            : ''
+                        }`}
+                      >
+                        {/* Student Name and Delete */}
+                        <td className="px-3 py-2 text-right">
+                          <div className="flex items-center gap-2">
+                            <span className="text-white/30 font-mono text-[10px] w-4 text-center shrink-0">{idx + 1}</span>
                             <button 
-                              onClick={async () => {
-                                try {
-                                  const newStatus = !stu.isTopStudent;
-                                  const periodName = periods.find(p => p.id === selectedPeriod)?.name || 'غير محدد';
-                                  const schoolId = selectedList.schoolId;
-                                  
-                                  // 1. Sync with Firestore users collection
-                                  const studentCode = stu.student || stu.code;
-                                  const usersRef = collection(db, 'users');
-                                  const safeStudentCode = studentCode || 'unassigned';
-                                  const q = query(usersRef, where('studentCode', '==', safeStudentCode));
-                                  const querySnapshot = await getDocs(q);
-                                  
-                                  if (!querySnapshot.empty) {
-                                    const userDoc = querySnapshot.docs[0];
-                                    await updateDoc(doc(db, 'users', userDoc.id), {
-                                      isTopStudent: newStatus,
-                                      topStudentPeriod: newStatus ? periodName : null,
-                                      schoolId: schoolId,
-                                      grade: stu.grade || selectedList.name.split('-')[0].trim() || userDoc.data().grade
-                                    });
-                                  }
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setConfirmDelete({ 
+                                  id: stu.student, 
+                                  name: stu.name, 
+                                  type: 'student',
+                                  student: stu 
+                                });
+                              }}
+                              className="w-6 h-6 flex items-center justify-center text-rose-400/40 hover:text-white bg-rose-500/5 hover:bg-rose-600 rounded-md transition-all shrink-0"
+                              title="حذف الطالب"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                            <span className="text-white text-xs font-black group-hover:text-amber-300 transition-colors truncate max-w-[180px]">
+                              {stu.name}
+                            </span>
+                          </div>
+                        </td>
 
-                                  // 2. Sync with school_students collection (Global)
-                                  const studentDocId = `${schoolId}_${studentCode}`.replace(/\s+/g, '_');
-                                  await updateDoc(doc(db, 'school_students', studentDocId), {
-                                    name: stu.fullName || stu.name,
+                        {/* Subject Grade Inputs */}
+                        {subjects.map(sub => {
+                          const currentVal = periodGrades[sub.id];
+                          const numVal = currentVal !== undefined && currentVal !== '' ? Number(currentVal) : null;
+                          const isFailed = numVal !== null && numVal < 50;
+
+                          return (
+                            <td key={sub.id} className="px-1 py-1.5">
+                              <input 
+                                type="number"
+                                min="0"
+                                max="100"
+                                value={currentVal ?? ''}
+                                onChange={(e) => {
+                                  const raw = e.target.value;
+                                  if (raw === '') {
+                                    handleUpdateGrade(stu.student, sub.id, 0);
+                                  } else {
+                                    const val = Math.min(100, Math.max(0, parseInt(raw) || 0));
+                                    handleUpdateGrade(stu.student, sub.id, val);
+                                  }
+                                }}
+                                className={`w-12 h-8 rounded-lg text-center text-xs font-black font-mono outline-none border transition-all ${
+                                  numVal === null
+                                    ? 'bg-black/30 border-white/10 text-white/40 focus:border-blue-400 focus:bg-black/60'
+                                    : isFailed
+                                    ? 'bg-rose-500/10 border-rose-500/30 text-rose-300 focus:border-rose-400 focus:bg-rose-500/20'
+                                    : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 focus:border-emerald-400 focus:bg-emerald-500/20'
+                                }`}
+                              />
+                            </td>
+                          );
+                        })}
+
+                        {/* Excellence Star Toggle */}
+                        <td className="px-2 py-1.5">
+                          <button 
+                            onClick={async () => {
+                              try {
+                                const newStatus = !stu.isTopStudent;
+                                const periodName = periods.find(p => p.id === selectedPeriod)?.name || 'غير محدد';
+                                const schoolId = selectedList.schoolId;
+                                
+                                // 1. Sync with Firestore users collection
+                                const studentCode = stu.student || stu.code;
+                                const usersRef = collection(db, 'users');
+                                const safeStudentCode = studentCode || 'unassigned';
+                                const q = query(usersRef, where('studentCode', '==', safeStudentCode));
+                                const querySnapshot = await getDocs(q);
+                                
+                                if (!querySnapshot.empty) {
+                                  const userDoc = querySnapshot.docs[0];
+                                  await updateDoc(doc(db, 'users', userDoc.id), {
                                     isTopStudent: newStatus,
                                     topStudentPeriod: newStatus ? periodName : null,
-                                    grade: stu.grade || selectedList.name.split('-')[0].trim(),
                                     schoolId: schoolId,
-                                    updatedAt: new Date().toISOString()
-                                  }).catch(e => console.warn("Could not find student in school_students, skipping global sync"));
-
-                                  // 3. Update local state
-                                  const updatedList = {
-                                    ...selectedList,
-                                    students: selectedList.students.map((s: any) => 
-                                      (s.id === stu.id || s.student === stu.student) 
-                                        ? { ...s, isTopStudent: newStatus, topStudentPeriod: newStatus ? periodName : null } 
-                                        : s
-                                    )
-                                  };
-                                  setSelectedList(updatedList);
-                                  if (onUpdateList) onUpdateList(updatedList);
-                                  
-                                  showToast(newStatus ? `تم منح الطالب وسام التميز (${periodName})` : 'تم سحب وسام التميز', 'success');
-                                } catch (err) {
-                                  console.error(err);
-                                  showToast('فشل تحديث حالة التميز العميقة', 'error');
+                                    grade: stu.grade || selectedList.name.split('-')[0].trim() || userDoc.data().grade
+                                  });
                                 }
-                              }}
-                              className={`w-12 h-12 rounded-2xl transition-all border flex items-center justify-center ${
-                                stu.isTopStudent 
-                                  ? 'bg-amber-400/20 border-amber-400/40 text-amber-400 shadow-[0_0_20px_rgba(251,191,36,0.3)] scale-110' 
-                                  : 'bg-white/5 border-white/10 text-white/10 hover:text-amber-400 hover:border-amber-400/30'
-                              }`}
-                              title={stu.isTopStudent ? 'إلغاء التميز' : 'منح التميز'}
-                            >
-                              <Star size={24} fill={stu.isTopStudent ? "currentColor" : "none"} />
-                            </button>
-                          </td>
+
+                                // 2. Sync with school_students collection (Global PostgreSQL)
+                                const studentDocId = `${schoolId}_${studentCode}`.replace(/\s+/g, '_');
+                                await academicService.updateStudentDirect(studentDocId, {
+                                  name: stu.fullName || stu.name,
+                                  isTopStudent: newStatus,
+                                  topStudentPeriod: newStatus ? periodName : null,
+                                  grade: stu.grade || selectedList.name.split('-')[0].trim(),
+                                  schoolId: schoolId,
+                                  updatedAt: new Date().toISOString()
+                                }).catch(e => console.warn("Could not find student in school_students, skipping global sync"));
+
+                                // 3. Update local state
+                                const updatedList = {
+                                  ...selectedList,
+                                  students: selectedList.students.map((s: any) => 
+                                    (s.id === stu.id || s.student === stu.student) 
+                                      ? { ...s, isTopStudent: newStatus, topStudentPeriod: newStatus ? periodName : null } 
+                                      : s
+                                  )
+                                };
+                                setSelectedList(updatedList);
+                                if (onUpdateList) onUpdateList(updatedList);
+                                
+                                showToast(newStatus ? `تم منح الطالب وسام التميز (${periodName})` : 'تم سحب وسام التميز', 'success');
+                              } catch (err) {
+                                console.error(err);
+                                showToast('فشل تحديث حالة التميز', 'error');
+                              }
+                            }}
+                            className={`w-9 h-8 mx-auto rounded-lg transition-all border flex items-center justify-center ${
+                              stu.isTopStudent 
+                                ? 'bg-[#FFD600]/20 border-[#FFD600]/50 text-[#FFD600] shadow-[0_0_12px_rgba(255,214,0,0.3)] scale-105' 
+                                : 'bg-white/5 border-white/10 text-white/20 hover:text-amber-300 hover:border-amber-300/30'
+                            }`}
+                            title={stu.isTopStudent ? 'إلغاء وسام التميز' : 'منح وسام التميز'}
+                          >
+                            <Star size={16} fill={stu.isTopStudent ? "currentColor" : "none"} />
+                          </button>
+                        </td>
                       </tr>
-                  );
-                })}
+                    );
+                  })}
               </tbody>
             </table>
           </div>
         </div>
 
-        <div className="flex gap-4">
-           <button 
-             onClick={printGrades}
-             className="flex-1 h-14 bg-white/5 border border-white/10 rounded-2xl text-white/40 text-xs font-black hover:bg-white/10 flex items-center justify-center gap-2 transition-all hover:scale-[1.02]"
-           >
-              <Printer size={18} />
-              طباعة كشف الدرجات
-           </button>
-           <button 
-             onClick={exportToDigitalList}
-             className="flex-1 h-14 bg-white/5 border border-white/10 rounded-2xl text-white/40 text-xs font-black hover:bg-white/10 flex items-center justify-center gap-2 transition-all hover:scale-[1.02]"
-           >
-              <FileSpreadsheet size={18} />
-              تنزيل اكسل
-           </button>
+        {/* Bottom Actions Bar */}
+        <div className="flex items-center gap-3 px-3 sm:px-0">
+          <button 
+            onClick={printGrades}
+            className="flex-1 h-12 bg-white/5 border border-white/10 rounded-xl text-white/60 text-xs font-black hover:bg-white/10 hover:text-white flex items-center justify-center gap-2 transition-all"
+          >
+            <Printer size={16} />
+            طباعة كشف الدرجات
+          </button>
+          <button 
+            onClick={exportToDigitalList}
+            className="flex-1 h-12 bg-white/5 border border-white/10 rounded-xl text-white/60 text-xs font-black hover:bg-white/10 hover:text-white flex items-center justify-center gap-2 transition-all"
+          >
+            <FileSpreadsheet size={16} />
+            تصدير كشف إكسل
+          </button>
         </div>
 
         {/* Subject Manager Modal */}
@@ -2071,25 +2169,32 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4"
+              className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
+              onClick={() => setShowSubjectManager(false)}
             >
               <motion.div
-                initial={{ scale: 0.9, y: 20 }}
+                initial={{ scale: 0.95, y: 15 }}
                 animate={{ scale: 1, y: 0 }}
-                exit={{ scale: 0.9, y: 20 }}
-                className="bg-[#101935] border border-white/10 rounded-[30px] p-8 w-full max-w-4xl max-h-[90vh] overflow-y-auto relative no-scrollbar shadow-2xl"
+                exit={{ scale: 0.95, y: 15 }}
+                onClick={(e) => e.stopPropagation()}
+                className="bg-[#101935] border border-white/10 rounded-3xl p-4 sm:p-8 w-full max-w-4xl max-h-[90vh] overflow-y-auto relative no-scrollbar shadow-2xl my-auto"
               >
-                <div className="sticky top-0 right-0 z-10 flex justify-end mb-4">
+                <div className="flex items-center justify-between pb-3 mb-4 border-b border-white/10 sticky top-0 bg-[#101935] z-30 pt-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
+                    <span className="text-white font-black text-sm">إدارة وتوزيع مواد المرحلة</span>
+                  </div>
                   <button 
                     onClick={() => setShowSubjectManager(false)}
-                    className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center text-white/40 hover:text-white transition-all transform hover:rotate-90"
+                    className="w-9 h-9 rounded-xl bg-white/10 hover:bg-rose-500/20 text-white/70 hover:text-rose-400 border border-white/10 hover:border-rose-500/30 flex items-center justify-center transition-all cursor-pointer"
+                    title="إغلاق النافذة"
                   >
-                    <X size={24} />
+                    <X size={18} />
                   </button>
                 </div>
                 <SubjectManager 
                   showToast={showToast} 
-                  initialStage={getStageKey(selectedList?.students[0]?.grade || '')} 
+                  onClose={() => setShowSubjectManager(false)}
                 />
               </motion.div>
             </motion.div>
@@ -2099,11 +2204,17 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
     );
   }
 
+  const getListStageName = (list: any): string => {
+    const stage = getListStage(list);
+    if (stage === 'primary') return 'ابتدائي';
+    if (stage === 'intermediate') return 'متوسط';
+    if (stage === 'high') return 'إعدادي';
+    return 'عام';
+  };
+
   const getGradeOrderValue = (list: any): number => {
-    // 1. Get the grade string
     let grade = list.students?.[0]?.grade || '';
     if (!grade) {
-      // Try to guess from list name
       const name = list.name || '';
       if (name.includes('ابتدائي') || name.includes('ابتدائ')) {
         grade = 'ابتدائي';
@@ -2126,12 +2237,9 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
       }
     }
     
-    // Normalize string to handle Arabic letters without/with Hamza-variants
-    const cleanGrade = (grade || '')
-      .replace(/[أإآ]/g, 'ا')
-      .trim();
+    const cleanGrade = (grade || '').replace(/[أإآ]/g, 'ا').trim();
 
-    // Primary
+    // Primary (Order 10-19)
     if (cleanGrade.includes('ابتدائي') || cleanGrade.includes('ابتدائ')) {
       if (cleanGrade.includes('اول')) return 10;
       if (cleanGrade.includes('ثاني')) return 11;
@@ -2141,14 +2249,14 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
       if (cleanGrade.includes('سادس')) return 15;
       return 19;
     }
-    // Intermediate
+    // Intermediate (Order 20-29)
     if (cleanGrade.includes('متوسط')) {
       if (cleanGrade.includes('اول')) return 20;
       if (cleanGrade.includes('ثاني')) return 21;
       if (cleanGrade.includes('ثالث')) return 22;
       return 29;
     }
-    // High / Preparatory
+    // High / Preparatory (Order 30-39)
     if (cleanGrade.includes('اعدادي') || cleanGrade.includes('علمي') || cleanGrade.includes('ادبي') || cleanGrade.includes('سادس') || cleanGrade.includes('خامس') || cleanGrade.includes('رابع')) {
       if (cleanGrade.includes('رابع')) return 30;
       if (cleanGrade.includes('خامس')) return 31;
@@ -2174,16 +2282,16 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
   });
 
   return (
-    <div className="space-y-6">
-      {/* Brand New Centered Modern Unified Tabs Selector */}
-      <div className="flex justify-center items-center pb-4 mb-6 border-b border-white/5">
-        <div className="flex bg-[#101935]/80 backdrop-blur-md p-1.5 rounded-[2rem] border border-white/5 shadow-2xl w-full max-w-md justify-stretch">
+    <div className="space-y-4 animate-in fade-in slide-in-from-left-4 duration-300 -mx-3 sm:mx-0 w-[calc(100%+1.5rem)] sm:w-full">
+      {/* Centered Modern Unified Tabs Selector */}
+      <div className="flex justify-center items-center pb-2 mb-2 px-3 sm:px-0">
+        <div className="flex bg-[#101935]/90 backdrop-blur-md p-1 rounded-2xl border border-white/10 shadow-2xl w-full max-w-2xl justify-stretch flex-col md:flex-row gap-1.5">
           <button
             onClick={() => { setMainTab('academic'); setSelectedList(null); }}
-            className={`flex-1 py-3 px-6 rounded-2xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
+            className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
               (mainTab as string) === 'academic'
-                ? 'bg-gradient-to-b from-blue-500 to-indigo-600 text-white shadow-lg'
-                : 'text-white/40 hover:text-white/80'
+                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg'
+                : 'text-white/40 hover:text-white/80 hover:bg-white/5'
             }`}
           >
             <Users size={14} />
@@ -2191,69 +2299,76 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
           </button>
           <button
             onClick={() => setMainTab('excellence')}
-            className={`flex-1 py-3 px-6 rounded-2xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
+            className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
               (mainTab as string) === 'excellence'
                 ? 'bg-gradient-to-r from-[#FFD600] to-amber-500 text-black shadow-lg border border-amber-400/20'
-                : 'text-white/40 hover:text-white/80'
+                : 'text-white/40 hover:text-white/80 hover:bg-white/5'
             }`}
           >
             <Star size={14} fill={(mainTab as string) === 'excellence' ? 'currentColor' : 'none'} />
             سجل التميز والأوسمة 🏅
           </button>
+          <button
+            onClick={() => { setMainTab('books'); setSelectedList(null); }}
+            className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
+              (mainTab as string) === 'books'
+                ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg border border-emerald-400/20'
+                : 'text-white/40 hover:text-white/80 hover:bg-white/5'
+            }`}
+          >
+            <BookOpen size={14} />
+            جرد وتوزيع الكتب
+          </button>
         </div>
       </div>
 
-      {/* Epic Educational Stages Filter Row */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 bg-[#101935]/30 p-2.5 md:p-4 rounded-none md:rounded-[2.5rem] border-y md:border border-white/5 shadow-inner -mx-4 md:mx-0">
+      {/* Educational Stages Filter Row - Primary First */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2.5 bg-[#0b1226]/80 p-3 sm:p-4 border-y sm:border border-white/10 sm:rounded-2xl shadow-xl">
         {[
-          { id: 'all', name: 'كافة الوجبات', description: 'الصف الأول الابتدائي إلى السادس الإعدادي', icon: Users, color: 'from-blue-500/10 to-indigo-500/10', borderColor: 'border-blue-500/20', textColor: 'text-blue-400', glowColor: 'rgba(59, 130, 246, 0.4)' },
-          { id: 'primary', name: 'المرحلة الابتدائية', description: 'من الصف الأول حتى السادس الابتدائي', icon: BookOpen, color: 'from-amber-500/10 to-orange-500/10', borderColor: 'border-amber-500/20', textColor: 'text-amber-400', glowColor: 'rgba(212, 175, 55, 0.4)' },
-          { id: 'intermediate', name: 'المرحلة المتوسطة', description: 'من الأول متوسط حتى الثالث المتوسط', icon: Award, color: 'from-emerald-500/10 to-teal-500/10', borderColor: 'border-emerald-500/20', textColor: 'text-emerald-400', glowColor: 'rgba(16, 185, 129, 0.4)' },
-          { id: 'high', name: 'المرحلة الإعدادية', description: 'من الرابع الإعدادي حتى السادس الإعدادي', icon: GraduationCap, color: 'from-purple-500/10 to-pink-500/10', borderColor: 'border-purple-500/20', textColor: 'text-purple-400', glowColor: 'rgba(168, 85, 247, 0.4)' }
+          { id: 'primary', name: 'المرحلة الابتدائية', description: 'من الأول حتى السادس الابتدائي', icon: BookOpen, color: 'from-amber-500/10 to-orange-500/10', borderColor: 'border-amber-500/30', textColor: 'text-amber-400', glowColor: 'rgba(212, 175, 55, 0.4)' },
+          { id: 'intermediate', name: 'المرحلة المتوسطة', description: 'من الأول حتى الثالث المتوسط', icon: Award, color: 'from-emerald-500/10 to-teal-500/10', borderColor: 'border-emerald-500/30', textColor: 'text-emerald-400', glowColor: 'rgba(16, 185, 129, 0.4)' },
+          { id: 'high', name: 'المرحلة الإعدادية', description: 'من الرابع حتى السادس الإعدادي', icon: GraduationCap, color: 'from-purple-500/10 to-pink-500/10', borderColor: 'border-purple-500/30', textColor: 'text-purple-400', glowColor: 'rgba(168, 85, 247, 0.4)' },
+          { id: 'all', name: 'كافة المراحل', description: 'عرض جميع الشعب الدراسية', icon: Users, color: 'from-blue-500/10 to-indigo-500/10', borderColor: 'border-blue-500/30', textColor: 'text-blue-400', glowColor: 'rgba(59, 130, 246, 0.4)' }
         ].map((stg) => {
           const StageIcon = stg.icon;
           const isSelected = selectedStage === stg.id;
           return (
             <motion.button
               key={stg.id}
-              whileHover={{ scale: 1.03, y: -2 }}
+              whileHover={{ scale: 1.02, y: -1 }}
               whileTap={{ scale: 0.98 }}
               onClick={() => setSelectedStage(stg.id as any)}
-              className={`relative flex flex-col items-center justify-center p-4 rounded-2xl md:rounded-[2rem] text-center border transition-all duration-300 overflow-hidden cursor-pointer group ${
+              className={`relative flex items-center gap-3 p-3 rounded-xl text-right border transition-all duration-200 overflow-hidden cursor-pointer group ${
                 isSelected 
-                  ? `bg-gradient-to-br ${stg.color} ${stg.borderColor} text-white shadow-[0_8px_30px_${stg.glowColor}] ring-1 ring-white/15` 
-                  : 'bg-[#101935]/40 backdrop-blur-xl border-white/5 text-white/40 hover:text-white hover:bg-[#101935] hover:border-white/10'
+                  ? `bg-gradient-to-br ${stg.color} ${stg.borderColor} text-white shadow-lg ring-1 ring-white/10` 
+                  : 'bg-[#101935]/40 border-white/5 text-white/50 hover:text-white hover:bg-[#101935] hover:border-white/10'
               }`}
             >
-              {isSelected && (
-                <div className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-transparent via-white/50 to-transparent animate-pulse" />
-              )}
-              
-              <div className={`w-11 h-11 rounded-xl flex items-center justify-center mb-2.5 transition-all duration-300 ${
+              <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 transition-all ${
                 isSelected 
-                  ? `${stg.textColor} bg-white/10 scale-110 shadow-[0_4px_12px_rgba(255,255,255,0.05)]` 
-                  : 'bg-white/5 text-white/30 group-hover:scale-105 group-hover:bg-white/10'
+                  ? `${stg.textColor} bg-white/10 scale-105` 
+                  : 'bg-white/5 text-white/30 group-hover:text-white'
               }`}>
-                <StageIcon size={20} className="transition-transform duration-300 group-hover:rotate-6" />
+                <StageIcon size={18} />
               </div>
               
-              <h4 className={`text-xs md:text-[13px] font-black tracking-tight transition-colors ${
-                isSelected ? 'text-amber-400 font-extrabold' : 'text-white/80'
-              }`}>
-                {stg.name}
-              </h4>
-              
-              <p className={`text-[9px] mt-1 font-bold transition-colors hidden md:block max-w-[150px] mx-auto ${
-                isSelected ? 'text-white/60' : 'text-white/20'
-              }`}>
-                {stg.description}
-              </p>
+              <div className="min-w-0">
+                <h4 className={`text-xs font-black truncate ${
+                  isSelected ? 'text-white' : 'text-white/80'
+                }`}>
+                  {stg.name}
+                </h4>
+                <p className="text-[9px] text-white/40 truncate hidden sm:block">
+                  {stg.description}
+                </p>
+              </div>
             </motion.button>
           );
         })}
       </div>
 
-      <div className="relative">
+      {/* Global Students Search */}
+      <div className="px-3 sm:px-0">
         <SearchStudentsGlobal 
           savedLists={savedLists}
           onSelectStudent={handleSelectStudent}
@@ -2262,63 +2377,108 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
         />
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      {/* Class Cards Grid - Slim Edge-to-Edge Design */}
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3 px-3 sm:px-0">
         {filteredLists.length === 0 ? (
-          <div className="col-span-2 p-12 text-center text-white/10 font-bold border-2 border-dashed border-white/5 rounded-none md:rounded-[3rem] -mx-4 md:mx-0">
-             لا توجد قوائم طلاب محفوظة حالياً
+          <div className="col-span-full p-12 text-center text-white/20 font-bold border border-dashed border-white/10 rounded-2xl">
+             لا توجد قوائم طلاب مسجلة لهذه المرحلة
           </div>
         ) : (
-          filteredLists.map((list) => (
-            <div 
-              key={list.id} 
-              onClick={() => setSelectedList(list)}
-              className="bg-[#101935] p-5 rounded-none md:rounded-[3rem] -mx-4 md:mx-0 border-y md:border border-white/5 hover:border-blue-500/50 transition-all cursor-pointer group relative overflow-hidden shadow-2xl"
-            >
-              <div className="absolute top-0 right-0 w-32 h-32 bg-blue-600/5 rounded-full -translate-y-16 -translate-x-16 group-hover:bg-blue-600/10 transition-all" />
-              
-              <div className="flex items-start justify-between relative z-10">
-                <div className="flex gap-4">
-                  <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center text-white/20 group-hover:text-blue-400 transition-all">
-                    <Users size={24} />
-                  </div>
-                  <div>
-                    <h4 className="text-white font-black text-sm group-hover:text-blue-400 transition-colors uppercase tracking-tight">{list.name}</h4>
-                    <span className="text-white/20 text-[10px] uppercase tracking-widest">{list.date}</span>
-                  </div>
-                </div>
-                <button 
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setConfirmDelete({ id: list.id, name: list.name, type: 'list' });
-                  }}
-                  className="w-12 h-12 flex items-center justify-center text-rose-500 hover:text-rose-400 bg-rose-500/10 rounded-xl hover:bg-rose-500 hover:text-white transition-all border border-rose-500/20"
-                  title="حذف القائمة نهائياً"
-                >
-                  <Trash2 size={24} />
-                </button>
-              </div>
+          filteredLists.map((list) => {
+            const totalStudents = list.students.length;
+            const topStudentsCount = list.students.filter((s: any) => s.isTopStudent).length;
+            const studentsWithGrades = list.students.filter((s: any) => {
+              if (!s.grades) return false;
+              return Object.values(s.grades).some((p: any) => p && Object.keys(p).length > 0);
+            }).length;
+            const gradeCompletion = totalStudents > 0 ? Math.round((studentsWithGrades / totalStudents) * 100) : 0;
 
-              <div className="mt-6 flex items-center justify-between">
-                <div className="flex flex-col gap-1">
-                  <span className="text-white/40 text-[9px] font-black">الطلاب المسجلين</span>
-                  <span className="text-white font-black text-lg">{list.students.length}</span>
+            return (
+              <div 
+                key={list.id} 
+                onClick={() => setSelectedList(list)}
+                className="bg-[#0b1226]/90 hover:bg-[#101938] p-4 rounded-2xl border border-white/10 hover:border-blue-500/40 transition-all cursor-pointer group relative overflow-hidden shadow-xl flex flex-col justify-between gap-3.5"
+              >
+                {/* Header Row */}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500/20 to-indigo-500/10 border border-blue-500/30 flex items-center justify-center text-blue-400 group-hover:scale-105 transition-all shrink-0">
+                      <Users size={18} />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-white font-black text-xs sm:text-sm group-hover:text-blue-400 transition-colors truncate">{list.name}</h4>
+                        <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-blue-500/10 text-blue-300 border border-blue-500/20 shrink-0">
+                          {getListStageName(list)}
+                        </span>
+                      </div>
+                      <span className="text-white/40 text-[10px] font-mono block mt-0.5">{list.date || 'تم الإنشاء'}</span>
+                    </div>
+                  </div>
+
+                  <button 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setConfirmDelete({ id: list.id, name: list.name, type: 'list' });
+                    }}
+                    className="w-8 h-8 flex items-center justify-center text-rose-400/40 hover:text-white bg-rose-500/5 hover:bg-rose-600 rounded-lg transition-all shrink-0"
+                    title="حذف القائمة نهائياً"
+                  >
+                    <Trash2 size={14} />
+                  </button>
                 </div>
-                <div className="flex flex-col items-end gap-1">
-                  <span className="text-white/40 text-[9px] font-black">حالة الدرجات</span>
-                  <span className="px-3 py-1 bg-emerald-500/10 text-emerald-500 text-[8px] font-black rounded-lg border border-emerald-500/20">
-                     جاهزة للإرسال
+
+                {/* Progress & Stat Strip */}
+                <div className="bg-black/30 rounded-xl p-2.5 border border-white/5 space-y-2">
+                  <div className="flex items-center justify-between text-[10px] font-black">
+                    <div className="flex items-center gap-1.5 text-white/70">
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
+                      <span>نسبة رصد الدرجات</span>
+                    </div>
+                    <span className="text-blue-400 font-mono font-black">{gradeCompletion}%</span>
+                  </div>
+                  
+                  <div className="w-full h-1.5 bg-white/5 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-gradient-to-r from-blue-500 to-indigo-400 transition-all duration-500 rounded-full"
+                      style={{ width: `${gradeCompletion}%` }}
+                    />
+                  </div>
+                  
+                  <div className="grid grid-cols-3 gap-1.5 pt-1 border-t border-white/5 text-center">
+                    <div className="flex flex-col">
+                      <span className="text-white/40 text-[8px] font-black">الطلاب</span>
+                      <span className="text-white font-black text-xs font-mono">{totalStudents}</span>
+                    </div>
+                    <div className="flex flex-col border-x border-white/5">
+                      <span className="text-white/40 text-[8px] font-black">المتميزين</span>
+                      <span className="text-amber-400 font-black text-xs font-mono">⭐ {topStudentsCount}</span>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-white/40 text-[8px] font-black">الحالة</span>
+                      <span className="text-emerald-400 text-[9px] font-black">
+                        {gradeCompletion === 100 ? 'مكتمل' : gradeCompletion > 0 ? 'قيد الرصد' : 'جديد'}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Action Footer */}
+                <div className="pt-1 flex items-center justify-between border-t border-white/5 text-[#FFD600] group-hover:text-white transition-colors">
+                  <span className="text-[10px] font-black flex items-center gap-1.5">
+                    فتح سجل الرصد والمزامنة
+                    <ArrowRight size={12} className="transform group-hover:translate-x-1 transition-transform" />
+                  </span>
+                  <span className="text-white/30 text-[9px] group-hover:text-blue-400 transition-colors font-mono truncate max-w-[120px]">
+                    {list.schoolName || ''}
                   </span>
                 </div>
               </div>
-
-              <div className="mt-6 pt-4 border-t border-white/5 flex items-center justify-between">
-                 <span className="text-[#FFD600] text-[10px] font-black uppercase tracking-tight">اضغط لرصد الدرجات</span>
-                 <ArrowRight size={16} className="text-white/10 group-hover:text-white transition-all transform group-hover:translate-x-1" />
-              </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
+
       <ConfirmDialog 
         isOpen={!!confirmDelete}
         onClose={() => setConfirmDelete(null)}
@@ -2385,7 +2545,6 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
         title="تأكيد الحذف"
         message={`هل أنت متأكد من حذف ${confirmDelete?.type === 'list' ? 'القائمة ' + confirmDelete.name : 'الطالب ' + confirmDelete?.student?.name}؟`}
       />
-
     </div>
   );
 };

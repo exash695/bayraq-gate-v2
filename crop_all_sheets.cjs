@@ -114,7 +114,7 @@ Return ONLY a valid JSON array, surrounded by \`\`\`json and \`\`\`.
   console.log('📡 Sending request to Gemini to locate poses...');
   try {
     const response = await client.models.generateContent({
-      model: 'gemini-2.5-flash',
+      model: 'gemini-3.7-flash',
       contents: [
         {
           inlineData: {

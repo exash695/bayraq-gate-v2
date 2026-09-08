@@ -1,15 +1,19 @@
-import React, { useState, useEffect } from 'react';
-import { collection, query, getDocs, updateDoc, doc, deleteDoc, addDoc, serverTimestamp, orderBy, where, getDoc, getDocFromCache, writeBatch, onSnapshot, setDoc, limit, startAfter, getCountFromServer } from 'firebase/firestore';
+import { safeStorage } from "../lib/storage";
+import React, { useState, useEffect, useMemo } from 'react';
+import { collection, query, getDocs, updateDoc, doc, deleteDoc, addDoc, serverTimestamp, orderBy, where, getDoc, getDocFromCache, writeBatch, onSnapshot, setDoc, limit, startAfter, getCountFromServer } from '@/src/lib/firebase';
 import { db, auth } from '../lib/firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { academicService } from '../services/academicService';
+import { staffService } from '../services/staffService';
 import { Shield, Lock, Unlock, CheckCircle, Search, Mail, Trash2, Activity, Filter, AlertTriangle, MessageSquare, Pin, MessageSquareText, Ban, Star, Users, User, UserCircle, ShieldCheck, RotateCcw, PauseCircle, Clock, Key, GraduationCap, Briefcase, Heart, Contact, Smartphone, LogOut, Bell, UserCheck, BarChart2, Plus, Sparkles, ThumbsUp, MessageCircle, Share2, School } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { logActivity } from '../utils/auditLogger';
 import { ConfirmDialog } from './ConfirmDialog';
 import { getPrefixForGrade, getSanitizedSubCode } from '../utils/studentUtils';
 import { subscribeMultiQuery } from '../utils/firestoreSubscriptions';
 import { usePortalData } from '../hooks/usePortalData';
 import { mergeDashboardData } from '../lib/dataMerger';
+import { realtimeManager } from '../lib/realtimeManager';
 
 interface UserData {
   id: string;
@@ -121,18 +125,37 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
   const [selectedStatus, setSelectedStatus] = useState('all');
 
   const handleSaveContactNumbers = async () => {
+    if (!selectedSchoolId) return;
     setIsSavingPhone(true);
     try {
-      await setDoc(doc(db, 'settings', 'school_info'), {
+      await academicService.updateSchoolSettings(selectedSchoolId, {
         adminPhone,
         adminWhatsapp
-      }, { merge: true });
+      });
       showToast('تم الحفظ بنجاح', 'success');
     } catch (e) {
       console.error("Error saving phone numbers:", e);
       showToast('حدث خطأ أثناء الحفظ', 'error');
     } finally {
       setIsSavingPhone(false);
+    }
+  };
+
+  const handleSaveLocks = async (updates: Partial<{communityLockAll: boolean, communityLockGrades: string[], storiesLock: boolean, loungeLock: boolean}>) => {
+    if (!selectedSchoolId) return;
+    
+    // Optimistic UI updates
+    if (updates.communityLockAll !== undefined) setCommunityLockAll(updates.communityLockAll);
+    if (updates.communityLockGrades !== undefined) setCommunityLockGrades(updates.communityLockGrades);
+    if (updates.storiesLock !== undefined) setStoriesLock(updates.storiesLock);
+    if (updates.loungeLock !== undefined) setLoungeLock(updates.loungeLock);
+    
+    try {
+      await academicService.updateSchoolSettings(selectedSchoolId, updates);
+      showToast('تم تحديث إعدادات النشر بنجاح', 'success');
+    } catch (e) {
+      console.error("Error saving locks:", e);
+      showToast('حدث خطأ أثناء التحديث', 'error');
     }
   };
 
@@ -201,8 +224,49 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
   const [adminQuickReplyText, setAdminQuickReplyText] = useState('');
   const [isSendingQuickReply, setIsSendingQuickReply] = useState(false);
   const [isDeleteAllNotifsConfirmOpen, setIsDeleteAllNotifsConfirmOpen] = useState(false);
+  const [isSendingMessage, setIsSendingMessage] = useState(false);
+  const [actionLoading, setActionLoading] = useState<Record<string, string>>({});
+  const [readNotifCardIds, setReadNotifCardIds] = useState<Set<string>>(() => {
+    try {
+      const saved = safeStorage.getItem('bayraq_admin_read_notif_cards');
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+
+  const markNotifCardAsRead = async (notifId: string, replies: any[] = []) => {
+    setReadNotifCardIds(prev => {
+      const next = new Set(prev);
+      next.add(notifId);
+      try {
+        safeStorage.setItem('bayraq_admin_read_notif_cards', JSON.stringify(Array.from(next)));
+      } catch {}
+      return next;
+    });
+
+    const unreadReplies = replies.filter(t => !t.readByAdmin);
+    if (unreadReplies.length > 0) {
+      setAllTickets(prev => prev.map(t => unreadReplies.some(u => u.id === t.id) ? { ...t, readByAdmin: true } : t));
+      try {
+        await Promise.all(unreadReplies.map(t => 
+          fetch(`/api/support-tickets/${t.id}`, { 
+            method: 'PATCH', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ readByAdmin: true }) 
+          }).catch(() => {})
+        ));
+      } catch (err) {
+        console.error("Error marking replies as read", err);
+      }
+    }
+  };
   const [isAdmin, setIsAdmin] = useState<boolean | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [communityLockAll, setCommunityLockAll] = useState(false);
+  const [communityLockGrades, setCommunityLockGrades] = useState<string[]>([]);
+  const [storiesLock, setStoriesLock] = useState(false);
+  const [loungeLock, setLoungeLock] = useState(false);
 
   useEffect(() => {
     const checkAdmin = async () => {
@@ -257,35 +321,19 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
   const fetchPostStats = async () => {
     if (!isAdmin) return;
     try {
-      const dbRef = collection(db, 'community_posts');
-      const res: Record<string, number> = { total: 0, adminTeacher: 0, comments: 0, likes: 0 };
+      const res = await fetch(`/api/pulse/stats?schoolId=${selectedSchoolId || 'all'}`);
+      const data = await res.json();
       
-      const totalSnap = await getCountFromServer(dbRef);
-      res.total = totalSnap.data().count;
-
-      const latestQ = query(dbRef, orderBy('timestamp', 'desc'), limit(500));
-      const latestSnap = await getDocs(latestQ);
-      let adminTeacherCount = 0;
-      let commentsCount = 0;
-      let likesCount = 0;
-
-      latestSnap.docs.forEach((d) => {
-         const data = d.data();
-         if (data.type === 'admin' || data.type === 'teacher') adminTeacherCount++;
-         commentsCount += (data.comments || 0);
-         likesCount += (data.likes || 0);
-         if (data.reactions) {
-            likesCount += Object.values(data.reactions).reduce((s: any, v: any) => s + v, 0) as number;
-         }
-      });
-
-      res.adminTeacher = adminTeacherCount;
-      res.comments = commentsCount;
-      res.likes = likesCount;
-
-      setPostStats(res);
+      if (data.success) {
+        setPostStats({
+          total: data.stats.total || 0,
+          adminTeacher: data.stats.adminTeacher || 0,
+          comments: data.stats.comments || 0,
+          likes: data.stats.likes || 0
+        });
+      }
     } catch(err) {
-      console.log('Error fetching post stats', err);
+      console.log('Error fetching pulse stats from PG', err);
     }
   };
 
@@ -299,12 +347,14 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
     setLoadingComments(true);
     setPostComments([]);
     try {
-      const q = query(collection(db, 'community_posts', postId, 'comments_list'), orderBy('timestamp', 'asc'));
-      const snapshot = await getDocs(q);
-      const comments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setPostComments(comments);
+      const res = await fetch(`/api/pulse/posts/${postId}/comments`);
+      const data = await res.json();
+      if (data.success) {
+        setPostComments(data.comments);
+      }
     } catch (err) {
-      console.error('Error fetching comments', err);
+      console.error('Error fetching comments from PG', err);
+      showToast("فشل جلب التعليقات", "error");
     } finally {
       setLoadingComments(false);
     }
@@ -319,48 +369,47 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
     }
 
     try {
-      // we query up to 500 posts, sort them manually since firestore needs composite indexes for multiple things
-      const q = query(collection(db, 'community_posts'), orderBy('timestamp', 'desc'), limit(500));
+      // Use PostgreSQL API instead of Firestore
+      const res = await fetch(`/api/pulse/posts?schoolId=${selectedSchoolId || 'all'}`);
+      const data = await res.json();
       
-      const snapshot = await getDocs(q);
-      let pData = snapshot.docs.map(d => ({ id: d.id, ...d.data() })) as PostData[];
+      if (data.success) {
+        let pData = data.posts as PostData[];
 
-      // Filter by stage/grade
-      if (postFilterStage !== 'all') {
-         if (postFilterGrade !== 'all') {
-            const targetLabel = getGradeLabel(postFilterGrade);
-            pData = pData.filter(p => normalizeArabic(p.grade || '').includes(normalizeArabic(targetLabel)));
-         } else {
-            const stageCfg = (STAGES_CONFIG as any)[postFilterStage];
-            const gradeLabels = stageCfg?.grades?.map((g: any) => normalizeArabic(g.label)) || [];
-            pData = pData.filter(p => {
-               const normalizedGrade = normalizeArabic(p.grade || '');
-               return gradeLabels.some((lbl: string) => normalizedGrade.includes(lbl));
-            });
-         }
+        // Filter by stage/grade (Client-side filtering for now)
+        if (postFilterStage !== 'all') {
+           if (postFilterGrade !== 'all') {
+              const targetLabel = getGradeLabel(postFilterGrade);
+              pData = pData.filter(p => normalizeArabic(p.grade || '').includes(normalizeArabic(targetLabel)));
+           } else {
+              const stageCfg = (STAGES_CONFIG as any)[postFilterStage];
+              const gradeLabels = stageCfg?.grades?.map((g: any) => normalizeArabic(g.label)) || [];
+              pData = pData.filter(p => {
+                 const normalizedGrade = normalizeArabic(p.grade || '');
+                 return gradeLabels.some((lbl: string) => normalizedGrade.includes(lbl));
+              });
+           }
+        }
+
+        // Filter/sort by type
+        if (postFilterType === 'reported') {
+           pData = pData.filter((p: any) => (p as any).reportsCount > 0);
+           pData.sort((a: any, b: any) => ((b as any).reportsCount || 0) - ((a as any).reportsCount || 0));
+        } else if (postFilterType === 'top') {
+           pData.sort((a: any, b: any) => {
+              const aTotal = ((a as any).likesCount || 0);
+              const bTotal = ((b as any).likesCount || 0);
+              return bTotal - aTotal;
+           });
+        }
+
+        setPosts(pData);
+        setPostsLastDoc(null);
+        setHasMorePosts(false);
       }
-
-      // Filter/sort by type
-      if (postFilterType === 'reported') {
-         pData = pData.filter((p: any) => p.reportsCount > 0);
-         pData.sort((a: any, b: any) => (b.reportsCount || 0) - (a.reportsCount || 0));
-      } else if (postFilterType === 'top') {
-         pData.sort((a: any, b: any) => {
-            const aTotal = (a.likes || 0) + Object.values(a.reactions || {}).reduce((s: any, v: any) => s+v, 0);
-            const bTotal = (b.likes || 0) + Object.values(b.reactions || {}).reduce((s: any, v: any) => s+v, 0);
-            return bTotal - aTotal;
-         });
-      }
-
-      // client side pagination mapping
-      setPostsLastDoc(null);
-      setHasMorePosts(false); // Disable it since we grabbed 500
-      setPosts(pData);
-
     } catch (error: any) {
-      if (error.code !== 'permission-denied') {
-        handleFirestoreError(error, OperationType.GET, 'community_posts'); 
-      }
+      console.error("Error fetching posts from PG:", error);
+      showToast("فشل جلب المنشورات من النظام الجديد", "error");
     } finally {
       setLoadingPosts(false);
       setLoadingMorePosts(false);
@@ -381,7 +430,7 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
     }
   }, [showPosts, postFilterStage, postFilterGrade, postFilterType]);
 
-  const { sourceCodes, sData, uData, tData, dataVersion, codesVersion } = usePortalData(isAdmin, selectedSchoolId, schoolName);
+  const { sourceCodes, sData, uData, tData, aData, dataVersion, codesVersion } = usePortalData(isAdmin, selectedSchoolId, schoolName || '');
 
   useEffect(() => {
     if (isAdmin === null) return;
@@ -391,43 +440,76 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
     let unsubTickets = () => {};
 
     if (isAdmin) {
-      unsubOutbox = onSnapshot(
-        query(collection(db, 'admin_outbox'), orderBy('timestamp', 'desc')),
-        (snapshot) => {
-          setAdminNotifs(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-        },
-        (error) => handleFirestoreError(error, OperationType.GET, 'admin_outbox')
-      );
+      const fetchAdminData = async () => {
+        try {
+          // Fetch Admin Outbox
+          const outboxRes = await fetch('/api/admin-outbox' + (selectedSchoolId ? `?schoolId=${selectedSchoolId}` : ''));
+          const outboxData = await outboxRes.json();
+          if (outboxData.success) setAdminNotifs(outboxData.admin_outbox);
 
-      unsubTickets = onSnapshot(
-        query(collection(db, 'support_tickets'), orderBy('timestamp', 'asc')),
-        (snapshot) => {
-          setAllTickets(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
-        },
-        (error) => handleFirestoreError(error, OperationType.GET, 'support_tickets')
-      );
-      
-      unsubSettings = onSnapshot(doc(db, 'settings', 'school_info'), (docSnapshot) => {
-        if (docSnapshot.exists()) {
-          const data = docSnapshot.data();
+          // Fetch Tickets
+          const ticketRes = await fetch('/api/support-tickets');
+          const ticketData = await ticketRes.json();
+          if (ticketData.success) setAllTickets(ticketData.tickets);
+          
+          // Fetch Audit Logs
+          const auditRes = await fetch('/api/audit-logs?limit=50');
+          const auditData = await auditRes.json();
+          if (auditData.success) {
+            // Mapping developer_logs to what the UI expects if needed, or just using them
+            // In this UI, audit logs might be handled elsewhere or just shown in a list
+          }
+        } catch (e) {
+          console.error("Pulse API Fetch error:", e);
+        }
+      };
+
+      fetchAdminData();
+
+      const unsubRealtimeNotifs = realtimeManager.on('notifications_updated', fetchAdminData);
+      const unsubRealtimeOutbox = realtimeManager.on('admin_outbox_updated', fetchAdminData);
+      const unsubRealtimeTickets = realtimeManager.on('support_tickets_updated', fetchAdminData);
+
+      if (selectedSchoolId) {
+        unsubSettings = academicService.subscribeToSchoolSettings(selectedSchoolId, (data) => {
           setAdminPhone(data.adminPhone || '');
           setAdminWhatsapp(data.adminWhatsapp || '');
-        }
-      }, (error) => handleFirestoreError(error, OperationType.GET, 'settings'));
-    }
+          setCommunityLockAll(data.communityLockAll || false);
+          setCommunityLockGrades(data.communityLockGrades || []);
+          setStoriesLock(data.storiesLock || false);
+          setLoungeLock(data.loungeLock || false);
+        });
+      }
 
-    return () => {
-      unsubOutbox();
-      unsubSettings();
-      unsubTickets();
-    };
-  }, [isAdmin]);
+      return () => {
+        unsubRealtimeNotifs();
+        unsubRealtimeOutbox();
+        unsubRealtimeTickets();
+        unsubSettings();
+      };
+    }
+  }, [isAdmin, selectedSchoolId]);
 
   useEffect(() => {
     if (isAdmin) {
-      setLoading(true);
-      const initialMerged = mergeDashboardData(sourceCodes, sData, uData, tData);
-      setUsers(initialMerged);
+      const initialMerged = mergeDashboardData(sourceCodes, sData, uData, tData, aData);
+      
+      // Preserve optimistic updates for users currently undergoing actions
+      setUsers(prev => {
+        const activeActionUserIds = new Set(
+          Object.keys(actionLoading).map(key => key.split('_')[0])
+        );
+
+        if (activeActionUserIds.size === 0) return initialMerged;
+
+        return initialMerged.map(newUser => {
+          if (activeActionUserIds.has(newUser.id)) {
+            const existingUser = prev.find(u => u.id === newUser.id);
+            return existingUser ? existingUser : newUser;
+          }
+          return newUser;
+        });
+      });
       
       const counts: any = {
         student: { total: 0, active: 0 },
@@ -447,7 +529,7 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
       setRoleCounts(counts);
       setLoading(false);
     }
-  }, [sourceCodes, sData, uData, tData, isAdmin]);
+  }, [sourceCodes, sData, uData, tData, aData, isAdmin]);
   const handleManualRefresh = async () => {
     showToast("البيانات يتم تحديثها تلقائياً عند تغيير المصادر.", "success");
   };
@@ -459,7 +541,7 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
 
     try {
       // 1. Refresh Base Data
-      mergeDashboardData(sourceCodes, sData, uData, tData);
+      mergeDashboardData(sourceCodes, sData, uData, tData, aData);
 
       // 2. Fetch all academic lists to identify valid student and parent codes
       let listsQ = selectedSchoolId && selectedSchoolId !== 'unassigned'
@@ -624,24 +706,34 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
   };
 
   const resolveActualId = async (user: UserData): Promise<string> => {
-    if (!user.id.startsWith('pcode_') && !user.id.startsWith('scode_')) {
+    // If it's already a real Firestore ID (not one of our placeholders)
+    if (!user.id.startsWith('pcode_') && !user.id.startsWith('scode_') && !user.id.startsWith('tch_')) {
       return user.id;
     }
 
     try {
       const usersRef = collection(db, 'users');
-      const userCode = user.studentCode || user.parentCode || user.code || '';
+      const userCode = (user.studentCode || user.parentCode || user.code || '').trim().toUpperCase();
       if (!userCode) return user.id;
 
-      const role = normalizeRole(user.role || '', userCode);
-      const q = role === 'parent' 
-          ? query(usersRef, where('parentCode', '==', userCode.trim().toUpperCase()))
-          : query(usersRef, where('studentCode', '==', userCode.trim().toUpperCase()));
+      const normRole = normalizeRole(user.role || '', userCode);
       
-      const snap = await getDocs(q);
-      if (!snap.empty) {
-        return snap.docs[0].id;
+      // Try multiple possible code fields in Firestore
+      const fieldsToTry = ['code', 'studentCode', 'parentCode', 'userId', 'uid'];
+      
+      for (const fieldName of fieldsToTry) {
+        const q = query(usersRef, where(fieldName, '==', userCode));
+        const snap = await getDocs(q);
+        if (!snap.empty) return snap.docs[0].id;
       }
+      
+      // Special case for teachers often prefixed with TCH-
+      if (normRole === 'cadre' || normRole === 'teacher') {
+        const q = query(usersRef, where('code', '==', `TCH-${userCode}`));
+        const snap = await getDocs(q);
+        if (!snap.empty) return snap.docs[0].id;
+      }
+
     } catch (e) {
       console.error("ID resolution failed:", e);
     }
@@ -665,13 +757,17 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
       try {
         if (!userId || userId.startsWith('pcode_') || userId.startsWith('scode_')) return false;
         const docRef = doc(db, coll, userId);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          await updateDoc(docRef, { ...data, updatedAt: serverTimestamp() });
+        // Force set with merge to ensure document exists with the new data
+        const updatePayload = { ...data };
+        if (Object.keys(updatePayload).length > 0) {
+          updatePayload.updatedAt = serverTimestamp();
+          await setDoc(docRef, updatePayload, { merge: true });
           updatedCount++;
           return true;
         }
-      } catch (err) {}
+      } catch (err) {
+        console.error(`Sync error on ID phase for ${coll}:`, err);
+      }
       return false;
     });
     
@@ -681,33 +777,73 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
     if (finalCode) {
       const fallbackPromises = prioritized.map(async (coll) => {
           try {
-              const fieldsToTry = ['code', 'studentCode', 'parentCode'];
-              let foundAny = false;
+              let collectionUpdated = false;
+
+              // Check if record exists
+              const fieldsToTry = ['code', 'studentCode', 'parentCode', 'userId', 'uid'];
+              let foundDocRef = null;
+              
               for (const fieldName of fieldsToTry) {
-                  const q = query(collection(db, coll), where(fieldName, '==', finalCode || 'unassigned'));
+                  const q = query(collection(db, coll), where(fieldName, '==', finalCode));
                   const snap = await getDocs(q);
                   if (!snap.empty) {
-                      const batch = writeBatch(db);
-                      snap.docs.forEach(d => {
-                          batch.update(d.ref, { ...data, updatedAt: serverTimestamp() });
-                      });
-                      await batch.commit();
-                      updatedCount++;
-                      foundAny = true;
+                      foundDocRef = snap.docs[0].ref;
+                      break;
                   }
               }
-              return foundAny;
-          } catch (e) {}
+
+              if (foundDocRef) {
+                  await updateDoc(foundDocRef, { ...data, updatedAt: serverTimestamp() });
+                  updatedCount++;
+                  collectionUpdated = true;
+              } else if (coll === 'school_students' || coll === 'users') {
+                  // Optimistic creation if record not found
+                  const docId = coll === 'school_students' && selectedSchoolId 
+                      ? `${selectedSchoolId}_${finalCode}`.replace(/\s+/g, '_')
+                      : finalCode;
+                      
+                  const docRef = doc(db, coll, docId);
+                  await setDoc(docRef, { 
+                      studentCode: normRole === 'student' ? finalCode : undefined,
+                      parentCode: normRole === 'parent' ? finalCode : undefined,
+                      schoolId: selectedSchoolId,
+                      createdAt: serverTimestamp(),
+                      ...data 
+                  }, { merge: true });
+                  updatedCount++;
+                  collectionUpdated = true;
+              }
+              
+              return collectionUpdated;
+          } catch (e) {
+              console.error(`Sync failed for collection ${coll}:`, e);
+          }
           return false;
       });
       await Promise.all(fallbackPromises);
     }
     
-    // 3. PHASE 3: Success logic
-    if (!userId || userId.startsWith('pcode_') || userId.startsWith('scode_')) {
-        return true; 
+    // 3. PHASE 3: SQL Updates (Source of Truth for Cadre & Students)
+    try {
+      if (normRole === 'cadre' || normRole === 'teacher' || normRole === 'staff') {
+        const sqlId = userCode || userId;
+        if (sqlId && !sqlId.startsWith('pcode_') && !sqlId.startsWith('scode_')) {
+          await staffService.updateTeacher(sqlId, data).catch(e => console.warn("SQL Teacher sync failed:", e));
+          updatedCount++;
+        }
+      } else if (normRole === 'student' && finalCode && selectedSchoolId) {
+        const studentSqlId = `${selectedSchoolId}_${finalCode}`.replace(/\s+/g, '_');
+        await academicService.updateStudent(studentSqlId, data).catch(e => console.warn("SQL Student sync failed:", e));
+        updatedCount++;
+      }
+    } catch (err) {
+      console.error("SQL Sync Phase failed:", err);
     }
 
+    // 4. PHASE 4: Success logic
+    if (updatedCount > 0) {
+      console.log(`[Sync] Successfully updated ${updatedCount} records across collections.`);
+    }
     return updatedCount > 0;
   };
 
@@ -718,16 +854,17 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
       return;
     }
 
-    // 2. Validate/Find real ID for placeholder IDs using unified resolver
-    const actualId = await resolveActualId(user);
+    const loadingKey = `${user.id}_ban`;
+    if (actionLoading[loadingKey]) return;
+    setActionLoading(prev => ({ ...prev, [loadingKey]: 'جاري التجميد...' }));
 
-    const originalStatus = user.isBanned;
-    const newStatus = !originalStatus;
-    
-    // Optimistic Update
-    setUsers(prev => prev.map(u => u.id === user.id ? { ...u, isBanned: newStatus, status: newStatus ? 'مجمّد' : 'نشط' } : u));
-    
     try {
+      // 2. Validate/Find real ID for placeholder IDs using unified resolver
+      const actualId = await resolveActualId(user);
+
+      const originalStatus = user.isBanned;
+      const newStatus = !originalStatus;
+      
       // 3. Sync with actual ID
       const updatePayload: any = { 
         isBanned: newStatus,
@@ -738,176 +875,190 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
       const success = await syncUserUpdate(actualId, updatePayload, user.role, user.studentCode || user.parentCode || user.code);
       
       if (!success) {
-        // Rollback
-        setUsers(prev => prev.map(u => u.id === user.id ? { ...u, isBanned: originalStatus } : u));
         showToast('فشل في تحديث حالة المستخدم في Firebase', 'error');
         return;
       }
 
-      await addDoc(collection(db, 'audit_logs'), {
+      // Update locally - use functional update to be safe and match by multiple possible identifiers
+      setUsers(prev => prev.map(u => {
+        const isMatch = u.id === user.id || 
+                       (u.code && user.code && u.code === user.code) ||
+                       (u.studentCode && user.studentCode && u.studentCode === user.studentCode);
+        return isMatch ? { ...u, isBanned: newStatus, status: newStatus ? 'مجمّد' : 'نشط' } : u;
+      }));
+
+      const roleLabel = (user.role === 'cadre' || user.role === 'teacher') ? 'للأستاذ' : 
+                         user.role === 'staff' ? 'للموظف' : 
+                         user.role === 'parent' ? 'لولي الأمر' : 'للطالب';
+
+      await logActivity({
         action: newStatus ? 'تجميد حساب' : 'إلغاء التجميد',
-        details: `تم ${newStatus ? 'تجميد' : 'إلغاء تجميد'} حساب ${user.fullName} بنجاح.`,
+        details: `تم ${newStatus ? 'تجميد' : 'إلغاء تجميد'} حساب ${roleLabel} ${user.fullName} بنجاح.`,
         targetId: actualId,
         targetName: user.fullName,
-        targetType: 'account_freeze',
-        userId: auth.currentUser?.uid,
-        userName: auth.currentUser?.email || 'Admin',
-        userEmail: auth.currentUser?.email,
-        timestamp: serverTimestamp()
+        targetType: 'account_freeze'
       });
       
-      showToast('تمت العملية بنجاح', 'success');
+      showToast(`تم ${newStatus ? 'تجميد' : 'إلغاء تجميد'} حساب ${roleLabel} بنجاح`, 'success');
     } catch (error) {
-      // Rollback
-      setUsers(prev => prev.map(u => u.id === user.id ? { ...u, isBanned: originalStatus } : u));
       console.error("Error toggling ban:", error);
       showToast('فشل في تحديث الحالة. تأكد من وجود صلاحيات كافية.', 'error');
+    } finally {
+      setActionLoading(prev => {
+        const next = { ...prev };
+        delete next[loadingKey];
+        return next;
+      });
     }
   };
 
   const handleUpdatePermission = async (user: UserData, field: 'canPost' | 'canComment', currentValue: boolean | undefined) => {
-    const actualId = await resolveActualId(user);
+    const loadingKey = `${user.id}_${field}`;
+    if (actionLoading[loadingKey]) return;
+    setActionLoading(prev => ({ ...prev, [loadingKey]: 'جاري التحديث...' }));
 
-    // Treat undefined as true (allowed) by default
-    const actualCurrentValue = currentValue ?? true;
-    const newValue = !actualCurrentValue;
-    
-    // Optimistic Update
-    setUsers(prev => prev.map(u => u.id === user.id ? { ...u, [field]: newValue } : u));
-    
     try {
+      const actualId = await resolveActualId(user);
+
+      // Treat undefined as true (allowed) by default
+      const actualCurrentValue = currentValue ?? true;
+      const newValue = !actualCurrentValue;
+      
       const success = await syncUserUpdate(actualId, { [field]: newValue }, user.role, user.studentCode || user.parentCode || user.code);
       
       if (!success) {
-        // Rollback
-        setUsers(prev => prev.map(u => u.id === user.id ? { ...u, [field]: actualCurrentValue } : u));
         showToast('فشل في تحديث الحالة', 'error');
         return;
       }
 
+      // Update locally - use functional update to be safe and match by multiple possible identifiers
+      setUsers(prev => prev.map(u => {
+        const isMatch = u.id === user.id || 
+                       (u.code && user.code && u.code === user.code) ||
+                       (u.studentCode && user.studentCode && u.studentCode === user.studentCode);
+        return isMatch ? { ...u, [field]: newValue } : u;
+      }));
 
       // Improved feedback messages
       const statusText = newValue ? 'تفعيل' : 'منع';
       const actionText = field === 'canPost' ? 'النشر' : 'التعليق';
-      showToast(`تم ${statusText} ${actionText} للطالب ${user.fullName}`, 'success');
+      const roleLabel = (user.role === 'cadre' || user.role === 'teacher') ? 'للأستاذ' : 
+                         user.role === 'staff' ? 'للموظف' : 
+                         user.role === 'parent' ? 'لولي الأمر' : 'للطالب';
+      
+      showToast(`تم ${statusText} ${actionText} ${roleLabel} ${user.fullName}`, 'success');
       
     } catch (error) {
-      // Rollback
-      setUsers(prev => prev.map(u => u.id === user.id ? { ...u, [field]: actualCurrentValue } : u));
       console.error("Error updating permission:", error);
       showToast('حدث خطأ أثناء تحديث الصلاحية', 'error');
+    } finally {
+      setActionLoading(prev => {
+        const next = { ...prev };
+        delete next[loadingKey];
+        return next;
+      });
     }
   };
 
   const handleRegenerateCode = async (user: UserData) => {
-    showToast('جاري توليد الكود...', 'success');
-    const actualId = await resolveActualId(user);
-    const normalizedRole = normalizeRole(user.role || '', user.studentCode || user.parentCode || user.code || '');
+    const loadingKey = `${user.id}_regenerate`;
+    if (actionLoading[loadingKey]) return;
+    setActionLoading(prev => ({ ...prev, [loadingKey]: 'جاري التوليد...' }));
 
-    if (normalizedRole === 'cadre' || normalizedRole === 'staff') {
-        let codeData: Record<string, string> = {};
-        let syncData: any = {};
-        let generatedCode = '';
-
-        if (normalizedRole === 'cadre') {
-            const subCode = getSanitizedSubCode(user.subject || 'SUB');
-            const classCodes: Record<string, string> = { ...user.classes?.reduce((acc, cls) => ({ ...acc, [cls]: '' }), {}) };
-            
-            for (const className of (user.classes || [user.grade || ''])) {
-                const prefix = getPrefixForGrade(className);
-                const randomNum = Math.floor(1000 + Math.random() * 9000);
-                classCodes[className] = `TCH-${subCode}-${prefix}-${randomNum}`;
-            }
-            codeData = classCodes;
-            generatedCode = Object.values(classCodes)[0];
-            syncData = { classCodes: codeData, code: generatedCode };
-        } else {
-            // Staff
-            const randomNum = Math.floor(1000 + Math.random() * 9000);
-            generatedCode = `TCH-STAFF-${randomNum}`;
-            syncData = { studentCode: generatedCode };
-        }
-        
-        setUsers(prev => prev.map(u => u.id === user.id ? { ...u, ...syncData } : u));
-        
-        // Optimistically sync
-        syncUserUpdate(actualId, syncData, user.role, user.studentCode)
-            .then(() => {
-                const message = normalizedRole === 'cadre' 
-                    ? `تم تحديث أكواد المعلم بنجاح:\n${Object.entries(codeData).map(([cls, code]) => `${cls}: ${code}`).join('\n')}`
-                    : `تم تحديث كود الموظف بنجاح: ${generatedCode}`;
-                
-                showToast('تم تحديث الكود بنجاح', 'success');
-                if (navigator.share) {
-                    navigator.share({ title: 'أكواد الحساب', text: message }).catch(() => {});
-                } else {
-                    alert(message);
-                }
-            })
-            .catch(() => {
-                showToast('فشل في تحديث الكود', 'error');
-            });
-        return;
-    }
-
-    const originalCode = user.studentCode;
-    const originalParentCode = user.parentCode;
-    let newCode = '';
-    let newParentCode = '';
-
-    // Generate code based on role and existing encryption (format) patterns
-    const randomNum = Math.floor(1000 + Math.random() * 9000);
-    
-    if (user.role === 'student') {
-      const prefix = getPrefixForGrade(user.grade || '');
-      // Extract branch from old code or default to checking school name
-      let branch = 'B';
-      if (originalCode && originalCode.includes('-')) {
-        const parts = originalCode.split('-');
-        if (parts.length > 1 && (parts[1] === 'G' || parts[1] === 'B')) {
-          branch = parts[1];
-        }
-      } else if ((user.schoolName || (user as any).school || '').includes('بنات')) {
-        branch = 'G';
-      }
-      
-      newCode = `${prefix}-${branch}-${randomNum}`;
-      newParentCode = `PAR-${branch}-${randomNum}`;
-    } else if (user.role === 'parent') {
-      // Parent code logic: Use PAR- prefix and same branch/number logic
-      let branch = 'B';
-      let studentNum: string | number = randomNum;
-
-      if (user.studentCode && user.studentCode.includes('-')) {
-        const parts = user.studentCode.split('-');
-        if (parts.length > 1) {
-          branch = (parts[1] === 'G' || parts[1] === 'B') ? parts[1] : branch;
-          if (parts.length > 2) studentNum = parts[2];
-        }
-      } else if (user.parentCode && user.parentCode.includes('-')) {
-        const parts = user.parentCode.split('-');
-        if (parts.length > 1) {
-          branch = (parts[1] === 'G' || parts[1] === 'B') ? parts[1] : branch;
-          if (parts.length > 2) studentNum = parts[2];
-        }
-      }
-      newCode = `PAR-${branch}-${studentNum}`;
-      // In parents tab, regenerated code is applied to parentCode field
-    } else if (user.role === 'staff') {
-      newCode = `EMP-${randomNum}`;
-    } else {
-      // Fallback
-      newCode = `ADM-${randomNum}`;
-    }
-
-    // Optimistic Update
-    setUsers(prev => prev.map(u => u.id === user.id ? (
-      user.role === 'parent' 
-        ? { ...u, parentCode: newCode }
-        : { ...u, studentCode: newCode, parentCode: newParentCode || u.parentCode }
-    ) : u));
-    
     try {
+      const actualId = await resolveActualId(user);
+      const normalizedRole = normalizeRole(user.role || '', user.studentCode || user.parentCode || user.code || '');
+
+      if (normalizedRole === 'cadre' || normalizedRole === 'staff') {
+          let codeData: Record<string, string> = {};
+          let syncData: any = {};
+          let generatedCode = '';
+
+          if (normalizedRole === 'cadre') {
+              const subCode = getSanitizedSubCode(user.subject || 'SUB');
+              const classCodes: Record<string, string> = { ...user.classes?.reduce((acc, cls) => ({ ...acc, [cls]: '' }), {}) };
+              
+              for (const className of (user.classes || [user.grade || ''])) {
+                  const prefix = getPrefixForGrade(className);
+                  const randomNum = Math.floor(1000 + Math.random() * 9000);
+                  classCodes[className] = `TCH-${subCode}-${prefix}-${randomNum}`;
+              }
+              codeData = classCodes;
+              generatedCode = Object.values(classCodes)[0];
+              syncData = { classCodes: codeData, code: generatedCode };
+          } else {
+              // Staff
+              const randomNum = Math.floor(1000 + Math.random() * 9000);
+              generatedCode = `TCH-STAFF-${randomNum}`;
+              syncData = { studentCode: generatedCode };
+          }
+          
+          // Optimistically sync
+          await syncUserUpdate(actualId, syncData, user.role, user.studentCode);
+          
+          const message = normalizedRole === 'cadre' 
+              ? `تم تحديث أكواد المعلم بنجاح:\n${Object.entries(codeData).map(([cls, code]) => `${cls}: ${code}`).join('\n')}`
+              : `تم تحديث كود الموظف بنجاح: ${generatedCode}`;
+          
+          showToast('تم تحديث الكود بنجاح', 'success');
+          if (navigator.share) {
+              navigator.share({ title: 'أكواد الحساب', text: message }).catch(() => {});
+          } else {
+              alert(message);
+          }
+          return;
+      }
+
+      const originalCode = user.studentCode;
+      const originalParentCode = user.parentCode;
+      let newCode = '';
+      let newParentCode = '';
+
+      // Generate code based on role and existing encryption (format) patterns
+      const randomNum = Math.floor(1000 + Math.random() * 9000);
+      
+      if (user.role === 'student') {
+        const prefix = getPrefixForGrade(user.grade || '');
+        // Extract branch from old code or default to checking school name
+        let branch = 'B';
+        if (originalCode && originalCode.includes('-')) {
+          const parts = originalCode.split('-');
+          if (parts.length > 1 && (parts[1] === 'G' || parts[1] === 'B')) {
+            branch = parts[1];
+          }
+        } else if ((user.schoolName || (user as any).school || '').includes('بنات')) {
+          branch = 'G';
+        }
+        
+        newCode = `${prefix}-${branch}-${randomNum}`;
+        newParentCode = `PAR-${branch}-${randomNum}`;
+      } else if (user.role === 'parent') {
+        // Parent code logic: Use PAR- prefix and same branch/number logic
+        let branch = 'B';
+        let studentNum: string | number = randomNum;
+
+        if (user.studentCode && user.studentCode.includes('-')) {
+          const parts = user.studentCode.split('-');
+          if (parts.length > 1) {
+            branch = (parts[1] === 'G' || parts[1] === 'B') ? parts[1] : branch;
+            if (parts.length > 2) studentNum = parts[2];
+          }
+        } else if (user.parentCode && user.parentCode.includes('-')) {
+          const parts = user.parentCode.split('-');
+          if (parts.length > 1) {
+            branch = (parts[1] === 'G' || parts[1] === 'B') ? parts[1] : branch;
+            if (parts.length > 2) studentNum = parts[2];
+          }
+        }
+        newCode = `PAR-${branch}-${studentNum}`;
+        // In parents tab, regenerated code is applied to parentCode field
+      } else if (user.role === 'staff') {
+        newCode = `EMP-${randomNum}`;
+      } else {
+        // Fallback
+        newCode = `ADM-${randomNum}`;
+      }
+
       const updateData: any = {};
       if (user.role === 'parent') {
         updateData.parentCode = newCode;
@@ -921,50 +1072,53 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
       const success = await syncUserUpdate(actualId, updateData, user.role, user.studentCode || user.parentCode || user.code);
       
       if (!success) {
-        // Rollback
-        setUsers(prev => prev.map(u => u.id === user.id ? { ...u, studentCode: originalCode, parentCode: originalParentCode } : u));
         showToast('فشل في تحديث الكود', 'error');
         return;
       }
 
+      // Update locally
+      setUsers(prev => prev.map(u => u.id === user.id ? (
+        user.role === 'parent' 
+          ? { ...u, parentCode: newCode }
+          : { ...u, studentCode: newCode, parentCode: newParentCode || u.parentCode }
+      ) : u));
+
       // Sync with activation_codes collection if it exists
-      setTimeout(async () => {
-        try {
-          const codesRef = collection(db, 'activation_codes');
-          // Find records matching either studentCode, parentCode or general code
-          const safeOriginalCode = originalCode || 'unassigned';
-          const safeOriginalParentCode = originalParentCode || 'unassigned';
-          const queries = [
-            getDocs(query(codesRef, where('studentCode', '==', safeOriginalCode))),
-            getDocs(query(codesRef, where('parentCode', '==', safeOriginalCode))),
-            getDocs(query(codesRef, where('code', '==', safeOriginalCode))),
-            getDocs(query(codesRef, where('parentCode', '==', safeOriginalParentCode)))
-          ];
-          
-          const snapshots = await Promise.all(queries);
-          const allDocs = snapshots.flatMap(s => s.docs);
-          
-          const updatePromises = allDocs.map(cDoc => {
-             const cData = cDoc.data();
-             const update: any = {};
-             
-             if (user.role === 'parent') {
-                update.parentCode = newCode;
-                // If this is a direct parent code record
-                if (cData.code === originalCode) update.code = newCode;
-             } else {
-                update.studentCode = newCode;
-                if (cData.code === originalCode) update.code = newCode;
-                if (newParentCode) update.parentCode = newParentCode;
-             }
-             
-             return updateDoc(doc(db, 'activation_codes', cDoc.id), update);
-          });
-          await Promise.all(updatePromises);
-        } catch (err) {
-          console.warn("Could not sync activation_codes:", err);
-        }
-      }, 0);
+      try {
+        const codesRef = collection(db, 'activation_codes');
+        // Find records matching either studentCode, parentCode or general code
+        const safeOriginalCode = originalCode || 'unassigned';
+        const safeOriginalParentCode = originalParentCode || 'unassigned';
+        const queries = [
+          getDocs(query(codesRef, where('studentCode', '==', safeOriginalCode))),
+          getDocs(query(codesRef, where('parentCode', '==', safeOriginalCode))),
+          getDocs(query(codesRef, where('code', '==', safeOriginalCode))),
+          getDocs(query(codesRef, where('parentCode', '==', safeOriginalParentCode)))
+        ];
+        
+        const snapshots = await Promise.all(queries);
+        const allDocs = snapshots.flatMap(s => s.docs);
+        
+        const updatePromises = allDocs.map(cDoc => {
+           const cData = cDoc.data();
+           const update: any = {};
+           
+           if (user.role === 'parent') {
+              update.parentCode = newCode;
+              // If this is a direct parent code record
+              if (cData.code === originalCode) update.code = newCode;
+           } else {
+              update.studentCode = newCode;
+              if (cData.code === originalCode) update.code = newCode;
+              if (newParentCode) update.parentCode = newParentCode;
+           }
+           
+           return updateDoc(doc(db, 'activation_codes', cDoc.id), update);
+        });
+        await Promise.all(updatePromises);
+      } catch (err) {
+        console.warn("Could not sync activation_codes:", err);
+      }
       
       showToast(`تم توليد الكود الجديد: ${newCode}`, 'success');
       
@@ -986,36 +1140,39 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
         showToast('تم نسخ المعلومات للمحافظة', 'success');
       }
     } catch (error) {
-      // Rollback
-      setUsers(prev => prev.map(u => u.id === user.id ? { ...u, studentCode: originalCode, parentCode: originalParentCode } : u));
       console.error("Error regenerating code:", error);
       showToast('حدث خطأ أثناء توليد الكود', 'error');
+    } finally {
+      setActionLoading(prev => {
+        const next = { ...prev };
+        delete next[loadingKey];
+        return next;
+      });
     }
   };
 
   const handleSecureDevice = async (user: UserData) => {
-    const actualId = await resolveActualId(user);
-    if (actualId.startsWith('pcode_') || actualId.startsWith('scode_')) {
-      showToast('الحساب غير مفعل على أي جهاز حالياً', 'success');
-      return;
-    }
+    const loadingKey = `${user.id}_secure`;
+    if (actionLoading[loadingKey]) return;
+    setActionLoading(prev => ({ ...prev, [loadingKey]: 'جاري التأمين...' }));
 
-    const originalDeviceId = user.deviceId;
-    const originalLastLogin = user.lastLogin;
-
-    // Optimistic Update
-    setUsers(prev => prev.map(u => u.id === user.id ? { ...u, deviceId: '', lastLogin: null } : u));
-    
     try {
+      const actualId = await resolveActualId(user);
+      if (actualId.startsWith('pcode_') || actualId.startsWith('scode_')) {
+        showToast('الحساب غير مفعل على أي جهاز حالياً', 'success');
+        return;
+      }
+
       const success = await syncUserUpdate(actualId, { deviceId: '', lastLogin: null }, user.role, user.studentCode || user.parentCode || user.code);
       
       if (!success) {
-        // Rollback
-        setUsers(prev => prev.map(u => u.id === user.id ? { ...u, deviceId: originalDeviceId, lastLogin: originalLastLogin } : u));
         showToast('فشل في تنفيذ بروتوكول التأمين', 'error');
         return;
       }
       
+      // Update locally
+      setUsers(prev => prev.map(u => u.id === user.id ? { ...u, deviceId: '', lastLogin: null } : u));
+
       // Update recently secured state
       setRecentlySecured(prev => new Set(prev).add(user.id));
       setTimeout(() => {
@@ -1028,10 +1185,14 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
 
       showToast(`تم تنفيذ بروتوكول الحماية وتأمين حساب ${user.fullName}`, 'success');
     } catch (error) {
-      // Rollback
-      setUsers(prev => prev.map(u => u.id === user.id ? { ...u, deviceId: originalDeviceId, lastLogin: originalLastLogin } : u));
       console.error("Error securing device:", error);
       showToast('حدث خطأ أثناء تأمين الجهاز', 'error');
+    } finally {
+      setActionLoading(prev => {
+        const next = { ...prev };
+        delete next[loadingKey];
+        return next;
+      });
     }
   };
 
@@ -1046,16 +1207,12 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
       setUsers(users.map(u => u.id === user.id ? { ...u, isTopStudent: newStatus } : u));
       
       // Audit log
-      await addDoc(collection(db, 'audit_logs'), {
+      await logActivity({
         action: newStatus ? 'تعيين طالب متفوق' : 'إلغاء تفوق طالب',
         details: `تم ${newStatus ? 'إضافة' : 'إزالة'} الطالب ${user.fullName} من قائمة أوائل المتفوقين.`,
         targetId: user.id,
         targetName: user.fullName,
-        targetType: 'student_top',
-        userId: auth.currentUser?.uid,
-        userName: auth.currentUser?.email || 'Admin',
-        userEmail: auth.currentUser?.email,
-        timestamp: serverTimestamp()
+        targetType: 'student_top'
       });
       
       showToast('تمت العملية بنجاح', 'success');
@@ -1093,16 +1250,12 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
 
       await deleteDoc(doc(db, 'community_posts', postToDelete.id));
 
-      addDoc(collection(db, 'audit_logs'), {
+      logActivity({
         action: 'حذف منشور غير مناسب',
         details: `تم حذف منشور للطالب ${postToDelete.userName}.`,
         targetId: postToDelete.id,
         targetName: postToDelete.userName,
-        targetType: 'post_delete',
-        userId: auth.currentUser?.uid,
-        userName: auth.currentUser?.email || 'Admin',
-        userEmail: auth.currentUser?.email,
-        timestamp: serverTimestamp()
+        targetType: 'post_delete'
       }).catch(console.error);
       
       showToast('تمت العملية بنجاح', 'success');
@@ -1176,15 +1329,11 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
       });
 
       // Write audit log
-      await addDoc(collection(db, 'audit_logs'), {
+      await logActivity({
         action: 'نشر منشور إداري',
         details: `تم نشر منشور إداري موجه إلى: ${targetSchoolName} / ${selectedGradeLabel}`,
         targetName: selectedGradeLabel,
-        targetType: 'admin_post_publish',
-        userId: auth.currentUser?.uid,
-        userName: auth.currentUser?.email || 'Admin',
-        userEmail: auth.currentUser?.email,
-        timestamp: serverTimestamp()
+        targetType: 'admin_post_publish'
       });
 
       showToast('تم نشر المنشور الإداري بنجاح وتوجيهه للفئة المستهدفة! 📢🌟', 'success');
@@ -1213,11 +1362,24 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
   const confirmDeleteUser = async () => {
     if (!userToDelete) return;
 
+    const loadingKey = `${userToDelete.id}_delete`;
+    setActionLoading(prev => ({ ...prev, [loadingKey]: 'جاري الحذف...' }));
+
     try {
       const actualId = await resolveActualId(userToDelete);
       const batch = writeBatch(db);
 
-      // 1. Delete user from 'users' if we know the ID and it's not a dummy prefix
+      // 1. Delete from SQL server with context for thorough deletion
+      const queryParams = new URLSearchParams({
+        role: userToDelete.role || '',
+        schoolId: selectedSchoolId || '',
+        code: userToDelete.code || userToDelete.studentCode || userToDelete.parentCode || ''
+      });
+      
+      const sqlId = actualId || userToDelete.id;
+      await fetch(`/api/users/${sqlId}?${queryParams.toString()}`, { method: 'DELETE' }).catch(err => console.warn("SQL delete failed:", err));
+
+      // 2. Delete user from Firestore 'users'
       if (actualId && !actualId.startsWith('pcode_') && !actualId.startsWith('scode_')) {
         batch.delete(doc(db, 'users', actualId));
       }
@@ -1286,16 +1448,12 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
         !codesArray.includes((u.code || '').trim().toUpperCase())
       ));
       
-      addDoc(collection(db, 'audit_logs'), {
+      logActivity({
         action: 'حذف مستخدم نهائي مع الأكواد',
         details: `تم حذف الحساب والبيانات التابعة لـ ${userToDelete.fullName} (${userToDelete.role}) نهائياً بالرموز: ${codesArray.join(', ') || 'بدون رمز'}.`,
         targetId: userToDelete.id,
         targetName: userToDelete.fullName,
-        targetType: 'user_delete',
-        userId: auth.currentUser?.uid,
-        userName: auth.currentUser?.email || 'Admin',
-        userEmail: auth.currentUser?.email,
-        timestamp: serverTimestamp()
+        targetType: 'user_delete'
       }).catch(console.error);
       
       showToast('تم حذف المستخدم وكافة أكواده وبطاقاته التعريفية نهائياً من كافه السجلات', 'success');
@@ -1303,8 +1461,16 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
       console.error("Deletion Error:", e);
       showToast('فشل في حذف المستخدم وسجلاته بالكامل', 'error');
     } finally {
+      const delId = userToDelete?.id;
       setUserToDelete(null);
       setIsConfirmDialogOpen(false);
+      if (delId) {
+        setActionLoading(prev => {
+          const next = { ...prev };
+          delete next[`${delId}_delete`];
+          return next;
+        });
+      }
     }
   };
 
@@ -1312,23 +1478,28 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
     if (!adminQuickReplyText.trim()) return;
     setIsSendingQuickReply(true);
     try {
-      await updateDoc(doc(db, 'support_tickets', ticketId), {
-        adminReply: adminQuickReplyText,
-        status: 'resolved',
-        readByStudent: false,
-        readByAdmin: true
+      await fetch(`/api/support-tickets/${ticketId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          adminReply: adminQuickReplyText,
+          status: 'resolved',
+          readByStudent: false,
+          readByAdmin: true
+        })
       });
 
-      await addDoc(collection(db, 'notifications'), {
-        title: 'رد من الادارة 💬',
-        message: adminQuickReplyText,
-        type: 'system',
-        userId: originalTicket.userId || '',
-        read: false,
-        isRead: false,
-        recipientRole: originalTicket.role || 'student',
-        timestamp: serverTimestamp(),
-        createdAt: new Date().toISOString()
+      await fetch('/api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          schoolId: selectedSchoolId || 'school_awail_ghamas',
+          recipientId: originalTicket.userId || '',
+          title: 'رد من الادارة 💬',
+          body: adminQuickReplyText,
+          type: 'general',
+          read: false
+        })
       });
 
       setAdminQuickReplyText('');
@@ -1343,13 +1514,18 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
   };
 
   const handleDeleteNotification = async (outboxId: string, refIds: any[] = []) => {
+    setAdminNotifs(prev => prev.filter(n => n.id !== outboxId));
     try {
-      // Delete underlying notifications/tickets
       if (refIds && refIds.length > 0) {
-        await Promise.all(refIds.map(ref => deleteDoc(doc(db, ref.collection, ref.id))));
+        await Promise.all(refIds.map(async (ref) => {
+          if (ref.collection === 'support_tickets') {
+            await fetch(`/api/support-tickets/${ref.id}`, { method: 'DELETE' }).catch(() => {});
+          } else if (ref.collection === 'notifications') {
+            await fetch(`/api/notifications/${ref.id}`, { method: 'DELETE' }).catch(() => {});
+          }
+        }));
       }
-      // Delete the outbox record itself
-      await deleteDoc(doc(db, 'admin_outbox', outboxId));
+      await fetch(`/api/admin-outbox/${outboxId}`, { method: 'DELETE' });
       showToast('تمت إزالة التبليغ بنجاح', 'success');
     } catch (error) {
       console.error("Error deleting notification:", error);
@@ -1360,18 +1536,9 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
   const handleDeleteAllNotifications = async () => {
     try {
       if (adminNotifs.length === 0) return;
-      
-      const deletePromises: Promise<any>[] = [];
-      for (const n of adminNotifs) {
-        if (n.refIds && n.refIds.length > 0) {
-          n.refIds.forEach((ref: any) => {
-            deletePromises.push(deleteDoc(doc(db, ref.collection, ref.id)).catch(() => {}));
-          });
-        }
-        deletePromises.push(deleteDoc(doc(db, 'admin_outbox', n.id)).catch(() => {}));
-      }
-      
-      await Promise.all(deletePromises);
+      setAdminNotifs([]);
+      setIsDeleteAllNotifsConfirmOpen(false);
+      await fetch('/api/admin-outbox', { method: 'DELETE' }).catch(() => {});
       showToast('تم حذف كافة التبليغات المُرسلة بنجاح', 'success');
     } catch (error) {
       console.error("Error deleting all notifications:", error);
@@ -1380,289 +1547,76 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
   };
 
   const handleSendMessage = async () => {
-    if (!messageText.trim()) return;
+    if (!messageText.trim() || isSendingMessage) return;
+    setIsSendingMessage(true);
     
     try {
-      if (isBroadcastMode) {
-        // Use correct filtered list based on activeRole
-        const targetUsers = activeRole === 'cadre' 
-          ? filteredCadreStaff 
-          : (activeRole === 'parent' ? filteredParents : filteredStudents);
-        
-        if (targetUsers.length === 0) {
-          showToast('لا يوجد مستخدمون لإرسال التبليغ إليهم', 'error');
-          return;
-        }
+      const targetUsers = isBroadcastMode 
+        ? (activeRole === 'cadre' ? filteredCadreStaff : (activeRole === 'parent' ? filteredParents : filteredStudents))
+        : null;
 
-        const batch = writeBatch(db);
-        let count = 0;
-        const refIds: { id: string, collection: string }[] = [];
-        const outboxRef = doc(collection(db, 'admin_outbox'));
-        const broadcastId = outboxRef.id;
-        
-        const processedTargetIds = new Set<string>();
-        
-        for (const user of targetUsers) {
-           // Skip unactivated accounts for broadcasts to avoid inflating counts incorrectly
-           if (user.subscriptionStatus === 'pending') continue;
+      if (isBroadcastMode && (!targetUsers || targetUsers.length === 0)) {
+        showToast('لا يوجد مستخدمون لإرسال التبليغ إليهم', 'error');
+        return;
+      }
+      if (!isBroadcastMode && !selectedUser) return;
 
-           let targetId = (user as any).uid || user.id;
-           if (activeRole === 'student') {
-             const sCode = (user.studentCode || user.code || '').trim().toUpperCase();
-             targetId = sCode ? `scode_${sCode}` : targetId;
-           } else if (activeRole === 'parent') {
-             const pCode = (user.parentCode || user.code || '').trim().toUpperCase();
-             targetId = pCode ? `pcode_${pCode}` : targetId;
-           } else if (activeRole === 'cadre') {
-             const tCode = (user.code || user.studentCode || '').trim().toUpperCase();
-             targetId = tCode ? `tcode_${tCode}` : targetId;
-           }
-           
-           if (processedTargetIds.has(targetId)) {
-             continue; // Skip duplicate target IDs
-           }
-           processedTargetIds.add(targetId);
-
-           const notifRef = doc(collection(db, 'notifications'));
-           refIds.push({ id: notifRef.id, collection: 'notifications' });
-           
-           let notifTitle = 'تبليغ إداري عام';
-           let recRole = 'student';
-           
-           if (activeRole === 'parent') {
-             notifTitle = 'تبليغ لولي الأمر';
-             recRole = 'parent';
-           } else if (activeRole === 'cadre') {
-             notifTitle = 'تبليغ الكادر التدريسي';
-             recRole = 'teacher';
-           } else if (activeRole === 'staff') {
-             notifTitle = 'تبليغ الكادر الإداري والموظفين';
-             recRole = 'staff';
-           } else if (activeRole === 'student') {
-             notifTitle = 'تبليغ عام للطلاب';
-             recRole = 'student';
-           }
-
-           batch.set(notifRef, {
-             title: notifTitle,
-             message: messageText,
-             type: 'system',
-             userId: targetId,
-             isRead: false,
-             read: false,
-             recipientRole: recRole,
-             timestamp: serverTimestamp(),
-             createdAt: new Date().toISOString(),
-             broadcastId: broadcastId
-           });
-           
-           count++;
-           if (count >= 490) break;
-        }
-        
-        if (count === 0) {
-          showToast('لا يوجد مستخدمون نشطون لإرسال التبليغ إليهم', 'error');
-          return;
-        }
-
-        batch.set(outboxRef, {
-           title: `رسالة جماعية - ${activeRole === 'student' ? 'الطلاب' : activeRole === 'cadre' ? 'الكادر' : activeRole === 'staff' ? 'الموظفين' : 'أولياء الأمور'}`,
-           message: messageText,
-           type: 'broadcast',
-           targetRole: activeRole,
-           count,
-           refIds,
-           timestamp: serverTimestamp(),
-           createdAt: new Date().toISOString(),
-           broadcastId: broadcastId
-        });
-        
-        await batch.commit();
-        
-        await addDoc(collection(db, 'audit_logs'), {
-          action: 'إرسال تبليغ جماعي',
-          details: `تم إرسال رسالة جماعية لـ ${count} من ${activeRole === 'student' ? 'الطلاب' : activeRole === 'cadre' ? 'الكادر' : activeRole === 'staff' ? 'الموظفين' : 'أولياء الأمور'}.`,
-          targetType: 'broadcast_message',
-          role: activeRole,
-          userId: auth.currentUser?.uid,
-          userName: auth.currentUser?.email || 'Admin',
-          userEmail: auth.currentUser?.email,
-          timestamp: serverTimestamp()
-        });
-        
-        showToast(`تم إرسال التبليغ لـ ${count} مستخدم`, 'success');
-      } else {
-        if (!selectedUser) return;
-        
-        let outboxRefId = '';
-        let outboxCollection = '';
-
-        const realAuthUserId = await resolveActualId(selectedUser);
-
-        if (activeRole === 'cadre') {
-          const tCode = (selectedUser.code || selectedUser.studentCode || '').trim().toUpperCase();
-          const targetUserId = tCode ? `tcode_${tCode}` : realAuthUserId;
-
-          const docRef = await addDoc(collection(db, 'support_tickets'), {
-            userId: targetUserId,
-            role: 'teacher',
-            studentName: selectedUser.fullName || selectedUser.name || 'أستاذ',
-            grade: 'General',
-            issueType: 'تبليغ إداري',
-            message: 'رسالة إدارية',
-            timestamp: serverTimestamp(),
-            status: 'resolved',
-            adminReply: messageText,
-            readByStudent: false,
-            senderType: 'teacher'
-          });
-
-          await addDoc(collection(db, 'notifications'), {
-            title: 'رسالة إدارية هامة',
-            message: messageText,
-            type: 'system',
-            userId: targetUserId,
-            read: false,
-            isRead: false,
-            recipientRole: 'teacher',
-            timestamp: serverTimestamp(),
-            createdAt: new Date().toISOString()
-          });
-
-          outboxRefId = docRef.id;
-          outboxCollection = 'support_tickets';
-        } else if (activeRole === 'staff') {
-          const docRef = await addDoc(collection(db, 'support_tickets'), {
-            userId: realAuthUserId,
-            role: 'staff',
-            studentName: selectedUser.fullName || selectedUser.name || 'موظف',
-            grade: 'General',
-            issueType: 'تبليغ إداري',
-            message: 'رسالة إدارية',
-            timestamp: serverTimestamp(),
-            status: 'resolved',
-            adminReply: messageText,
-            readByStudent: false,
-            senderType: 'staff'
-          });
-
-          await addDoc(collection(db, 'notifications'), {
-            title: 'رسالة إدارية هامة',
-            message: messageText,
-            type: 'system',
-            userId: realAuthUserId,
-            read: false,
-            isRead: false,
-            recipientRole: 'staff',
-            timestamp: serverTimestamp(),
-            createdAt: new Date().toISOString()
-          });
-
-          outboxRefId = docRef.id;
-          outboxCollection = 'support_tickets';
-        } else if (activeRole === 'parent') {
-          const pCode = (selectedUser.parentCode || selectedUser.code || '').trim().toUpperCase();
-          const targetUserId = pCode ? `pcode_${pCode}` : realAuthUserId;
-
-          const docRef = await addDoc(collection(db, 'support_tickets'), {
-            userId: targetUserId,
-            role: 'parent',
-            studentName: selectedUser.fullName || 'ولي أمر',
-            grade: 'General',
-            issueType: 'تبليغ إداري',
-            message: 'رسالة إدارية',
-            timestamp: serverTimestamp(),
-            status: 'resolved',
-            adminReply: messageText,
-            readByStudent: false,
-            senderType: 'parent'
-          });
-          
-          await addDoc(collection(db, 'notifications'), {
-            title: 'رسالة إدارية هامة',
-            message: messageText,
-            type: 'system',
-            userId: targetUserId,
-            read: false,
-            isRead: false,
-            recipientRole: 'parent',
-            timestamp: serverTimestamp(),
-            createdAt: new Date().toISOString()
-          });
-
-          outboxRefId = docRef.id;
-          outboxCollection = 'support_tickets';
-        } else {
-          const sCode = (selectedUser.studentCode || selectedUser.code || '').trim().toUpperCase();
-          const targetUserId = sCode ? `scode_${sCode}` : realAuthUserId;
-
-          const docRef = await addDoc(collection(db, 'support_tickets'), {
-            userId: targetUserId,
-            role: 'student',
-            studentName: selectedUser.fullName || selectedUser.name || 'طالب',
-            grade: selectedUser.grade || 'General',
-            issueType: 'تبليغ إداري',
-            message: 'رسالة إدارية',
-            timestamp: serverTimestamp(),
-            status: 'resolved',
-            adminReply: messageText,
-            readByStudent: false,
-            senderType: 'student'
-          });
-
-          await addDoc(collection(db, 'notifications'), {
-            title: 'رسالة إدارية هامة',
-            message: messageText,
-            type: 'system',
-            userId: targetUserId,
-            read: false,
-            isRead: false,
-            recipientRole: 'student',
-            timestamp: serverTimestamp(),
-            createdAt: new Date().toISOString()
-          });
-
-          outboxRefId = docRef.id;
-          outboxCollection = 'support_tickets';
-        }
-        
-        await addDoc(collection(db, 'admin_outbox'), {
-           title: `رسالة فردية - ${(selectedUser as any).fullName || (selectedUser as any).name}`,
-           message: messageText,
-           type: 'single',
-           targetRole: activeRole,
-           count: 1,
-           refIds: [{ id: outboxRefId, collection: outboxCollection }],
-           timestamp: serverTimestamp(),
-           createdAt: new Date().toISOString()
-        });
-        
-        await addDoc(collection(db, 'audit_logs'), {
-          action: 'إرسال تبليغ مباشر',
-          details: `تم إرسال رسالة لـ ${selectedUser.fullName}.`,
-          targetId: selectedUser.id,
-          targetName: selectedUser.fullName,
-          targetType: 'admin_message',
-          userId: auth.currentUser?.uid,
-          userName: auth.currentUser?.email || 'Admin',
-          userEmail: auth.currentUser?.email,
-          timestamp: serverTimestamp()
-        });
-        
-        showToast('تمت العملية بنجاح', 'success');
+      const response = await fetch('/api/admin-outbox/send-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          schoolId: selectedSchoolId || 'school_awail_ghamas',
+          messageText,
+          activeRole,
+          targetUsers: isBroadcastMode ? targetUsers : null,
+          isBroadcastMode,
+          selectedUser: isBroadcastMode ? null : selectedUser
+        })
+      });
+      
+      const resData = await response.json();
+      
+      if (!response.ok || !resData.success) {
+        throw new Error(resData.message || 'فشل إرسال التبليغ');
       }
       
+      showToast('تمت العملية بنجاح', 'success');
       setIsMessageModalOpen(false);
       setIsBroadcastMode(false);
       setMessageText('');
       setSelectedUser(null);
+
+      // Non-blocking background tasks
+      (async () => {
+        try {
+          const { broadcastService } = await import('../services/broadcastService');
+          if (isBroadcastMode && (activeRole === 'student' || activeRole === 'cadre' || activeRole === 'parent')) {
+            await broadcastService.sendBroadcast({
+              schoolId: selectedSchoolId || 'school_awail_ghamas',
+              message: messageText,
+              targetGrades: activeRole === 'student' ? ['الجميع'] : activeRole === 'cadre' ? ['teacher_only'] : ['parent_only'],
+              durationHours: 24,
+              author: 'الإدارة',
+              targetLocation: 'ticker'
+            });
+          }
+        } catch (e) {
+          console.error("Failed to add to broadcast ticker:", e);
+        }
+        
+      await logActivity({
+        action: isBroadcastMode ? 'إرسال تبليغ جماعي' : 'إرسال تبليغ فردي',
+        details: isBroadcastMode ? `تم إرسال رسالة جماعية لـ ${resData.count} من ${activeRole === 'student' ? 'الطلاب' : activeRole === 'cadre' ? 'الكادر' : activeRole === 'staff' ? 'الموظفين' : 'أولياء الأمور'}.` : `تم إرسال رسالة فردية إلى ${(selectedUser as any).fullName || (selectedUser as any).name} (${activeRole === 'student' ? 'طالب' : activeRole === 'cadre' ? 'مدرس' : activeRole === 'staff' ? 'موظف' : 'ولي أمر'})`,
+        targetType: isBroadcastMode ? 'broadcast_message' : 'single_message'
+      });
+      })();
     } catch (error) {
       console.error("Error sending message:", error);
-      showToast('حدث خطأ', 'error');
+      showToast('حدث خطأ أثناء إرسال التبليغ', 'error');
+    } finally {
+      setIsSendingMessage(false);
     }
   };
-
-
 
   const normalizeArabic = (str: string) => {
     if (!str) return '';
@@ -1946,6 +1900,7 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
 
   const getUnreadRepliesCount = (notifications: any[]) => {
     return notifications.reduce((acc, n) => {
+      if (readNotifCardIds.has(n.id)) return acc;
       const replies = allTickets.filter(t => {
         if (t.broadcastId && n.broadcastId && t.broadcastId === n.broadcastId) return true;
         if (t.replyToTicketId && n.refIds && n.refIds.some((ref: any) => ref.id === t.replyToTicketId)) return true;
@@ -1977,28 +1932,6 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
         </div>
 
         <div className="relative z-10 flex flex-col sm:flex-row gap-3">
-          <button
-            id="deep-sync-btn"
-            onClick={() => handleSyncAndPurge(false)}
-            disabled={isSyncing}
-            className={`flex items-center justify-center gap-2 px-6 py-3.5 rounded-2xl md:self-center font-bold text-sm tracking-tight transition-all duration-300 relative group overflow-hidden ${
-              isSyncing 
-                ? 'bg-amber-500/10 text-amber-300 border border-amber-500/30 cursor-wait'
-                : 'bg-gradient-to-r from-amber-500 to-yellow-600 hover:from-amber-400 hover:to-yellow-500 text-slate-950 shadow-[0_0_20px_rgba(245,158,11,0.2)] hover:shadow-[0_0_30px_rgba(245,158,11,0.4)] border border-yellow-400/30 transform hover:-translate-y-0.5 pointer-events-auto'
-            }`}
-          >
-            {isSyncing ? (
-              <>
-                <div className="w-4 h-4 border-2 border-amber-950 border-t-transparent rounded-full animate-spin" />
-                <span>جاري المزامنة والتطهير...</span>
-              </>
-            ) : (
-              <>
-                <RotateCcw className="group-hover:rotate-180 transition-transform duration-500" size={18} />
-                <span>مزامنة عميقة وتطهير الأشباح ⚡</span>
-              </>
-            )}
-          </button>
         </div>
       </div>
 
@@ -2248,7 +2181,7 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
                       initial={{ opacity: 0, scale: 0.98 }}
                       animate={{ opacity: 1, scale: 1 }}
                       className={`backdrop-blur-md rounded-2xl border overflow-hidden shadow-2xl transition-all ${
-                         post.type === 'admin' 
+                         (post as any).type === 'admin' 
                          ? 'bg-gradient-to-br from-amber-950/20 to-[#101935]/80 border-amber-500/30' 
                          : 'bg-[#101935]/60 border-white/5'
                       }`}
@@ -2256,21 +2189,21 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
                       <div className="p-4 md:p-5 flex flex-wrap sm:flex-nowrap items-start justify-between gap-4">
                         <div className="flex items-center gap-3 md:gap-4 overflow-hidden w-full sm:w-auto">
                            <div className={`w-10 h-10 md:w-12 md:h-12 rounded-2xl flex items-center justify-center border shadow-lg overflow-hidden shrink-0 ${
-                             post.type === 'admin' 
+                             (post as any).type === 'admin' 
                                ? 'bg-amber-400 border-amber-300/30' 
                                : 'bg-blue-600/10 border-blue-500/20'
                              }`}
                            >
-                             {post.type === 'admin' ? (
-                               post.stageIcon ? (
-                                 <span className="text-xl md:text-2.5xl select-none" role="img">{post.stageIcon}</span>
+                             {(post as any).type === 'admin' ? (
+                               (post as any).stageIcon ? (
+                                 <span className="text-xl md:text-2.5xl select-none" role="img">{(post as any).stageIcon}</span>
                                ) : (
                                  <School className="text-black" size={20} />
                                )
-                             ) : post.userPhotoURL ? (
-                               <img src={post.userPhotoURL} alt={post.userName} className="w-full h-full object-cover" />
+                             ) : (post as any).userPhotoURL ? (
+                               <img src={(post as any).userPhotoURL} alt={post.userName} className="w-full h-full object-cover" />
                              ) : (
-                               <User size={20} className={post.type === 'teacher' ? 'text-amber-400' : 'text-blue-400'} />
+                               <User size={20} className={(post as any).type === 'teacher' ? 'text-amber-400' : 'text-blue-400'} />
                              )}
                            </div>
                            <div className="min-w-0">
@@ -2278,8 +2211,8 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
                                <span className="truncate">{post.userName}</span>
                                {post.isPinned && <Pin size={12} className="text-amber-400 shrink-0" />}
                                {post.isLocked && <Lock size={12} className="text-rose-400 shrink-0" />}
-                               {post.type === 'teacher' && <span className="bg-amber-500/20 text-amber-400 text-[9px] px-2 py-0.5 rounded-full font-bold ml-1 shrink-0">كادر</span>}
-                               {post.type === 'admin' && <span className="bg-amber-500/20 text-amber-400 text-[9px] px-2 py-0.5 rounded-full font-bold ml-1 shrink-0">إدارة</span>}
+                               {(post as any).type === 'teacher' && <span className="bg-amber-500/20 text-amber-400 text-[9px] px-2 py-0.5 rounded-full font-bold ml-1 shrink-0">كادر</span>}
+                               {(post as any).type === 'admin' && <span className="bg-amber-500/20 text-amber-400 text-[9px] px-2 py-0.5 rounded-full font-bold ml-1 shrink-0">إدارة</span>}
                              </div>
                              <div className="text-white/40 text-[9px] md:text-[10px] font-bold tracking-widest uppercase mt-1 truncate">
                                 {post.timestamp?.toDate ? post.timestamp.toDate().toLocaleString('ar-IQ') : 'الآن'}
@@ -2354,46 +2287,46 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
                           </div>
                         )}
                         
-                        {post.reportsCount && post.reportsCount > 0 ? (
+                        {(post as any).reportsCount && (post as any).reportsCount > 0 ? (
                           <div className="mb-4 bg-rose-500/10 p-3 rounded-xl border border-rose-500/20 flex items-center gap-2">
                              <AlertTriangle size={16} className="text-rose-400 shrink-0" />
-                             <span className="text-rose-400 text-sm font-bold">هذا المنشور محظور استلام إبلاغات ضده ({post.reportsCount} إبلاغ)</span>
+                             <span className="text-rose-400 text-sm font-bold">هذا المنشور محظور استلام إبلاغات ضده ({(post as any).reportsCount} إبلاغ)</span>
                           </div>
                         ) : null}
                         
                         <p className="text-white/90 leading-relaxed text-base md:text-lg whitespace-pre-wrap font-medium">{post.content}</p>
                         
-                        {post.mediaUrl && (
+                        {(post as any).mediaUrl && (
                           <div className="mt-4 rounded-xl overflow-hidden border border-white/10">
-                            <img src={post.mediaUrl} className="w-full object-contain max-h-[500px]" alt="مرفق المنشور" />
+                            <img src={(post as any).mediaUrl} className="w-full object-contain max-h-[500px]" alt="مرفق المنشور" />
                           </div>
                         )}
                         
                         {/* Interactive Bar */}
                         <div className="mt-4 flex items-center gap-2 border-t border-white/5 pt-3 pb-2 text-xs font-bold w-full">
                            <div className="flex items-center gap-1.5 text-white/50 bg-white/5 px-3 py-1.5 rounded-lg border border-white/5 whitespace-nowrap">
-                              <ThumbsUp size={14} className={(post.likes?.length || 0) > 0 ? "text-cyan-400" : ""} /> 
-                              <span className={(post.likes?.length || 0) > 0 ? "text-cyan-400" : ""}>{(post.likes?.length || 0)}</span>
+                              <ThumbsUp size={14} className={((post as any).likes?.length || 0) > 0 ? "text-cyan-400" : ""} /> 
+                              <span className={((post as any).likes?.length || 0) > 0 ? "text-cyan-400" : ""}>{((post as any).likes?.length || 0)}</span>
                            </div>
                            <button 
                               onClick={() => handleFetchComments(post.id)}
                               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors cursor-pointer border whitespace-nowrap ${expandedCommentsPostId === post.id ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' : 'bg-white/5 text-white/50 border-white/5 hover:bg-white/10 hover:text-white'}`}
                            >
                               <MessageCircle size={14} /> 
-                              <span>{post.comments?.length || 0}</span>
+                              <span>{(post as any).comments?.length || 0}</span>
                            </button>
                            <div className="flex items-center gap-1.5 text-white/30 bg-white/5 px-3 py-1.5 rounded-lg border border-white/5 whitespace-nowrap mr-auto">
-                              <Share2 size={13} /> <span>{post.shares || 0}</span>
+                              <Share2 size={13} /> <span>{(post as any).shares || 0}</span>
                            </div>
                         </div>
 
                         {/* Reactions Bar (Facebook style summary) */}
-                        {post.reactions && Object.keys(post.reactions).length > 0 && (
+                        {(post as any).reactions && Object.keys((post as any).reactions).length > 0 && (
                           <div className="pb-4 flex flex-wrap items-center gap-2">
                              <div className="flex items-center gap-2 bg-white/5 border border-white/10 px-3 py-1.5 rounded-xl text-white font-mono text-[11px]">
                                <div className="flex items-center -space-x-1.5 space-x-reverse">
-                                 {Object.keys(post.reactions).slice(0, 5).map(char => {
-                                   if (post.reactions[char] === 0) return null;
+                                 {Object.keys((post as any).reactions).slice(0, 5).map(char => {
+                                   if ((post as any).reactions[char] === 0) return null;
                                    return (
                                      <div key={char} className="w-6 h-6 rounded-full bg-[#101935] border border-white/10 flex items-center justify-center text-sm shadow-md z-10" title={char}>
                                        {char}
@@ -2402,7 +2335,7 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
                                  })}
                                </div>
                                <span className="font-extrabold text-cyan-400 px-1 text-xs">
-                                 {Number(Object.values(post.reactions || {}).reduce((acc: any, val: any) => acc + val, 0))}
+                                 {Number(Object.values((post as any).reactions || {}).reduce((acc: any, val: any) => acc + val, 0))}
                                </span>
                              </div>
                           </div>
@@ -2455,6 +2388,113 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
               )}
             </div>
           </div>
+
+          {/* Right Column: Global Publish Locks & Stats */}
+          <div className="lg:col-span-1 space-y-4">
+            <div className="glass-card p-6 border-white/5 space-y-6 sticky top-6">
+              <h3 className="text-lg font-black text-white flex items-center gap-2 mb-4 border-b border-white/5 pb-4">
+                <Lock className="text-red-400" size={20} />
+                قيود النشر للمنصات (للطلاب)
+              </h3>
+
+              {/* Sytem Locks */}
+              <div className="space-y-5">
+                {/* 1. Lounge Lock */}
+                <div className="flex items-center justify-between p-4 bg-black/20 rounded-xl border border-white/5">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-purple-500/20 flex items-center justify-center">
+                      <MessageSquareText className="text-purple-400" size={18} />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-black text-white">قفل المجلس (الدردشة)</h4>
+                      <p className="text-[10px] text-white/40">منع الطلاب من إرسال رسائل في المجلس</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleSaveLocks({ loungeLock: !loungeLock })}
+                    className={`relative w-12 h-6 rounded-full transition-colors ${loungeLock ? 'bg-red-500' : 'bg-white/10'}`}
+                  >
+                    <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${loungeLock ? 'left-1' : 'left-7'}`} />
+                  </button>
+                </div>
+
+                {/* 2. Excellence Stories Lock */}
+                <div className="flex items-center justify-between p-4 bg-black/20 rounded-xl border border-white/5">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-amber-500/20 flex items-center justify-center">
+                      <Star className="text-amber-400" size={18} />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-black text-white">قفل ستوريات التميز</h4>
+                      <p className="text-[10px] text-white/40">منع الطلاب من نشر تحديثات تميز</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleSaveLocks({ storiesLock: !storiesLock })}
+                    className={`relative w-12 h-6 rounded-full transition-colors ${storiesLock ? 'bg-red-500' : 'bg-white/10'}`}
+                  >
+                    <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${storiesLock ? 'left-1' : 'left-7'}`} />
+                  </button>
+                </div>
+
+                {/* 3. Community (Al-Saha) Lock */}
+                <div className="p-4 bg-black/20 rounded-xl border border-white/5 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center">
+                        <Users className="text-blue-400" size={18} />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-black text-white">قفل الساحة (المجتمع)</h4>
+                        <p className="text-[10px] text-white/40">حصر النشر في الساحة على الإدارة والأساتذة</p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleSaveLocks({ communityLockAll: !communityLockAll })}
+                      className={`relative w-12 h-6 rounded-full transition-colors ${communityLockAll ? 'bg-red-500' : 'bg-white/10'}`}
+                    >
+                      <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${communityLockAll ? 'left-1' : 'left-7'}`} />
+                    </button>
+                  </div>
+                  
+                  {/* Select grades if community is not completely locked */}
+                  <AnimatePresence>
+                    {!communityLockAll && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="pt-4 border-t border-white/10 overflow-hidden space-y-3"
+                      >
+                        <p className="text-xs text-white/60 font-bold mb-2">أو قفل النشر لصفوف محددة فقط:</p>
+                        {['1p', '2p', '3p', '4p', '5p', '6p', '1m', '2m', '3m', '4s', '4l', '5s', '5l', '6s', '6l'].map(gradeId => {
+                          const isLocked = communityLockGrades.includes(gradeId);
+                          return (
+                            <div key={gradeId} className="flex items-center justify-between bg-black/30 p-2 rounded-lg border border-white/5">
+                              <span className="text-xs text-white">{getPrefixForGrade(gradeId)} {gradeId.replace(/[^1-6]/g, '')}</span>
+                              <button
+                                onClick={() => {
+                                  const newGrades = isLocked 
+                                    ? communityLockGrades.filter(g => g !== gradeId)
+                                    : [...communityLockGrades, gradeId];
+                                  setCommunityLockGrades(newGrades);
+                                  handleSaveLocks({ communityLockGrades: newGrades });
+                                }}
+                                className={`text-[10px] px-3 py-1 rounded-full font-bold transition-colors ${isLocked ? 'bg-red-500/20 text-red-400' : 'bg-emerald-500/20 text-emerald-400'}`}
+                              >
+                                {isLocked ? 'مقفول' : 'مسموح'}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              </div>
+            </div>
+          </div>
+
         </div>
       )}
       
@@ -2743,7 +2783,6 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
                             ) : (
                               activeList.map((user) => (
                                 <motion.div 
-                                  layout
                                   key={user.id} 
                                   className="bg-[#0c1225]/80 border border-white/10 rounded-[16px] p-5 hover:border-cyan-500/40 transition-all flex flex-col gap-4 relative group overflow-hidden shadow-2xl"
                                 >
@@ -2826,38 +2865,43 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
                                 <div className="grid grid-cols-2 gap-2 mt-2 pt-4 border-t border-white/5">
                                   <button 
                                     onClick={() => handleUpdatePermission(user, 'canPost', user.canPost)}
-                                    className={`py-2 rounded-xl flex items-center justify-center gap-1.5 border transition-all text-[10px] font-black ${user.canPost === false ? 'bg-rose-500/20 text-rose-400 border-rose-500/20' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'}`}
+                                    disabled={!!actionLoading[`${user.id}_canPost`]}
+                                    className={`py-2 rounded-xl flex items-center justify-center gap-1.5 border transition-all text-[10px] font-black ${user.canPost === false ? 'bg-rose-500/20 text-rose-400 border-rose-500/20' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'} disabled:opacity-50`}
                                   >
                                     <MessageSquare size={14} />
-                                    {user.canPost === false ? 'تفعيل النشر' : 'منع النشر'}
+                                    {actionLoading[`${user.id}_canPost`] || (user.canPost === false ? 'تفعيل النشر' : 'منع النشر')}
                                   </button>
                                   <button 
                                     onClick={() => handleUpdatePermission(user, 'canComment', user.canComment)}
-                                    className={`py-2 rounded-xl flex items-center justify-center gap-1.5 border transition-all text-[10px] font-black ${user.canComment === false ? 'bg-rose-500/20 text-rose-400 border-rose-500/20' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'}`}
+                                    disabled={!!actionLoading[`${user.id}_canComment`]}
+                                    className={`py-2 rounded-xl flex items-center justify-center gap-1.5 border transition-all text-[10px] font-black ${user.canComment === false ? 'bg-rose-500/20 text-rose-400 border-rose-500/20' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'} disabled:opacity-50`}
                                   >
                                     <MessageSquare size={14} />
-                                    {user.canComment === false ? 'تفعيل التعليق' : 'منع التعليق'}
+                                    {actionLoading[`${user.id}_canComment`] || (user.canComment === false ? 'تفعيل التعليق' : 'منع التعليق')}
                                   </button>
                                  <button 
                                    onClick={() => handleRegenerateCode(user)}
-                                   className="py-2 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[10px] font-black flex items-center justify-center gap-1.5 hover:bg-cyan-500/20 transition-all"
+                                   disabled={!!actionLoading[`${user.id}_regenerate`]}
+                                   className="py-2 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[10px] font-black flex items-center justify-center gap-1.5 hover:bg-cyan-500/20 transition-all disabled:opacity-50"
                                  >
                                    <RotateCcw size={14} />
-                                   إعادة توليد الكود
+                                   {actionLoading[`${user.id}_regenerate`] || 'إعادة توليد الكود'}
                                  </button>
                                  <button 
                                    onClick={() => handleToggleBan(user)}
-                                   className={`py-2 rounded-xl flex items-center justify-center gap-1.5 border transition-all text-[10px] font-black ${user.isBanned ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20' : 'bg-rose-500/20 text-rose-400 border-rose-500/20'}`}
+                                   disabled={!!actionLoading[`${user.id}_ban`]}
+                                   className={`py-2 rounded-xl flex items-center justify-center gap-1.5 border transition-all text-[10px] font-black ${user.isBanned ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20' : 'bg-rose-500/20 text-rose-400 border-rose-500/20'} disabled:opacity-50`}
                                  >
                                    {user.isBanned ? <Unlock size={14}/> : <Ban size={14}/>}
-                                   {user.isBanned ? 'إلغاء التجميد' : 'تجميد الحساب'}
+                                   {actionLoading[`${user.id}_ban`] || (user.isBanned ? 'إلغاء التجميد' : 'تجميد الحساب')}
                                  </button>
                                  <button
                                      onClick={() => handleSecureDevice(user)}
-                                     className={`py-2 rounded-xl border transition-all text-[10px] font-black flex items-center justify-center gap-1.5 ${recentlySecured.has(user.id) ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white'}`}
+                                     disabled={!!actionLoading[`${user.id}_secure`]}
+                                     className={`py-2 rounded-xl border transition-all text-[10px] font-black flex items-center justify-center gap-1.5 ${recentlySecured.has(user.id) ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white'} disabled:opacity-50`}
                                    >
                                      <ShieldCheck size={14} className={recentlySecured.has(user.id) ? 'text-emerald-400' : 'text-cyan-400'} /> 
-                                     {recentlySecured.has(user.id) ? 'تم التأمين' : 'تأمين الجهاز'}
+                                     {actionLoading[`${user.id}_secure`] || (recentlySecured.has(user.id) ? 'تم التأمين' : 'تأمين الجهاز')}
                                    </button>
                                  <button 
                                    onClick={() => {
@@ -2873,10 +2917,11 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
                                  </button>
                                  <button 
                                    onClick={() => handleDeleteUser(user)}
-                                   className="py-2 rounded-xl bg-rose-600/10 text-rose-400 border border-rose-500/20 text-[10px] font-black hover:bg-rose-600/20 flex items-center justify-center gap-1.5 transition-all"
+                                   disabled={!!actionLoading[`${user.id}_delete`]}
+                                   className="py-2 rounded-xl bg-rose-600/10 text-rose-400 border border-rose-500/20 text-[10px] font-black hover:bg-rose-600/20 flex items-center justify-center gap-1.5 transition-all disabled:opacity-50"
                                  >
                                    <Trash2 size={14} />
-                                   حذف نهائي
+                                   {actionLoading[`${user.id}_delete`] || 'حذف نهائي'}
                                  </button>
                                </div>
                              </motion.div>
@@ -2895,10 +2940,7 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
                        <p className="text-white/40">لا يوجد بيانات حالياً.</p>
                    </div>
                  ) : (
-                   <motion.div 
-                     layout
-                     className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
-                   >
+                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                      {filteredCadreStaff.map(user => (
                         <motion.div key={user.id} className="bg-[#0c1225]/80 p-5 rounded-[16px] border border-white/10 flex flex-col gap-4 relative overflow-hidden group">
                             <div className="absolute -right-4 -top-4 w-24 h-24 bg-cyan-500/5 blur-2xl" />
@@ -2981,42 +3023,47 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
                                   )}
                                </div>
 
-                               <div className="grid grid-cols-2 gap-2 mt-2 pt-3 border-t border-white/5">
+                                <div className="grid grid-cols-2 gap-2 mt-2 pt-3 border-t border-white/5">
                                  <button 
                                    onClick={() => handleUpdatePermission(user, 'canPost', user.canPost)}
-                                   className={`py-2 rounded-xl flex items-center justify-center gap-1.5 border transition-all text-[10px] font-black ${user.canPost === false ? 'bg-rose-500/20 text-rose-400 border-rose-500/20' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'}`}
+                                   disabled={!!actionLoading[`${user.id}_canPost`]}
+                                   className={`py-2 rounded-xl flex items-center justify-center gap-1.5 border transition-all text-[10px] font-black ${user.canPost === false ? 'bg-rose-500/20 text-rose-400 border-rose-500/20' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'} disabled:opacity-50`}
                                  >
                                    <MessageSquare size={14} />
-                                   {user.canPost === false ? 'تفعيل النشر' : 'منع النشر'}
+                                   {actionLoading[`${user.id}_canPost`] || (user.canPost === false ? 'تفعيل النشر' : 'منع النشر')}
                                  </button>
                                  <button 
                                    onClick={() => handleUpdatePermission(user, 'canComment', user.canComment)}
-                                   className={`py-2 rounded-xl flex items-center justify-center gap-1.5 border transition-all text-[10px] font-black ${user.canComment === false ? 'bg-rose-500/20 text-rose-400 border-rose-500/20' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'}`}
+                                   disabled={!!actionLoading[`${user.id}_canComment`]}
+                                   className={`py-2 rounded-xl flex items-center justify-center gap-1.5 border transition-all text-[10px] font-black ${user.canComment === false ? 'bg-rose-500/20 text-rose-400 border-rose-500/20' : 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'} disabled:opacity-50`}
                                  >
                                    <MessageSquare size={14} />
-                                   {user.canComment === false ? 'تفعيل التعليق' : 'منع التعليق'}
+                                   {actionLoading[`${user.id}_canComment`] || (user.canComment === false ? 'تفعيل التعليق' : 'منع التعليق')}
                                  </button>
 
                                  <button 
                                    onClick={() => handleRegenerateCode(user)}
-                                   className="py-2 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[10px] font-black flex items-center justify-center gap-1.5 hover:bg-cyan-500/20 transition-all"
+                                   disabled={!!actionLoading[`${user.id}_regenerate`]}
+                                   className="py-2 rounded-xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-[10px] font-black flex items-center justify-center gap-1.5 hover:bg-cyan-500/20 transition-all disabled:opacity-50"
                                  >
                                    <RotateCcw size={14} />
-                                   إعادة توليد الكود
+                                   {actionLoading[`${user.id}_regenerate`] || 'إعادة توليد الكود'}
                                  </button>
                                  <button 
                                    onClick={() => handleToggleBan(user)}
-                                   className={`py-2 rounded-xl flex items-center justify-center gap-1.5 border transition-all text-[10px] font-black ${user.isBanned ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20' : 'bg-rose-500/20 text-rose-400 border-rose-500/20'}`}
+                                   disabled={!!actionLoading[`${user.id}_ban`]}
+                                   className={`py-2 rounded-xl flex items-center justify-center gap-1.5 border transition-all text-[10px] font-black ${user.isBanned ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 hover:bg-emerald-500/20' : 'bg-rose-500/20 text-rose-400 border-rose-500/20'} disabled:opacity-50`}
                                  >
-                                   {user.isBanned ? <Unlock size={14}/> : <Ban size={14}/>}
-                                   {user.isBanned ? 'إلغاء التجميد' : 'تجميد الحساب'}
+                                   {user.isBanned ? <Unlock size={14} className="text-emerald-400" /> : <Ban size={14} className="text-rose-400" />}
+                                   {actionLoading[`${user.id}_ban`] || (user.isBanned ? 'تفعيل الحساب' : 'تجميد الحساب')}
                                  </button>
                                  <button 
                                      onClick={() => handleSecureDevice(user)}
-                                     className={`py-2 rounded-xl border transition-all text-[10px] font-black flex items-center justify-center gap-1.5 ${recentlySecured.has(user.id) ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white'}`}
+                                     disabled={!!actionLoading[`${user.id}_secure`]}
+                                     className={`py-2 rounded-xl border transition-all text-[10px] font-black flex items-center justify-center gap-1.5 ${recentlySecured.has(user.id) ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-white/5 text-white/70 border-white/10 hover:bg-white/10 hover:text-white'} disabled:opacity-50`}
                                    >
                                      <ShieldCheck size={14} className={recentlySecured.has(user.id) ? 'text-emerald-400' : 'text-cyan-400'} /> 
-                                     {recentlySecured.has(user.id) ? 'تم التأمين' : 'تأمين الجهاز'}
+                                     {actionLoading[`${user.id}_secure`] || (recentlySecured.has(user.id) ? 'تم التأمين' : 'تأمين الجهاز')}
                                    </button>
                                  <button 
                                    onClick={() => { setSelectedUser(user); setMessageText(''); setIsBroadcastMode(false); setIsMessageModalOpen(true); }}
@@ -3027,16 +3074,17 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
                                  </button>
                                  <button 
                                    onClick={() => handleDeleteUser(user)}
-                                   className="py-2 rounded-xl bg-rose-600/10 text-rose-400 border border-rose-500/20 text-[10px] font-black hover:bg-rose-600/20 flex items-center justify-center gap-1.5 transition-all"
+                                   disabled={!!actionLoading[`${user.id}_delete`]}
+                                   className="py-2 rounded-xl bg-rose-600/10 text-rose-400 border border-rose-500/20 text-[10px] font-black hover:bg-rose-600/20 flex items-center justify-center gap-1.5 transition-all disabled:opacity-50"
                                  >
                                    <Trash2 size={14} />
-                                   حذف نهائي
+                                   {actionLoading[`${user.id}_delete`] || 'حذف نهائي'}
                                  </button>
                                </div>
                         </motion.div>
                       ))
                     }
-                  </motion.div>
+                  </div>
                 )
               )}
             </div>
@@ -3147,6 +3195,7 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
                   });
 
                   const unreadReplies = replies.filter(t => !t.readByAdmin);
+                  const isCardUnread = unreadReplies.length > 0 && !readNotifCardIds.has(n.id);
                   const isExpanded = expandedNotifIds.has(n.id);
                   const toggleExpand = async () => {
                     const copy = new Set(expandedNotifIds);
@@ -3154,28 +3203,29 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
                       copy.delete(n.id);
                     } else {
                       copy.add(n.id);
-                      if (unreadReplies.length > 0) {
-                        try {
-                          await Promise.all(unreadReplies.map(t => 
-                            updateDoc(doc(db, 'support_tickets', t.id), { readByAdmin: true })
-                          ));
-                        } catch (err) {
-                          console.error("Error marking replies as read", err);
-                        }
-                      }
+                      markNotifCardAsRead(n.id, replies);
                     }
                     setExpandedNotifIds(copy);
                   };
 
                   return (
-                    <div key={n.id || idx} className="bg-[#101935] p-5 rounded-3xl border border-white/5 flex flex-col gap-4 group hover:border-purple-500/20 transition-all">
+                    <div 
+                      key={n.id || idx} 
+                      onClick={() => markNotifCardAsRead(n.id, replies)}
+                      className={`bg-[#101935] p-5 rounded-3xl border transition-all flex flex-col gap-4 group ${isCardUnread ? 'border-red-500/40 bg-[#141b3d]' : 'border-white/5 hover:border-purple-500/20'}`}
+                    >
                       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-                        <div className="flex-1 space-y-2">
-                           <h4 className="text-white font-bold text-sm flex items-center gap-2">
+                        <div className="flex-1 space-y-2 cursor-pointer" onClick={toggleExpand}>
+                           <h4 className="text-white font-bold text-sm flex items-center gap-2 flex-wrap">
                               {n.title || 'تبليغ إداري عام'}
                               <span className={`${n.type === 'broadcast' ? 'bg-orange-500/20 text-orange-400' : 'bg-purple-500/20 text-purple-400'} text-[9px] px-2 py-0.5 rounded-full font-black`}>
                                 {n.type === 'broadcast' ? `جماعي (${n.count})` : 'فردي'}
                               </span>
+                              {isCardUnread && (
+                                <span className="bg-red-500 text-white text-[9px] px-2 py-0.5 rounded-full font-black animate-pulse flex items-center gap-1 shadow-lg shadow-red-500/30">
+                                  <span>رد جديد ({unreadReplies.length})</span>
+                                </span>
+                              )}
                            </h4>
                            <p className="text-white/60 text-xs leading-relaxed max-w-2xl">{n.message}</p>
                            <div className="flex items-center gap-4 text-[10px] text-white/30 font-mono">
@@ -3187,8 +3237,11 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
                            {replies.length > 0 && (
                              <button
                                type="button"
-                               onClick={toggleExpand}
-                               className={`px-4 py-2 rounded-2xl text-[11px] font-black transition-all flex items-center gap-1 cursor-pointer active:scale-95 ${isExpanded ? 'bg-[#FFD600] text-black shadow-lg' : 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 hover:bg-cyan-500/30'}`}
+                               onClick={(e) => {
+                                 e.stopPropagation();
+                                 toggleExpand();
+                               }}
+                               className={`px-4 py-2 rounded-2xl text-[11px] font-black transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 ${isExpanded ? 'bg-[#FFD600] text-black shadow-lg' : isCardUnread ? 'bg-red-500 text-white shadow-lg shadow-red-500/30 animate-pulse' : 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30 hover:bg-cyan-500/30'}`}
                              >
                                <span>💬 الردود الواردة ({replies.length})</span>
                              </button>
@@ -3196,7 +3249,10 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
                            
                            <button
                              type="button"
-                             onClick={() => handleDeleteNotification(n.id, n.refIds)}
+                             onClick={(e) => {
+                               e.stopPropagation();
+                               handleDeleteNotification(n.id, n.refIds);
+                             }}
                              className="p-3 bg-rose-500/10 text-rose-400 hover:bg-rose-500 hover:text-white rounded-2xl flex items-center justify-center transition-all cursor-pointer active:scale-95"
                              title="حذف التبليغ"
                            >
@@ -3358,10 +3414,10 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
                   </button>
                   <button
                     onClick={handleSendMessage}
-                    disabled={!messageText.trim()}
+                    disabled={!messageText.trim() || isSendingMessage}
                     className="py-4 rounded-2xl bg-cyan-600 text-white font-bold shadow-lg shadow-cyan-600/20 hover:bg-cyan-500 transition-all disabled:opacity-50 disabled:grayscale"
                   >
-                    إرسال الرسالة
+                    {isSendingMessage ? 'جاري الإرسال...' : 'إرسال الرسالة'}
                   </button>
                 </div>
               </div>

@@ -62,9 +62,18 @@ export const ArchiveSection: React.FC<ArchiveSectionProps> = ({
           </div>
           <h4 className="text-white font-black text-xl tracking-tight">الأرشيف الرقمي والقوائم</h4>
         </div>
-        <div className="flex flex-col items-end">
-          <span className="text-white/20 text-[10px] font-black uppercase">إجمالي الوجبات</span>
-          <span className="text-purple-400 text-lg font-black leading-none">{savedLists.length}</span>
+        <div className="flex items-center gap-4">
+          <div className="flex flex-col items-end">
+            <span className="text-white/20 text-[9px] font-black uppercase">إجمالي الوجبات</span>
+            <span className="text-purple-400 text-base font-black leading-none mt-0.5">{savedLists.length}</span>
+          </div>
+          <div className="w-px h-6 bg-white/10"></div>
+          <div className="flex flex-col items-end">
+            <span className="text-white/20 text-[9px] font-black uppercase">إجمالي الطلاب</span>
+            <span className="text-emerald-400 text-base font-black leading-none mt-0.5">
+              {savedLists.reduce((acc, list) => acc + (list.students?.length || 0), 0)}
+            </span>
+          </div>
         </div>
       </div>
 

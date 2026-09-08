@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, terminate, clearIndexedDbPersistence } from '@/src/lib/firebase';
 import { db } from '../lib/firebase';
 import { Bell, X, MonitorPlay, Users, Calendar } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -46,11 +46,9 @@ export const ScheduleAlerter: React.FC<Props> = ({ grade, isTeacher, teacherId, 
     }, (error) => {
       console.warn("ScheduleAlerter error:", error);
       if (error.message && error.message.includes('Unexpected state') && error.message.includes('ca9')) {
-        import('firebase/firestore').then(({ terminate, clearIndexedDbPersistence }) => {
-          terminate(db).then(() => {
-            clearIndexedDbPersistence(db).then(() => {
-              window.location.reload();
-            });
+        terminate(db).then(() => {
+          clearIndexedDbPersistence(db).then(() => {
+            window.location.reload();
           });
         });
       }

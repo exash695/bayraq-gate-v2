@@ -1,5 +1,4 @@
-import { 
-  collection, 
+import { collection, 
   onSnapshot, 
   query, 
   where, 
@@ -13,12 +12,12 @@ import {
   getDoc,
   setDoc,
   deleteDoc,
-  writeBatch
-} from 'firebase/firestore';
+  writeBatch } from '@/src/lib/firebase';
 import { db } from '../lib/firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { logActivity } from '../utils/auditLogger';
 import { safeStorage, safeSessionStorage } from '../lib/storage';
+import { realtimeManager } from '../lib/realtimeManager';
 
 // ملاحظة للإدارة: لتفعيل صلاحيات المدير لهذا الحساب، يجب إضافة وثيقة في مجموعة "admins"
 // معرف الوثيقة (Document ID) يجب أن يكون: FW9aRJklhbZ6m6h6YJjOCG5nPqB3
@@ -61,202 +60,145 @@ export interface StudentPayment {
 }
 
 export const subscribeToPendingPayments = (callback: (payments: StudentPayment[]) => void, schoolId?: string | null) => {
-  let q = query(
-    collection(db, 'payment_requests'),
-    where('status', '==', 'pending')
-  );
+  let isSubscribed = true;
+  let abortController: AbortController | null = null;
+  let retryTimeout: any = null;
 
-  if (schoolId) {
-    q = query(
-      collection(db, 'payment_requests'),
-      where('status', '==', 'pending'),
-      where('schoolId', '==', schoolId || 'unassigned')
-    );
-  }
+  const fetchPayments = async (retries = 2) => {
+    if (!isSubscribed) return;
+    try {
+      if (abortController) {
+        abortController.abort();
+      }
+      abortController = new AbortController();
 
-  return onSnapshot(q, (snapshot) => {
-    const payments = snapshot.docs.map(doc => ({
-      id: doc.id,
-      ...doc.data()
-    } as unknown as StudentPayment))
-    .sort((a, b) => {
-      const dateA = a.createdAt?.toDate?.() || new Date(a.createdAt || 0);
-      const dateB = b.createdAt?.toDate?.() || new Date(b.createdAt || 0);
-      return dateB.getTime() - dateA.getTime();
-    });
-    callback(payments);
-  }, (error) => {
-    if (error.code !== 'permission-denied') {
-      handleFirestoreError(error, OperationType.LIST, 'payment_requests', false);
+      const validSchoolId = (schoolId && schoolId !== 'all' && schoolId !== 'undefined' && schoolId !== 'null') ? schoolId : null;
+      const url = validSchoolId 
+        ? `/api/finance/pending-payments?schoolId=${encodeURIComponent(validSchoolId)}&t=${Date.now()}` 
+        : `/api/finance/pending-payments?t=${Date.now()}`;
+
+      const res = await fetch(url, { signal: abortController.signal });
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      if (isSubscribed && data && data.success && Array.isArray(data.payments)) {
+        callback(data.payments);
+      }
+    } catch (error: any) {
+      if (error?.name === 'AbortError') return;
+      if (!isSubscribed) return;
+
+      if (error instanceof Error && error.message.includes('Failed to fetch')) {
+        console.warn("[financeService] Network reconnecting, will retry fetching pending payments...");
+      } else {
+        console.warn("[financeService] Issue fetching pending payments:", error?.message || error);
+      }
+
+      if (retries > 0) {
+        clearTimeout(retryTimeout);
+        retryTimeout = setTimeout(() => {
+          if (isSubscribed) fetchPayments(retries - 1);
+        }, 2500);
+      }
+    }
+  };
+
+  fetchPayments();
+  const unsub = realtimeManager.subscribe('payment_requests', () => {
+    if (isSubscribed) {
+      fetchPayments();
     }
   });
+
+  return () => {
+    isSubscribed = false;
+    clearTimeout(retryTimeout);
+    if (abortController) {
+      abortController.abort();
+    }
+    unsub();
+  };
 };
 
-export const verifyPayment = async (requestId: string, studentCode: string, studentName: string, amount: number, adminName: string = 'النظام') => {
-  // 1. Get the request document
-  const requestRef = doc(db, 'payment_requests', requestId);
-  const requestSnap = await getDoc(requestRef);
-  
-  if (!requestSnap.exists() || requestSnap.data().status !== 'pending') {
-    throw new Error('الطلب غير موجود أو تمت معالجته مسبقاً');
+export const verifyPayment = async (requestId: string, studentId: string, studentName: string, amount: number, adminName: string = 'النظام') => {
+  const response = await fetch('/api/finance/verify-payment', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requestId, studentId, amount, adminName, note: `تأكيد دفعة الطالب ${studentName}` })
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.message || 'فشل في تأكيد الدفعة');
   }
 
-  const requestData = requestSnap.data();
-  const schoolId = requestData.schoolId || 'unknown';
-  
-  // 2. Resolve specific student document ID (with space/sanitization)
-  const studentDocId = `${schoolId}_${studentCode}`.replace(/\s+/g, '_');
-  const studentRef = doc(db, 'school_students', studentDocId);
-  
-  const studentSnap = await getDoc(studentRef);
-  if (!studentSnap.exists()) {
-    throw new Error(`تعذر العثور على سجل الطالب: ${studentCode}`);
-  }
-
-  const studentData = studentSnap.data();
-
-  // 3. Update installments logic - correctly target finance object
-  const installments = studentData.finance?.installments || studentData.installments || [];
-  let amountLeft = amount;
-  const updatedInstallments = installments.map((inst: any) => {
-    const isPaid = inst.paid === true || inst.status === 'paid' || inst.status === 'completed' || inst.status === 'verified' || inst.status === 'approved';
-    // Match based on amount remaining
-    if (!isPaid && amountLeft >= inst.amount) {
-      amountLeft -= inst.amount;
-      return { 
-        ...inst, 
-        status: 'completed', 
-        paid: true, 
-        paidAt: serverTimestamp(),
-        verifiedAt: serverTimestamp()
-      };
-    }
-    return inst;
-  });
-  
-  const batch = writeBatch(db);
-
-  // 4. Mark request as verified/approved
-  batch.update(requestRef, {
-    status: 'verified',
-    verifiedAt: serverTimestamp(),
-    approvedBy: adminName
-  });
-
-  // 5. Update student document
-  batch.update(studentRef, {
-    'finance.paidAmount': increment(amount),
-    'finance.lastPaymentDate': serverTimestamp(),
-    'finance.installments': updatedInstallments,
-    'paidAmount': increment(amount)
-  });
-
-  // 6. Create notification
-  const notificationRef = doc(collection(db, 'notifications'));
-  batch.set(notificationRef, {
-    title: 'تم تأكيد دفعة مالية',
-    message: `تم تأكيد مبلغ ${amount.toLocaleString()} د.ع للطالب ${studentName}`,
-    type: 'payment',
-    createdAt: new Date().toISOString(),
-    isRead: false,
-    studentId: studentCode,
-    userId: studentData.userId || null
-  });
-
-  await batch.commit();
-
-  try {
-    logActivity({
-      action: 'تأكيد دفعة مالية',
-      details: `تم تأكيد وصل قبض بمبلغ ${amount.toLocaleString()} د.ع للطالب: ${studentName}`,
-      targetId: studentCode,
-      targetType: 'finance_payment',
-      targetName: studentName
-    });
-  } catch (error) {
-    console.error("Failed to log payment confirmation:", error);
-  }
+  return await response.json();
 };
 
 export const rejectPayment = async (requestId: string, notes: string) => {
-  const requestRef = doc(db, 'payment_requests', requestId);
+  const response = await fetch('/api/finance/reject-payment', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requestId, reason: notes })
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.message || 'فشل في رفض الدفعة');
+  }
+
+  return await response.json();
+};
+
+export const createPaymentRequest = async (paymentData: Omit<StudentPayment, 'id' | 'status' | 'date'>) => {
+  const response = await fetch('/api/finance/payment-requests', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(paymentData)
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.message || 'فشل في إرسال طلب الدفع');
+  }
+
+  return await response.json();
+};
+
+export const getStudentTransactions = async (studentId: string) => {
   try {
-    const requestSnap = await getDoc(requestRef);
-    if (!requestSnap.exists()) return;
-    
-    const data = requestSnap.data();
-    const studentDocId = `${data.schoolId}_${data.studentCode || data.studentId}`.replace(/\s+/g, '_');
-    const studentRef = doc(db, 'school_students', studentDocId);
-
-    const batch = writeBatch(db);
-    
-    // Mark as rejected in request collection
-    batch.update(requestRef, {
-      status: 'rejected',
-      rejectReason: notes,
-      rejectedAt: serverTimestamp()
-    });
-
-    // Update student's transaction log (the pending record in their finance object)
-    const studentSnap = await getDoc(studentRef);
-    if (studentSnap.exists()) {
-      const txns = (studentSnap.data().finance?.transactions || []).map((t: any) => {
-        if (t.id === requestId) return { ...t, status: 'rejected', rejectReason: notes };
-        return t;
-      });
-      batch.update(studentRef, { 'finance.transactions': txns });
-    }
-
-    await batch.commit();
-
-    logActivity({
-      action: 'رفض دفعة مالية',
-      details: `تم رفض وصل الدفع للطالب: ${data.studentName}. السبب: ${notes}`,
-      targetId: data.studentCode || data.studentId,
-      targetType: 'finance_payment'
-    });
-  } catch (e) {
-    console.error("Error rejecting payment:", e);
-    throw new Error('فشل في عملية الرفض: ' + (e instanceof Error ? e.message : String(e)));
+    const response = await fetch(`/api/finance/student-transactions/${encodeURIComponent(studentId)}`);
+    if (!response.ok) return [];
+    const data = await response.json();
+    return data.success ? data.transactions : [];
+  } catch (error: any) {
+    console.warn("[financeService] Transient issue fetching student transactions:", error?.message || error);
+    return [];
   }
 };
 
-export const createPaymentRequest = async (paymentData: Omit<StudentPayment, 'id' | 'status' | 'date'>, idempotencyKey?: string) => {
-  const payload = {
-    ...paymentData,
-    status: 'pending',
-    date: serverTimestamp(),
-    ...(idempotencyKey && { idempotency_key: idempotencyKey })
-  };
-
-  if (idempotencyKey) {
-    const paymentRef = doc(db, 'payments', idempotencyKey);
-    await setDoc(paymentRef, payload, { merge: true });
-    return paymentRef;
-  } else {
-    return await addDoc(collection(db, 'payments'), payload);
+export const getStudentFinanceProfile = async (studentId: string) => {
+  try {
+    const response = await fetch(`/api/finance/student-profile/${encodeURIComponent(studentId)}`);
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.success ? data.data : null;
+  } catch (error: any) {
+    console.warn("[financeService] Transient issue fetching student finance profile:", error?.message || error);
+    return null;
   }
 };
+
 
 export const getStudentFinancials = async (studentId: string) => {
-  const cacheKey = `financials_${studentId}`;
-  const cachedData = safeStorage.getItem(cacheKey);
-
-  // 1. التحقق من وجود بيانات مخزنة محلياً لتوفير التكلفة
-  if (cachedData) {
-    return JSON.parse(cachedData);
+  try {
+    const response = await fetch(`/api/students/${encodeURIComponent(studentId)}`);
+    if (!response.ok) return null;
+    const data = await response.json();
+    return data.success ? data.student : null;
+  } catch (error: any) {
+    console.warn("[financeService] Transient issue fetching student financials:", error?.message || error);
+    return null;
   }
-
-  // 2. إذا لم توجد، نسحبها من السيرفر لمرة واحدة
-  const studentRef = doc(db, 'students', studentId);
-  const data = await getDoc(studentRef);
-  
-  if (data.exists()) {
-    const studentData = data.data();
-    // حفظ محلي
-    safeStorage.setItem(cacheKey, JSON.stringify(studentData));
-    return studentData;
-  }
-  
-  return null;
 };

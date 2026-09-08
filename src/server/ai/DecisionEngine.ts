@@ -11,9 +11,9 @@ export class DecisionEngine {
   private secondaryProvider: IAIProvider | null = null;
 
   constructor() {
-    const useOpenRouter = !!process.env.OPENROUTER_API_KEY || process.env.AI_PROVIDER === 'openrouter';
+    const preferOpenRouter = process.env.AI_PROVIDER === 'openrouter' || (!process.env.GEMINI_API_KEY && !!process.env.OPENROUTER_API_KEY);
     
-    if (useOpenRouter) {
+    if (preferOpenRouter && process.env.OPENROUTER_API_KEY) {
       console.log('[DecisionEngine] Setting OpenRouter as PRIMARY');
       this.primaryProvider = new OpenRouterProvider();
       if (process.env.GEMINI_API_KEY) {

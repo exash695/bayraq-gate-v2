@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { doc, onSnapshot } from 'firebase/firestore';
+import { doc, onSnapshot } from '@/src/lib/firebase';
 import { db } from '../lib/firebase';
 import { getSubjectsForGrade } from '../utils/studentUtils';
 
@@ -33,7 +33,13 @@ export const useSubjectDistributor = () => {
     }
     const all = new Set<string>();
     Object.values(subjectMapping).forEach((stageSubjects: any) => {
-      stageSubjects.forEach((s: any) => all.add(s.name.trim()));
+      if (Array.isArray(stageSubjects)) {
+        stageSubjects.forEach((s: any) => {
+          if (s && typeof s.name === 'string') {
+            all.add(s.name.trim());
+          }
+        });
+      }
     });
     all.add('أخرى');
     return Array.from(all);

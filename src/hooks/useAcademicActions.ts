@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { academicService } from '../services/academicService';
-import { deleteDoc, doc } from 'firebase/firestore';
+import { deleteDoc, doc } from '@/src/lib/firebase';
 import { db } from '../lib/firebase';
 
 export const useAcademicActions = (showToast: (msg: string, type?: 'success' | 'error') => void) => {

@@ -1,57 +1,105 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { collection, query, onSnapshot, doc, updateDoc, orderBy, addDoc, serverTimestamp, deleteDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
 import { Lightbulb, CheckCircle2, XCircle, Clock, Search, MessageSquare, Send, BrainCircuit, Filter, Users, ThumbsUp, ThumbsDown, Trash2 } from 'lucide-react';
 import { logActivity } from '../utils/auditLogger';
 import { ConfirmDialog } from './ConfirmDialog';
-
-interface IdeaSubmit {
-  id: string;
-  senderName: string;
-  senderId?: string;
-  title: string;
-  description: string;
-  category: 'academic' | 'behavior' | 'administrative' | 'other';
-  timestamp: any;
-  status: 'pending' | 'under_review' | 'implemented' | 'rejected';
-  adminReply?: string;
-  targetGrade?: string;
-}
-
-interface CouncilPoll {
-  id: string;
-  title: string;
-  description: string;
-  type: 'admin' | 'parent';
-  authorId?: string;
-  authorName?: string;
-  status: 'active' | 'closed' | 'implemented' | 'rejected';
-  adminReply?: string;
-  votes: Record<string, 'support' | 'reject'>;
-  comments?: {
-    id: string;
-    authorName: string;
-    text: string;
-    timestamp: number;
-  }[];
-  timestamp: any;
-  targetGrade?: string;
-}
+import { ideaService, IdeaSubmit, CouncilPoll } from '../services/ideaService';
+import { notificationService } from '../services/notificationService';
+import { CardGridSkeleton } from './shared/ShimmerSkeleton';
 
 export interface IdeaBankAdminViewProps {
   schoolId: string | null;
   schoolName?: string;
+  showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
+  defaultTab?: 'ideas' | 'council';
+  onReadTab?: (tab: 'ideas' | 'council') => void;
 }
 
-export const IdeaBankAdminView: React.FC<IdeaBankAdminViewProps> = ({ schoolId }) => {
+export const IdeaBankAdminView: React.FC<IdeaBankAdminViewProps> = ({ schoolId, showToast, defaultTab = 'ideas', onReadTab }) => {
   const [ideas, setIdeas] = useState<IdeaSubmit[]>([]);
   const [polls, setPolls] = useState<CouncilPoll[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterGrade, setFilterGrade] = useState<string>('all');
-  const [activeTab, setActiveTab] = useState<'ideas' | 'council'>('ideas');
+  const [activeTab, setActiveTab] = useState<'ideas' | 'council'>(defaultTab);
+
+  const [readIdeasTs, setReadIdeasTs] = useState<number>(() => {
+    try {
+      return parseInt(localStorage.getItem('bairaq_admin_read_ideas_ts') || '0', 10);
+    } catch {
+      return 0;
+    }
+  });
+
+  const [readCouncilTs, setReadCouncilTs] = useState<number>(() => {
+    try {
+      return parseInt(localStorage.getItem('bairaq_admin_read_council_ts') || '0', 10);
+    } catch {
+      return 0;
+    }
+  });
+
+  // تحديث التبويب إذا تم تمرير defaultTab مختلف
+  useEffect(() => {
+    if (defaultTab) {
+      setActiveTab(defaultTab);
+    }
+  }, [defaultTab]);
+
+  const markIdeasRead = React.useCallback(() => {
+    const now = Date.now();
+    setReadIdeasTs(now);
+    try {
+      localStorage.setItem('bairaq_admin_read_ideas_ts', now.toString());
+      window.dispatchEvent(new CustomEvent('bairaq:ideabank-read-update', { detail: { tab: 'ideas' } }));
+    } catch (e) {}
+    onReadTab?.('ideas');
+  }, [onReadTab]);
+
+  const markCouncilRead = React.useCallback(() => {
+    const now = Date.now();
+    setReadCouncilTs(now);
+    try {
+      localStorage.setItem('bairaq_admin_read_council_ts', now.toString());
+      window.dispatchEvent(new CustomEvent('bairaq:ideabank-read-update', { detail: { tab: 'council' } }));
+    } catch (e) {}
+    onReadTab?.('council');
+  }, [onReadTab]);
+
+  // دالة مساعدة لضمان إسناد الاقتراح لولي الأمر وليس الطالب
+  const formatParentSender = (name?: string) => {
+    if (!name) return 'ولي أمر';
+    const clean = name.trim();
+    if (clean === 'الإدارة المدرسية' || clean === 'الإدارة العامة' || clean === 'الإدارة') return clean;
+    if (clean.startsWith('ولي أمر') || clean.startsWith('ولي امر')) return clean;
+    return `ولي أمر ${clean}`;
+  };
+
+  const unreadIdeasCount = React.useMemo(() => {
+    return ideas.filter(idea => {
+      if (idea.status !== 'pending') return false;
+      const t = idea.timestamp ? new Date(idea.timestamp).getTime() : 0;
+      return t > readIdeasTs;
+    }).length;
+  }, [ideas, readIdeasTs]);
+
+  const unreadCouncilCount = React.useMemo(() => {
+    return polls.filter(poll => {
+      if (poll.type !== 'parent' && poll.authorName === 'الإدارة المدرسية') return false;
+      const t = poll.timestamp ? new Date(poll.timestamp).getTime() : 0;
+      return t > readCouncilTs;
+    }).length;
+  }, [polls, readCouncilTs]);
+
+  // عند الدخول، نميز التبويب النشط كمقروء لإخفاء إشعاره
+  useEffect(() => {
+    if (activeTab === 'ideas' && unreadIdeasCount > 0) {
+      markIdeasRead();
+    } else if (activeTab === 'council' && unreadCouncilCount > 0) {
+      markCouncilRead();
+    }
+  }, [activeTab, unreadIdeasCount, unreadCouncilCount, markIdeasRead, markCouncilRead]);
   
   const [replyIdea, setReplyIdea] = useState<IdeaSubmit | null>(null);
   const [replyMessage, setReplyMessage] = useState('');
@@ -93,37 +141,25 @@ export const IdeaBankAdminView: React.FC<IdeaBankAdminViewProps> = ({ schoolId }
   const [pollResolveStatus, setPollResolveStatus] = useState<'implemented' | 'rejected'>('implemented');
   const [pollAdminReply, setPollAdminReply] = useState('');
 
-  useEffect(() => {
-    const q = query(
-      collection(db, 'idea_bank'),
-      orderBy('timestamp', 'desc')
-    );
-    
-    const unsubscribeIdeas = onSnapshot(q, (snapshot) => {
-      const ideasData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as IdeaSubmit[];
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const [ideasData, pollsData] = await Promise.all([
+        ideaService.fetchIdeas(schoolId || undefined),
+        ideaService.fetchPolls(schoolId || undefined)
+      ]);
       setIdeas(ideasData);
+      setPolls(pollsData);
+    } catch (err) {
+      console.warn("IdeaBankAdmin load error:", err);
+    } finally {
       setLoading(false);
-    }, (error) => {
-      console.warn("IdeaBankAdmin error:", error);
-      setLoading(false);
-    });
+    }
+  };
 
-    const qPolls = query(
-      collection(db, 'council_polls'),
-      orderBy('timestamp', 'desc')
-    );
-    const unsubscribePolls = onSnapshot(qPolls, (snapshot) => {
-      setPolls(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })) as CouncilPoll[]);
-    });
-
-    return () => {
-      unsubscribeIdeas();
-      unsubscribePolls();
-    };
-  }, []);
+  useEffect(() => {
+    loadData();
+  }, [schoolId]);
 
   const handleCreatePoll = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -131,7 +167,8 @@ export const IdeaBankAdminView: React.FC<IdeaBankAdminViewProps> = ({ schoolId }
 
     setIsSubmittingPoll(true);
     try {
-      await addDoc(collection(db, 'council_polls'), {
+      await ideaService.createPoll({
+        schoolId: schoolId || undefined,
         title: pollTitle.trim() || 'مقترح إداري عام',
         description: pollDesc,
         type: 'admin',
@@ -139,20 +176,22 @@ export const IdeaBankAdminView: React.FC<IdeaBankAdminViewProps> = ({ schoolId }
         authorName: 'الإدارة المدرسية',
         status: 'active',
         votes: {},
-        timestamp: serverTimestamp(),
         targetGrade: pollTargetGrade
       });
       setPollTitle('');
       setPollDesc('');
       setPollTargetGrade('all');
       setShowPollForm(false);
+      loadData();
       logActivity({
         action: 'طرح مقترح جديد',
         details: `طرح مقترح للتصويت العام بعنوان: ${pollTitle}`,
         targetType: 'idea_bank'
       });
+      showToast('تم طرح المقترح بنجاح', 'success');
     } catch (err) {
       console.error(err);
+      showToast('حدث خطأ أثناء طرح المقترح', 'error');
     } finally {
       setIsSubmittingPoll(false);
     }
@@ -160,9 +199,11 @@ export const IdeaBankAdminView: React.FC<IdeaBankAdminViewProps> = ({ schoolId }
 
   const handleTogglePollStatus = async (pollId: string, currentStatus: string) => {
     try {
-      await updateDoc(doc(db, 'council_polls', pollId), {
+      await ideaService.updatePoll(pollId, {
         status: currentStatus === 'active' ? 'closed' : 'active'
       });
+      loadData();
+      showToast('تم تحديث حالة التصويت');
     } catch (err) {
       console.error(err);
     }
@@ -171,32 +212,32 @@ export const IdeaBankAdminView: React.FC<IdeaBankAdminViewProps> = ({ schoolId }
   const handleResolvePoll = async () => {
     if (!resolvingPoll) return;
     try {
-      await updateDoc(doc(db, 'council_polls', resolvingPoll.id), {
+      await ideaService.updatePoll(resolvingPoll.id, {
         status: pollResolveStatus,
         adminReply: pollAdminReply.trim() || (pollResolveStatus === 'implemented' ? 'تم تنفيذ المقترح بناءً على تصويت المجلس.' : '')
       });
       
       // Notify parent if the poll author was a parent
       if (resolvingPoll.authorId && resolvingPoll.authorId !== 'admin') {
-         await addDoc(collection(db, 'notifications'), {
+         await notificationService.sendNotification({
            userId: resolvingPoll.authorId,
            title: pollResolveStatus === 'implemented' ? 'تم تنفيذ مقترحك! 🌟' : 'تحديث على مقترحك في المجلس',
            message: pollResolveStatus === 'implemented' 
                ? `لقد تم تنفيذ مقترحك "${resolvingPoll.title}". شكراً لك!`
                : `تم رفض مقترحك "${resolvingPoll.title}" مع السبب: ${pollAdminReply.trim()}`,
-           type: 'system',
-           read: false,
-           timestamp: serverTimestamp()
+           type: 'system'
          });
       }
 
       setResolvingPoll(null);
       setPollAdminReply('');
+      loadData();
       logActivity({
         action: 'تحديث مقترح مجلس',
         details: `تم تحديث مقترح المجلس إلى ${pollResolveStatus}`,
         targetType: 'idea_bank'
       });
+      showToast('تم تحديث المقترح بنجاح');
     } catch (err) {
       console.error(err);
     }
@@ -227,7 +268,9 @@ export const IdeaBankAdminView: React.FC<IdeaBankAdminViewProps> = ({ schoolId }
   const handleDeleteIdea = (ideaId: string) => {
     openConfirm('تأكيد الحذف', 'هل أنت متأكد من حذف هذا المقترح؟ لا يمكن التراجع عن هذا الإجراء.', async () => {
       try {
-        await deleteDoc(doc(db, 'idea_bank', ideaId));
+        await ideaService.deleteIdea(ideaId);
+        loadData();
+        showToast('تم حذف المقترح بنجاح');
       } catch (err) {
         console.error("Error deleting idea:", err);
       }
@@ -237,8 +280,10 @@ export const IdeaBankAdminView: React.FC<IdeaBankAdminViewProps> = ({ schoolId }
   const handleDeleteAllIdeas = () => {
     openConfirm('تأكيد حذف الكل', 'هل أنت متأكد من حذف جميع المقترحات؟ لا يمكن التراجع عن هذا الإجراء.', async () => {
       try {
-        const promises = ideas.map(idea => deleteDoc(doc(db, 'idea_bank', idea.id)));
+        const promises = ideas.map(idea => ideaService.deleteIdea(idea.id));
         await Promise.all(promises);
+        loadData();
+        showToast('تم حذف جميع المقترحات');
       } catch (err) {
         console.error("Error deleting all ideas:", err);
       }
@@ -248,7 +293,9 @@ export const IdeaBankAdminView: React.FC<IdeaBankAdminViewProps> = ({ schoolId }
   const handleDeletePoll = (pollId: string) => {
     openConfirm('تأكيد الحذف', 'هل أنت متأكد من حذف هذا التصويت؟ لا يمكن التراجع عن هذا الإجراء.', async () => {
       try {
-        await deleteDoc(doc(db, 'council_polls', pollId));
+        await ideaService.deletePoll(pollId);
+        loadData();
+        showToast('تم حذف التصويت بنجاح');
       } catch (err) {
         console.error("Error deleting poll:", err);
       }
@@ -258,8 +305,10 @@ export const IdeaBankAdminView: React.FC<IdeaBankAdminViewProps> = ({ schoolId }
   const handleDeleteAllPolls = () => {
     openConfirm('تأكيد حذف الكل', 'هل أنت متأكد من حذف جميع التصويتات؟ لا يمكن التراجع عن هذا الإجراء.', async () => {
       try {
-        const promises = polls.map(poll => deleteDoc(doc(db, 'council_polls', poll.id)));
+        const promises = polls.map(poll => ideaService.deletePoll(poll.id));
         await Promise.all(promises);
+        loadData();
+        showToast('تم حذف جميع التصويتات');
       } catch (err) {
         console.error("Error deleting all polls:", err);
       }
@@ -269,21 +318,19 @@ export const IdeaBankAdminView: React.FC<IdeaBankAdminViewProps> = ({ schoolId }
   const handleUpdateStatus = async () => {
     if (!statusUpdateIdea) return;
     try {
-      await updateDoc(doc(db, 'idea_bank', statusUpdateIdea.ideaId), {
-        status: statusUpdateIdea.status,
+      await ideaService.updateIdea(statusUpdateIdea.ideaId, {
+        status: statusUpdateIdea.status as any,
         readByParent: false
       });
       
       if (statusUpdateIdea.status === 'implemented') {
         const ideaObj = ideas.find(i => i.id === statusUpdateIdea.ideaId);
-        if (ideaObj && ideaObj.senderId) {
-          await addDoc(collection(db, 'notifications'), {
-            userId: ideaObj.senderId,
+        if (ideaObj && ideaObj.userId) {
+          await notificationService.sendNotification({
+            userId: ideaObj.userId,
             title: 'رسالة شكر وتقدير 🌟',
             message: `لقد تم تنفيذ مقترحك: "${ideaObj.title || 'مقترحك'}". شكراً لمساهمتك القيمة في التطوير!`,
-            type: 'system',
-            read: false,
-            timestamp: serverTimestamp()
+            type: 'system'
           });
         }
       }
@@ -293,6 +340,7 @@ export const IdeaBankAdminView: React.FC<IdeaBankAdminViewProps> = ({ schoolId }
         details: `تم تغيير حالة المقترح إلى ${statusUpdateIdea.status}`,
         targetType: 'idea_bank'
       });
+      loadData();
     } catch (err) {
       console.error(err);
     } finally {
@@ -303,7 +351,7 @@ export const IdeaBankAdminView: React.FC<IdeaBankAdminViewProps> = ({ schoolId }
   const handleSendReply = async () => {
     if (!replyIdea || !replyMessage.trim()) return;
     try {
-      await updateDoc(doc(db, 'idea_bank', replyIdea.id), {
+      await ideaService.updateIdea(replyIdea.id, {
         adminReply: replyMessage,
         status: replyIdea.status === 'pending' ? 'under_review' : replyIdea.status,
         readByParent: false
@@ -317,6 +365,7 @@ export const IdeaBankAdminView: React.FC<IdeaBankAdminViewProps> = ({ schoolId }
       
       setReplyIdea(null);
       setReplyMessage('');
+      loadData();
     } catch (err) {
       console.error(err);
     }
@@ -358,8 +407,8 @@ export const IdeaBankAdminView: React.FC<IdeaBankAdminViewProps> = ({ schoolId }
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center p-12">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-yellow-500"></div>
+      <div className="p-6">
+        <CardGridSkeleton count={6} />
       </div>
     );
   }
@@ -396,19 +445,43 @@ export const IdeaBankAdminView: React.FC<IdeaBankAdminViewProps> = ({ schoolId }
         </div>
       </div>
 
-      <div className="flex gap-2 p-1 bg-white/5 rounded-xl w-fit border border-white/10 mx-auto md:mx-0">
+      <div className="flex flex-wrap gap-2 p-1.5 bg-white/5 rounded-2xl w-fit border border-white/10 mx-auto md:mx-0">
         <button
-          onClick={() => setActiveTab('ideas')}
-          className={`px-8 py-2.5 rounded-lg font-bold transition-all text-sm h-[44px] flex items-center justify-center leading-tight text-center ${activeTab === 'ideas' ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/50 shadow-lg shadow-yellow-500/10' : 'text-white/40 hover:text-white border border-transparent'}`}
+          onClick={() => {
+            setActiveTab('ideas');
+            markIdeasRead();
+          }}
+          className={`px-6 sm:px-8 py-2.5 rounded-xl font-bold transition-all text-xs sm:text-sm h-[44px] flex items-center justify-center gap-2.5 leading-tight text-center relative ${
+            activeTab === 'ideas' 
+              ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/50 shadow-lg shadow-yellow-500/10' 
+              : 'text-white/50 hover:text-white border border-transparent'
+          }`}
         >
-          بنك الأفكار (مقترحات الآباء)
+          <span>بنك الأفكار (مقترحات الآباء)</span>
+          {unreadIdeasCount > 0 && (
+            <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-rose-500 text-white font-black text-[11px] flex items-center justify-center animate-pulse shrink-0 shadow-lg shadow-rose-500/50">
+              {unreadIdeasCount}
+            </span>
+          )}
         </button>
         <button
-          onClick={() => setActiveTab('council')}
-          className={`px-8 py-2.5 rounded-lg font-bold transition-all text-sm h-[44px] flex items-center justify-center text-center leading-tight gap-2 ${activeTab === 'council' ? 'bg-purple-500/20 text-purple-400 border border-purple-500/50 shadow-lg shadow-purple-500/10' : 'text-white/40 hover:text-white border border-transparent'}`}
+          onClick={() => {
+            setActiveTab('council');
+            markCouncilRead();
+          }}
+          className={`px-6 sm:px-8 py-2.5 rounded-xl font-bold transition-all text-xs sm:text-sm h-[44px] flex items-center justify-center text-center leading-tight gap-2.5 relative ${
+            activeTab === 'council' 
+              ? 'bg-purple-500/20 text-purple-400 border border-purple-500/50 shadow-lg shadow-purple-500/10' 
+              : 'text-white/50 hover:text-white border border-transparent'
+          }`}
         >
           <Users size={16} className="shrink-0" />
-          مجلس الآباء (تصويت عام)
+          <span>مجلس الآباء (تصويت عام)</span>
+          {unreadCouncilCount > 0 && (
+            <span className="min-w-[20px] h-5 px-1.5 rounded-full bg-rose-500 text-white font-black text-[11px] flex items-center justify-center animate-pulse shrink-0 shadow-lg shadow-rose-500/50">
+              {unreadCouncilCount}
+            </span>
+          )}
         </button>
       </div>
 
@@ -488,7 +561,7 @@ export const IdeaBankAdminView: React.FC<IdeaBankAdminViewProps> = ({ schoolId }
                             {idea.title}
                           </h4>
                           <div className="flex flex-wrap items-center gap-2 mt-1">
-                            <span className="text-white/40 text-[10px] font-bold">بواسطة: {idea.senderName}</span>
+                            <span className="text-white/40 text-[10px] font-bold">بواسطة: {formatParentSender(idea.senderName)}</span>
                             <span className="w-1 h-1 rounded-full bg-white/20"></span>
                             <span className="text-yellow-400 text-[10px] font-bold px-2 py-0.5 rounded bg-yellow-400/10">
                               {getCategoryLabel(idea.category)}
@@ -697,9 +770,9 @@ export const IdeaBankAdminView: React.FC<IdeaBankAdminViewProps> = ({ schoolId }
                             </button>
                          </div>
                          <div className="flex items-center gap-2 text-[10px] text-white/40 mb-3">
-                           <span>{poll.authorName}</span>
+                           <span>{formatParentSender(poll.authorName)}</span>
                            <span>•</span>
-                           <span>{poll.timestamp ? new Date(poll.timestamp.seconds * 1000).toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' }) : 'الآن'}</span>
+                           <span>{poll.timestamp ? new Date(poll.timestamp).toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' }) : 'الآن'}</span>
                            {poll.targetGrade && (
                              <>
                                <span>•</span>
@@ -778,7 +851,7 @@ export const IdeaBankAdminView: React.FC<IdeaBankAdminViewProps> = ({ schoolId }
                                 </h5>
                                 {poll.comments.map(c => (
                                   <div key={c.id} className="bg-white/5 rounded-lg p-2.5 text-xs">
-                                    <span className="font-bold text-white/60 mb-1 block">{c.authorName}</span>
+                                    <span className="font-bold text-white/60 mb-1 block">{formatParentSender(c.authorName)}</span>
                                     <p className="text-white/80">{c.text}</p>
                                   </div>
                                 ))}
@@ -882,7 +955,10 @@ export const IdeaBankAdminView: React.FC<IdeaBankAdminViewProps> = ({ schoolId }
                 <span className="text-yellow-400 text-xs font-bold px-2 py-0.5 rounded bg-yellow-400/10 mb-2 inline-block shadow-sm">
                   {getCategoryLabel(replyIdea.category)}
                 </span>
-                <h4 className="text-white font-bold text-lg mb-1">{replyIdea.title}</h4>
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+                  <h4 className="text-white font-bold text-lg">{replyIdea.title}</h4>
+                  <span className="text-white/40 text-xs font-bold">بواسطة: {formatParentSender(replyIdea.senderName)}</span>
+                </div>
                 <p className="text-white/60 text-sm leading-relaxed">{replyIdea.description}</p>
               </div>
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, orderBy, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc, updateDoc } from 'firebase/firestore';
+import { collection, query, where, orderBy, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc, updateDoc } from '@/src/lib/firebase';
 import { db } from '../lib/firebase';
 import { Database, Plus, Trash2, Edit2, BookOpen, Layers, Calendar, BookOpenText, ArrowRight, Save, X, CheckCircle, BrainCircuit, Search, Filter, Scan, Loader, FileText } from 'lucide-react';
 import { TeacherExamPapers } from './TeacherExamPapers';
@@ -9,9 +9,10 @@ interface TeacherQuestionBankProps {
   schoolId: string;
   teacherData?: any;
   schoolName?: string;
+  selectedClass?: string;
 }
 
-export const TeacherQuestionBank: React.FC<TeacherQuestionBankProps> = ({ schoolId, teacherData, schoolName }) => {
+export const TeacherQuestionBank: React.FC<TeacherQuestionBankProps> = ({ schoolId, teacherData, schoolName, selectedClass }) => {
   const [mainTab, setMainTab] = useState<'questions' | 'papers'>('questions');
   const [allQuestions, setAllQuestions] = useState<any[]>([]);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
@@ -95,6 +96,7 @@ export const TeacherQuestionBank: React.FC<TeacherQuestionBankProps> = ({ school
         teacherId: teacherData?.id || teacherData?.code || 'unknown',
         subject: teacherData?.subject || 'مادة عامة',
         category: activeCategory,
+        targetGrade: (selectedClass && selectedClass !== 'ALL') ? selectedClass : (teacherData?.classes?.[0] || 'all'),
         text: qText,
         type: 'custom',
         difficulty: qDifficulty,
@@ -360,7 +362,7 @@ export const TeacherQuestionBank: React.FC<TeacherQuestionBankProps> = ({ school
   if ((mainTab as string) === 'papers') {
     return (
       <div className="h-full flex flex-col overflow-hidden relative" dir="rtl">
-        <TeacherExamPapers schoolId={schoolId} teacherData={teacherData} onBack={() => setMainTab('questions')} />
+        <TeacherExamPapers schoolId={schoolId} teacherData={teacherData} selectedClass={selectedClass} onBack={() => setMainTab('questions')} />
       </div>
     );
   }

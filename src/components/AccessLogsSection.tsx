@@ -7,9 +7,10 @@ interface AccessLogsSectionProps {
   gradesByStage: Record<string, string[]>;
   students: any[];
   showToast: (message: string, type?: 'success' | 'error' | 'info') => void;
+  installmentPlan?: any[];
 }
 
-export const AccessLogsSection: React.FC<AccessLogsSectionProps> = ({ gradesByStage, students, showToast }) => {
+export const AccessLogsSection: React.FC<AccessLogsSectionProps> = ({ gradesByStage, students, showToast, installmentPlan }) => {
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
   const [selectedGrade, setSelectedGrade] = useState<string | null>(null);
   const [selectedReceipt, setSelectedReceipt] = useState<any | null>(null);
@@ -113,8 +114,12 @@ export const AccessLogsSection: React.FC<AccessLogsSectionProps> = ({ gradesBySt
     return Array.from(logsMap.values()).sort((a, b) => new Date(b.timestamp?.seconds * 1000 || b.timestamp).getTime() - new Date(a.timestamp?.seconds * 1000 || a.timestamp).getTime());
   }, [students]);
 
-  // Find all unique installment notes globally for the filters
-  const uniqueInstallmentNotes = useMemo(() => {
+  // Use provided installment plan for filters, fallback to unique notes if none
+  const filterInstallmentNotes = useMemo(() => {
+    if (installmentPlan && installmentPlan.length > 0) {
+      return installmentPlan.map(p => p.name || 'قسط').filter(Boolean);
+    }
+    // Fallback
     const notesSet = new Set<string>();
     allStampedTransactions.forEach(t => {
       if (t.note) {
@@ -122,7 +127,7 @@ export const AccessLogsSection: React.FC<AccessLogsSectionProps> = ({ gradesBySt
       }
     });
     return Array.from(notesSet).filter(Boolean);
-  }, [allStampedTransactions]);
+  }, [allStampedTransactions, installmentPlan]);
 
   // Apply filters on top of all transactions
   const filteredTransactions = useMemo(() => {
@@ -170,7 +175,7 @@ export const AccessLogsSection: React.FC<AccessLogsSectionProps> = ({ gradesBySt
 
       // 4. Installment Note Filter
       if (selectedNoteFilter !== 'all') {
-        if (log.note !== selectedNoteFilter) {
+        if (!log.note || !log.note.includes(selectedNoteFilter)) {
           return false;
         }
       }
@@ -273,7 +278,7 @@ export const AccessLogsSection: React.FC<AccessLogsSectionProps> = ({ gradesBySt
               className="w-full h-12 pr-10 pl-4 bg-black/60 border border-white/5 focus:border-indigo-500/50 rounded-2xl text-white text-xs font-bold leading-relaxed focus:outline-none transition-all cursor-pointer appearance-none text-right shadow-inner"
             >
               <option value="all" className="bg-[#0b1021]">جميع الأقساط والمناسبات</option>
-              {uniqueInstallmentNotes.map(note => (
+              {filterInstallmentNotes.map(note => (
                 <option key={note} value={note} className="bg-[#0b1021]">{note}</option>
               ))}
             </select>

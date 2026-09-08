@@ -1,3 +1,5 @@
+import { Gate6 } from './components/Gate6';
+import { matchesTargetGrades, isSchoolMatch } from './utils/gradeMatcher';
 /**
  * @license
  * SPDX-License-Identifier: Apache-2.0
@@ -6,11 +8,7 @@
  */
 
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import {
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
-} from "firebase/auth";
+import { customAuth } from "./services/customAuthService";
 import { auth, db, purgeFirestore } from "./lib/firebase";
 import { safeStorage, safeSessionStorage } from "./lib/storage";
 import {
@@ -31,7 +29,7 @@ import {
   deleteDoc,
   getDocs,
   getDocsFromServer,
-} from "firebase/firestore";
+} from "@/src/lib/firebase";
 
 import { handleFirestoreError, OperationType } from "./lib/firestoreUtils";
 import { getStudentLevelInfo, getProfessionalAvatar } from "./lib/avatarLevel";
@@ -50,7 +48,9 @@ import { NotificationDrawer } from "./components/NotificationDrawer";
 import { ToastContainer } from "./components/ToastNotification";
 import { BerqCharacter } from "./components/BerqCharacterManager";
 import { MascotTestPage } from "./components/MascotTestPage";
+import { PrivacyPolicy } from "./components/PrivacyPolicy";
 import { SwipeDismissContainer } from "./components/SwipeDismissContainer";
+import { ComingSoonPlaceholder } from "./components/ComingSoonPlaceholder";
 import { sounds } from "./lib/sounds";
 import { preloadAllMascotAssets } from "./utils/mediaPreloader";
 import {
@@ -95,9 +95,10 @@ const INITIAL_PROGRESS: UserProgress = {
 
 import { AnimatePresence, motion } from "motion/react";
 import { BadgeNotification } from "./components/BadgeNotification";
+import { broadcastService } from "./services/broadcastService";
 import { Badge } from "./types";
 import { checkNewBadges } from "./lib/badgeUtils";
-import { SovereigntyMap } from "./components/SovereigntyMap";
+import { SovereigntyPlatform } from "./components/Sovereignty/SovereigntyPlatform";
 
 import { BroadcastTicker } from "./components/BroadcastTicker";
 import { SeasonalThemeBanner } from "./components/SeasonalThemeBanner";
@@ -141,19 +142,24 @@ import { AIEnhancedRadar } from "./components/AIEnhancedRadar";
 import { StudentLounge } from "./components/StudentLounge";
 import { SchoolContent } from "./components/SchoolContent";
 import { SchoolAccessGate } from "./components/SchoolAccessGate";
+import { BayraqAcademyHub } from "./components/BayraqAcademyHub";
 import { ParentPortal } from "./components/ParentPortal";
 import { AdminDashboard } from "./components/AdminDashboard";
+import { AdminHomeDashboard } from "./components/AdminHomeDashboard";
 import { DriverDashboard } from "./components/Transport/DriverDashboard";
+import { DriverPortal } from "./components/Transport/DriverPortal";
 import { getDriverByAccessCode } from "./services/transportService";
 import { OnboardingCarousel } from "./components/OnboardingCarousel";
 import { RoleSelectionModal } from "./components/RoleSelectionModal";
 import { SCHOOLS_DATA, getOfficialSchoolName } from "./lib/constants";
+import { schoolService, SchoolRecord } from "./services/schoolService";
 import { STUDENT_REGISTRY } from "./lib/studentRegistry";
 import { ReceiptVerification } from "./components/ReceiptVerification";
+import { useAppLogo } from "./components/BerqCharacterManager";
 
 import DevDashboard from "./components/DevDashboard";
 import { useRemoteConfig } from "./services/remoteConfig";
-import { PhoneCall, Globe, Lock, ShieldAlert, RefreshCw, Radio as RadioIcon, Smartphone, Presentation, ClipboardCheck, PlusCircle, FileUp, CalendarClock, Bus, BarChart3, Wallet, CreditCard } from "lucide-react";
+import { PhoneCall, Globe, Lock as LockIcon, ShieldAlert, RefreshCw, Radio as RadioIcon, Smartphone, Presentation, ClipboardCheck, PlusCircle, FileUp, CalendarClock, Bus, BarChart3, Wallet, CreditCard, ArrowLeft, ArrowRight } from "lucide-react";
 import { GlobalAnnouncementsPopup } from "./components/GlobalAnnouncementsPopup";
 import { SystemDialogsModal } from "./components/SystemDialogsModal";
 
@@ -237,12 +243,17 @@ const getXpProgressDetails = (xp: number = 0) => {
   };
 };
 
+import { Gate6Demo } from './components/Gate6/Gate6Demo';
+
 export default function App() {
+  const dynamicAppLogo = useAppLogo();
   const remoteConfig = useRemoteConfig();
   const [bypassMaintenance, setBypassMaintenance] = useState(false);
   const [dismissedOptionalUpdate, setDismissedOptionalUpdate] = useState(false);
   const [dismissedNewVersionNotice, setDismissedNewVersionNotice] = useState(false);
   const [verifyReceiptId, setVerifyReceiptId] = useState<string | null>(null);
+  const [showPrivacyPublic, setShowPrivacyPublic] = useState(false);
+  const [showGate6Demo, setShowGate6Demo] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -250,24 +261,37 @@ export default function App() {
     if (verifyId) {
       setVerifyReceiptId(verifyId);
     }
+    const isPrivacyParam = params.get("privacy") !== null || params.get("view") === "privacy" || params.get("policy") !== null;
+    const isPrivacyPath = window.location.pathname.toLowerCase().includes("privacy");
+    if (isPrivacyParam || isPrivacyPath) {
+      setShowPrivacyPublic(true);
+    }
+
+    if (window.location.pathname.toLowerCase().includes("gate6") || params.get("gate6") !== null) {
+      setShowGate6Demo(true);
+    }
   }, []);
 
-  const [authReady, setAuthReady] = useState(false);
-  const [splashFinished, setSplashFinished] = useState(false);
-  const [hasSeenOnboarding, setHasSeenOnboarding] = useState(() => {
-    try {
-      return safeStorage.getItem("app_has_seen_onboarding") === "true";
-    } catch (e) {
-      return false;
-    }
-  });
-  const [hasSeenWelcomeIntro, setHasSeenWelcomeIntro] = useState(() => {
-    try {
-      return safeStorage.getItem("app_has_seen_welcome_intro") === "true";
-    } catch (e) {
-      return false;
-    }
-  });
+  const [authReady, setAuthReady] = useState(true);
+  const [splashFinished, setSplashFinished] = useState(true);
+  const [hasSeenOnboarding, setHasSeenOnboarding] = useState(true);
+  const [hasSeenWelcomeIntro, setHasSeenWelcomeIntro] = useState(true);
+
+  // Global failsafe: Ensure immediate loading readiness
+  useEffect(() => {
+    setAuthReady(true);
+    setSplashFinished(true);
+  }, []);
+
+  const handleWelcomeIntroComplete = React.useCallback(() => {
+    safeStorage.setItem("app_has_seen_welcome_intro", "true");
+    setHasSeenWelcomeIntro(true);
+    setSplashFinished(true);
+  }, []);
+
+  const handleSplashFinished = React.useCallback(() => {
+    setSplashFinished(true);
+  }, []);
 
   const loading = !authReady || !splashFinished;
 
@@ -284,6 +308,18 @@ export default function App() {
     } catch {}
     return "student";
   });
+
+  // Sync portalType when userProfile loads if not manually overridden
+  useEffect(() => {
+    if (userProfile && userProfile.role && !safeStorage.getItem("bayraq_user_role")) {
+      const role = userProfile.role === "admin" 
+        ? (userProfile.adminBranch === "boys" ? "admin-boys" : "admin-girls")
+        : userProfile.role;
+      if (["student", "parent", "admin-boys", "admin-girls", "teacher", "admin-observer", "driver"].includes(role)) {
+        setPortalType(role);
+      }
+    }
+  }, [userProfile]);
   const [showRoleSelectionModal, setShowRoleSelectionModal] = useState(() => {
     try {
       return safeStorage.getItem("app_has_seen_onboarding") === "true" && !safeStorage.getItem("bayraq_user_role");
@@ -316,15 +352,58 @@ export default function App() {
     const list = Array.from(
       new Map(notifications.map((n) => [n.id, n])).values(),
     );
+    const isAdmin = portalType.startsWith('admin');
+    const isDev = Boolean(userProfile?.isDeveloper || userProfile?.role === 'developer');
+
     return list.filter((n: any) => {
-      // If the notification has a recipientRole, check if it matches the active portalType.
-      // (Mapping 'admin-boys' or 'admin-girls' to 'admin', 'teacher' to 'teacher', etc)
-      if (n.recipientRole) {
-        return n.recipientRole === portalType;
+      // Role & portal isolation: block admin/developer audit & internal actions from students/parents/teachers/drivers
+      const isDevOrAdminNotification =
+        n.recipientRole === 'developer' ||
+        n.recipientRole === 'admin' ||
+        n.type === 'developer' ||
+        n.type === 'admin_audit' ||
+        (typeof n.message === 'string' && (
+          n.message.includes('كود الإدارة') ||
+          n.message.includes('كود إدارة') ||
+          n.message.includes('لوحة المطور') ||
+          n.message.includes('سيرفر') ||
+          n.message.includes('تفريغ الكاش')
+        ));
+
+      if (isDev) return true;
+
+      if (isAdmin) {
+        if (n.recipientRole && n.recipientRole !== 'admin' && n.recipientRole !== 'developer') return false;
+        return true;
       }
-      return portalType === "student";
+
+      if (portalType === 'student') {
+        if (isDevOrAdminNotification) return false;
+        if (n.recipientRole && n.recipientRole !== 'student') return false;
+        return true;
+      }
+
+      if (portalType === 'parent') {
+        if (isDevOrAdminNotification) return false;
+        if (n.recipientRole && n.recipientRole !== 'parent') return false;
+        return true;
+      }
+
+      if (portalType === 'teacher') {
+        if (isDevOrAdminNotification) return false;
+        if (n.recipientRole && n.recipientRole !== 'teacher' && n.recipientRole !== 'cadre' && n.recipientRole !== 'staff') return false;
+        return true;
+      }
+
+      if (portalType === 'driver') {
+        if (isDevOrAdminNotification) return false;
+        if (n.recipientRole && n.recipientRole !== 'driver') return false;
+        return true;
+      }
+
+      return true;
     });
-  }, [notifications, portalType]);
+  }, [notifications, portalType, userProfile?.isDeveloper, userProfile?.role]);
   const [activeToasts, setActiveToasts] = useState<AppNotification[]>([]);
   const [showLogoutToast, setShowLogoutToast] = useState(false);
   const [notification, setNotification] = useState<any>(null);
@@ -361,13 +440,14 @@ export default function App() {
           "admin-hub",
           "school-content",
           "dev-dashboard",
+          "gate-6",
           "mascot-test",
         ];
         return validSections.includes(saved as AppSection)
           ? (saved as AppSection)
-          : "hub";
+          : "gate-6";
       } catch {
-        return "hub";
+        return "gate-6";
       }
     },
   );
@@ -393,6 +473,17 @@ export default function App() {
   };
 
   const activeSection = activeSectionState;
+
+  React.useEffect(() => {
+    // Force scroll to top on any section change after DOM paints
+    requestAnimationFrame(() => {
+      window.scrollTo({ top: 0, left: 0, behavior: "instant" });
+      const mainContent = document.getElementById("main-content-area");
+      if (mainContent) mainContent.scrollTop = 0;
+      document.body.scrollTop = 0;
+      document.documentElement.scrollTop = 0;
+    });
+  }, [activeSectionState]);
 
 
 
@@ -445,6 +536,7 @@ export default function App() {
   >(null);
   const [verifiedStudentInfo, setVerifiedStudentInfo] = useState<any>(null);
   const [isVerifying, setIsVerifying] = useState(false);
+  const [bannedCode, setBannedCode] = useState<string | null>(null);
   const [activeKnightsCount, setActiveKnightsCount] = useState<number>(0);
   const [activeKnights, setActiveKnights] = useState<any[]>([]);
   const [showActiveKnights, setShowActiveKnights] = useState(false);
@@ -452,60 +544,70 @@ export default function App() {
   const [isLoungeChatOpen, setIsLoungeChatOpen] = useState(false);
   const [todayTasksCount, setTodayTasksCount] = useState<number | null>(null);
   const [highlightTasksSection, setHighlightTasksSection] = useState<boolean>(false);
-  const [firestoreSchools, setFirestoreSchools] = useState<any[]>([]);
+  const [apiSchools, setApiSchools] = useState<SchoolRecord[]>([]);
 
-  // Real-time sync for active schools in Firestore
+  // Real-time sync for active schools from internal PostgreSQL API
   useEffect(() => {
-    try {
-      const q = query(collection(db, "schools"));
-      const unsubscribe = onSnapshot(
-        q,
-        (snapshot) => {
-          const list: any[] = [];
-          snapshot.forEach((docSnap) => {
-            const data = docSnap.data();
-            list.push({ id: docSnap.id, name: data.name, ...data });
-          });
-          setFirestoreSchools(list);
-        },
-        (error) => {
-          console.error("Error fetching firestore schools:", error);
+    let isMounted = true;
+    const loadSchools = async () => {
+      try {
+        const list = await schoolService.fetchSchools();
+        if (isMounted) {
+          setApiSchools(list);
         }
-      );
-      return () => unsubscribe();
-    } catch (e) {
-      console.error(e);
-    }
+      } catch (err) {
+        console.warn("Error fetching PostgreSQL schools:", err);
+      }
+    };
+    loadSchools();
+    const interval = setInterval(loadSchools, 30000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, []);
 
   const allSchoolsList = useMemo(() => {
-    // 1. Start with SCHOOLS_DATA, but overwrite images and names if they exist in Firestore
+    const normalize = (name?: string) => 
+      (name || '').toLowerCase().replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/[\s\-_]/g, '').trim();
+
+    const seenIds = new Set<string>();
+    const seenNames = new Set<string>();
+
+    // 1. Start with SCHOOLS_DATA, but overwrite images and names if they exist in PostgreSQL
     const merged = SCHOOLS_DATA.map(sysSchool => {
-      const fs = firestoreSchools.find(f => f.id === sysSchool.id);
-      return {
+      const sysNorm = normalize(sysSchool.name);
+      const fs = apiSchools.find(f => f.id === sysSchool.id || normalize(f.name) === sysNorm);
+      const item = {
         ...sysSchool,
-        name: fs?.name || fs?.schoolName || sysSchool.name,
-        schoolBairaqImageUrl: fs?.coverUrl || fs?.logoUrl || sysSchool.schoolBairaqImageUrl,
-        schoolLogoUrl: fs?.logoUrl || fs?.coverUrl || sysSchool.schoolLogoUrl,
+        name: fs?.name || sysSchool.name,
+        schoolBairaqImageUrl: fs?.schoolBairaqImageUrl || sysSchool.schoolBairaqImageUrl,
+        schoolLogoUrl: fs?.schoolLogoUrl || sysSchool.schoolLogoUrl,
       };
+      seenIds.add(item.id);
+      seenNames.add(normalize(item.name));
+      return item;
     });
 
-    // 2. Add any schools that are purely in Firestore
-    firestoreSchools.forEach((fs) => {
-      if (!merged.some((s) => s.id === fs.id)) {
+    // 2. Add any schools that are purely in PostgreSQL
+    apiSchools.forEach((fs) => {
+      const fsNorm = normalize(fs.name);
+      if (!seenIds.has(fs.id) && !seenNames.has(fsNorm)) {
+        seenIds.add(fs.id);
+        seenNames.add(fsNorm);
         merged.push({
           id: fs.id,
-          name: fs.name || fs.schoolName || fs.id,
+          name: fs.name || fs.id,
           governorate: fs.governorate || "العراق",
           studentsCount: fs.studentsCount || 0,
-          teachersCount: fs.teachersCount || 0,
-          schoolBairaqImageUrl: fs.coverUrl || fs.logoUrl || '/schools/cover1.jpg',
-          schoolLogoUrl: fs.logoUrl || fs.coverUrl || '/school-logos/logo1.jpg',
+          teachersCount: 0,
+          schoolBairaqImageUrl: fs.schoolBairaqImageUrl || '/schools/cover1.jpg',
+          schoolLogoUrl: fs.schoolLogoUrl || '/school-logos/logo1.jpg',
         } as any);
       }
     });
     return merged;
-  }, [firestoreSchools]);
+  }, [apiSchools]);
 
   // Fetch active homework and competitions count for "Today's Tasks" card
   useEffect(() => {
@@ -540,7 +642,7 @@ export default function App() {
       const q = query(
         usersRef,
         where("role", "==", "student"),
-        where("grade", "==", userProfile.grade),
+        where("grade", "==", userProfile?.grade),
       );
 
       const unsubscribe = onSnapshot(
@@ -579,17 +681,6 @@ export default function App() {
       safeStorage.getItem("s6_preferred_school") ||
       "school1";
 
-    const normalizeSchool = (id?: string) => {
-      if (!id) return "";
-      let s = id.toLowerCase().trim();
-      if (s.startsWith("school")) {
-        s = "s" + s.replace("school", "");
-      }
-      return s;
-    };
-
-    const normStudentSchool = normalizeSchool(currentSchool);
-
     // Query broadcasts without strict orderBy so missing fields don't cause Firestore to exclude docs
     const q = query(collection(db, "broadcasts"));
 
@@ -602,6 +693,7 @@ export default function App() {
             const data = doc.data() as any;
             const timestampMs =
               data.timestampMs ||
+              data.timestamp_ms ||
               (data.timestamp?.toMillis
                 ? data.timestamp.toMillis()
                 : typeof data.timestamp === "number"
@@ -609,13 +701,26 @@ export default function App() {
                 : Date.now());
 
             let expMs = 0;
-            if (typeof data.expiryDate === "number") expMs = data.expiryDate;
-            else if (data.expiryDate?.toMillis) expMs = data.expiryDate.toMillis();
-            else if (typeof data.expiryDate === "string") expMs = Number(data.expiryDate) || 0;
+            const expField = data.expiryDate || data.expiry_date;
+            if (typeof expField === "number") {
+              expMs = expField;
+            } else if (expField?.toMillis) {
+              expMs = expField.toMillis();
+            } else if (expField instanceof Date) {
+              expMs = expField.getTime();
+            } else if (typeof expField === "string") {
+              const parsed = new Date(expField).getTime();
+              expMs = isNaN(parsed) ? (Number(expField) || 0) : parsed;
+            }
+
+            const schoolId = data.schoolId || data.school_id || "";
+            const targetGrades = data.targetGrades || data.target_grades || [];
 
             return {
               id: doc.id,
               ...data,
+              schoolId,
+              targetGrades,
               timestampMs,
               expMs,
             };
@@ -625,56 +730,22 @@ export default function App() {
             if (b.expMs > 0 && b.expMs < now) return false;
 
             // School check
-            if (
-              b.schoolId &&
-              b.schoolId !== "" &&
-              b.schoolId !== "all" &&
-              b.schoolId !== "global" &&
-              b.schoolId !== "central"
-            ) {
-              const normBSchool = normalizeSchool(b.schoolId);
-              if (normStudentSchool && normBSchool && normBSchool !== normStudentSchool) {
-                return false;
-              }
+            if (!isSchoolMatch(currentSchool, b.schoolId)) {
+              return false;
             }
 
-            // Grade check
-            if (b.targetGrades) {
-              let gradesArr: string[] = [];
-              if (Array.isArray(b.targetGrades)) {
-                gradesArr = b.targetGrades;
-              } else if (typeof b.targetGrades === "string") {
-                gradesArr = [b.targetGrades];
-              }
+            // Target roles check
+            let gradesArr: string[] = [];
+            if (Array.isArray(b.targetGrades)) {
+              gradesArr = b.targetGrades;
+            } else if (typeof b.targetGrades === "string") {
+              gradesArr = [b.targetGrades];
+            }
+            if (gradesArr.includes("parent_only")) return false;
 
-              if (gradesArr.length > 0) {
-                const isForEveryone = gradesArr.some((g) => {
-                  if (!g || typeof g !== "string") return true;
-                  const str = g.trim().toLowerCase();
-                  return (
-                    str === "" ||
-                    str === "الجميع" ||
-                    str === "جميع الصفوف" ||
-                    str === "جميع المراحل" ||
-                    str === "الكل" ||
-                    str === "all" ||
-                    str.includes("الجميع") ||
-                    str.includes("جميع")
-                  );
-                });
-
-                if (!isForEveryone && currentGrade) {
-                  const cleanStr = (s: string) =>
-                    s.replace(/الصف\s*/g, "").replace(/\s+/g, "").toLowerCase();
-                  const studentClean = cleanStr(currentGrade);
-                  const matchesGrade = gradesArr.some((g) => {
-                    if (typeof g !== "string") return false;
-                    const gClean = cleanStr(g);
-                    return gClean.includes(studentClean) || studentClean.includes(gClean);
-                  });
-                  if (!matchesGrade) return false;
-                }
-              }
+            // Grade / stage check
+            if (!matchesTargetGrades(currentGrade, gradesArr)) {
+              return false;
             }
 
             return true;
@@ -698,6 +769,8 @@ export default function App() {
     verifiedStudentInfo?.schoolId,
   ]);
 
+  /* Visibility change logic removed as it could cause black screen issues */
+  /*
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.hidden) {
@@ -710,6 +783,7 @@ export default function App() {
     return () =>
       document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, []);
+  */
 
   useEffect(() => {
     safeStorage.setItem("app_notifications", JSON.stringify(notifications));
@@ -734,22 +808,7 @@ export default function App() {
 
   // Load cached school verified session automatically when school is selected
   useEffect(() => {
-    if (selectedSchoolId && !isSchoolVerified) {
-      try {
-        const cachedAuthStr = safeStorage.getItem("s6_cachedAuth_" + selectedSchoolId);
-        if (cachedAuthStr) {
-          const cached = JSON.parse(cachedAuthStr);
-          setPortalType(cached.portalType);
-          setVerifiedStudentInfo(cached.verifiedStudentInfo);
-          setLoggedInTeacher(cached.loggedInTeacher);
-          setLoggedInDriver(cached.loggedInDriver);
-          setSelectedStudentGrade(cached.selectedStudentGrade);
-          setIsSchoolVerified(true);
-        }
-      } catch (e) {
-        console.error("Error loading cached school verification:", e);
-      }
-    }
+    // Session auto-resume disabled per request
   }, [selectedSchoolId, isSchoolVerified]);
 
   // Save cached school verified session automatically when verified state is active
@@ -763,7 +822,6 @@ export default function App() {
           loggedInDriver,
           selectedStudentGrade
         };
-        safeStorage.setItem("s6_cachedAuth_" + selectedSchoolId, JSON.stringify(cacheObj));
       } catch (e) {
         console.error("Error caching school verification:", e);
       }
@@ -778,29 +836,17 @@ export default function App() {
     if (!user) return;
 
     try {
-      const broadcastRef = collection(db, "broadcasts");
-      const expiryDate = Date.now() + duration * 60 * 60 * 1000;
-      const docRef = await addDoc(broadcastRef, {
+      await broadcastService.sendBroadcast({
+        schoolId: userProfile?.schoolId || selectedSchoolId || "school1",
         message,
         targetGrades,
-        senderId: user.uid,
-        authorRole: 'school_admin',
-        senderName: userProfile?.name || "الإدارة المركزية",
-        schoolId: userProfile?.schoolId || selectedSchoolId || "",
-        branch:
-          userProfile?.adminBranch ||
-          (portalType === "admin-boys" ? "boys" : "girls"),
-        type: 'school_broadcast',
-        isSchoolBroadcast: true,
+        durationHours: duration,
+        author: userProfile?.name || "الإدارة المدرسية",
+        subject: 'الإذاعة المدرسية',
         targetLocation: 'ticker',
-        isCentralPlatform: false,
-        timestamp: serverTimestamp(),
-        timestampMs: Date.now(),
-        expiryDate: expiryDate,
+        type: 'school_broadcast',
+        isSchoolBroadcast: true
       });
-      if (docRef?.id) {
-        localStorage.setItem(`dismissed_popup_${docRef.id}`, 'true');
-      }
     } catch (e) {
       console.error("Failed to send broadcast:", e);
     }
@@ -812,10 +858,7 @@ export default function App() {
   ) => {
     if (!user) return;
     try {
-      await updateDoc(doc(db, "broadcasts", broadcastId), {
-        message: newMessage,
-        timestamp: serverTimestamp(),
-      });
+      await broadcastService.updateBroadcast(broadcastId, newMessage);
     } catch (e) {
       console.error("Failed to update broadcast:", e);
     }
@@ -828,6 +871,7 @@ export default function App() {
     optionalId?: string,
     recipientRole?: "student" | "parent" | "teacher",
     showToast = true,
+    broadcastId?: string
   ) {
     // Prevent broadcast and general announcements from popping up as toasts or playing sounds
     const finalShowToast = (type === "broadcast" || type === "general") ? false : showToast;
@@ -839,13 +883,14 @@ export default function App() {
       timestamp: new Date().toISOString(),
       read: false,
       type,
+      broadcastId,
       recipientRole:
         recipientRole ||
-        (portalType === "student" ||
-        portalType === "parent" ||
-        portalType === "teacher"
-          ? (portalType as any)
-          : undefined),
+        (portalType.startsWith("admin")
+          ? "admin"
+          : (portalType === "parent" || portalType === "teacher" || portalType === "driver"
+            ? (portalType as any)
+            : "student")),
     };
 
     setNotifications((prev) => {
@@ -875,12 +920,9 @@ export default function App() {
       prev.map((n) => (n.id === id ? { ...n, read: true } : n)),
     );
     try {
-      await updateDoc(doc(db, "notifications", id), {
-        read: true,
-        isRead: true,
-      });
+      await fetch(`/api/notifications/${id}/read`, { method: 'PATCH' });
     } catch (e) {
-      // It might be a local-only notification or we don't have permission, ignore
+      // Ignore
     }
   };
 
@@ -932,27 +974,35 @@ export default function App() {
 
       if (status === "accepted") {
         // Notify the challenger that the target has accepted and ask for confirmation
-        await addDoc(collection(db, "notifications"), {
+        await fetch('/api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           userId: notif.challengerId,
           type: "challenge_accepted_by_target",
           targetId: user.uid,
           targetName: userProfile?.fullName || user.displayName || "فارس",
           challengeType: notif.subType,
           originalNotifId: notif.id,
-          timestamp: serverTimestamp(),
+          
           read: false,
-        });
+        })
+      });
       } else {
         // Notify the challenger of rejection
-        await addDoc(collection(db, "notifications"), {
+        await fetch('/api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           userId: notif.challengerId,
           type: "challenge_response",
           status: "rejected",
           targetName: userProfile?.fullName || user.displayName || "فارس",
           challengeType: notif.subType,
-          timestamp: serverTimestamp(),
+          
           read: false,
-        });
+        })
+      });
       }
 
       setNotification(null);
@@ -967,7 +1017,7 @@ export default function App() {
   ) => {
     if (!user) return;
     try {
-      await updateDoc(doc(db, "notifications", notif.id), { read: true });
+      await fetch(`/api/notifications/${notif.id}/read`, { method: 'PATCH' });
 
       if (status === "accepted") {
         if (notif.type === "battalion_invite") {
@@ -994,13 +1044,17 @@ export default function App() {
             },
             { merge: true },
           );
-          await addDoc(collection(db, "notifications"), {
+          await fetch('/api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
             userId: notif.requesterId,
             type: "battalion_join_accepted",
             battalionName: notif.battalionName,
-            timestamp: serverTimestamp(),
+            
             read: false,
-          });
+          })
+      });
         }
       }
       setNotification(null);
@@ -1016,18 +1070,22 @@ export default function App() {
     if (!user) return;
 
     try {
-      await updateDoc(doc(db, "notifications", notif.id), { read: true });
+      await fetch(`/api/notifications/${notif.id}/read`, { method: 'PATCH' });
 
       if (confirmed) {
         // Final invite to the target
-        await addDoc(collection(db, "notifications"), {
+        await fetch('/api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           userId: notif.targetId,
           type: "challenge_final_invite",
           challengerId: user.uid,
           challengerName: userProfile?.fullName || user.displayName || "فارس",
-          timestamp: serverTimestamp(),
+          
           read: false,
-        });
+        })
+      });
 
         // Trigger the arena for the challenger
         setDualConfig({
@@ -1036,13 +1094,17 @@ export default function App() {
         });
       } else {
         // Notify target of cancellation
-        await addDoc(collection(db, "notifications"), {
+        await fetch('/api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           userId: notif.targetId,
           type: "challenge_cancelled",
           challengerName: userProfile?.fullName || user.displayName || "فارس",
-          timestamp: serverTimestamp(),
+          
           read: false,
-        });
+        })
+      });
       }
       setNotification(null);
     } catch (error) {
@@ -1064,7 +1126,7 @@ export default function App() {
 
   // 1. Auth Listener: Solely responsible for user state
   useEffect(() => {
-    const unsubscribeAuth = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribeAuth = customAuth.onAuthStateChanged((currentUser: any) => {
       setUser(currentUser);
       setAuthReady(true);
     });
@@ -1088,9 +1150,19 @@ export default function App() {
       docRef,
       (docSnap) => {
         if (!docSnap.exists()) {
-          if (activeSection !== "profile-setup")
-            setActiveSection("profile-setup");
-          initializedProfile.current = true;
+          // Auto create profile silently
+          setDoc(
+            docRef,
+            {
+              fullName: user.displayName || (user.email ? user.email.split("@")[0] : "فارس جديد"),
+              governorate: "غير محدد",
+              profileCompleted: true,
+              status: "online",
+              role: "student",
+              lastActive: new Date().toISOString(),
+            },
+            { merge: true }
+          ).catch(console.error);
           return;
         }
 
@@ -1098,7 +1170,7 @@ export default function App() {
         setUserProfile({ uid: user.uid, ...profileData });
 
         if (profileData.isBanned) {
-          auth.signOut();
+          customAuth.logout();
           return;
         }
 
@@ -1201,7 +1273,7 @@ export default function App() {
     const possibleIdsSet = new Set<string>();
     const hasSpecificCode = Boolean(studentCode || parentCode || teacherCode);
 
-    if (activeUserId && !hasSpecificCode) {
+    if (activeUserId) {
       possibleIdsSet.add(activeUserId);
       possibleIdsSet.add(activeUserId.trim());
       possibleIdsSet.add(activeUserId.trim().toUpperCase());
@@ -1278,19 +1350,46 @@ export default function App() {
       }
     } else if (portalType === "parent") {
       processCode(parentCode, true);
-    } else if (portalType === "teacher" && teacherCode) {
-      const clean = teacherCode.trim();
-      const upper = clean.toUpperCase();
-      const lower = clean.toLowerCase();
-      possibleIdsSet.add(clean);
-      possibleIdsSet.add(upper);
-      possibleIdsSet.add(lower);
-      possibleIdsSet.add(`tcode_${clean}`);
-      possibleIdsSet.add(`tcode_${upper}`);
-      possibleIdsSet.add(`tcode_${lower}`);
+      const extraParentIds = [verifiedStudentInfo?.parentCode, userProfile?.parentCode, activeUserId].filter(Boolean);
+      for (const pId of extraParentIds) {
+        processCode(pId as string, true);
+      }
+    } else if (portalType === "teacher") {
+      const teacherIds = [teacherCode, loggedInTeacher?.id, loggedInTeacher?.code, userProfile?.code, userProfile?.studentCode, activeUserId].filter(Boolean);
+      for (const tId of teacherIds) {
+        const clean = (tId as string).trim();
+        const upper = clean.toUpperCase();
+        const lower = clean.toLowerCase();
+        possibleIdsSet.add(clean);
+        possibleIdsSet.add(upper);
+        possibleIdsSet.add(lower);
+        possibleIdsSet.add(`tcode_${clean}`);
+        possibleIdsSet.add(`tcode_${upper}`);
+        possibleIdsSet.add(`tcode_${lower}`);
+        possibleIdsSet.add(`tch_${clean}`);
+        possibleIdsSet.add(`tch_${upper}`);
+        possibleIdsSet.add(`tch_${lower}`);
+        if (upper.startsWith("TCH-") || upper.startsWith("T-")) {
+          const pure = upper.startsWith("TCH-") ? upper.slice(4) : upper.slice(2);
+          possibleIdsSet.add(pure);
+          possibleIdsSet.add(pure.toLowerCase());
+          possibleIdsSet.add(`tcode_${pure}`);
+          possibleIdsSet.add(`tcode_${pure.toLowerCase()}`);
+          possibleIdsSet.add(`tch_${pure}`);
+          possibleIdsSet.add(`tch_${pure.toLowerCase()}`);
+          possibleIdsSet.add(`tcode_TCH-${pure}`);
+          possibleIdsSet.add(`tcode_T-${pure}`);
+          possibleIdsSet.add(`tch_TCH-${pure}`);
+        } else {
+          possibleIdsSet.add(`TCH-${upper}`);
+          possibleIdsSet.add(`T-${upper}`);
+          possibleIdsSet.add(`tcode_TCH-${upper}`);
+          possibleIdsSet.add(`tch_TCH-${upper}`);
+        }
+      }
     }
 
-    const possibleIds = Array.from(possibleIdsSet).filter(Boolean).slice(0, 30);
+    const possibleIds = Array.from(possibleIdsSet).filter(Boolean);
     const currentIdsStr = possibleIds.join(",");
 
     // Only clear cache and previous notifications if the user/codes actually changed
@@ -1310,214 +1409,102 @@ export default function App() {
 
     let isInitialLoad = processedFirestoreNotifs.current.size === 0;
 
-    const q = query(
-      collection(db, "notifications"),
-      where("userId", "in", possibleIds),
-      orderBy("timestamp", "desc"),
-      limit(40),
-    );
-
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        // Sort in memory instead
-        const docs = snapshot.docs
-          .map((doc) => ({ id: doc.id, ...doc.data() }))
+    let isMounted = true;
+    
+    const fetchAppNotifs = async () => {
+       try {
+         const res = await fetch(`/api/notifications?recipientIds=${encodeURIComponent(possibleIds.filter(id => id && id !== 'undefined').join(','))}`);
+         if (!res.ok) {
+           console.warn(`[App] Notification fetch failed: ${res.status}`);
+           return;
+         }
+         
+         const contentType = res.headers.get('content-type');
+         if (!contentType || !contentType.includes('application/json')) {
+            console.error('[App] Expected JSON notifications but got', contentType);
+            return;
+         }
+         
+         const data = await res.json();
+         if (!isMounted || !data.success) return;
+         
+         const notifs = data.notifications
           .filter((d: any) => d.read === false || d.isRead === false)
           .filter((d: any) => !(portalType === "teacher" && d.type === "alarm"))
-          .filter((d: any) => d.type !== "reminder") // Completely block remote 'reminder' types
+          .filter((d: any) => d.type !== "reminder")
           .filter((d: any) => {
             if (d.recipientRole) {
-              return d.recipientRole === portalType;
+              const r = d.recipientRole.toLowerCase();
+              if (portalType === "teacher") return r === "teacher" || r === "cadre" || r === "staff" || r === "general";
+              if (portalType === "parent") return r === "parent" || r === "general";
+              return r === "student" || r === "general";
             }
-            return portalType === "student";
-          })
-          .sort((a: any, b: any) => {
-            const tA = a.timestamp?.toMillis
-              ? a.timestamp.toMillis()
-              : a.timestamp?.seconds
-                ? a.timestamp.seconds * 1000
-                : new Date(a.timestamp || 0).getTime();
-            const tB = b.timestamp?.toMillis
-              ? b.timestamp.toMillis()
-              : b.timestamp?.seconds
-                ? b.timestamp.seconds * 1000
-                : new Date(b.timestamp || 0).getTime();
-            return tB - tA;
+            if (d.recipientId && d.recipientId !== 'all') return true;
+            return true;
           });
-
-        if (docs.length > 0) {
-          const specialTypes = [
-            "challenge",
-            "challenge_accepted_by_target",
-            "challenge_final_invite",
-            "challenge_response",
-            "siege",
-            "battalion_invite",
-            "battalion_join_request",
-            "battalion_join_accepted",
-            "reminder",
-          ];
-          const specialDoc = docs.find((d: any) =>
-            specialTypes.includes(d.type),
-          );
-
-          if (specialDoc) {
-            setNotification(specialDoc);
-          } else {
-            setNotification(null);
-          }
-
-          // Add to the drawer notifications if not already processed
-          docs.forEach((doc: any) => {
-            if (!processedFirestoreNotifs.current.has(doc.id)) {
-              let title =
-                doc.title ||
-                (settings.language === "ar"
-                  ? "إشعار جديد"
-                  : "New Notification");
-              let message = doc.message || "";
-              let type: AppNotification["type"] = "general";
-
-              if (doc.type === "challenge") {
-                title =
-                  settings.language === "ar"
-                    ? "تحدي جديد! ⚔️"
-                    : "New Challenge! ⚔️";
-                message =
-                  settings.language === "ar"
-                    ? `الفارس ${doc.challengerName} يتحداكم لانتزاع اللقب!`
-                    : `Knight ${doc.challengerName} is challenging you!`;
-                type = "challenge";
-              } else if (doc.type === "challenge_accepted_by_target") {
-                title =
-                  settings.language === "ar"
-                    ? "تم قبول التحدي! ✅"
-                    : "Challenge Accepted! ✅";
-                message =
-                  settings.language === "ar"
-                    ? `${doc.targetName} وافق على التحدي. هل أنت مستعد؟`
-                    : `${doc.targetName} accepted the challenge. Are you ready?`;
-                type = "challenge";
-              } else if (doc.type === "siege") {
-                title =
-                  settings.language === "ar"
-                    ? "تحدي الحصار! 🏰"
-                    : "Siege Challenge! 🏰";
-                type = "siege";
-              } else if (doc.type?.includes("sovereignty")) {
-                title =
-                  settings.language === "ar"
-                    ? "منصة السيادة 👑"
-                    : "Sovereignty Platform 👑";
-                type = "sovereignty";
-              }
-
-              let showToast =
-                !isInitialLoad &&
-                Date.now() - lastProfileSwitchTime.current > 3000;
-
-              if (doc.timestamp) {
-                const notifTime = doc.timestamp?.toMillis
-                  ? doc.timestamp.toMillis()
-                  : doc.timestamp?.seconds
-                    ? doc.timestamp.seconds * 1000
-                    : new Date(doc.timestamp).getTime();
-                if (Date.now() - notifTime > 60000) {
-                  showToast = false;
-                }
-              }
-
-              if (portalType === "parent") {
-                showToast = false;
-              }
-
-              addNotification(
-                title,
-                message,
-                type,
-                doc.id,
-                doc.recipientRole,
-                showToast,
-              );
-              processedFirestoreNotifs.current.add(doc.id);
-            }
-          });
-        } else {
-          setNotification(null);
-        }
-        isInitialLoad = false;
-      },
-      (error) => {
-        handleFirestoreError(error, OperationType.LIST, "notifications");
-      },
-    );
-
+          
+         if (notifs.length > 0) {
+           const specialDoc = notifs.find((d: any) => d.type === 'challenge' || d.type === 'reward' || d.type === 'sovereignty' || d.type === 'level_up');
+           if (specialDoc) {
+             setNotification(specialDoc);
+           } else {
+             setNotification(null);
+           }
+           
+           notifs.forEach((doc: any) => {
+             if (!processedFirestoreNotifs.current.has(doc.id)) {
+               let title = doc.title || (settings.language === "ar" ? "إشعار جديد" : "New Notification");
+               let message = doc.body || doc.message || "";
+               let type = doc.type || "general";
+               
+               if (doc.type === "challenge") {
+                 title = settings.language === "ar" ? "تحدي الـ 60 ثانية!" : "60 Second Challenge!";
+               } else if (doc.type === "level_up") {
+                 title = settings.language === "ar" ? "ترقية المستوى! 🏆" : "Level Up! 🏆";
+               } else if (doc.type === "siege") {
+                 title = settings.language === "ar" ? "تحدي الحصار! 🏰" : "Siege Challenge! 🏰";
+               }
+               
+               let showToast = !isInitialLoad && Date.now() - lastProfileSwitchTime.current > 3000;
+               if (doc.createdAt) {
+                 const notifTime = new Date(doc.createdAt).getTime();
+                 if (Date.now() - notifTime > 60000) showToast = false;
+               }
+               if (portalType === "parent") showToast = false;
+               
+               addNotification(title, message, type as any, doc.id, doc.recipientRole || doc.type, showToast, doc.metadata?.broadcastId);
+               processedFirestoreNotifs.current.add(doc.id);
+             }
+           });
+         } else {
+           setNotification(null);
+         }
+         isInitialLoad = false;
+       } catch (err) {
+         console.error("Error fetching app notifs:", err);
+       }
+    };
+    
+    fetchAppNotifs();
+    
     // Fast sync when coming back from background
-    const handleVisibilityChange = async () => {
+    const handleVisibilityChange = () => {
       if (document.visibilityState === "visible") {
-        console.log("App returned from background, performing fast sync of notifications...");
-        try {
-          // Bypassing local cache to guarantee absolute latest data from the server
-          let serverSnapshot;
-          try {
-            serverSnapshot = await getDocsFromServer(q);
-          } catch (serverErr) {
-            console.warn("getDocsFromServer failed, falling back to local cache/standard getDocs:", serverErr);
-            serverSnapshot = await getDocs(q);
-          }
-          const freshDocs = serverSnapshot.docs
-            .map((doc) => ({ id: doc.id, ...doc.data() }))
-            .filter((d: any) => d.read === false || d.isRead === false)
-            .filter((d: any) => !(portalType === "teacher" && d.type === "alarm"))
-            .filter((d: any) => d.type !== "reminder")
-            .filter((d: any) => {
-              if (d.recipientRole) return d.recipientRole === portalType;
-              return portalType === "student";
-            });
-
-          freshDocs.forEach((doc: any) => {
-            if (!processedFirestoreNotifs.current.has(doc.id)) {
-              let title = doc.title || (settings.language === "ar" ? "إشعار جديد" : "New Notification");
-              let message = doc.message || "";
-              let type: AppNotification["type"] = "general";
-
-              if (doc.type === "challenge") {
-                title = settings.language === "ar" ? "تحدي جديد! ⚔️" : "New Challenge! ⚔️";
-                message = settings.language === "ar"
-                  ? `الفارس ${doc.challengerName} يتحداكم لانتزاع اللقب!`
-                  : `Knight ${doc.challengerName} is challenging you!`;
-                type = "challenge";
-              } else if (doc.type === "challenge_accepted_by_target") {
-                title = settings.language === "ar" ? "تم قبول التحدي! ✅" : "Challenge Accepted! ✅";
-                message = settings.language === "ar"
-                  ? `${doc.targetName} وافق على التحدي. هل أنت مستعد؟`
-                  : `${doc.targetName} accepted the challenge. Are you ready?`;
-                type = "challenge";
-              } else if (doc.type === "siege") {
-                title = settings.language === "ar" ? "تحدي الحصار! 🏰" : "Siege Challenge! 🏰";
-                type = "siege";
-              } else if (doc.type?.includes("sovereignty")) {
-                title = settings.language === "ar" ? "منصة السيادة 👑" : "Sovereignty Platform 👑";
-                type = "sovereignty";
-              }
-
-              // Background sync notifications should be added silently without loud bells/popups
-              addNotification(title, message, type, doc.id, doc.recipientRole, false);
-              processedFirestoreNotifs.current.add(doc.id);
-            }
-          });
-        } catch (e) {
-          console.error("Fast sync of notifications failed:", e);
-        }
+        fetchAppNotifs();
       }
     };
-
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    
+    import('./lib/realtimeManager').then(({ realtimeManager }) => {
+       realtimeManager.on('notifications_updated', fetchAppNotifs);
+    });
 
     return () => {
-      unsubscribe();
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
+       isMounted = false;
+       document.removeEventListener("visibilitychange", handleVisibilityChange);
+       import('./lib/realtimeManager').then(({ realtimeManager }) => {
+          realtimeManager.off('notifications_updated', fetchAppNotifs);
+       });
     };
   }, [
     user?.uid,
@@ -1585,32 +1572,6 @@ export default function App() {
       setProgress((prev) => ({ ...prev, rank: newRank }));
     }
   }, [progress.masteredPages?.length, progress.rank]);
-
-  useEffect(() => {
-    if (progress.unlockedUnits.length > 0) {
-      const lastUnlocked =
-        progress.unlockedUnits[progress.unlockedUnits.length - 1];
-      const savedUnlocked = JSON.parse(
-        safeStorage.getItem("last_unlocked_units") || "[]",
-      );
-
-      if (!savedUnlocked.includes(lastUnlocked)) {
-        addNotification(
-          settings.language === "ar"
-            ? "تم فتح وحدة جديدة! 🔓"
-            : "New Unit Unlocked! 🔓",
-          settings.language === "ar"
-            ? `لقد تم فتح الوحدة ${lastUnlocked} بنجاح. استعد للتحدي!`
-            : `Unit ${lastUnlocked} has been successfully unlocked. Get ready for the challenge!`,
-          "unlock",
-        );
-        safeStorage.setItem(
-          "last_unlocked_units",
-          JSON.stringify(progress.unlockedUnits),
-        );
-      }
-    }
-  }, [progress.unlockedUnits]);
 
   useEffect(() => {
     if (user && notifications.length === 0) {
@@ -1854,7 +1815,15 @@ export default function App() {
 
 
   const renderContent = () => {
-    if (!user) return <AuthPage />;
+    if (activeSection === "gate-6") {
+      return <Gate6 onBack={() => setActiveSection('hub')} />;
+    }
+
+    if (!user) return <AuthPage onOpenPrivacy={() => setShowPrivacyPublic(true)} />;
+
+    if (activeSection === "privacy-policy") {
+      return <PrivacyPolicy onBack={() => setActiveSection('control')} />;
+    }
 
     // 1. If choosing school or in mayadeen section, show SchoolSelection
     if (isChoosingSchool || activeSection === "mayadeen") {
@@ -1894,8 +1863,10 @@ export default function App() {
     const effectiveSection = activeSection;
 
     // 2. Main structure
+    console.log("[DEBUG] rendering section:", effectiveSection, "portalType:", portalType);
     switch (effectiveSection as string) {
-      case "school-content":
+      case "school-content": {
+        console.log("[DEBUG] portalType inside school-content:", portalType);
         const currentSchool = allSchoolsList.find(
           (s) => s.id === selectedSchoolId,
         );
@@ -1904,1088 +1875,205 @@ export default function App() {
           : selectedSchoolId ? getOfficialSchoolName(selectedSchoolId) : "";
 
         if (!isSchoolVerified) {
+          const isAcademy =
+            selectedSchoolId === "school8" ||
+            selectedSchoolId === "general" ||
+            selectedSchoolId === "academy" ||
+            (institutionName &&
+              (institutionName.includes("أكاديمية") ||
+                institutionName.includes("اكاديمية")));
+
+          const handleAccessVerify = async (code: string, isParent: boolean) => {
+            setIsVerifying(true);
+            try {
+              const user = await customAuth.loginWithCode(
+                code,
+                selectedSchoolId || undefined,
+              );
+              setIsSchoolVerified(true);
+              if (
+                user.role === "teacher" ||
+                (user as any).role === "TEACHER"
+              ) {
+                setPortalType("teacher");
+                const teacherObj = {
+                  id: user.uid || (user as any).id,
+                  code: code, // Add the login code here
+                  name:
+                    user.displayName ||
+                    (user as any).name ||
+                    "الأستاذ المحاضر",
+                  schoolId: user.schoolId || selectedSchoolId || "school8",
+                  subject: (user as any).subject || "المنهج الوزاري",
+                  grade: (user as any).grade || "السادس العلمي",
+                  classes: (user as any).classes || [],
+                  role: "teacher",
+                };
+                setLoggedInTeacher(teacherObj);
+                setUserProfile((prev: any) => ({
+                  ...prev,
+                  ...user,
+                  role: "teacher",
+                  name: teacherObj.name,
+                }));
+              } else if (
+                user.role === "admin" ||
+                (user as any).role === "ADMIN"
+              ) {
+                setPortalType(
+                  user.schoolId && user.schoolId.includes("boys")
+                    ? "admin-boys"
+                    : "admin-girls",
+                );
+                setVerifiedStudentInfo({
+                  id: user.uid,
+                  code: code,
+                  name: user.displayName || "",
+                  role: user.role,
+                  schoolId: user.schoolId,
+                });
+              } else if (user.role === "parent") {
+                setPortalType("parent");
+                const studentGrade =
+                  (user as any).grade ||
+                  (user as any).academicLevel ||
+                  "";
+                if (studentGrade) {
+                  setSelectedStudentGrade(studentGrade);
+                }
+                setVerifiedStudentInfo({
+                  id: user.uid,
+                  parentCode: code,
+                  code: code,
+                  studentCode: (user as any).studentCode || code,
+                  name:
+                    (user as any).studentName ||
+                    user.displayName ||
+                    "",
+                  studentName:
+                    (user as any).studentName ||
+                    user.displayName ||
+                    "",
+                  role: "parent",
+                  grade: studentGrade,
+                  schoolId: user.schoolId || selectedSchoolId,
+                  gender: (user as any).gender,
+                });
+              } else if (user.role === "driver") {
+                setPortalType("driver");
+                setVerifiedStudentInfo({
+                  id: user.uid,
+                  code: code,
+                  name: user.displayName || "",
+                  role: "driver",
+                  schoolId: user.schoolId,
+                });
+              } else {
+                // Student
+                setPortalType("student");
+                const studentGrade =
+                  (user as any).grade ||
+                  (user as any).academicLevel ||
+                  "";
+                if (studentGrade) {
+                  setSelectedStudentGrade(studentGrade);
+                }
+                setVerifiedStudentInfo({
+                  id: user.uid,
+                  code: code,
+                  studentCode: (user as any).studentCode || code,
+                  name:
+                    user.displayName ||
+                    (user as any).name ||
+                    "طالب الأكاديمية",
+                  role: "student",
+                  grade: studentGrade || "سادس علمي",
+                  schoolId:
+                    user.schoolId || selectedSchoolId || "school8",
+                  gender: (user as any).gender,
+                });
+              }
+            } catch (e: any) {
+              if (e.message === 'ACCOUNT_BANNED') {
+                setBannedCode(code);
+              } else {
+                addNotification(
+                  "خطأ في التحقق",
+                  e.message || "كود الدخول غير صحيح",
+                  "alarm",
+                );
+              }
+            } finally {
+              setIsVerifying(false);
+            }
+          };
+
+          if (bannedCode) {
+            return (
+              <div className="fixed inset-0 bg-[#050A18] flex flex-col items-center justify-center p-6 text-center z-[110]" dir="rtl">
+                <button 
+                  onClick={() => setBannedCode(null)}
+                  className="fixed top-8 right-6 w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition-all"
+                >
+                  <ArrowRight size={20} />
+                </button>
+                <div className="max-w-sm w-full bg-rose-500/10 border border-rose-500/20 rounded-3xl p-8 flex flex-col items-center gap-4">
+                  <div className="w-20 h-20 bg-rose-500/20 rounded-full flex items-center justify-center text-rose-400 mb-2 shadow-[0_0_30px_rgba(244,63,94,0.3)]">
+                    <LockIcon size={36} />
+                  </div>
+                  <h2 className="text-3xl font-black text-rose-400 drop-shadow-[0_0_10px_rgba(244,63,94,0.5)]">حساب مجمد</h2>
+                  <p className="text-rose-400/80 text-base leading-relaxed mt-2 text-center">
+                    عذراً، لقد تم تجميد هذا الحساب من قبل الإدارة. يرجى مراجعة إدارة المدرسة لمعرفة السبب وطلب رفع التجميد.
+                  </p>
+                  <button 
+                    onClick={() => setBannedCode(null)}
+                    className="mt-6 w-full py-4 bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/30 text-rose-300 rounded-xl font-bold transition-all active:scale-95"
+                  >
+                    العودة للرئيسية
+                  </button>
+                </div>
+              </div>
+            );
+          }
+
+          if (isAcademy) {
+            return (
+              <BayraqAcademyHub
+                key={selectedSchoolId || "academy"}
+                onVerify={handleAccessVerify}
+                onBack={() => {
+                  setActiveSection("mayadeen");
+                  setSelectedSchoolId(null);
+                  safeStorage.removeItem("s6_selectedSchoolId");
+                }}
+                isVerifying={isVerifying}
+              />
+            );
+          }
+
           return (
             <SchoolAccessGate
               key={selectedSchoolId}
               schoolName={institutionName}
               isVerifying={isVerifying}
-              savedCode={safeStorage.getItem("s6_savedCode_" + selectedSchoolId) || undefined}
               onBack={() => {
                 setActiveSection("mayadeen");
                 setSelectedSchoolId(null);
                 safeStorage.removeItem("s6_selectedSchoolId");
               }}
-              onVerify={async (code, isParent) => {
-                setIsVerifying(true);
-                let succeeded = false;
-                const setVerified = (val: boolean) => {
-                  if (val) succeeded = true;
-                  setIsSchoolVerified(val);
-                };
-                try {
-                  const docMatchesSchool = (docData: any) => {
-                    if (!selectedSchoolId) return true;
-                    
-                    const docSchoolId = String(docData.schoolId || docData.school_id || '').trim().toLowerCase();
-                    const docSchoolName = String(docData.schoolName || docData.school || docData.academyName || '').trim();
-                    
-                    if (docSchoolId && docSchoolId === selectedSchoolId.trim().toLowerCase()) {
-                      return true;
-                    }
-                    
-                    if (currentSchool) {
-                      const normalizeFuzzy = (str: string) => {
-                        if (!str) return '';
-                        return str
-                          .replace(/[أإآ]/g, 'ا')
-                          .replace(/ة/g, 'ه')
-                          .replace(/[ىي]/g, 'ي')
-                          .replace(/\s+/g, '')
-                          .trim()
-                          .toLowerCase();
-                      };
-                      
-                      const normalizedFilter = normalizeFuzzy(currentSchool.name);
-                      const normalizedDoc = normalizeFuzzy(docSchoolName);
-                      
-                      if (normalizedFilter && normalizedDoc === normalizedFilter) {
-                        return true;
-                      }
-                      
-                      if (!docSchoolId && normalizedFilter && (normalizedDoc.includes(normalizedFilter) || normalizedFilter.includes(normalizedDoc))) {
-                        return true;
-                      }
-                    }
-                    return false;
-                  };
-
-                  const isAdminCode =
-                    code.startsWith("ADM-") || code === "112233";
-
-                  if (isAdminCode) {
-                    try {
-                      // Test/Master Codes for verification/bypass during development
-                      const isMasterCode =
-                        code === "ADM-G-MASTER" ||
-                        code === "ADM-B-MASTER" ||
-                        code === "ADM-ROOT" ||
-                        code === "112233";
-
-                      let qSnap: any = { empty: true };
-                      if (!isMasterCode) {
-                        const codesRef = collection(db, "activation_codes");
-                        const q = query(
-                          codesRef,
-                          where("code", "==", code || "unassigned"),
-                          where("role", "==", "admin"),
-                        );
-                        qSnap = await getDocs(q);
-                      }
-
-                      if (!qSnap.empty || isMasterCode) {
-                        const adminDoc = !isMasterCode
-                          ? qSnap.docs[0].data()
-                          : null;
-                        const adminDocId = !isMasterCode ? qSnap.docs[0].id : null;
-
-                        // Check security rules
-                        if (adminDoc) {
-                          if (adminDoc.status === "disabled" || adminDoc.status === "expired") {
-                            addNotification(
-                              "خطأ في التحقق",
-                              "هذا الكود غير فعال أو تم تعطيله",
-                              "alarm",
-                            );
-                            setIsVerifying(false);
-                            return;
-                          }
-                          if (adminDoc.expiresAt) {
-                            const expiresDate = new Date(adminDoc.expiresAt);
-                            if (expiresDate < new Date()) {
-                              addNotification(
-                                "خطأ في التحقق",
-                                "هذا الكود انتهت صلاحيته",
-                                "alarm",
-                              );
-                              setIsVerifying(false);
-                              return;
-                            }
-                          }
-                          const maxUses = typeof adminDoc.maxUses === 'number' && adminDoc.maxUses > 0 ? adminDoc.maxUses : null;
-                          if (maxUses !== null && adminDoc.usedCount !== undefined && adminDoc.usedCount >= maxUses) {
-                            addNotification(
-                              "خطأ في التحقق",
-                              "تجاوز هذا الكود الحد الأقصى للاستخدام",
-                              "alarm",
-                            );
-                            setIsVerifying(false);
-                            return;
-                          }
-                        }
-
-                        // update usedCount & log
-                        if (adminDoc && adminDocId) {
-                          const codeRef = doc(db, "activation_codes", adminDocId);
-                          const newUsedCount = (adminDoc.usedCount || 0) + 1;
-                          const updates: any = { usedCount: newUsedCount, lastUsedAt: serverTimestamp() };
-                          const maxUses = typeof adminDoc.maxUses === 'number' && adminDoc.maxUses > 0 ? adminDoc.maxUses : null;
-                          if (maxUses !== null && newUsedCount >= maxUses) {
-                            updates.status = "expired";
-                          }
-                          await setDoc(codeRef, updates, { merge: true });
-
-                          await addDoc(collection(db, "developer_logs"), {
-                            action: `استخدام كود الإدارة: ${code}`,
-                            code: code,
-                            schoolId: adminDoc.schoolId || selectedSchoolId,
-                            schoolName: institutionName,
-                            userEmail: user?.email || auth.currentUser?.email || "غير معروف",
-                            timestamp: serverTimestamp(),
-                            status: "success"
-                          });
-                        }
-
-                        const isAdminObserver = adminDoc?.type === "observer";
-
-                        const branch =
-                          code.includes("-G-") ||
-                          code === "ADM-ROOT" ||
-                          code === "112233"
-                            ? "girls"
-                            : "boys";
-
-                        if (isAdminObserver) {
-                          setPortalType("admin-observer");
-                          setVerifiedStudentInfo({
-                            id: code,
-                            code: code,
-                            name: "إدارة المدرسة",
-                            role: "admin",
-                          });
-                          setSelectedStudentGrade(""); // They will need to select a grade next
-                        } else {
-                          setPortalType(
-                            branch === "boys" ? "admin-boys" : "admin-girls",
-                          );
-                        }
-
-                        // Permanent upgrade if user is logged in
-                        if (user) {
-                          try {
-                            await setDoc(
-                              doc(db, "users", user.uid),
-                              {
-                                isAdmin: true,
-                                role: "admin",
-                                adminBranch: branch,
-                                schoolName: institutionName,
-                                schoolId: selectedSchoolId,
-                                adminType: isAdminObserver
-                                  ? "observer"
-                                  : "master",
-                              },
-                              { merge: true },
-                            );
-                          } catch (e) {
-                            console.error(
-                              "Failed to upgrade account to admin:",
-                              e,
-                            );
-                          }
-                        }
-
-                        setVerified(true);
-                        return;
-                      } else {
-                        addNotification(
-                          "خطأ في التحقق",
-                          "كود الإدارة غير صحيح أو غير مفعل في مركز الأكواد",
-                          "alarm",
-                        );
-                        return;
-                      }
-                    } catch (e) {
-                      console.error("Admin verification error:", e);
-                      addNotification(
-                        "خطأ في النظام",
-                        "حدث خطأ أثناء التحقق من كود الإدارة",
-                        "alarm",
-                      );
-                      return;
-                    }
-                  } else if (code.startsWith("PAR-") || code.startsWith("PCODE-") || isParent) {
-                    try {
-                      const codesRef = collection(db, "activation_codes");
-                      const studentsRef = collection(db, "school_students");
-                      const cleanCode = (code || "").trim();
-                      const safeCode = cleanCode.toUpperCase() || "unassigned";
-                      const lowerCode = cleanCode.toLowerCase();
-
-                      // Search activation_codes by parentCode, code, parent, and direct document ID
-                      const [
-                        qCodesParentCode, qCodesCode, qCodesParent, docByIdSnap,
-                        qCodesParentCodeRaw, qCodesCodeRaw
-                      ] = await Promise.all([
-                        getDocs(query(codesRef, where("parentCode", "==", safeCode))),
-                        getDocs(query(codesRef, where("code", "==", safeCode))),
-                        getDocs(query(codesRef, where("parent", "==", safeCode))),
-                        getDoc(doc(db, "activation_codes", safeCode)).catch(() => null),
-                        getDocs(query(codesRef, where("parentCode", "==", cleanCode))),
-                        getDocs(query(codesRef, where("code", "==", cleanCode)))
-                      ]);
-
-                      let codeDoc: any = null;
-                      let cData: any = null;
-
-                      if (!qCodesParentCode.empty) {
-                        codeDoc = qCodesParentCode.docs[0];
-                        cData = codeDoc.data();
-                      } else if (!qCodesCode.empty) {
-                        codeDoc = qCodesCode.docs[0];
-                        cData = codeDoc.data();
-                      } else if (!qCodesParent.empty) {
-                        codeDoc = qCodesParent.docs[0];
-                        cData = codeDoc.data();
-                      } else if (!qCodesParentCodeRaw.empty) {
-                        codeDoc = qCodesParentCodeRaw.docs[0];
-                        cData = codeDoc.data();
-                      } else if (!qCodesCodeRaw.empty) {
-                        codeDoc = qCodesCodeRaw.docs[0];
-                        cData = codeDoc.data();
-                      } else if (docByIdSnap && docByIdSnap.exists()) {
-                        codeDoc = docByIdSnap;
-                        cData = docByIdSnap.data();
-                      }
-
-                      if (cData) {
-                        const maxUsesNum = typeof cData.maxUses === 'number' && cData.maxUses > 0 ? cData.maxUses : null;
-
-                        console.log("[RUNTIME DEBUG - Parent Verification]", {
-                          enteredCode: code,
-                          dbCode: cData.code || cData.parentCode || safeCode,
-                          status: cData.status || "active",
-                          createdAt: cData.createdAt ? (cData.createdAt.toDate ? cData.createdAt.toDate().toISOString() : cData.createdAt) : "N/A",
-                          expiresAt: cData.expiresAt || "N/A",
-                          usedCount: cData.usedCount || 0,
-                          maxUses: maxUsesNum !== null ? maxUsesNum : "unlimited",
-                          rejectionReason: null
-                        });
-
-                        // Check security rules
-                        if (cData.status === "disabled" || cData.status === "expired" || cData.status === "معطل") {
-                          console.warn("[RUNTIME DEBUG - Parent Code Rejected]", {
-                            enteredCode: code,
-                            dbCode: cData.code || cData.parentCode,
-                            status: cData.status,
-                            rejectionReason: "كود ملغى أو معطل أو منتهي الصلاحية"
-                          });
-                          addNotification(
-                            "خطأ في التحقق",
-                            "هذا الكود غير فعال أو تم تعطيله",
-                            "alarm",
-                          );
-                          setIsVerifying(false);
-                          return;
-                        }
-                        if (cData.expiresAt) {
-                          const expiresDate = new Date(cData.expiresAt);
-                          if (expiresDate < new Date()) {
-                            console.warn("[RUNTIME DEBUG - Parent Code Rejected]", {
-                              enteredCode: code,
-                              expiresAt: cData.expiresAt,
-                              rejectionReason: "انتهت فترة صلاحية الكود"
-                            });
-                            addNotification(
-                              "خطأ في التحقق",
-                              "هذا الكود انتهت صلاحيته",
-                              "alarm",
-                            );
-                            setIsVerifying(false);
-                            return;
-                          }
-                        }
-                        if (maxUsesNum !== null && cData.usedCount !== undefined) {
-                          if (cData.usedCount >= maxUsesNum) {
-                            console.warn("[RUNTIME DEBUG - Parent Code Rejected]", {
-                              enteredCode: code,
-                              usedCount: cData.usedCount,
-                              maxUses: maxUsesNum,
-                              rejectionReason: "تجاوز الحد الأقصى لمرات الاستخدام"
-                            });
-                            addNotification(
-                              "خطأ في التحقق",
-                              "تجاوز هذا الكود الحد الأقصى للاستخدام",
-                              "alarm",
-                            );
-                            setIsVerifying(false);
-                            return;
-                          }
-                        }
-
-                        // update usedCount & log safely without setting status="expired" if maxUses is not defined
-                        const codeRef = doc(db, "activation_codes", codeDoc.id);
-                        const newUsedCount = (cData.usedCount || 0) + 1;
-                        const updates: any = { usedCount: newUsedCount, lastUsedAt: serverTimestamp() };
-                        if (maxUsesNum !== null && newUsedCount >= maxUsesNum) {
-                          updates.status = "expired";
-                        }
-                        await setDoc(codeRef, updates, { merge: true }).catch(console.error);
-
-                        await addDoc(collection(db, "developer_logs"), {
-                          action: `استخدام كود ولي الأمر: ${code}`,
-                          code: code,
-                          schoolId: cData.schoolId || selectedSchoolId,
-                          schoolName: institutionName,
-                          userEmail: user?.email || auth.currentUser?.email || "غير معروف",
-                          timestamp: serverTimestamp(),
-                          status: "success"
-                        }).catch(console.error);
-
-                        const studentCode =
-                          cData.studentCode || cData.student || cData.code;
-
-                        setPortalType("parent");
-                        setVerifiedStudentInfo({
-                          ...cData,
-                          parentCode: safeCode,
-                          studentCode,
-                        });
-
-                        // Non-blocking update
-                        if (user) {
-                          setDoc(
-                            doc(db, "users", user.uid),
-                            {
-                              role: "parent",
-                              parentCode: safeCode,
-                              studentCode: studentCode,
-                              schoolId: cData.schoolId || selectedSchoolId,
-                              verifiedAt: serverTimestamp(),
-                            },
-                            { merge: true },
-                          ).catch((err) =>
-                            console.error(
-                              "Error updating parent profile:",
-                              err,
-                            ),
-                          );
-                        }
-
-                        setSelectedStudentGrade(
-                          "أبناء مدرسة " + institutionName,
-                        );
-                        setVerified(true);
-                        return;
-                      }
-
-                      // If not found in activation_codes, query school_students
-                      const [qStudentsParentCode, qStudentsParent, qStudentsCode] = await Promise.all([
-                        getDocs(query(studentsRef, where("parentCode", "==", safeCode))),
-                        getDocs(query(studentsRef, where("parent", "==", safeCode))),
-                        getDocs(query(studentsRef, where("code", "==", safeCode)))
-                      ]);
-
-                      let studentDocData: any = null;
-                      if (!qStudentsParentCode.empty) {
-                        studentDocData = qStudentsParentCode.docs[0].data();
-                      } else if (!qStudentsParent.empty) {
-                        studentDocData = qStudentsParent.docs[0].data();
-                      } else if (!qStudentsCode.empty) {
-                        studentDocData = qStudentsCode.docs[0].data();
-                      }
-
-                      if (studentDocData) {
-                        const studentCode =
-                          studentDocData.code || studentDocData.student || studentDocData.id;
-
-                        setPortalType("parent");
-                        setVerifiedStudentInfo({
-                          ...studentDocData,
-                          parentCode: safeCode,
-                          studentCode,
-                        });
-
-                        // Non-blocking update
-                        if (user) {
-                          try {
-                            await setDoc(
-                              doc(db, "users", user.uid),
-                              {
-                                role: "parent",
-                                parentCode: safeCode,
-                                studentCode: studentCode,
-                                schoolId: studentDocData.schoolId || selectedSchoolId,
-                                verifiedAt: serverTimestamp(),
-                              },
-                              { merge: true },
-                            );
-                          } catch (err) {
-                            console.error(
-                              "Error updating parent profile:",
-                              err,
-                            );
-                          }
-                        }
-
-                        setSelectedStudentGrade(
-                          "أبناء مدرسة " + institutionName,
-                        );
-                        setVerified(true);
-                        return;
-                      } else if (safeCode.startsWith("PAR-") || safeCode.startsWith("PCODE-")) {
-                        // Demo parent fallback
-                        setPortalType("parent");
-                        setVerifiedStudentInfo({
-                          parentCode: safeCode,
-                          studentCode: "STU-DEMO-1",
-                          name: "ولي أمر (تجريبي)",
-                          studentName: "عمر أحمد (طالب تجريبي)",
-                          grade: "السادس ابتدائي",
-                          schoolId: selectedSchoolId,
-                        });
-                        setSelectedStudentGrade("أبناء مدرسة " + institutionName);
-                        setVerified(true);
-                        return;
-                      } else {
-                        addNotification(
-                          "خطأ في التحقق",
-                          "كود ولي الأمر غير صحيح أو غير مفعل في المنظومة",
-                          "alarm",
-                        );
-                        return;
-                      }
-                    } catch (e) {
-                      console.error("Parent verification error:", e);
-                      addNotification(
-                        "خطأ في النظام",
-                        "حدث خطأ أثناء التحقق من الكود",
-                        "alarm",
-                      );
-                      return;
-                    }
-                  } else if (code.startsWith("TCH-")) {
-                    try {
-                      const codesRef = collection(db, "activation_codes");
-                      // Search by code or studentCode (as some cadre use studentCode field)
-                      const safeCode = code || "unassigned";
-                      const qCode = query(
-                        codesRef,
-                        where("code", "==", safeCode),
-                      );
-                      const qStudentCode = query(
-                        codesRef,
-                        where("studentCode", "==", safeCode),
-                      );
-
-                      const [snapCode, snapStudent] = await Promise.all([
-                        getDocs(qCode),
-                        getDocs(qStudentCode),
-                      ]);
-
-                      const activationDoc = !snapCode.empty
-                        ? snapCode.docs[0]
-                        : !snapStudent.empty
-                          ? snapStudent.docs[0]
-                          : null;
-
-                       if (activationDoc) {
-                        const cData = activationDoc.data();
-
-                        // Check security rules
-                        if (cData.status === "disabled" || cData.status === "expired") {
-                          addNotification(
-                            "خطأ في التحقق",
-                            "هذا الكود غير فعال أو تم تعطيله",
-                            "alarm",
-                          );
-                          setIsVerifying(false);
-                          return;
-                        }
-                        if (cData.expiresAt) {
-                          const expiresDate = new Date(cData.expiresAt);
-                          if (expiresDate < new Date()) {
-                            addNotification(
-                              "خطأ في التحقق",
-                              "هذا الكود انتهت صلاحيته",
-                              "alarm",
-                            );
-                            setIsVerifying(false);
-                            return;
-                          }
-                        }
-                        const maxUsesNum = typeof cData.maxUses === 'number' && cData.maxUses > 0 ? cData.maxUses : null;
-
-                        console.log("[RUNTIME DEBUG - Cadre Verification]", {
-                          enteredCode: code,
-                          dbCode: cData.code || safeCode,
-                          status: cData.status || "active",
-                          createdAt: cData.createdAt ? (cData.createdAt.toDate ? cData.createdAt.toDate().toISOString() : cData.createdAt) : "N/A",
-                          expiresAt: cData.expiresAt || "N/A",
-                          usedCount: cData.usedCount || 0,
-                          maxUses: maxUsesNum !== null ? maxUsesNum : "unlimited",
-                          rejectionReason: null
-                        });
-
-                        if (maxUsesNum !== null && cData.usedCount !== undefined) {
-                          if (cData.usedCount >= maxUsesNum) {
-                            addNotification(
-                              "خطأ في التحقق",
-                              "تجاوز هذا الكود الحد الأقصى للاستخدام",
-                              "alarm",
-                            );
-                            setIsVerifying(false);
-                            return;
-                          }
-                        }
-
-                        // update usedCount & log
-                        const codeRef = doc(db, "activation_codes", activationDoc.id);
-                        const newUsedCount = (cData.usedCount || 0) + 1;
-                        const updates: any = { usedCount: newUsedCount, lastUsedAt: serverTimestamp() };
-                        if (maxUsesNum !== null && newUsedCount >= maxUsesNum) {
-                          updates.status = "expired";
-                        }
-                        await setDoc(codeRef, updates, { merge: true });
-
-                        await addDoc(collection(db, "developer_logs"), {
-                          action: `استخدام كود الأستاذ: ${code}`,
-                          code: code,
-                          schoolId: cData.schoolId || selectedSchoolId,
-                          schoolName: institutionName,
-                          userEmail: user?.email || auth.currentUser?.email || "غير معروف",
-                          timestamp: serverTimestamp(),
-                          status: "success"
-                        });
-                        
-                        // Enforce school check on activation doc
-                        if (!docMatchesSchool(cData)) {
-                          addNotification(
-                            "عذراً",
-                            "كود الأستاذ هذا مخصص لمدرسة أخرى وليس لهذه المدرسة.",
-                            "alarm",
-                          );
-                          setIsVerifying(false);
-                          return;
-                        }
-
-                        const teachersRef = collection(db, "teachers");
-
-                        // Try to find the linked teacher record by code or name
-                        let tchSnap = await getDocs(
-                          query(
-                            teachersRef,
-                            where("code", "==", code || "unassigned"),
-                          ),
-                        );
-                        if (tchSnap.empty) {
-                          tchSnap = await getDocs(
-                            query(
-                              teachersRef,
-                              where(
-                                "name",
-                                "==",
-                                cData.userName || cData.name || "unassigned",
-                              ),
-                            ),
-                          );
-                        }
-
-                        if (!tchSnap.empty) {
-                          const tId = tchSnap.docs[0].id;
-                          const tData = tchSnap.docs[0].data();
-
-                          // Enforce school check on detailed teacher record
-                          if (!docMatchesSchool(tData)) {
-                            addNotification(
-                              "عذراً",
-                              "حساب الأستاذ هذا مسجل في مدرسة أخرى وليس في هذه المدرسة.",
-                              "alarm",
-                            );
-                            setIsVerifying(false);
-                            return;
-                          }
-
-                          setLoggedInTeacher({ id: tId, ...tData });
-                          setPortalType("teacher");
-
-                          if (user && (tData as any).uid !== user.uid) {
-                            updateDoc(doc(db, "teachers", tId), {
-                              uid: user.uid,
-                              lastLogin: serverTimestamp(),
-                            }).catch(console.error);
-                          }
-
-                          setSelectedStudentGrade(
-                            tData.subject ||
-                              (Array.isArray(tData.classes)
-                                ? tData.classes?.[0]
-                                : null) ||
-                              "المنصة التعليمية",
-                          );
-                          setVerified(true);
-                          return;
-                        } else {
-                          // Authenticated via code but no detailed teacher profile found
-                          setLoggedInTeacher({
-                            id: code,
-                            name: cData.userName || cData.name || "أستاذ",
-                            ...cData,
-                          });
-                          setPortalType("teacher");
-                          setVerifiedStudentInfo(cData);
-                          setSelectedStudentGrade(
-                            cData.subject || "المنصة التعليمية",
-                          );
-                          setVerified(true);
-                          return;
-                        }
-                      } else {
-                        // Fallback in teachers collection
-                        const teachersRef = collection(db, "teachers");
-                        let q = query(
-                          teachersRef,
-                          where("code", "==", code || "unassigned"),
-                        );
-                        let querySnapshot = await getDocs(q);
-
-                        let teacherData = null;
-                        let teacherId = null;
-                        let targetClass = null;
-
-                        if (!querySnapshot.empty) {
-                          teacherId = querySnapshot.docs[0].id;
-                          teacherData = querySnapshot.docs[0].data();
-                        }
-
-                        if (teacherData) {
-                          // Enforce school check on detailed teacher record
-                          if (!docMatchesSchool(teacherData)) {
-                            addNotification(
-                              "عذراً",
-                              "كود الأستاذ هذا مخصص لمدرسة أخرى وليس لهذه المدرسة.",
-                              "alarm",
-                            );
-                            setIsVerifying(false);
-                            return;
-                          }
-
-                          setLoggedInTeacher({ id: teacherId, ...teacherData });
-                          setPortalType("teacher");
-                          if (user && (teacherData as any).uid !== user.uid) {
-                            updateDoc(doc(db, "teachers", teacherId), {
-                              uid: user.uid,
-                              lastLogin: serverTimestamp(),
-                            }).catch(console.error);
-                          }
-                          if (targetClass) {
-                            setSelectedStudentGrade(targetClass);
-                          } else if (
-                            teacherData.classes &&
-                            Array.isArray(teacherData.classes) &&
-                            teacherData.classes.length > 0
-                          ) {
-                            setSelectedStudentGrade(teacherData.classes[0]);
-                          }
-                          setVerified(true);
-                          return;
-                        }
-
-                        if (code.startsWith("TCH-")) {
-                          setLoggedInTeacher({
-                            id: code,
-                            name: "الأستاذ علي أحمد (تجريبي)",
-                            subject: "اللغة العربية والتربية الإسلامية",
-                            classes: ["السادس ابتدائي", "الأول متوسط"],
-                            schoolId: selectedSchoolId,
-                            code: code,
-                          });
-                          setPortalType("teacher");
-                          setSelectedStudentGrade("السادس ابتدائي");
-                          setVerified(true);
-                          return;
-                        }
-
-                        addNotification(
-                          "خطأ في التحقق",
-                          "كود الأستاذ غير صحيح أو غير مفعل",
-                          "alarm",
-                        );
-                        return;
-                      }
-                    } catch (e) {
-                      console.error("Teacher verification error:", e);
-                      addNotification(
-                        "خطأ في النظام",
-                        "حدث خطأ أثناء التحقق من الكود",
-                        "alarm",
-                      );
-                      return;
-                    }
-                  } else if (code.trim().toUpperCase().startsWith("DRI-") || code.trim().toUpperCase().startsWith("DRV-") || /^\d{6}$/.test(code.trim())) {
-                    try {
-                      const cleanCode = code.trim().toUpperCase();
-                      const driverRecord = await getDriverByAccessCode(cleanCode);
-                      if (driverRecord) {
-                        setLoggedInDriver(driverRecord);
-                        setPortalType("driver");
-                        setVerified(true);
-
-                        await addDoc(collection(db, "developer_logs"), {
-                          action: `تسجيل دخول السائق: ${driverRecord.name}`,
-                          code: cleanCode,
-                          schoolId: driverRecord.schoolId || selectedSchoolId,
-                          schoolName: institutionName,
-                          userEmail: user?.email || auth.currentUser?.email || "سائق حافلة",
-                          timestamp: serverTimestamp(),
-                          status: "success"
-                        });
-                        return;
-                      } else {
-                        addNotification(
-                          "خطأ في التحقق",
-                          "كود السائق هذا غير مسجل أو غير مفعل في المنظومة",
-                          "alarm"
-                        );
-                        setIsVerifying(false);
-                        return;
-                      }
-                    } catch (e) {
-                      console.error("Driver check error:", e);
-                      addNotification(
-                        "خطأ في النظام",
-                        "حدث خطأ أثناء التحقق من كود السائق",
-                        "alarm"
-                      );
-                      setIsVerifying(false);
-                      return;
-                    }
-                  } else {
-                    // Student Code Handling
-                    try {
-                      const student =
-                        STUDENT_REGISTRY[code as keyof typeof STUDENT_REGISTRY];
-                      setPortalType("student");
-
-                      if (student) {
-                        // Enforce school check on hardcoded student registry
-                        if (!docMatchesSchool(student)) {
-                          addNotification(
-                            "عذراً",
-                            "كود الطالب هذا مخصص لمدرسة أخرى وليس لهذه المدرسة.",
-                            "alarm",
-                          );
-                          setIsVerifying(false);
-                          return;
-                        }
-
-                        setVerifiedStudentInfo({
-                          id: code,
-                          code: code,
-                          studentCode: code,
-                          name: student.name,
-                          fullName: student.name,
-                          grade: student.grade,
-                          school: student.school,
-                          schoolId: selectedSchoolId,
-                        });
-                        setSelectedStudentGrade(student.grade);
-                        setVerified(true);
-                        return;
-                      } else {
-                        // Check school_students for live codes
-                        const studentsRef = collection(db, "school_students");
-                        const q = query(
-                          studentsRef,
-                          where("code", "==", code || "unassigned"),
-                        );
-                        const querySnapshot = await getDocs(q);
-
-                        let foundStudentData = null;
-
-                        if (!querySnapshot.empty) {
-                          foundStudentData = querySnapshot.docs[0].data();
-                        } else {
-                          // Check activation_codes collection too
-                          const codesRef = collection(db, "activation_codes");
-                          const qc = query(
-                            codesRef,
-                            where("code", "==", code || "unassigned"),
-                          );
-                          const qSnapC = await getDocs(qc);
-                          if (!qSnapC.empty) {
-                            const cData = qSnapC.docs[0].data();
-                            if (cData.role === "parent" || cData.role === "guardian") {
-                              if (cData.status === "disabled" || cData.status === "expired") {
-                                addNotification(
-                                  "خطأ في التحقق",
-                                  "هذا الكود غير فعال أو تم تعطيله",
-                                  "alarm",
-                                );
-                                setIsVerifying(false);
-                                return;
-                              }
-                              const studentCode = cData.studentCode || cData.student || cData.code;
-                              setPortalType("parent");
-                              setVerifiedStudentInfo({
-                                ...cData,
-                                parentCode: code,
-                                studentCode,
-                              });
-                              if (user) {
-                                setDoc(
-                                  doc(db, "users", user.uid),
-                                  {
-                                    role: "parent",
-                                    parentCode: code,
-                                    studentCode: studentCode,
-                                    schoolId: cData.schoolId || selectedSchoolId,
-                                    verifiedAt: serverTimestamp(),
-                                  },
-                                  { merge: true },
-                                ).catch(console.error);
-                              }
-                              setSelectedStudentGrade("أبناء مدرسة " + institutionName);
-                              setVerified(true);
-                              setIsVerifying(false);
-                              return;
-                            } else if (cData.role === "student" || !cData.role) {
-                              // Check security rules
-                              if (cData.status === "disabled" || cData.status === "expired") {
-                                addNotification(
-                                  "خطأ في التحقق",
-                                  "هذا الكود غير فعال أو تم تعطيله",
-                                  "alarm",
-                                );
-                                setIsVerifying(false);
-                                return;
-                              }
-                              if (cData.expiresAt) {
-                                const expiresDate = new Date(cData.expiresAt);
-                                if (expiresDate < new Date()) {
-                                  addNotification(
-                                    "خطأ في التحقق",
-                                    "هذا الكود انتهت صلاحيته",
-                                    "alarm",
-                                  );
-                                  setIsVerifying(false);
-                                  return;
-                                }
-                              }
-                              const maxUsesNum = typeof cData.maxUses === 'number' && cData.maxUses > 0 ? cData.maxUses : null;
-
-                              console.log("[RUNTIME DEBUG - Student Verification]", {
-                                enteredCode: code,
-                                dbCode: cData.code || code,
-                                status: cData.status || "active",
-                                createdAt: cData.createdAt ? (cData.createdAt.toDate ? cData.createdAt.toDate().toISOString() : cData.createdAt) : "N/A",
-                                expiresAt: cData.expiresAt || "N/A",
-                                usedCount: cData.usedCount || 0,
-                                maxUses: maxUsesNum !== null ? maxUsesNum : "unlimited",
-                                rejectionReason: null
-                              });
-
-                              if (maxUsesNum !== null && cData.usedCount !== undefined) {
-                                if (cData.usedCount >= maxUsesNum) {
-                                  addNotification(
-                                    "خطأ في التحقق",
-                                    "تجاوز هذا الكود الحد الأقصى للاستخدام",
-                                    "alarm",
-                                  );
-                                  setIsVerifying(false);
-                                  return;
-                                }
-                              }
-
-                              // update usedCount & log
-                              const codeRef = doc(db, "activation_codes", qSnapC.docs[0].id);
-                              const newUsedCount = (cData.usedCount || 0) + 1;
-                              const updates: any = { usedCount: newUsedCount, lastUsedAt: serverTimestamp() };
-                              if (maxUsesNum !== null && newUsedCount >= maxUsesNum) {
-                                updates.status = "expired";
-                              }
-                              await setDoc(codeRef, updates, { merge: true });
-
-                              await addDoc(collection(db, "developer_logs"), {
-                                action: `استخدام كود الطالب: ${code}`,
-                                code: code,
-                                schoolId: cData.schoolId || selectedSchoolId,
-                                schoolName: institutionName,
-                                userEmail: user?.email || auth.currentUser?.email || "غير معروف",
-                                timestamp: serverTimestamp(),
-                                status: "success"
-                              });
-
-                              foundStudentData = cData;
-                            }
-                          }
-                        }
-
-                        if (foundStudentData) {
-                          // Enforce school check on live student data
-                          if (!docMatchesSchool(foundStudentData)) {
-                            addNotification(
-                              "عذراً",
-                              "كود الطالب هذا مخصص لمدرسة أخرى وليس لهذه المدرسة.",
-                              "alarm",
-                            );
-                            setIsVerifying(false);
-                            return;
-                          }
-
-                          const studentCode =
-                            foundStudentData.code ||
-                            foundStudentData.student ||
-                            foundStudentData.id ||
-                            foundStudentData.studentCode;
-
-                          setVerifiedStudentInfo(foundStudentData);
-                          setSelectedStudentGrade(
-                            foundStudentData.grade || "غير محدد",
-                          );
-
-                          // Update user profile with student code
-                          if (user) {
-                            setDoc(
-                              doc(db, "users", user.uid),
-                              {
-                                role: "student",
-                                studentCode: studentCode,
-                                schoolId:
-                                  foundStudentData.schoolId || selectedSchoolId,
-                                grade:
-                                  foundStudentData.grade ||
-                                  selectedStudentGrade ||
-                                  "غير محدد",
-                                verifiedAt: serverTimestamp(),
-                              },
-                              { merge: true },
-                            ).catch((err) =>
-                              console.error(
-                                "Error updating student profile:",
-                                err,
-                              ),
-                            );
-                          }
-
-                          setVerified(true);
-                          return;
-                        } else {
-                          // targeted fallback for teachers who don't have TCH- prefix
-                          const teachersRef = collection(db, "teachers");
-                          let qTch = query(
-                            teachersRef,
-                            where("code", "==", code || "unassigned"),
-                          );
-                          let tchSnap = await getDocs(qTch);
-                          if (!tchSnap.empty) {
-                            const tId = tchSnap.docs[0].id;
-                            const tData = tchSnap.docs[0].data();
-
-                            // Enforce school check on fallback teacher
-                            if (!docMatchesSchool(tData)) {
-                              addNotification(
-                                "عذراً",
-                                "كود الأستاذ هذا مخصص لمدرسة أخرى وليس لهذه المدرسة.",
-                                "alarm",
-                              );
-                              setIsVerifying(false);
-                              return;
-                            }
-
-                            setLoggedInTeacher({ id: tId, ...tData });
-                            setPortalType("teacher"); // Fixed: Change portal to teacher dynamically
-                            if (user && (tData as any).uid !== user.uid) {
-                              updateDoc(doc(db, "teachers", tId), {
-                                uid: user.uid,
-                                lastLogin: serverTimestamp(),
-                              }).catch(console.error);
-                            }
-                            setSelectedStudentGrade(
-                              tData.subject ||
-                                (Array.isArray(tData.classes)
-                                  ? tData.classes?.[0]
-                                  : null) ||
-                                "المنصة التعليمية",
-                            );
-                            setVerified(true);
-                            return;
-                          }
-
-                          if (
-                            code.startsWith("STU-") ||
-                            code.startsWith("PRI-") ||
-                            code.startsWith("INT-") ||
-                            code.startsWith("SCI-") ||
-                            code.startsWith("LIT-") ||
-                            /^[PMS]\d/i.test(code) ||
-                            code.startsWith("P-") ||
-                            code.startsWith("M-") ||
-                            code.startsWith("S-")
-                          ) {
-                            setVerifiedStudentInfo({
-                              id: code,
-                              code: code,
-                              studentCode: code,
-                              name: "طالب تجريبي",
-                              fullName: "عمر أحمد علي",
-                              grade: "السادس ابتدائي",
-                              schoolId: selectedSchoolId,
-                            });
-                            setSelectedStudentGrade("السادس ابتدائي");
-                            setVerified(true);
-                            return;
-                          }
-
-                          addNotification(
-                            "خطأ في التحقق",
-                            "الكود غير صحيح أو غير مسجل في قاعدة البيانات. برجاء مراجعة الإدارة لتفعيل الكود الخاص بك.",
-                            "alarm",
-                          );
-                          return;
-                        }
-                      }
-                    } catch (e) {
-                      console.error("Student verification error:", e);
-                      handleFirestoreError(
-                        e,
-                        OperationType.GET,
-                        "school_students/verify",
-                        false,
-                      );
-                      addNotification(
-                        "خطأ في النظام",
-                        "حدث خطأ أثناء الاتصال بالخادم. يرجى المحاولة لاحقاً.",
-                        "alarm",
-                      );
-                    }
-                  }
-                } finally {
-                  setIsVerifying(false);
-                  if (succeeded) {
-                    try {
-                      safeStorage.setItem("s6_savedCode_" + selectedSchoolId, code);
-                    } catch (e) {
-                      console.error("Error saving verification code:", e);
-                    }
-                  } else {
-                    try {
-                      safeStorage.removeItem("s6_savedCode_" + selectedSchoolId);
-                      safeStorage.removeItem("s6_cachedAuth_" + selectedSchoolId);
-                    } catch {}
-                  }
-                }
-              }}
+              onVerify={handleAccessVerify}
             />
           );
         }
 
         if (portalType === "driver") {
           return (
-            <DriverDashboard
-              driverId={loggedInDriver?.id || "d1"}
-              routeId={loggedInDriver?.routeId || "1"}
-              driverObj={loggedInDriver}
-              schoolId={loggedInDriver?.schoolId || selectedSchoolId || "s1"}
+            <DriverPortal
+              loggedInDriver={loggedInDriver}
+              selectedSchoolId={selectedSchoolId}
+              userProfile={userProfile}
+              institutionName={institutionName}
+              onOpenNotifications={() => setIsNotificationDrawerOpen(true)}
               onBack={() => {
                 setActiveSection("hub");
               }}
@@ -2997,17 +2085,19 @@ export default function App() {
           return (
             <ParentPortal
               studentName={
+                verifiedStudentInfo?.studentName ||
                 verifiedStudentInfo?.fullName ||
                 verifiedStudentInfo?.name ||
                 verifiedStudentInfo?.userName ||
                 "طالب مجهول"
               }
               studentCode={
-                verifiedStudentInfo?.studentCode || verifiedStudentInfo?.code
+                verifiedStudentInfo?.studentCode || verifiedStudentInfo?.code || verifiedStudentInfo?.parentCode
               }
               schoolId={verifiedStudentInfo?.schoolId || selectedSchoolId}
               schoolName={institutionName}
               gender={verifiedStudentInfo?.gender}
+              grade={verifiedStudentInfo?.grade || selectedStudentGrade || ""}
               onBack={() => {
                 setActiveSection("hub");
               }}
@@ -3075,13 +2165,14 @@ export default function App() {
             progress={progress}
             setProgress={updateProgress}
             schoolName={institutionName}
-            schoolId={selectedSchoolId || ""}
-            grade={selectedStudentGrade || ""}
-            gradeName={selectedStudentGrade}
+            schoolId={selectedSchoolId || verifiedStudentInfo?.schoolId || userProfile?.schoolId || ""}
+            grade={selectedStudentGrade || verifiedStudentInfo?.grade || userProfile?.grade || ""}
+            gradeName={selectedStudentGrade || verifiedStudentInfo?.grade || userProfile?.grade || ""}
             onBack={() => {
               setActiveSection("hub");
             }}
             language={settings.language}
+            portalType={portalType}
             isTeacher={portalType === "teacher"}
             teacherData={loggedInTeacher}
             userProfile={(() => {
@@ -3138,6 +2229,7 @@ export default function App() {
             notifications={memoizedNotifications}
           />
         );
+      }
       case "profile-setup":
         return (
           <ProfileSetup
@@ -3175,21 +2267,6 @@ export default function App() {
             safeStorage.setItem("s6_selectedSchoolId", targetSchool);
           }
 
-          if (!isSchoolVerified && targetSchool) {
-            try {
-              const cachedAuthStr = safeStorage.getItem(
-                "s6_cachedAuth_" + targetSchool
-              );
-              if (cachedAuthStr) {
-                const cached = JSON.parse(cachedAuthStr);
-                setVerifiedStudentInfo(cached.verifiedStudentInfo);
-                setIsSchoolVerified(true);
-              }
-            } catch (e) {
-              console.error(e);
-            }
-          }
-
           setIsChoosingSchool(false);
           setActiveSection("school-content");
         };
@@ -3220,28 +2297,49 @@ export default function App() {
             safeStorage.setItem("s6_selectedSchoolId", targetSchool);
           }
 
-          if (!isSchoolVerified && targetSchool) {
-            try {
-              const cachedAuthStr = safeStorage.getItem(
-                "s6_cachedAuth_" + targetSchool
-              );
-              if (cachedAuthStr) {
-                const cached = JSON.parse(cachedAuthStr);
-                setVerifiedStudentInfo(cached.verifiedStudentInfo);
-                setLoggedInTeacher(cached.loggedInTeacher);
-                setLoggedInDriver(cached.loggedInDriver);
-                setSelectedStudentGrade(cached.selectedStudentGrade);
-                setIsSchoolVerified(true);
-              }
-            } catch (e) {
-              console.error(e);
-            }
-          }
-
           setIsChoosingSchool(false);
           setActiveSection("school-content");
         };
+        const isAdminUser =
+          portalType === "admin-boys" ||
+          portalType === "admin-girls" ||
+          userProfile?.role === "admin" ||
+          userProfile?.role === "dev";
 
+        const isDriverUser =
+          portalType === "driver" ||
+          userProfile?.role === "driver";
+
+        const resolvedSchoolData = allSchoolsList.find(
+          (s) => s.id === (selectedSchoolId || userProfile?.schoolId),
+        );
+        const resolvedSchoolName = resolvedSchoolData?.name || userProfile?.schoolName || "بوابة بيرق";
+
+        if (isAdminUser) {
+          return (
+            <div className="max-w-6xl mx-auto p-4 sm:p-6 pb-32">
+              <AdminHomeDashboard
+                schoolName={resolvedSchoolName}
+                selectedSchoolId={selectedSchoolId || userProfile?.schoolId}
+                setActiveTab={(tab) => {
+                  safeStorage.setItem("s6_admin_target_tab", tab);
+                  safeStorage.setItem("s6_admin_target_tab_glow", tab);
+                  setActiveSection("admin-hub");
+                }}
+                onOpenNotifications={() => setIsNotificationDrawerOpen(true)}
+              />
+            </div>
+          );
+        }
+
+        if (isDriverUser) {
+          return <DriverDashboard driverId={loggedInDriver?.id || "unknown"} routeId={loggedInDriver?.routeId || "unknown"} onBack={() => setActiveSection("hub")} />;
+        }
+
+        if (isParentUser) {
+          return <ParentPortal studentName={userProfile?.name || "ولي أمر"} onBack={() => setActiveSection("hub")} />;
+        }
+        
         const currentSchool = allSchoolsList.find(
           (s) => s.id === selectedSchoolId,
         );
@@ -3260,11 +2358,11 @@ export default function App() {
               {/* Logo top right - Minimal */}
               <div className="w-14 h-14 shrink-0 overflow-hidden rounded-[1rem] relative border border-white/5 flex items-center justify-center bg-[#0A0F1D] p-1 group hover:scale-105 transition-transform shadow-sm">
                 <img
-                  src={'/logo.png'}
+                  src={dynamicAppLogo}
                   alt="شعار البوابة"
                   className="w-full h-full object-contain scale-110 drop-shadow-sm rounded-lg"
                   onError={(e) => {
-                    (e.target as HTMLImageElement).src = '/school-logos/logo1.jpg';
+                    (e.target as HTMLImageElement).src = '/logo.png';
                   }}
                 />
               </div>
@@ -3424,8 +2522,8 @@ export default function App() {
                     </h1>
                     <div className="mt-1 flex items-center gap-1.5 bg-white/5 border border-white/10 px-2 py-0.5 rounded-full backdrop-blur-sm">
                       <span className="text-[9px] sm:text-[10px] font-bold text-white/70 truncate">
-                        {userProfile?.schoolName && userProfile.schoolName !== "school_baghdad" && userProfile.schoolName !== "مدرسة غير محددة"
-                          ? `${userProfile.schoolName} - ${userProfile.grade || ""}`
+                        {userProfile?.schoolName && userProfile?.schoolName !== "school_baghdad" && userProfile?.schoolName !== "مدرسة غير محددة"
+                          ? `${userProfile?.schoolName} - ${userProfile?.grade || ""}`
                           : "بطل بيرق"}
                       </span>
                     </div>
@@ -3812,45 +2910,15 @@ export default function App() {
               {/* 1. Daily Homework / الواجبات اليومية */}
               <div
                 onClick={() => {
-                  if (userProfile?.role === "teacher" || isTeacherUser) {
-                    setPortalType("teacher");
-                  } else {
-                    setPortalType("student");
-                    safeStorage.setItem("bayraq_user_role", "student");
-                  }
                   safeStorage.setItem("s6_target_tab", "tasks");
                   let targetSchool = selectedSchoolId;
                   if (!targetSchool) {
                     targetSchool = safeStorage.getItem("s6_selectedSchoolId") || safeStorage.getItem("s6_preferred_school") || userProfile?.schoolId || null;
                     if (!targetSchool) {
-                      for (const sch of SCHOOLS_DATA) {
-                        if (safeStorage.getItem("s6_savedCode_" + sch.id) || safeStorage.getItem("s6_cachedAuth_" + sch.id)) {
-                          targetSchool = sch.id;
-                          break;
-                        }
-                      }
-                    }
-                    if (!targetSchool) {
                       targetSchool = "school1";
                     }
                     setSelectedSchoolId(targetSchool);
                     safeStorage.setItem("s6_selectedSchoolId", targetSchool);
-                  }
-
-                  if (!isSchoolVerified && targetSchool) {
-                    try {
-                      const cachedAuthStr = safeStorage.getItem("s6_cachedAuth_" + targetSchool);
-                      if (cachedAuthStr) {
-                        const cached = JSON.parse(cachedAuthStr);
-                        setVerifiedStudentInfo(cached.verifiedStudentInfo);
-                        setLoggedInTeacher(cached.loggedInTeacher);
-                        setLoggedInDriver(cached.loggedInDriver);
-                        setSelectedStudentGrade(cached.selectedStudentGrade);
-                        setIsSchoolVerified(true);
-                      }
-                    } catch (e) {
-                      console.error(e);
-                    }
                   }
 
                   setHighlightTasksSection(true);
@@ -3898,6 +2966,24 @@ export default function App() {
                 </div>
               </div>
 
+                            {/* Gate 6 Button */}
+              <div 
+                onClick={() => setActiveSection("gate-6")}
+                className="col-span-2 bg-[#0A0F1D] border border-yellow-500/30 hover:border-yellow-500/60 rounded-[1.5rem] p-3 flex flex-row items-center justify-between relative overflow-hidden group transition-all cursor-pointer shadow-[0_0_15px_rgba(255,215,0,0.15)] active:scale-95"
+              >
+                <div className="absolute left-0 top-0 w-24 h-full bg-gradient-to-r from-yellow-500/10 to-transparent pointer-events-none" />
+                <div className="text-right flex-1 min-w-0 pr-1">
+                  <span className="block text-[9px] font-bold text-white/50 mb-0.5 truncate">
+                    النظام الجديد
+                  </span>
+                  <span className="block text-sm sm:text-base font-black text-yellow-400 truncate">
+                    بوابة بيرق (Gate 6)
+                  </span>
+                </div>
+                <div className="w-10 h-10 rounded-2xl bg-yellow-500/10 border border-yellow-500/30 flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 group-active:scale-95 transition-transform ml-2">
+                  <Zap size={20} strokeWidth={1.5} className="text-yellow-400 animate-pulse" />
+                </div>
+              </div>
               {/* 3. Sovereignty Platform / تتويجات الصف */}
               <div
                 onClick={() => setActiveSection("sovereignty")}
@@ -3955,33 +3041,12 @@ export default function App() {
               {/* 6. Last Read Lesson / آخر درس قرأته */}
               <div 
                 onClick={() => {
-                  if (userProfile?.role === "teacher" || isTeacherUser) {
-                    setPortalType("teacher");
-                  } else {
-                    setPortalType("student");
-                    safeStorage.setItem("bayraq_user_role", "student");
-                  }
                   safeStorage.setItem("s6_target_tab", "files");
                   let targetSchool = selectedSchoolId;
                   if (!targetSchool) {
                     targetSchool = safeStorage.getItem("s6_selectedSchoolId") || safeStorage.getItem("s6_preferred_school") || userProfile?.schoolId || "school1";
                     setSelectedSchoolId(targetSchool);
                     safeStorage.setItem("s6_selectedSchoolId", targetSchool);
-                  }
-                  if (!isSchoolVerified && targetSchool) {
-                    try {
-                      const cachedAuthStr = safeStorage.getItem("s6_cachedAuth_" + targetSchool);
-                      if (cachedAuthStr) {
-                        const cached = JSON.parse(cachedAuthStr);
-                        setVerifiedStudentInfo(cached.verifiedStudentInfo);
-                        setLoggedInTeacher(cached.loggedInTeacher);
-                        setLoggedInDriver(cached.loggedInDriver);
-                        setSelectedStudentGrade(cached.selectedStudentGrade);
-                        setIsSchoolVerified(true);
-                      }
-                    } catch (e) {
-                      console.error(e);
-                    }
                   }
                   setIsChoosingSchool(false);
                   setActiveSection("school-content");
@@ -4005,12 +3070,6 @@ export default function App() {
               {/* Sleek Horizontal Class Announcements Ticker Box */}
               <div
                 onClick={() => {
-                  if (userProfile?.role === "teacher" || isTeacherUser) {
-                    setPortalType("teacher");
-                  } else {
-                    setPortalType("student");
-                    safeStorage.setItem("bayraq_user_role", "student");
-                  }
                   safeStorage.setItem("s6_target_tab", "feed");
                   let targetSchool = selectedSchoolId;
                   if (!targetSchool) {
@@ -4021,21 +3080,6 @@ export default function App() {
                       "school1";
                     setSelectedSchoolId(targetSchool);
                     safeStorage.setItem("s6_selectedSchoolId", targetSchool);
-                  }
-                  if (!isSchoolVerified && targetSchool) {
-                    try {
-                      const cachedAuthStr = safeStorage.getItem("s6_cachedAuth_" + targetSchool);
-                      if (cachedAuthStr) {
-                        const cached = JSON.parse(cachedAuthStr);
-                        setVerifiedStudentInfo(cached.verifiedStudentInfo);
-                        setLoggedInTeacher(cached.loggedInTeacher);
-                        setLoggedInDriver(cached.loggedInDriver);
-                        setSelectedStudentGrade(cached.selectedStudentGrade);
-                        setIsSchoolVerified(true);
-                      }
-                    } catch (e) {
-                      console.error(e);
-                    }
                   }
                   setIsChoosingSchool(false);
                   setActiveSection("school-content");
@@ -4186,12 +3230,6 @@ export default function App() {
               animate={{ opacity: 1, scale: 1 }}
               transition={{ delay: 0.5 }}
               onClick={() => {
-                if (userProfile?.role === "teacher" || isTeacherUser) {
-                  setPortalType("teacher");
-                } else if (portalType !== "parent" && portalType !== "driver") {
-                  setPortalType("student");
-                  safeStorage.setItem("bayraq_user_role", "student");
-                }
                 if (isSchoolVerified && selectedSchoolId) {
                   setActiveSection("school-content");
                 } else {
@@ -4408,29 +3446,17 @@ export default function App() {
         );
       case "sovereignty":
         return (
-          <div className="max-w-6xl mx-auto p-0 md:p-6 space-y-8">
-            <header className="flex items-center gap-4 p-4 md:p-0">
-              <button
+          <div className="w-full h-full min-h-[calc(100vh-6rem)] flex flex-col gap-4">
+             <button
                 onClick={() => setActiveSection("hub")}
-                className="neon-button px-4 py-2"
+                className="flex items-center gap-1.5 text-white/50 hover:text-white transition-colors w-fit px-3 py-1.5 rounded-lg border border-white/5 bg-[#0a0f1d]"
               >
-                {t.back}
+                <ArrowLeft size={16} className={settings.language === "ar" ? "" : "rotate-180"} />
+                <span className="text-xs font-bold">{settings.language === "ar" ? "العودة" : "Back"}</span>
               </button>
-              <h1 className="text-3xl font-bold neon-text">
-                {settings.language === "ar"
-                  ? "منصة السيادة"
-                  : "Sovereignty Platform"}
-              </h1>
-            </header>
-            <SovereigntyMap
-              language={settings.language}
-              unlockedUnits={progress.unlockedUnits}
-              userProfile={userProfile}
-              onNavigate={(section, unitId) => {
-                setActiveSection(section, "SovereigntyMap onNavigate");
-                if (unitId) setSelectedUnitId(Number(unitId) as UnitId);
-              }}
-            />
+              <div className="flex-1 w-full pt-4">
+                <ComingSoonPlaceholder title={settings.language === "ar" ? "منصة السيادة (البطولات)" : "Sovereignty Platform"} />
+              </div>
           </div>
         );
       case "unit-detail":
@@ -4496,7 +3522,12 @@ export default function App() {
             <IdeaBank />
           </div>
         );
-      case "admin-hub":
+      case "admin-hub": {
+        const resolvedSchoolData = allSchoolsList.find(
+          (s) => s.id === (selectedSchoolId || userProfile?.schoolId),
+        );
+        const resolvedSchoolName = resolvedSchoolData?.name || userProfile?.schoolName || "بوابة بيرق";
+
         return (
           <div className="max-w-6xl mx-auto p-2 sm:p-6 space-y-8">
             <header className="flex items-center gap-4 mb-2">
@@ -4513,8 +3544,8 @@ export default function App() {
               </h1>
             </header>
             <AdminDashboard
-              schoolName={userProfile?.schoolName || "بوابة بيرق"}
-              selectedSchoolId={userProfile?.schoolId || selectedSchoolId}
+              schoolName={resolvedSchoolName}
+              selectedSchoolId={selectedSchoolId || userProfile?.schoolId}
               adminBranch={userProfile?.adminBranch || "boys"}
               onBack={() => setActiveSection("hub")}
               onSendMessage={handleBroadcastMessage}
@@ -4522,6 +3553,7 @@ export default function App() {
             />
           </div>
         );
+      }
       case "control":
         return (
           <div
@@ -4551,10 +3583,7 @@ export default function App() {
                 setHasSeenWelcomeIntro(false);
                 setSplashFinished(false);
               }}
-              onResetRole={() => {
-                safeStorage.removeItem("bayraq_user_role");
-                setShowRoleSelectionModal(true);
-              }}
+              onOpenPrivacy={() => setActiveSection("privacy-policy")}
             />
           </div>
         );
@@ -4663,7 +3692,9 @@ export default function App() {
             }}
             onSelectSchool={(id) => {
               setSelectedSchoolId(id);
-              setIsSchoolVerified(false);
+              const currentRole = portalType || safeStorage.getItem("bayraq_user_role") || "student";
+              const isUserAdmin = currentRole === "admin-boys" || currentRole === "admin-girls" || currentRole === "admin" || currentRole === "dev" || String(currentRole).includes("admin");
+              setIsSchoolVerified(Boolean(isUserAdmin));
               safeStorage.setItem("s6_selectedSchoolId", id);
               setIsChoosingSchool(false);
               setActiveSection("school-content");
@@ -4717,6 +3748,27 @@ export default function App() {
     medium: "16px",
     large: "18px",
   };
+
+  if (showGate6Demo) {
+    return <Gate6Demo />;
+  }
+
+  if (showPrivacyPublic) {
+    return (
+      <ErrorBoundary>
+        <PrivacyPolicy onBack={() => {
+          setShowPrivacyPublic(false);
+          if (window.history.replaceState) {
+            const url = new URL(window.location.href);
+            url.searchParams.delete("privacy");
+            url.searchParams.delete("view");
+            url.searchParams.delete("policy");
+            window.history.replaceState({}, document.title, url.pathname + (url.search ? url.search : ''));
+          }
+        }} />
+      </ErrorBoundary>
+    );
+  }
 
   return (
     <ErrorBoundary>
@@ -4778,12 +3830,7 @@ export default function App() {
             {!hasSeenWelcomeIntro ? (
               <WelcomeIntroScreen
                 key="welcome-intro"
-                videoSrc="/mascot/sliced_bairaq_sheet5_greeting_hello.mp4"
-                onComplete={() => {
-                  safeStorage.setItem("app_has_seen_welcome_intro", "true");
-                  setHasSeenWelcomeIntro(true);
-                  setSplashFinished(true);
-                }}
+                onComplete={handleWelcomeIntroComplete}
               />
             ) : loading ? (
               <motion.div
@@ -4797,7 +3844,7 @@ export default function App() {
                   videoSrc={
                     hasSeenOnboarding ? "/short-intro.webm" : "/mascot/sliced_bairaq_sheet5_greeting_hello.mp4"
                   }
-                  onFinish={() => setSplashFinished(true)}
+                  onFinish={handleSplashFinished}
                 />
               </motion.div>
             ) : !hasSeenOnboarding ? (
@@ -4812,12 +3859,36 @@ export default function App() {
             ) : showRoleSelectionModal ? (
               <RoleSelectionModal
                 key="role-selection"
-                onSelectRole={(role) => {
+                onSelectRole={async (role) => {
                   safeStorage.setItem("bayraq_user_role", role);
                   setPortalType(role as any);
                   setShowRoleSelectionModal(false);
                   setActiveSection("mayadeen");
-                  setIsSchoolVerified(false);
+                  
+                  const isRoleAdmin = role === "admin-boys" || role === "admin-girls" || role.includes("admin");
+                  setIsSchoolVerified(isRoleAdmin);
+
+                  const branch = role === "admin-boys" ? "boys" : "girls";
+                  setUserProfile((prev: any) => {
+                    if (!prev) {
+                      return { role: isRoleAdmin ? "admin" : role, adminBranch: branch, isAdmin: isRoleAdmin };
+                    }
+                    return { ...prev, role: isRoleAdmin ? "admin" : role, adminBranch: branch, isAdmin: isRoleAdmin };
+                  });
+
+                  // Update Firestore safely
+                  if (user && user.uid) {
+                    const updateData: any = { role: isRoleAdmin ? "admin" : role };
+                    if (isRoleAdmin) {
+                      updateData.adminBranch = branch;
+                      updateData.isAdmin = true;
+                    }
+                    try {
+                      await setDoc(doc(db, "users", user.uid), updateData, { merge: true });
+                    } catch (err) {
+                      console.warn("Could not sync role to user doc:", err);
+                    }
+                  }
                 }}
               />
             ) : (
@@ -4851,7 +3922,7 @@ export default function App() {
                   <div className="absolute inset-0 opacity-[0.03] mix-blend-screen bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMjAwIj48ZmlsdGVyIGlkPSJub2lzZSI+PGZlVHVyYnVsZW5jZSB0eXBlPSJmcmFjdGFsTm9pc2UiIGJhc2VGcmVxdWVuY3k9IjAuODUiIG51bU9jdGF2ZXM9IjMiIHN0aXRjaFRpbGVzPSJzdGl0Y2giLz48L2ZpbHRlcj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWx0ZXI9InVybCgibm9pc2UpIiBvcGFjaXR5PSIwLjE1Ii8+PC9zdmc+')]"></div>
                 </div>
 
-                {user && activeSection !== "school-content" && !isChoosingSchool && (
+                {user && portalType !== "driver" && activeSection !== "school-content" && activeSection !== "gate-6" && !isChoosingSchool && (
                   <Sidebar
                     activeSection={activeSection}
                     onSelectSection={setActiveSection}
@@ -4870,10 +3941,10 @@ export default function App() {
                 )}
 
                 <div
-                  className={`relative z-10 flex-1 flex flex-col min-h-screen transition-all duration-300 w-full overflow-x-hidden ${user && activeSection !== "school-content" && !isChoosingSchool && isSidebarOpen ? (settings.language === "ar" ? "lg:pr-72" : "lg:pl-72") : ""}`}
+                  className={`relative z-10 flex-1 flex flex-col min-h-screen transition-all duration-300 w-full overflow-x-hidden ${user && portalType !== "driver" && activeSection !== "school-content" && !isChoosingSchool && isSidebarOpen ? (settings.language === "ar" ? "lg:pr-72" : "lg:pl-72") : ""}`}
                 >
                   {/* Seasonal Cloud Theme Banner & Ambiance */}
-                  {activeSection !== "school-content" && <SeasonalThemeBanner />}
+                  {portalType !== "driver" && activeSection !== "school-content" && <SeasonalThemeBanner />}
                   <main id="main-content-area"
                     className={
                       activeSection === "hub" ||
@@ -4893,22 +3964,9 @@ export default function App() {
                         : "p-5"
                     }
                   >
-                    <AnimatePresence mode="wait" onExitComplete={() => window.scrollTo(0, 0)}>
-                      <motion.div
-                        key={
-                          isChoosingSchool
-                            ? "school-selection"
-                            : (activeSection as string)
-                        }
-                        initial={{ opacity: 0 }}
-                        animate={{ opacity: 1 }}
-                        exit={{ opacity: 0 }}
-                        transition={{ duration: 0.2 }}
-                        className="w-full"
-                      >
+                    <div className="w-full animate-fade-in">
                         {renderContent()}
-                      </motion.div>
-                    </AnimatePresence>
+                      </div>
                   </main>
                 </div>
 
@@ -5357,7 +4415,7 @@ export default function App() {
 
           {/* Universal Mobile Bottom Tab Bar - Floating Minimal */}
           {user &&
-            (activeSection === "hub" || activeSection === "hall-of-fame" || activeSection === "mayadeen" || isChoosingSchool) && (
+            (activeSection === "hub" || activeSection === "hall-of-fame" || activeSection === "mayadeen" || activeSection === "admin-hub" || isChoosingSchool) && (
               <div className="fixed bottom-0 left-0 right-0 z-[60] px-6 pb-6 pt-2 bg-gradient-to-t from-[#02050F] via-[#02050F]/80 to-transparent pointer-events-none flex justify-center">
                 <div className="w-full max-w-[320px] pointer-events-auto bg-[#0A0F1D]/80 backdrop-blur-xl border border-white/5 rounded-[2rem] px-2 py-1.5 flex items-center justify-between shadow-[0_8px_32px_rgba(0,0,0,0.3)] min-h-[64px]">
                   {/* Nav: Home (Right) */}
@@ -5391,23 +4449,42 @@ export default function App() {
                     </button>
                   </div>
 
-                  {/* Nav: Knights Club / Hall of Fame (Left) */}
-                  <button
-                    onClick={() => {
-                      setActiveSection("hall-of-fame");
-                    }}
-                    className={`flex-1 flex flex-col justify-center items-center h-full transition-all duration-300 ${activeSection === "hall-of-fame" && !isChoosingSchool ? "text-amber-400" : "text-white/30 hover:text-white/60"}`}
-                  >
-                    <Trophy
-                      size={activeSection === "hall-of-fame" && !isChoosingSchool ? 22 : 20}
-                      className={`mb-0.5 transition-all duration-300 ${activeSection === "hall-of-fame" && !isChoosingSchool ? "drop-shadow-[0_0_8px_rgba(251,191,36,0.5)] scale-110" : ""}`}
-                    />
-                    <span
-                      className={`text-[9px] font-bold transition-all duration-300 ${activeSection === "hall-of-fame" && !isChoosingSchool ? "opacity-100 translate-y-0" : "opacity-0 translate-y-1 h-0 overflow-hidden"}`}
+                  {/* Nav: Knights Club / Hall of Fame / Admin Panel (Left) */}
+                  {userProfile?.role === "admin" || userProfile?.role === "dev" ? (
+                    <button
+                      onClick={() => {
+                        setActiveSection("admin-hub");
+                      }}
+                      className={`flex-1 flex flex-col justify-center items-center h-full transition-all duration-300 ${activeSection === "admin-hub" && !isChoosingSchool ? "text-rose-400" : "text-white/30 hover:text-white/60"}`}
                     >
-                      الفرسان
-                    </span>
-                  </button>
+                      <Shield
+                        size={activeSection === "admin-hub" && !isChoosingSchool ? 22 : 20}
+                        className={`mb-0.5 transition-all duration-300 ${activeSection === "admin-hub" && !isChoosingSchool ? "drop-shadow-[0_0_8px_rgba(244,63,94,0.5)] scale-110" : ""}`}
+                      />
+                      <span
+                        className={`text-[9px] font-bold transition-all duration-300 ${activeSection === "admin-hub" && !isChoosingSchool ? "opacity-100 translate-y-0" : "opacity-0 translate-y-1 h-0 overflow-hidden"}`}
+                      >
+                        لوحة الإدارة
+                      </span>
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setActiveSection("hall-of-fame");
+                      }}
+                      className={`flex-1 flex flex-col justify-center items-center h-full transition-all duration-300 ${activeSection === "hall-of-fame" && !isChoosingSchool ? "text-amber-400" : "text-white/30 hover:text-white/60"}`}
+                    >
+                      <Trophy
+                        size={activeSection === "hall-of-fame" && !isChoosingSchool ? 22 : 20}
+                        className={`mb-0.5 transition-all duration-300 ${activeSection === "hall-of-fame" && !isChoosingSchool ? "drop-shadow-[0_0_8px_rgba(251,191,36,0.5)] scale-110" : ""}`}
+                      />
+                      <span
+                        className={`text-[9px] font-bold transition-all duration-300 ${activeSection === "hall-of-fame" && !isChoosingSchool ? "opacity-100 translate-y-0" : "opacity-0 translate-y-1 h-0 overflow-hidden"}`}
+                      >
+                        الفرسان
+                      </span>
+                    </button>
+                  )}
                 </div>
               </div>
             )}

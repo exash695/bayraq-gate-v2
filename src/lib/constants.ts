@@ -61,8 +61,8 @@ export const SCHOOLS_DATA: SchoolItem[] = [
   },
   { 
     id: 'school8', 
-    name: 'معهد ابداعنا للتعليم المطور', 
-    type: 'تقوية مركزية',
+    name: 'أكاديمية بيرق الرقمية', 
+    type: 'منصة الدورات الألكترونية لنخبة الأساتذة',
     schoolBairaqImageUrl: '/schools/cover8.jpg',
     schoolLogoUrl: '/school-logos/logo8.jpg'
   },
@@ -148,7 +148,7 @@ export function getOfficialSchoolName(schoolId?: string, schoolName?: string): s
     if (name.includes('عقيل')) return 'مدارس ابن عقيل الأهلية';
     if (name.includes('اليمامة')) return 'مدرسة اليمامة الابتدائية';
     if (name.includes('الجواهري')) return 'مدارس الجواهري الاهلية';
-    if (name.includes('إبداعنا') || name.includes('ابداعنا')) return 'معهد ابداعنا للتعليم المطور';
+    if (name.includes('أكاديمية') || name.includes('اكاديمية') || name.includes('الرقمية') || name.includes('إبداعنا') || name.includes('ابداعنا')) return 'أكاديمية بيرق الرقمية';
   }
 
   return 'ثانوية اوائل غماس الاهلية';

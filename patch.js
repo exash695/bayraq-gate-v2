@@ -1,20 +1,23 @@
 const fs = require('fs');
-let code = fs.readFileSync('src/App.tsx', 'utf8');
+const path = require('path');
+const p = path.join(process.cwd(), 'src/services/academicService.ts');
+let code = fs.readFileSync(p, 'utf8');
+const search = `        const studentRef = doc(db, 'school_students', studentDocId);`;
+const replace = `        const studentRef = doc(db, 'school_students', studentDocId);
 
-const targetLine = '  const activeSection = activeSectionState;';
-const hookStr = `
-
-  useEffect(() => {
-    // Reset scroll position instantly when switching sections
-    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
-    
-    // Also try to reset any scroll containers if needed
-    const mainContent = document.getElementById("main-content-area");
-    if (mainContent) {
-      mainContent.scrollTop = 0;
-    }
-  }, [activeSectionState]);
-`;
-
-code = code.replace(targetLine, targetLine + hookStr);
-fs.writeFileSync('src/App.tsx', code);
+        // --- 🐘 SHADOW MODE: Sync to PostgreSQL ---
+        try {
+          fetch('/api/students', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: studentDocId,
+              schoolId: finalSchoolId,
+              name: student.name || 'بدون اسم',
+              grade: student.grade || 'غير محدد'
+            })
+          }).catch(() => {});
+        } catch (e) {}
+        // ----------------------------------------`;
+code = code.replace(search, replace);
+fs.writeFileSync(p, code);

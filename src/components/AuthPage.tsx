@@ -1,10 +1,14 @@
 import React, { useState } from 'react';
-import { auth, db } from '../lib/firebase';
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, GoogleAuthProvider, signInWithPopup } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
-import { Eye, EyeOff, Shield, Zap, Sparkles, Mail, Lock, User, Phone, MapPin, Building, ChevronRight, Layers, BrainCircuit } from 'lucide-react';
+import { auth, db, sendPasswordResetEmail, GoogleAuthProvider as GAP, signInWithPopup as SIP, doc, setDoc } from '@/src/lib/firebase';
+const GoogleAuthProvider = GAP as any;
+const signInWithPopup = SIP as any;
+import { customAuth } from '../services/customAuthService';
+import { safeStorage } from '../lib/storage';
+import { Eye, EyeOff, Shield, Zap, Sparkles, Mail, Lock, User, Phone, MapPin, Building, ChevronRight, Layers, BrainCircuit, ShieldCheck } from 'lucide-react';
 import { LoadingScreen } from './LoadingScreen';
 import { motion, AnimatePresence } from 'motion/react';
+import { useAppLogo } from './BerqCharacterManager';
+import { PrivacyPolicy } from './PrivacyPolicy';
 
 const iraqRegions: { [key: string]: string[] } = {
   "بغداد": ["مدرسة المتميزين", "إعدادية المركزية", "ثانوية كلية بغداد", "مدرسة العقيدة", "أخرى (كتابة يدوية)"],
@@ -27,8 +31,14 @@ const iraqRegions: { [key: string]: string[] } = {
   "دهوك": ["ثانوية دهوك النموذجية", "أخرى (كتابة يدوية)"]
 };
 
-export const AuthPage = () => {
+interface AuthPageProps {
+  onOpenPrivacy?: () => void;
+}
+
+export const AuthPage: React.FC<AuthPageProps> = ({ onOpenPrivacy }) => {
+  const appLogo = useAppLogo();
   const [isLogin, setIsLogin] = useState(true);
+  const [showInternalPrivacy, setShowInternalPrivacy] = useState(false);
   const [formData, setFormData] = useState({ email: '', password: '', fullName: '', governorate: '', school: '', phone: '' });
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -42,10 +52,12 @@ export const AuthPage = () => {
     setAuthLoading(true);
     try {
       if (isLogin) {
-        await signInWithEmailAndPassword(auth, formData.email, formData.password);
+        await customAuth.loginWithEmail(formData.email, formData.password);
+        safeStorage.setItem('s6_activeSection', 'hub');
       } else {
-        const userCredential = await createUserWithEmailAndPassword(auth, formData.email, formData.password);
-        await setDoc(doc(db, 'users', userCredential.user.uid), {
+        const user = await customAuth.registerWithEmail(formData.email, formData.password, 'مستخدم جديد', 'student', 'general');
+        safeStorage.setItem('s6_activeSection', 'hub');
+        await setDoc(doc(db, 'users', user.uid), {
           fullName: formData.fullName,
           governorate: formData.governorate,
           schoolName: formData.school,
@@ -78,6 +90,7 @@ export const AuthPage = () => {
     setAuthLoading(true);
     try {
       await signInWithPopup(auth, provider);
+      safeStorage.setItem('s6_activeSection', 'hub');
     } catch (err: any) {
       if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
         console.warn("Google sign-in popup was closed/cancelled by the user.");
@@ -106,6 +119,10 @@ export const AuthPage = () => {
 
   if (authLoading) {
     return <LoadingScreen />;
+  }
+
+  if (showInternalPrivacy) {
+    return <PrivacyPolicy onBack={() => setShowInternalPrivacy(false)} />;
   }
 
   return (
@@ -143,10 +160,13 @@ export const AuthPage = () => {
           className="flex flex-col items-center mb-10 w-full"
         >
           <img 
-            src="/logo.png" 
+            src={appLogo} 
             alt="بوابة بيرق" 
             className="w-36 h-auto mb-6 object-contain rounded-[25px] drop-shadow-[0_0_20px_rgba(212,175,55,0.3)]" 
             style={{ maskImage: 'radial-gradient(circle at center, black 55%, transparent 100%)', WebkitMaskImage: 'radial-gradient(circle at center, black 55%, transparent 100%)' }}
+            onError={(e) => {
+              (e.target as HTMLImageElement).src = '/logo.png';
+            }}
           />
           <h1 className="text-2xl sm:text-3xl md:text-3xl font-black text-transparent bg-clip-text bg-gradient-to-b from-white to-white/70 mb-2 text-center tracking-tight leading-tight whitespace-nowrap">
             مرحباً بك في بوابة المستقبل
@@ -346,12 +366,24 @@ export const AuthPage = () => {
           </button>
         </div>
 
-        {/* Quality Indicators */}
-        <div className="flex justify-between w-full max-w-[320px] mx-auto mt-12 mb-4 text-white/50 text-xs font-bold">
+        {/* Quality Indicators & Privacy Policy Link */}
+        <div className="flex justify-between w-full max-w-[320px] mx-auto mt-10 mb-3 text-white/50 text-xs font-bold">
           <span className="flex flex-col items-center gap-1.5"><Shield size={16} className="text-[#FFD700]/90 drop-shadow-[0_0_5px_rgba(255,215,0,0.4)]"/> آمن</span>
           <span className="flex flex-col items-center gap-1.5"><Zap size={16} className="text-[#FFD700]/90 drop-shadow-[0_0_5px_rgba(255,215,0,0.4)]"/> سريع</span>
           <span className="flex flex-col items-center gap-1.5"><BrainCircuit size={16} className="text-[#FFD700]/90 drop-shadow-[0_0_5px_rgba(255,215,0,0.4)]"/> ذكي</span>
           <span className="flex flex-col items-center gap-1.5"><Layers size={16} className="text-[#FFD700]/90 drop-shadow-[0_0_5px_rgba(255,215,0,0.4)]"/> متكامل</span>
+        </div>
+
+        {/* Official Privacy Policy Link for App Stores & Users */}
+        <div className="text-center pt-2 border-t border-white/5">
+          <button
+            type="button"
+            onClick={() => onOpenPrivacy ? onOpenPrivacy() : setShowInternalPrivacy(true)}
+            className="inline-flex items-center gap-1.5 text-xs text-white/40 hover:text-amber-400 transition-colors font-medium"
+          >
+            <ShieldCheck size={14} className="text-emerald-400" />
+            <span>سياسة الخصوصية وحماية البيانات (Privacy Policy)</span>
+          </button>
         </div>
 
       </motion.div>

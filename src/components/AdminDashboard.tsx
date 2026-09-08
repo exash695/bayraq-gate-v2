@@ -3,6 +3,9 @@ import { motion, AnimatePresence } from 'motion/react';
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { academicService } from '../services/academicService';
+import { supportService } from '../services/supportService';
+import { ideaService } from '../services/ideaService';
+import { notificationService } from '../services/notificationService';
 import { subscribeToPoseOverrides } from './BerqCharacterManager';
 import { generateSingleStudentPDF } from '../utils/studentUtils';
 import { useAdminData } from '../hooks/useAdminData';
@@ -38,6 +41,7 @@ import {
   History,
   BookOpenText,
   Activity,
+  Trophy,
   Layout,
   Sparkles,
   RotateCcw,
@@ -47,8 +51,9 @@ import {
   ChevronUp,
   ChevronDown
 } from 'lucide-react';
-import { db, auth } from '../lib/firebase';
-import { doc, getDoc, onSnapshot, collection, query, where, addDoc, updateDoc } from 'firebase/firestore';
+import { db, auth, doc, getDoc, onSnapshot, collection, query, where, addDoc, updateDoc } from '@/src/lib/firebase';
+import { AdminSovereigntyManager } from './Sovereignty/AdminSovereigntyManager';
+// Removed redundant firestore imports
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 
 import { verifyPayment, rejectPayment } from '../services/financeService';
@@ -67,9 +72,11 @@ import { TeachersSection } from './TeachersSection';
 import { SupportManager } from './SupportManager';
 import { IdeaBankAdminView } from './IdeaBankAdminView';
 import { ResourceManager } from './ResourceManager';
+import { ComingSoonPlaceholder } from './ComingSoonPlaceholder';
 import { SubjectManager } from './SubjectManager';
 import { AuditLogView } from './AuditLogView';
 import { PortalPulseDashboard } from './PortalPulseDashboard';
+
 import { safeStorage, safeSessionStorage } from '../lib/storage';
 import { useCachedMedia } from '../hooks/useCachedMedia';
 
@@ -213,8 +220,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   });
 
   const [installmentPlan, setInstallmentPlan] = useState<any[]>(() => {
-    const saved = safeStorage.getItem('academy6_installment_plan');
-    return saved ? JSON.parse(saved) : [];
+    const saved = safeStorage.getItem('academy6_installment_plan_v2');
+    return saved ? JSON.parse(saved) : [
+      { id: 'initial-reg', name: 'قسط التسجيل', amount: 250000, dueDate: '2026-09-01' },
+      { id: 'initial-p1', name: 'القسط الأول', amount: 500000, dueDate: '2026-11-01' },
+      { id: 'initial-p2', name: 'القسط الثاني', amount: 500000, dueDate: '2027-02-01' },
+    ];
   });
 
   const [attendanceAction, setAttendanceAction] = useState<{
@@ -223,6 +234,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     period: string;
     reason: string;
   } | null>(null);
+
+  const handleUpdateInstallmentPlan = (plan: any[]) => {
+    setInstallmentPlan(plan);
+    safeStorage.setItem('academy6_installment_plan_v2', JSON.stringify(plan));
+  };
 
   const { students, setStudents, savedLists, setSavedLists, pendingPayments, setPendingPayments, schoolSettings, isLoading } = useAdminData(selectedSchoolId, schoolName);
 
@@ -233,6 +249,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         safeStorage.setItem('academy6_tuition_fee', tuition.toString());
     }
   }, [schoolSettings?.tuitionFee]);
+
+  useEffect(() => {
+    if (schoolSettings?.installmentPlan && Array.isArray(schoolSettings.installmentPlan) && schoolSettings.installmentPlan.length > 0) {
+      setInstallmentPlan(schoolSettings.installmentPlan);
+      safeStorage.setItem('academy6_installment_plan_v2', JSON.stringify(schoolSettings.installmentPlan));
+    }
+  }, [schoolSettings?.installmentPlan]);
 
   const [isBusTrackingOpen, setIsBusTrackingOpen] = useState(false);
   useEffect(() => {
@@ -245,10 +268,44 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     };
   }, []);
 
-  const [activeTab, setActiveTab] = useState<'pulse' | 'codes' | 'students' | 'grades' | 'finance' | 'broadcast' | 'teachers' | 'archive' | 'control' | 'ideas' | 'radar' | 'hall' | 'resources' | 'audit' | 'academy' | 'attendance' | 'support' | 'transport'>('pulse');
+  const [activeTab, setActiveTab] = useState<'pulse' | 'codes' | 'students' | 'grades' | 'finance' | 'broadcast' | 'teachers' | 'archive' | 'control' | 'ideas' | 'radar' | 'hall' | 'resources' | 'audit' | 'academy' | 'attendance' | 'support' | 'transport' | 'sovereignty'>(() => {
+    const saved = safeStorage.getItem("s6_admin_target_tab");
+    if (saved && saved !== 'home') {
+      safeStorage.removeItem("s6_admin_target_tab");
+      return saved as any;
+    }
+    return 'pulse';
+  });
+  
+  const [glowingTab, setGlowingTab] = useState<string | null>(() => {
+    const saved = safeStorage.getItem("s6_admin_target_tab_glow");
+    if (saved) {
+      safeStorage.removeItem("s6_admin_target_tab_glow");
+      return saved;
+    }
+    return null;
+  });
+
+  useEffect(() => {
+    const handleAdminTabChange = (e: any) => {
+      if (e.detail) {
+        setActiveTab(e.detail);
+        setGlowingTab(e.detail);
+      }
+    };
+    window.addEventListener('change-admin-tab', handleAdminTabChange);
+    return () => window.removeEventListener('change-admin-tab', handleAdminTabChange);
+  }, []);
+
+  useEffect(() => {
+    if (glowingTab) {
+      const timer = setTimeout(() => setGlowingTab(null), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [glowingTab]);
+
   const [isAdminSidebarCollapsed, setIsAdminSidebarCollapsed] = useState(false);
   const [isMascotCollapsed, setIsMascotCollapsed] = useState(false);
-  const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
   const [selectedGrade, setSelectedGrade] = useState<string | null>(null);
   const [isFinanceUnlocked, setIsFinanceUnlocked] = useState(false);
@@ -265,9 +322,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     notes: string;
     isActive: boolean;
   }>>({
-    'المرحلة الابتدائية': { shirt: 'أبيض', pants: 'رمادي', accessories: 'حذاء مريح للبنين والبنات', days: ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس'], notes: 'يرجى الالتزام بالزي المدرسي للتربية والتعليم والمظهر اللائق لطلابنا.', isActive: true },
-    'المرحلة المتوسطة': { shirt: 'أزرق فاتح', pants: 'نيلي', accessories: 'الباج المدرسي وحذاء رياضي مريح أو أسود', days: ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس'], notes: 'لتزام الطلبة بالزي الرسمي يعكس انضباطهم وتربيتهم الأخلاقية العالية.', isActive: true },
-    'المرحلة الاعدادية': { shirt: 'أبيض / كريمي', pants: 'كحلي غامق', accessories: 'الباج التعريفي للفارس وحذاء رسمي أو أسود', days: ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس'], notes: 'الانضباط بالزي الرسمي جزء أساسي من الهوية الدراسية الملتزمة لطلبة السادس العلمي والأدبي.', isActive: true }
+    'المرحلة الابتدائية': { shirt: 'أبيض', pants: 'رمادي', accessories: 'حذاء مريح للبنين والبنات', days: ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس'], notes: 'يرجى الالتزام بالزي المدرسي للتربية والتعليم والمظهر اللائق لطلابنا.', isActive: true },
+    'المرحلة المتوسطة': { shirt: 'أزرق فاتح', pants: 'نيلي', accessories: 'الباج المدرسي وحذاء رياضي مريح أو أسود', days: ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس'], notes: 'لتزام الطلبة بالزي الرسمي يعكس انضباطهم وتربيتهم الأخلاقية العالية.', isActive: true },
+    'المرحلة الاعدادية': { shirt: 'أبيض / كريمي', pants: 'كحلي غامق', accessories: 'الباج التعريفي للفارس وحذاء رسمي أو أسود', days: ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس'], notes: 'الانضباط بالزي الرسمي جزء أساسي من الهوية الدراسية الملتزمة لطلبة السادس العلمي والأدبي.', isActive: true }
   });
 
   useEffect(() => {
@@ -316,16 +373,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       window.scrollTo({ top: 0 });
     };
 
-    // Staggered scrolls to guarantee resetting position during any dynamic page renders
     handleScrollTop();
     const t1 = setTimeout(handleScrollTop, 50);
     const t2 = setTimeout(handleScrollTop, 150);
-    const t3 = setTimeout(handleScrollTop, 350);
 
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
-      clearTimeout(t3);
     };
   }, [activeTab, isFinanceUnlocked]);
 
@@ -374,38 +428,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
     setIsSyncingBehavior(true);
     try {
-      const currentBehavior = student.behavior || {};
-      const currentScore = typeof currentBehavior.score === 'number' ? currentBehavior.score : 100;
-      const currentLogs = currentBehavior.logs || [];
-
-      // Calculate new score between 0 and 100
-      const updatedScore = Math.max(0, Math.min(100, currentScore + behaviorPoints));
-
-      // Generate a new timeline log entry
-      const newLog = {
-        id: Date.now().toString(),
+      await academicService.updateBehavior(student.id, {
         type: behaviorType,
-        title: finalActionText, // Administrative action / category
-        description: finalNoteText,
-        date: new Date().toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' }),
-        scoreEffect: behaviorPoints,
-        officialSeal: behaviorType === 'negative', // stamped official admin seal for negative notes!
-        createdAt: new Date().toISOString()
-      };
-
-      const updatedLogs = [newLog, ...currentLogs];
-
-      // Update student record in Firestore
-      await academicService.updateStudent(student.id, {
-        behavior: {
-          score: updatedScore,
-          logs: updatedLogs
-        }
+        points: behaviorPoints,
+        action: finalActionText,
+        note: finalNoteText,
+        by: 'الإدارة',
+        schoolId: selectedSchoolId || ''
       });
 
       // Generate instant notification for the parent
       const parentNotificationTarget = student.parentCode || `pcode_${student.code || student.id}`;
-      await addDoc(collection(db, 'notifications'), {
+      await notificationService.sendNotification({
         userId: parentNotificationTarget,
         studentId: student.id,
         studentCode: student.code || '',
@@ -415,10 +449,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           : `تنبيه: تم رصد ملاحظة سلوكية (${finalNoteText}) بحق الطالب ${student.name}. الإجراء الإداري المتخذ: (${finalActionText}) وخصم ${Math.abs(behaviorPoints)} نقاط من الانضباط السلوكي.`,
         type: 'support', // Standard type supported by ParentPortal communication lists
         recipientRole: 'parent',
-        icon: behaviorType === 'positive' ? 'ShieldCheck' : 'AlertTriangle',
-        read: false,
-        timestamp: new Date().toISOString(),
-        createdAt: new Date().toISOString()
+        icon: behaviorType === 'positive' ? 'ShieldCheck' : 'AlertTriangle'
       });
 
       showToast('⚡ تم المزامنة وحفظ الإجراء بنجاح وإرسال إشعار فوري لولي الأمر!');
@@ -449,7 +480,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       // Send instant notification to the parent notifying them of the behavior record reset
       const parentNotificationTarget = student.parentCode || `pcode_${student.code || student.id}`;
-      await addDoc(collection(db, 'notifications'), {
+      await notificationService.sendNotification({
         userId: parentNotificationTarget,
         studentId: student.id,
         studentCode: student.code || '',
@@ -457,10 +488,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         message: `تم تصفير وإعادة تعيين نقاط وسجل السلوك والانضباط بالكامل للطالب ${student.name} من قبل الإدارة، وإرجاع نقاط السلوك إلى 100 نقطة كاملة.`,
         type: 'support',
         recipientRole: 'parent',
-        icon: 'ShieldCheck',
-        read: false,
-        timestamp: new Date().toISOString(),
-        createdAt: new Date().toISOString()
+        icon: 'ShieldCheck'
       });
 
       showToast('⚡ تم تصفير وإعادة تعيين سجل سلوك الطالب إلى 100 نقطة بنجاح!');
@@ -498,6 +526,71 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const [pendingSupportCount, setPendingSupportCount] = useState<number>(0);
   const [pendingIdeabankCount, setPendingIdeabankCount] = useState<number>(0);
+  const [pendingIdeasCount, setPendingIdeasCount] = useState<number>(0);
+  const [pendingCouncilCount, setPendingCouncilCount] = useState<number>(0);
+  const [ideaBankDefaultTab, setIdeaBankDefaultTab] = useState<'ideas' | 'council'>('ideas');
+
+  const checkUnreadIdeaBank = React.useCallback(async () => {
+    try {
+      const readIdeasTs = parseInt(localStorage.getItem('bairaq_admin_read_ideas_ts') || '0', 10);
+      const readCouncilTs = parseInt(localStorage.getItem('bairaq_admin_read_council_ts') || '0', 10);
+
+      const [ideasData, pollsData] = await Promise.all([
+        ideaService.fetchIdeas().catch(() => []),
+        ideaService.fetchPolls().catch(() => [])
+      ]);
+
+      const unreadIdeas = (ideasData || []).filter(idea => {
+        if (idea.status !== 'pending') return false;
+        const t = idea.timestamp ? new Date(idea.timestamp).getTime() : 0;
+        return t > readIdeasTs;
+      }).length;
+
+      const unreadCouncil = (pollsData || []).filter(poll => {
+        if (poll.type !== 'parent' && poll.authorName === 'الإدارة المدرسية') return false;
+        const t = poll.timestamp ? new Date(poll.timestamp).getTime() : 0;
+        return t > readCouncilTs;
+      }).length;
+
+      setPendingIdeasCount(unreadIdeas);
+      setPendingCouncilCount(unreadCouncil);
+      setPendingIdeabankCount(unreadIdeas + unreadCouncil);
+
+      if (unreadCouncil > 0 && unreadIdeas === 0) {
+        setIdeaBankDefaultTab('council');
+      } else if (unreadIdeas > 0) {
+        setIdeaBankDefaultTab('ideas');
+      }
+    } catch (err) {
+      console.warn("Error checking unread idea bank:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    checkUnreadIdeaBank();
+    const interval = setInterval(checkUnreadIdeaBank, 20000);
+
+    const handleReadUpdate = (e: any) => {
+      const tab = e?.detail?.tab;
+      if (tab === 'ideas') {
+        setPendingIdeasCount(0);
+        setPendingIdeabankCount(prev => Math.max(0, prev - pendingIdeasCount));
+      } else if (tab === 'council') {
+        setPendingCouncilCount(0);
+        setPendingIdeabankCount(prev => Math.max(0, prev - pendingCouncilCount));
+      } else {
+        setPendingIdeasCount(0);
+        setPendingCouncilCount(0);
+        setPendingIdeabankCount(0);
+      }
+    };
+
+    window.addEventListener('bairaq:ideabank-read-update', handleReadUpdate);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('bairaq:ideabank-read-update', handleReadUpdate);
+    };
+  }, [checkUnreadIdeaBank, pendingIdeasCount, pendingCouncilCount]);
 
   useEffect(() => {
     if (!db || !auth.currentUser) return;
@@ -531,8 +624,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     );
 
     const unsub = onSnapshot(q, 
-      (snapshot) => {
-        setPendingIdeabankCount(snapshot.docs.length);
+      () => {
+        checkUnreadIdeaBank();
       },
       (error) => {
         if (error.code !== 'permission-denied') {
@@ -541,7 +634,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
     );
     return () => unsub();
-  }, [auth.currentUser]);
+  }, [auth.currentUser, checkUnreadIdeaBank]);
   
   const { 
     saveList: handleSaveList, 
@@ -629,6 +722,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     { id: 'teachers', name: 'الكادر والموظفين', icon: BookOpenText, color: 'text-fuchsia-400', bg: 'bg-fuchsia-400/10' },
     { id: 'resources', name: 'مركز مراقبة المحتوى', icon: ShieldCheck, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
     { id: 'audit', name: 'سجل النشاطات', icon: History, color: 'text-purple-400', bg: 'bg-purple-400/10' },
+    { id: 'sovereignty', name: 'منصة السيادة (البطولات)', icon: Trophy, color: 'text-amber-400', bg: 'bg-amber-400/10' },
     { id: "transport", name: "إدارة النقل المدرسي", icon: Bus, color: "text-blue-400", bg: "bg-blue-400/10" },
     { id: 'ideas', name: 'بنك الأفكار', icon: Lightbulb, color: 'text-yellow-400', bg: 'bg-yellow-400/10' },
     { id: 'support', name: 'الدعم والشكاوى', icon: AlertCircle, color: 'text-cyan-400', bg: 'bg-cyan-400/10' },
@@ -658,6 +752,63 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     showToast(`تم إنشاء بطاقة ${student.name} بصيغة PDF.`);
   };
 
+  const handleAdminMainBack = (e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    if (selectedArchiveList !== null) {
+      setSelectedArchiveList(null);
+      return;
+    }
+    if (listToEdit !== null) {
+      setListToEdit(null);
+      return;
+    }
+    if (studentsSubView) {
+      setStudentsSubView(null);
+      return;
+    }
+    if (financeSubView) {
+      setFinanceSubView(null);
+      return;
+    }
+    if (codesSubView) {
+      setCodesSubView(null);
+      return;
+    }
+    if (supportSubView) {
+      setSupportSubView(null);
+      return;
+    }
+    if (teachersSubView) {
+      setTeachersSubView(null);
+      return;
+    }
+    if (selectedBehaviorStudent !== null) {
+      setSelectedBehaviorStudent(null);
+      return;
+    }
+    if (gradingStudent !== null) {
+      setGradingStudent(null);
+      return;
+    }
+    if (showDigitalReceipt !== null) {
+      setShowDigitalReceipt(null);
+      return;
+    }
+    if (attendanceAction !== null) {
+      setAttendanceAction(null);
+      return;
+    }
+    if (isBusTrackingOpen) {
+      setIsBusTrackingOpen(false);
+      return;
+    }
+    if (activeTab !== 'pulse') {
+      setActiveTab('pulse');
+      return;
+    }
+    onBack();
+  };
+
   const isAnySubViewOpen = 
     studentsSubView || 
     financeSubView || 
@@ -679,157 +830,73 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   return (
     <div className="fixed inset-0 bg-[#050A18] flex flex-col z-[500] font-sans overflow-x-hidden" dir="rtl">
       
-      {!isAnySubViewOpen && (
-        <motion.button 
-          initial={{ opacity: 0, scale: 0.9 }}
-          animate={{ opacity: 1, scale: 1 }}
-          whileHover={{ scale: 1.1, y: -2 }}
-          whileTap={{ scale: 0.95 }}
-          onClick={(e) => {
-            e.stopPropagation();
-            if (activeTab !== 'pulse') {
-              setActiveTab('pulse');
-              setIsHeaderCollapsed(false);
-            } else {
-              if (isHeaderCollapsed) {
-                setIsHeaderCollapsed(false);
-              } else {
-                onBack();
-              }
-            }
-          }}
-          className="fixed top-2 right-2 md:right-4 z-[600] w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl bg-[#101935]/95 backdrop-blur-3xl border border-amber-500/40 hover:border-amber-400 text-amber-500 hover:text-amber-400 flex items-center justify-center shadow-[0_4px_25px_rgba(212,175,55,0.15)] hover:shadow-[0_6px_35px_rgba(212,175,55,0.35)] transition-all duration-300 group cursor-pointer"
-          title={isHeaderCollapsed ? "عرض لوحة التحكم الكاملة" : "رجوع للرئيسية"}
-        >
-          <ArrowRight size={22} strokeWidth={3} className="transition-transform duration-300 group-hover:-translate-x-1" />
-        </motion.button>
-      )}
+      {/* Main Admin Navigation Arrow - Always Visible */}
+      <motion.button 
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        whileHover={{ scale: 1.1, y: -2 }}
+        whileTap={{ scale: 0.95 }}
+        onClick={handleAdminMainBack}
+        className="fixed top-2.5 right-2.5 md:right-4 z-[600] w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl bg-[#101935]/95 backdrop-blur-3xl border border-amber-500/40 hover:border-amber-400 text-amber-400 hover:text-amber-300 flex items-center justify-center shadow-[0_4px_25px_rgba(212,175,55,0.25)] hover:shadow-[0_6px_35px_rgba(212,175,55,0.45)] transition-all duration-300 group cursor-pointer"
+        title={
+          selectedArchiveList !== null
+            ? "الرجوع لقوائم الوجبات"
+            : isAnySubViewOpen
+              ? "الرجوع للقائمة السابقة"
+              : activeTab !== 'pulse'
+                ? "الرجوع لنبض البوابة"
+                : "رجوع للرئيسية"
+        }
+      >
+        <ArrowRight size={22} strokeWidth={2.5} className="transition-transform duration-300 group-hover:-translate-x-1" />
+      </motion.button>
 
-      <motion.header 
-        initial={false}
-        animate={{ 
-          height: isHeaderCollapsed ? (window.innerWidth < 768 ? 58 : 66) : (window.innerWidth < 768 ? 144 : 176), 
-          backgroundColor: isHeaderCollapsed ? "rgba(10, 16, 36, 0.92)" : "rgba(5, 10, 24, 1)",
-          backdropFilter: isHeaderCollapsed ? "blur(20px)" : "blur(0px)",
-          borderColor: isHeaderCollapsed ? "rgba(255, 214, 0, 0.25)" : "rgba(255, 255, 255, 0.1)"
-        }}
-        transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-        onClick={() => {
-          if (isHeaderCollapsed) {
-            setIsHeaderCollapsed(false);
-          }
-        }}
-        className={`shrink-0 rounded-none md:rounded-bl-[32px] shadow-2xl relative overflow-hidden w-full border-b flex items-end pb-3 md:pb-5 z-[400] ${isHeaderCollapsed ? "cursor-pointer hover:bg-[#0a1024]" : ""}`}
-        style={{ willChange: "height, background-color" }}
+      {/* Stable, High-Performance Header */}
+      <header 
+        className="shrink-0 rounded-none md:rounded-bl-[32px] shadow-2xl relative overflow-hidden w-full border-b border-white/10 bg-[#050A18] flex items-end pb-3 md:pb-4 z-[400] h-[135px] md:h-[145px]"
       >
         {/* Full Header Ambient Mascot Video Backdrop */}
-        <motion.div
-          animate={{
-            opacity: isHeaderCollapsed ? 0.25 : 1,
-            scale: isHeaderCollapsed ? 1.05 : 1,
-          }}
-          transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-          className="absolute inset-0 pointer-events-none z-0 overflow-hidden"
-        >
+        <div className="absolute inset-0 pointer-events-none z-0 overflow-hidden">
           <MascotHeaderVideo activeTab={effectiveHeaderTab} />
           {/* Dynamic dark gradient background overlay */}
           <div className="absolute inset-0 bg-gradient-to-t from-[#050A18]/95 via-[#050A18]/50 to-transparent pointer-events-none z-10" />
-        </motion.div>
+        </div>
 
-        {/* Expanded State Content */}
-        <motion.div 
-          animate={{
-            opacity: isHeaderCollapsed ? 0 : 1,
-            y: isHeaderCollapsed ? -20 : 0,
-            scale: isHeaderCollapsed ? 0.95 : 1,
-          }}
-          transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-          className="max-w-7xl mx-auto flex items-end justify-between relative z-10 w-full px-4 md:px-8 pointer-events-none"
-          style={{ pointerEvents: isHeaderCollapsed ? "none" : "auto" }}
-        >
-          {/* Right Side: Tab/Section Info Stack */}
-          <div className="flex items-center gap-3 md:gap-4 text-right select-none">
-            <motion.div 
-              key={`icon-${effectiveHeaderTab}`}
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              className="p-2.5 md:p-3 bg-white/10 rounded-2xl border border-white/10 shadow-[inset_0_2px_4px_rgba(255,255,255,0.05)] text-[#FFD600] shrink-0"
-            >
-              {(() => {
-                const ActiveTabIcon = tabs.find(t => t.id === activeTab)?.icon || Database;
-                return <ActiveTabIcon size={22} className="text-[#FFD600] md:w-6 md:h-6" />;
-              })()}
-            </motion.div>
+        {/* Header Content Row: Far Right (Title + School) & Far Left (Active Tab) */}
+        <div className="max-w-7xl mx-auto flex items-end justify-between relative z-10 w-full px-3 sm:px-4 md:px-8">
+          {/* Right Side (أسفل الهيدر من اليمين تماماً): Admin Board Title & School Name */}
+          <div className="flex items-center gap-2 md:gap-2.5 text-right select-none">
+            <div className="p-1.5 md:p-2 bg-amber-500/15 border border-amber-400/30 rounded-xl text-[#FFD600] shrink-0 shadow-sm">
+              <GraduationCap size={16} className="text-[#FFD600] md:w-5 md:h-5" />
+            </div>
             
-            <div className="flex flex-col justify-end">
-              <h1 className="text-white font-black text-lg md:text-2xl tracking-tight drop-shadow-[0_2px_10px_rgba(0,0,0,0.8)]">
+            <div className="flex flex-col justify-end leading-tight">
+              <h1 className="text-white font-black text-xs sm:text-sm md:text-base tracking-tight drop-shadow-[0_2px_8px_rgba(0,0,0,0.9)]">
                 لوحة إدارة {adminBranch === 'girls' ? 'البنات' : 'البنين'}
               </h1>
-              <p className="text-white/90 text-xs md:text-sm font-semibold tracking-wide mt-0.5 drop-shadow-[0_1px_5px_rgba(0,0,0,0.8)]">
+              <p className="text-white/80 text-[10px] sm:text-xs md:text-sm font-semibold tracking-wide mt-0.5 drop-shadow-[0_1px_4px_rgba(0,0,0,0.9)] truncate max-w-[150px] sm:max-w-[260px] md:max-w-none">
                 {schoolName}
               </p>
             </div>
           </div>
 
-          {/* Left Side: Active Mascot Persona Pill Badge */}
-          <div className="hidden sm:flex items-center gap-2.5 bg-black/40 backdrop-blur-md px-3.5 py-1.5 rounded-2xl border border-amber-400/30 shadow-lg">
-            <div className="w-8 h-8 rounded-full border border-amber-400/60 overflow-hidden relative shrink-0">
-              <MascotHeaderVideo activeTab={effectiveHeaderTab} />
-            </div>
-            <div className="flex flex-col text-right">
-              <span className="text-[11px] font-black text-amber-300">
-                {mascotVideos[effectiveHeaderTab]?.title || "مساعد البوابة"}
-              </span>
-              <span className="text-[9px] font-bold text-white/60">نشط الآن</span>
-            </div>
+          {/* Left Side (أسفل الهيدر من اليسار تماماً): Active Tab Name & Icon */}
+          <div className="flex items-center select-none shrink-0">
+            {(() => {
+              const currentTab = tabs.find(t => t.id === activeTab) || tabs[0];
+              const ActiveTabIcon = currentTab?.icon || Database;
+              return (
+                <div className="flex items-center gap-1.5 md:gap-2 bg-[#0A1226]/90 backdrop-blur-md px-2.5 md:px-3.5 py-1 md:py-1.5 rounded-xl border border-amber-400/35 shadow-sm">
+                  <ActiveTabIcon size={14} className="md:w-4 md:h-4 text-amber-300 shrink-0" />
+                  <span className="text-[10px] sm:text-xs md:text-sm font-bold text-amber-300 whitespace-nowrap drop-shadow-[0_1px_4px_rgba(0,0,0,0.9)]">
+                    {currentTab.name}
+                  </span>
+                </div>
+              );
+            })()}
           </div>
-        </motion.div>
-
-        {/* Collapsed Glass Compact Bar Content */}
-        <motion.div
-          initial={false}
-          animate={{
-            opacity: isHeaderCollapsed ? 1 : 0,
-            y: isHeaderCollapsed ? 0 : 15,
-            scale: isHeaderCollapsed ? 1 : 0.95,
-          }}
-          transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}
-          className="absolute inset-0 z-20 flex items-center justify-between px-4 md:px-8"
-          style={{ pointerEvents: isHeaderCollapsed ? "auto" : "none" }}
-        >
-          {/* Right side: Section title next to Back Button */}
-          <div className="flex flex-col text-right pr-[52px] md:pr-[72px] select-none justify-center">
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0 shadow-[0_0_8px_#34d399]" />
-              <div className="flex items-center gap-1.5">
-                {(() => {
-                  const ActiveTabIcon = tabs.find(t => t.id === activeTab)?.icon || Database;
-                  return <ActiveTabIcon size={15} className="text-[#FFD600] shrink-0" />;
-                })()}
-                <span className="text-white font-black text-xs sm:text-sm whitespace-nowrap">
-                  {tabs.find(t => t.id === activeTab)?.name || ""}
-                </span>
-              </div>
-            </div>
-            <span className="text-white/60 text-[10px] sm:text-xs font-bold truncate max-w-[180px] sm:max-w-[320px] pr-3.5 mt-0.5 leading-tight">
-              {schoolName}
-            </span>
-          </div>
-
-          {/* Central Hint Badge */}
-          <div className="hidden md:flex items-center gap-1.5 text-amber-400 text-xs font-black bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/30 shadow-[0_0_15px_rgba(255,214,0,0.15)] animate-pulse">
-            <ChevronDown size={14} className="animate-bounce" />
-            <span>انقر لتوسيع لوحة التحكم ⚡</span>
-          </div>
-
-          {/* Left side: Sleek Floating Mascot Avatar Circle */}
-          <div className="flex items-center gap-2">
-            <div className="w-10 h-10 md:w-11 md:h-11 rounded-full border-2 border-amber-400/90 bg-[#0A1024] p-0.5 shadow-[0_0_15px_rgba(255,214,0,0.4)] overflow-hidden relative shrink-0">
-              <MascotHeaderVideo activeTab={effectiveHeaderTab} />
-            </div>
-          </div>
-        </motion.div>
-      </motion.header>
+        </div>
+      </header>
 
       {/* Main Workspace with Glassmorphism Collapsible Sidebar */}
       <div className="flex-1 flex overflow-hidden relative w-full">
@@ -885,6 +952,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   key={tab.id}
                   onClick={() => {
                     setActiveTab(tab.id as any);
+                    if (tab.id === 'ideas') {
+                      if (pendingCouncilCount > 0 && pendingIdeasCount === 0) {
+                        setIdeaBankDefaultTab('council');
+                        const now = Date.now();
+                        try {
+                          localStorage.setItem('bairaq_admin_read_council_ts', now.toString());
+                        } catch (e) {}
+                        setPendingCouncilCount(0);
+                        setPendingIdeabankCount(0);
+                      } else {
+                        setIdeaBankDefaultTab('ideas');
+                        const now = Date.now();
+                        try {
+                          localStorage.setItem('bairaq_admin_read_ideas_ts', now.toString());
+                        } catch (e) {}
+                        setPendingIdeasCount(0);
+                        setPendingIdeabankCount(pendingCouncilCount > 0 ? pendingCouncilCount : 0);
+                      }
+                    }
                     if (mainRef.current) {
                       mainRef.current.scrollTop = 0;
                     }
@@ -944,38 +1030,45 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         </motion.aside>
 
-        {/* Floating toggle button when sidebar is collapsed on mobile */}
+        {/* Floating edge tab when sidebar is collapsed */}
         {isAdminSidebarCollapsed && (
           <button
             onClick={() => setIsAdminSidebarCollapsed(false)}
-            className="fixed right-3 top-[180px] md:top-[200px] z-[350] p-3 bg-[#0d1533]/95 hover:bg-[#14214d] text-amber-400 transition-all rounded-full shadow-[0_0_20px_rgba(245,158,11,0.3)] border border-amber-500/40 flex items-center justify-center cursor-pointer hover:scale-110 active:scale-95"
+            className="fixed right-0 top-1/2 -translate-y-1/2 z-[350] pl-2.5 pr-1.5 py-4 bg-[#0d1533]/95 hover:bg-[#14214d] text-amber-400 transition-all duration-300 rounded-l-2xl shadow-[-4px_0_25px_rgba(245,158,11,0.3)] border-y border-l border-amber-500/40 flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95 group"
             title="إظهار قائمة الأقسام"
           >
-            <ChevronLeft size={20} strokeWidth={3} />
+            <ChevronLeft size={20} strokeWidth={3} className="group-hover:-translate-x-0.5 transition-transform" />
           </button>
         )}
 
         <main 
-          ref={mainRef} 
-          onScroll={(e) => {
-            const scrollTop = e.currentTarget.scrollTop;
-            if (scrollTop > 50 && !isHeaderCollapsed) {
-              setIsHeaderCollapsed(true);
-            } else if (scrollTop < 10 && isHeaderCollapsed) {
-              setIsHeaderCollapsed(false);
-            }
-          }}
-          className="flex-1 overflow-y-auto overflow-x-hidden w-full py-3 md:py-4 no-scrollbar px-3 md:px-6"
+          ref={mainRef}
+          className="flex-1 overflow-y-auto overflow-x-hidden w-full py-3 md:py-4 no-scrollbar px-3 md:px-6 will-change-scroll bg-[#050B14]/30"
+          style={{ willChange: 'scroll-position', WebkitOverflowScrolling: 'touch' }}
         >
         <GlobalAnnouncementsBanner dashboardType="admin" schoolId={selectedSchoolId} />
+        
+        {/* Loading fallback for slow transitions */}
+        {isLoading && (
+          <div className="fixed inset-0 z-[400] flex items-center justify-center pointer-events-none">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="bg-black/20 backdrop-blur-sm p-4 rounded-2xl border border-white/5"
+            >
+              <div className="w-8 h-8 border-2 border-amber-500/30 border-t-amber-500 rounded-full animate-spin" />
+            </motion.div>
+          </div>
+        )}
+
         <AnimatePresence mode="wait">
           {activeTab === 'pulse' && (
             <motion.div 
-               key="pulse-tab"
-               initial={{ opacity: 0, y: 10 }} 
-               animate={{ opacity: 1, y: 0 }} 
-               exit={{ opacity: 0, y: -10 }}
-               className="space-y-6"
+               key="pulse-tab-fixed"
+               initial={{ opacity: 0 }} 
+               animate={{ opacity: 1 }} 
+               exit={{ opacity: 0 }}
+               className={`space-y-6 transition-all duration-500 ${glowingTab === 'pulse' ? 'ring-4 ring-cyan-400 ring-offset-4 ring-offset-[#050B14] rounded-2xl p-2' : ''}`}
             >
               <PortalPulseDashboard showToast={showToast} schoolName={schoolName} selectedSchoolId={selectedSchoolId} />
             </motion.div>
@@ -983,11 +1076,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           {activeTab === 'codes' && (
             <motion.div 
-               key="codes-tab"
-               initial={{ opacity: 0, y: 10 }} 
-               animate={{ opacity: 1, y: 0 }} 
-               exit={{ opacity: 0, y: -10 }}
-               className="space-y-6"
+               key="codes-tab-fixed"
+               initial={{ opacity: 0 }} 
+               animate={{ opacity: 1 }} 
+               exit={{ opacity: 0 }}
+               className={`space-y-6 transition-all duration-500 ${glowingTab === 'codes' ? 'ring-4 ring-purple-400 ring-offset-4 ring-offset-[#050B14] rounded-2xl p-2' : ''}`}
             >
               {selectedArchiveList ? (
                 <ArchiveDetailView 
@@ -1002,6 +1095,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   discountLabels={discountLabels}
                   tuitionFee={tuitionFee}
                   discountRates={discountRates}
+                  onUpdateList={(list) => handleSaveList(selectedSchoolId || '', list)}
+                  setSavedLists={setSavedLists}
                 />
               ) : (
                 <>
@@ -1015,6 +1110,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     savedLists={savedLists}
                     setSavedLists={setSavedLists}
                     tuitionFee={tuitionFee}
+                    schoolSettings={schoolSettings}
                     installmentPlan={installmentPlan}
                     listToEdit={listToEdit}
                     setListToEdit={setListToEdit}
@@ -1037,11 +1133,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           {activeTab === 'students' && (
             <motion.div 
-               key="students-tab"
-               initial={{ opacity: 0, y: 10 }} 
-               animate={{ opacity: 1, y: 0 }} 
-               exit={{ opacity: 0, y: -10 }}
-               className="space-y-6"
+               key="students-tab-fixed"
+               initial={{ opacity: 0 }} 
+               animate={{ opacity: 1 }} 
+               exit={{ opacity: 0 }}
+               className={`space-y-6 transition-all duration-500 ${glowingTab === 'students' ? 'ring-4 ring-blue-400 ring-offset-4 ring-offset-[#050B14] rounded-2xl p-2' : ''}`}
             >
               <StudentsSection 
                 students={students}
@@ -1069,10 +1165,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           {activeTab === 'attendance' && (
             <motion.div 
-               key="attendance-tab"
-               initial={{ opacity: 0, y: 10 }} 
-               animate={{ opacity: 1, y: 0 }} 
-               exit={{ opacity: 0, y: -10 }}
+               key="attendance-tab-fixed"
+               initial={{ opacity: 0 }} 
+               animate={{ opacity: 1 }} 
+               exit={{ opacity: 0 }}
                className="space-y-6 px-4"
             >
                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-2 text-right" style={{ direction: 'rtl' }}>
@@ -1387,7 +1483,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                          <p className="text-[11px] text-white/40 leading-relaxed font-semibold">اختر أيام الأسبوع المقررة فيها لبس الزي المدرسي الرسمي للبنين والبنات:</p>
                          
                          <div className="flex flex-wrap gap-2 pt-1.5">
-                           {['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس'].map((day) => {
+                           {['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس'].map((day) => {
                              const stageConfigs = uniformConfigs[selectedUniformStage] || { days: [] };
                              const isChecked = stageConfigs.days?.includes(day);
                              return (
@@ -1514,10 +1610,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         return (
                           <div key={`adm_stu_${s.id || s.code || sIdx}`} className="bg-[#101935] p-4 rounded-2xl border border-white/5 space-y-4 text-right">
                             <div className="flex items-center justify-between">
-                              <span className="text-white font-bold text-sm">{s.name}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="text-white font-bold text-sm">{s.name}</span>
+                                <button
+                                  onClick={async () => {
+                                    const logs = await academicService.fetchAttendanceLogs(s.id);
+                                    if (logs.length > 0) {
+                                      const logText = logs.map((l: any) => `${l.date} (${l.period}): ${l.status === 'present' ? '✅' : l.status === 'absent' ? '❌' : '⏳'} ${l.status}${l.reason ? ` - ${l.reason}` : ''}`).join('\n');
+                                      alert(`سجل حضور الطالب ${s.name}:\n\n${logText}`);
+                                    } else {
+                                      showToast('لا يوجد سجل حضور سابق');
+                                    }
+                                  }}
+                                  className="text-white/20 hover:text-blue-400 transition-colors"
+                                  title="عرض السجل التاريخي"
+                                >
+                                  <History size={14} />
+                                </button>
+                              </div>
                               <div className="flex gap-1.5">
                                 <button 
-                                  onClick={() => academicService.updateAttendance(s.id, (s as any).userId, 'present', 'الإدارة', '', 'عام').then(() => {
+                                  onClick={() => academicService.updateAttendance(s.id, (s as any).userId, 'present', 'الإدارة', '', 'عام', selectedSchoolId || '').then(() => {
                                     showToast('تم تسجيل حضور');
                                     setAttendanceAction(null);
                                   })} 
@@ -1589,7 +1702,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         attendanceAction.status, 
                                         'الإدارة', 
                                         attendanceAction.reason, 
-                                        attendanceAction.period
+                                        attendanceAction.period,
+                                        selectedSchoolId || ''
                                       ).then(() => {
                                         showToast(`تم تسجيل ${attendanceAction.status === 'absent' ? 'الغياب' : 'التأخير'}`);
                                         setAttendanceAction(null);
@@ -1674,10 +1788,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           {activeTab === 'finance' && (
             <motion.div 
-               key="finance-tab"
-               initial={{ opacity: 0, y: 10 }} 
-               animate={{ opacity: 1, y: 0 }} 
-               exit={{ opacity: 0, y: -10 }}
+               key="finance-tab-fixed"
+               initial={{ opacity: 0 }} 
+               animate={{ opacity: 1 }} 
+               exit={{ opacity: 0 }}
                className="h-full w-full"
             >
               <FinanceSection 
@@ -1703,6 +1817,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 rejectPayment={rejectPayment}
                 tuitionFee={tuitionFee}
                 setTuitionFee={handleTuitionUpdate}
+                installmentPlan={installmentPlan}
+                setInstallmentPlan={handleUpdateInstallmentPlan}
                 updateDiscountRates={updateDiscountRates}
                 gradesByStage={GRADES_BY_STAGE}
                 onSubViewChange={setFinanceSubView}
@@ -1712,13 +1828,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           {activeTab === 'broadcast' && (
             <motion.div 
-               key="broadcast-tab"
-               initial={{ opacity: 0, y: 10 }} 
-               animate={{ opacity: 1, y: 0 }} 
-               exit={{ opacity: 0, y: -10 }}
-               className="space-y-6"
+               key="broadcast-tab-fixed"
+               initial={{ opacity: 0 }} 
+               animate={{ opacity: 1 }} 
+               exit={{ opacity: 0 }}
+               className={`space-y-6 transition-all duration-500 ${glowingTab === 'broadcast' ? 'ring-4 ring-rose-400 ring-offset-4 ring-offset-[#050B14] rounded-2xl p-2' : ''}`}
             >
               <BroadcastSection 
+                schoolId={selectedSchoolId || undefined}
                 onSendMessage={(msg, targetGrades, duration) => {
                   if (onSendMessage) {
                     onSendMessage(msg, targetGrades, duration);
@@ -1735,40 +1852,69 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </motion.div>
           )}
 
+            {activeTab === 'sovereignty' && (
+              <motion.div 
+                 key="sovereignty-tab-fixed" 
+                 initial={{ opacity: 0 }} 
+                 animate={{ opacity: 1 }} 
+                 exit={{ opacity: 0 }}
+                 className={`transition-all duration-500 ${glowingTab === 'sovereignty' ? 'ring-4 ring-amber-400 ring-offset-4 ring-offset-[#050B14] rounded-2xl p-2' : ''}`}
+              >
+                <ComingSoonPlaceholder title="منصة السيادة (البطولات)" />
+              </motion.div>
+            )}
           {activeTab === 'teachers' && (
-            <motion.div key="teachers-tab" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-              <TeachersSection showToast={showToast} schoolId={selectedSchoolId} schoolName={schoolName} onSubViewChange={setTeachersSubView} />
+            <motion.div 
+               key="teachers-tab-fixed" 
+               initial={{ opacity: 0 }} 
+               animate={{ opacity: 1 }} 
+               exit={{ opacity: 0 }}
+               className={`transition-all duration-500 ${glowingTab === 'teachers' ? 'ring-4 ring-fuchsia-400 ring-offset-4 ring-offset-[#050B14] rounded-2xl p-2' : ''}`}
+            >
+              <TeachersSection showToast={showToast} schoolId={selectedSchoolId} schoolName={schoolName} onSubViewChange={setTeachersSubView} savedLists={savedLists} />
             </motion.div>
           )}
 
           {activeTab === 'support' && (
-            <motion.div key="support-tab" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-              <SupportManager onSubViewChange={setSupportSubView} />
+            <motion.div key="support-tab-fixed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <SupportManager onSubViewChange={setSupportSubView} schoolId={selectedSchoolId} />
             </motion.div>
           )}
 
           {activeTab === "transport" && (
-            <motion.div key="transport-tab" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-              <TransportAdmin schoolId={selectedSchoolId || ""} schoolName={schoolName} />
+            <motion.div key="transport-tab-fixed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <ComingSoonPlaceholder title="إدارة النقل المدرسي" />
             </motion.div>
           )}
           {activeTab === 'ideas' && (
-            <motion.div key="ideabank-tab" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-              <IdeaBankAdminView schoolId={selectedSchoolId} schoolName={schoolName} />
+            <motion.div key="ideabank-tab-fixed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <IdeaBankAdminView 
+                schoolId={selectedSchoolId} 
+                schoolName={schoolName} 
+                showToast={showToast} 
+                defaultTab={ideaBankDefaultTab}
+                onReadTab={(tab) => {
+                  if (tab === 'ideas') {
+                    setPendingIdeasCount(0);
+                    setPendingIdeabankCount(pendingCouncilCount > 0 ? pendingCouncilCount : 0);
+                  } else if (tab === 'council') {
+                    setPendingCouncilCount(0);
+                    setPendingIdeabankCount(pendingIdeasCount > 0 ? pendingIdeasCount : 0);
+                  }
+                }}
+              />
             </motion.div>
           )}
 
           {activeTab === 'resources' && (
-            <motion.div key="resources-tab" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+            <motion.div key="resources-tab-fixed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <ResourceManager />
             </motion.div>
           )}
 
-
-
           {activeTab === 'audit' && (
-            <motion.div key="audit-tab" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-              <AuditLogView />
+            <motion.div key="audit-tab-fixed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <AuditLogView showToast={showToast} />
             </motion.div>
           )}
         </AnimatePresence>
@@ -2101,7 +2247,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
 
                 {/* Reset / Delete Behavior Section - Compact & Elegant */}
-                <div className="border-t border-white/5 pt-3.5 mt-2">
+                <div className="border-t border-white/5 pt-3.5 mt-2 space-y-3">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const logs = await academicService.fetchBehaviorLogs(selectedBehaviorStudent.id);
+                      if (logs.length > 0) {
+                        const logText = logs.map((l: any) => `${l.date}: ${l.type === 'positive' ? '🟢' : '🔴'} ${l.action} (${l.points} نقطة)\n- ${l.note}`).join('\n\n');
+                        alert(`سجل سلوك الطالب ${selectedBehaviorStudent.name}:\n\n${logText}`);
+                      } else {
+                        showToast('لا يوجد سجل سابق لهذا الطالب');
+                      }
+                    }}
+                    className="mx-auto h-9 px-4 w-full rounded-xl bg-indigo-950/20 hover:bg-indigo-950/40 border border-indigo-500/20 text-indigo-400 font-bold text-[11px] flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <span>📜 عرض السجل التاريخي الكامل</span>
+                  </button>
+
                   {!showResetConfirm ? (
                     <button
                       type="button"

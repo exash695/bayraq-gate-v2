@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { db, auth } from '../lib/firebase';
-import { collection, addDoc, serverTimestamp, query, where, onSnapshot, orderBy, updateDoc, doc, deleteDoc } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, query, where, onSnapshot, orderBy, updateDoc, doc, deleteDoc } from '@/src/lib/firebase';
 import { ShieldAlert, X, MessageSquare, History, Send, Bell, Trash2 } from 'lucide-react';
 import { AppNotification } from '../types';
 import { ConfirmDialog } from './ConfirmDialog';
+import { supportService, SupportTicket } from '../services/supportService';
 
 interface StudentSupportFormProps {
   isOpen: boolean;
@@ -22,19 +23,8 @@ interface StudentSupportFormProps {
   studentCode?: string;
   parentCode?: string;
   onSocialUnreadCount?: (count: number) => void;
-}
-
-interface TicketRecord {
-  id: string;
-  message: string;
-  issueType: string;
-  adminReply?: string;
-  status: string;
-  timestamp: any;
-  readByStudent?: boolean;
-  userId: string;
-  role: string;
-  broadcastId?: string;
+  onMarkAllRead?: () => void;
+  schoolId?: string | null;
 }
 
 export const StudentSupportForm: React.FC<StudentSupportFormProps> = ({ 
@@ -51,20 +41,116 @@ export const StudentSupportForm: React.FC<StudentSupportFormProps> = ({
   onClearAllNotifications,
   studentCode,
   parentCode,
-  onSocialUnreadCount
+  onSocialUnreadCount,
+  onMarkAllRead,
+  schoolId
 }) => {
   const [view, setView] = useState<'form' | 'history' | 'social'>('social');
   const [issueType, setIssueType] = useState('مشكلة تقنية');
   const [message, setMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [history, setHistory] = useState<TicketRecord[]>([]);
-  const [allTickets, setAllTickets] = useState<any[]>([]);
+  const [history, setHistory] = useState<SupportTicket[]>([]);
+  const [allTickets, setAllTickets] = useState<SupportTicket[]>([]);
   const [socialNotifications, setSocialNotifications] = useState<any[]>([]);
+  const [hiddenNotificationIds, setHiddenNotificationIds] = useState<Set<string>>(new Set());
 
+  const loadTickets = async () => {
+    if (!isOpen) return;
+    try {
+      const allPossibleUserIds = new Set<string>();
+      
+      const addVariants = (raw?: string, isT = false, isP = false) => {
+        if (!raw) return;
+        const clean = raw.trim();
+        const upper = clean.toUpperCase();
+        const lower = clean.toLowerCase();
+        allPossibleUserIds.add(clean);
+        allPossibleUserIds.add(upper);
+        allPossibleUserIds.add(lower);
+        
+          // Expand to match all possible ways it might be stored
+          allPossibleUserIds.add(clean);
+          allPossibleUserIds.add(upper);
+          
+          const prefixes = ['scode_', 'pcode_', 'tcode_', 'tch_'];
+          prefixes.forEach(p => {
+            allPossibleUserIds.add(`${p}${clean}`);
+            allPossibleUserIds.add(`${p}${upper}`);
+          });
+
+          if (upper.startsWith('TCH-') || upper.startsWith('PAR-')) {
+             allPossibleUserIds.add(`tcode_${upper}`);
+             allPossibleUserIds.add(`pcode_${upper}`);
+          }
+        };
+
+      const isT = isTeacher || role === 'teacher' || role === 'cadre' || role === 'staff';
+      const isP = role === 'parent';
+      const effectiveRole = isT ? 'teacher' : isP ? 'parent' : 'student';
+
+      addVariants(userId, isT, isP);
+      addVariants(studentCode, isT, isP);
+      addVariants(parentCode, false, true);
+
+      const possibleIds = Array.from(allPossibleUserIds).filter(Boolean);
+      const tickets = await supportService.fetchTickets(schoolId || undefined, possibleIds[0] || userId, possibleIds, effectiveRole);
+      
+      const filtered = tickets.filter(t => {
+        const ticketUserId = t.userId?.toLowerCase();
+        const lowerPossibleIds = possibleIds.map(id => id.toLowerCase());
+        return ticketUserId && lowerPossibleIds.includes(ticketUserId);
+      });
+      
+      setAllTickets(filtered);
+      const historyRecords = [...filtered]
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+      setHistory(historyRecords);
+
+      // Mark all as read when opened
+      if (isOpen) {
+        try {
+          fetch('/api/support-tickets/mark-all-read', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              userId: possibleIds[0] || userId, 
+              userIds: possibleIds, // Send all possible IDs
+              userRole: effectiveRole,
+              schoolId 
+            })
+          }).catch(() => {});
+          
+          // Local update for instant UI feedback
+          setAllTickets(prev => prev.map(t => ({ ...t, readByStudent: true })));
+          
+          // Also mark local notifications as read
+          if (notifications) {
+            // We can't setNotifications directly if it's from props, but let's assume it's state or handled by parent
+            // Actually StudentSupportForm usually gets them from props or a service.
+          }
+          
+          if (onMarkAllRead) onMarkAllRead();
+        } catch (mErr) {
+          console.warn("Mark as read failed:", mErr);
+        }
+      }
+    } catch (err) {
+      console.warn("Error fetching tickets:", err);
+    }
+  };
+
+  useEffect(() => {
+    loadTickets();
+  }, [isOpen, userId, studentCode, parentCode, schoolId]);
+
+  const lastUnreadCountRef = React.useRef<number>(-1);
   useEffect(() => {
     if (onSocialUnreadCount) {
       const unread = socialNotifications.filter(n => !n.read).length;
-      onSocialUnreadCount(unread);
+      if (unread !== lastUnreadCountRef.current) {
+        lastUnreadCountRef.current = unread;
+        onSocialUnreadCount(unread);
+      }
     }
   }, [socialNotifications, onSocialUnreadCount]);
 
@@ -74,42 +160,73 @@ export const StudentSupportForm: React.FC<StudentSupportFormProps> = ({
 
   useEffect(() => {
      if (!isOpen) return;
-     try {
-      const unsubs: any[] = [];
-      
-      let items1: any[] = [];
-      let items2: any[] = [];
-      
-      const updateCombined = () => {
-        const map = new Map();
-        items1.forEach(x => map.set(x.id, x));
-        items2.forEach(x => map.set(x.id, x));
-        setSocialNotifications(Array.from(map.values()).sort((a,b) => (b.timestamp?.seconds || 0) - (a.timestamp?.seconds || 0)));
-      };
+     let isMounted = true;
+     const fetchNotifs = async () => {
+       try {
+         const allPossibleUserIds = new Set<string>();
+         const addVariants = (raw?: string, isT = false, isP = false) => {
+           if (!raw) return;
+           const clean = raw.trim();
+           const upper = clean.toUpperCase();
+           allPossibleUserIds.add(clean);
+           allPossibleUserIds.add(upper);
+           const prefix = isP ? 'pcode_' : isT ? 'tcode_' : 'scode_';
+           allPossibleUserIds.add(`${prefix}${clean}`);
+           allPossibleUserIds.add(`${prefix}${upper}`);
+           if (isT) {
+             allPossibleUserIds.add(`tch_${clean}`);
+             allPossibleUserIds.add(`tch_${upper}`);
+           }
+           if (upper.startsWith('TCH-') || upper.startsWith('T-') || upper.startsWith('S-') || upper.startsWith('P-') || upper.startsWith('STU-') || upper.startsWith('PAR-')) {
+             const pure = upper.replace(/^(STU-|PAR-|TCH-|S-|P-|T-)/i, '');
+             allPossibleUserIds.add(pure);
+             allPossibleUserIds.add(`${prefix}${pure}`);
+             if (isT) {
+               allPossibleUserIds.add(`tch_${pure}`);
+               allPossibleUserIds.add(`tcode_TCH-${pure}`);
+               allPossibleUserIds.add(`tcode_T-${pure}`);
+             } else if (isP) {
+               allPossibleUserIds.add(`pcode_P-${pure}`);
+             } else {
+               allPossibleUserIds.add(`scode_S-${pure}`);
+             }
+           } else {
+             if (isT) {
+               allPossibleUserIds.add(`TCH-${upper}`);
+               allPossibleUserIds.add(`T-${upper}`);
+               allPossibleUserIds.add(`tcode_TCH-${upper}`);
+               allPossibleUserIds.add(`tch_TCH-${upper}`);
+             } else if (isP) {
+               allPossibleUserIds.add(`P-${upper}`);
+               allPossibleUserIds.add(`pcode_P-${upper}`);
+             } else {
+               allPossibleUserIds.add(`S-${upper}`);
+               allPossibleUserIds.add(`scode_S-${upper}`);
+             }
+           }
+         };
 
-      if (userId) {
-        const q1 = query(collection(db, 'social_notifications'), where('recipientUserId', '==', userId));
-        unsubs.push(onSnapshot(q1, snap => {
-           items1 = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-           updateCombined();
-        }, error => {
-           console.warn("Error fetching social_notifications for userId:", error);
-        }));
-      }
-      if (studentName) {
-        const q2 = query(collection(db, 'social_notifications'), where('recipientName', '==', studentName));
-        unsubs.push(onSnapshot(q2, snap => {
-           items2 = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-           updateCombined();
-        }, error => {
-           console.warn("Error fetching social_notifications for studentName:", error);
-        }));
-      }
-       return () => unsubs.forEach(u => u());
-     } catch (e) {
-       console.warn("Social notifications error:", e);
-     }
-  }, [isOpen, userId, studentName]);
+         const isT = isTeacher || role === 'teacher' || role === 'cadre' || role === 'staff';
+         const isP = role === 'parent';
+
+         addVariants(userId, isT, isP);
+         addVariants(studentCode, isT, isP);
+         addVariants(parentCode, false, true);
+         if (studentName) allPossibleUserIds.add(studentName);
+
+         const notifIds = Array.from(allPossibleUserIds).filter(Boolean);
+         const res = await fetch(`/api/notifications?recipientIds=${encodeURIComponent(notifIds.join(','))}`);
+         const data = await res.json();
+         if (isMounted && data.success) {
+           setSocialNotifications(data.notifications || []);
+         }
+       } catch (e) {
+         console.warn("Notifications error:", e);
+       }
+     };
+     fetchNotifs();
+     return () => { isMounted = false; };
+  }, [isOpen, userId, studentName, studentCode, parentCode]);
 
   const handleSendReply = async (
     originTitleOrMessage: string, 
@@ -123,23 +240,24 @@ export const StudentSupportForm: React.FC<StudentSupportFormProps> = ({
     try {
       const fullMessage = `[رد ومتابعة] ${studentName}:\n${replyText}\n\n(تعقيباً على: "${originTitleOrMessage.slice(0, 100)}${originTitleOrMessage.length > 100 ? '...' : ''}")`;
       
-      await addDoc(collection(db, 'support_tickets'), {
+      await supportService.createTicket({
+        schoolId: schoolId || undefined,
         userId: userId || studentCode || parentCode || '',
-        role,
+        role: role as any,
         studentName,
         grade,
         issueType: originalIssueType || 'متابعة',
         message: fullMessage,
-        timestamp: serverTimestamp(),
         status: 'pending',
         readByAdmin: false,
         senderType: role === 'parent' ? 'parent' : isTeacher ? 'teacher' : 'student',
-        replyToTicketId: replyToTicketId || null,
-        broadcastId: broadcastId || null
+        broadcastId: broadcastId || undefined,
+        replyToTicketId: replyToTicketId || undefined
       });
       
       setReplyInputText('');
       setReplyingToId(null);
+      loadTickets();
       setView('history');
     } catch (e) {
       console.error("Error sending reply:", e);
@@ -148,132 +266,87 @@ export const StudentSupportForm: React.FC<StudentSupportFormProps> = ({
     }
   };
 
-  useEffect(() => {
-    console.log("StudentSupportForm notifications:", notifications);
-    if (!isOpen || !auth.currentUser || (!userId && !studentCode && !parentCode)) return;
+  const displayNotifications = useMemo(() => {
+    // 1. Get real notifications
+    const combined = [...(notifications || []), ...socialNotifications];
+    
+    // 2. Add individual administrative messages from tickets
+    const adminTickets = allTickets.filter(t => 
+      t.senderType === 'admin' || 
+      t.issueType === 'رسالة إدارية خاصة' || 
+      t.issueType === 'تبليغ إداري'
+    ).map(t => ({
+      id: t.id,
+      title: t.issueType === 'رسالة إدارية خاصة' ? 'رسالة إدارية خاصة 💬' : (t.subject || 'تبليغ إداري'),
+      message: t.message || t.adminReply || t.description || '',
+      body: t.message || t.adminReply || t.description || '',
+      timestamp: t.timestamp,
+      read: t.readByStudent,
+      type: 'individual_admin',
+      isTicket: true,
+      broadcastId: t.broadcastId || t.id
+    }));
 
-    const possibleIdsSet = new Set<string>();
-    const hasSpecificCode = Boolean(studentCode || parentCode);
-
-    if (userId && !hasSpecificCode) {
-      possibleIdsSet.add(userId);
-      possibleIdsSet.add(userId.trim());
-      possibleIdsSet.add(userId.trim().toUpperCase());
-      possibleIdsSet.add(userId.trim().toLowerCase());
+    const allItems = [...combined, ...adminTickets];
+    const seen = new Set<string>();
+    const unique: any[] = [];
+    for (const item of allItems) {
+      if (!item || !item.id) continue;
+      const key = String(item.id);
+      if (seen.has(key) || hiddenNotificationIds.has(key)) continue;
+      seen.add(key);
+      unique.push(item);
     }
-    
-    const processCode = (rawCode?: string, isParent = false) => {
-      if (!rawCode) return;
-      const clean = rawCode.trim();
-      const upper = clean.toUpperCase();
-      const lower = clean.toLowerCase();
+    return unique.filter(n => {
+      // Always show administrative messages
+      if (n.type === 'admin_broadcast' || n.type === 'broadcast' || n.type === 'individual_admin' || n.isTicket) return true;
       
-      possibleIdsSet.add(clean);
-      possibleIdsSet.add(upper);
-      possibleIdsSet.add(lower);
-      
-      const prefix = isParent ? 'pcode_' : (isTeacher || upper.startsWith('TCH-') ? 'tcode_' : 'scode_');
-      possibleIdsSet.add(`${prefix}${clean}`);
-      possibleIdsSet.add(`${prefix}${upper}`);
-      possibleIdsSet.add(`${prefix}${lower}`);
+      const title = (n.title || '').toLowerCase();
+      const msg = (n.message || n.body || n.description || '').toLowerCase();
+      if (!title && !msg) return false;
+      if (title.includes('مرحباً بك') || title.includes('welcome to bayraq')) return false;
+      if (title.includes('خطأ في') || title.includes('خطأ') || n.type === 'alarm') return false;
+      if (msg.includes('تم نشر الإعلان') || msg.includes('أجهزة وواجهات جميع المستخدمين')) return false;
+      if (title.includes('تم نشر الإعلان') || (title === 'نجاح' && msg.includes('تم نشر'))) return false;
+      return true;
+    }).sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  }, [notifications, socialNotifications, allTickets]);
 
-      if (upper.startsWith('TCH-')) {
-        possibleIdsSet.add(`tcode_${clean}`);
-        possibleIdsSet.add(`tcode_${upper}`);
-        possibleIdsSet.add(`tcode_${lower}`);
-      }
-      
-      if (upper.startsWith('S-') || upper.startsWith('P-')) {
-        const pure = upper.slice(2);
-        possibleIdsSet.add(pure);
-        possibleIdsSet.add(pure.toLowerCase());
-        possibleIdsSet.add(`${prefix}${pure}`);
-        possibleIdsSet.add(`${prefix}${pure.toLowerCase()}`);
-      } else if (upper.startsWith('STU-') || upper.startsWith('PAR-')) {
-        const pure = upper.startsWith('STU-') ? upper.slice(4) : upper.slice(4);
-        possibleIdsSet.add(pure);
-        possibleIdsSet.add(pure.toLowerCase());
-        possibleIdsSet.add(`${prefix}${pure}`);
-        possibleIdsSet.add(`${prefix}${pure.toLowerCase()}`);
-      } else {
-        const signPrefix = isParent ? 'P-' : 'S-';
-        possibleIdsSet.add(`${signPrefix}${upper}`);
-        possibleIdsSet.add(`${signPrefix}${lower}`);
-        possibleIdsSet.add(`${prefix}${signPrefix}${upper}`);
-        possibleIdsSet.add(`${prefix}${signPrefix}${lower}`);
-      }
-    };
-    
-    if (role === 'parent') {
-      processCode(parentCode, true);
-    } else {
-      processCode(studentCode, false);
-    }
-    
-    const possibleIds = Array.from(possibleIdsSet).filter(Boolean).slice(0, 30);
-
-    if (possibleIds.length === 0) return;
-
-    const q = query(
-      collection(db, 'support_tickets'),
-      where('userId', 'in', possibleIds)
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      console.log("Got tickets, count:", snapshot.docs.length, "for possibleIds:", possibleIds);
-      const allRecords = snapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() } as TicketRecord))
-        .filter(r => r.role === role);
-      
-      allRecords.sort((a, b) => {
-        const tA = a.timestamp?.toMillis ? a.timestamp.toMillis() : (a.timestamp?.seconds ? a.timestamp.seconds * 1000 : new Date(a.timestamp || 0).getTime());
-        const tB = b.timestamp?.toMillis ? b.timestamp.toMillis() : (b.timestamp?.seconds ? b.timestamp.seconds * 1000 : new Date(b.timestamp || 0).getTime());
-        return tA - tB; // oldest first for chronological replies, history will reverse it
-      });
-
-      setAllTickets(allRecords);
-
-      const historyRecords = [...allRecords]
-        .filter(r => r.issueType !== 'تبليغ إداري' && r.issueType !== 'رد على تبليغ إداري')
-        .reverse(); // newest first for history
-
-      setHistory(historyRecords);
-    }, (error) => {
-      console.warn("StudentSupportForm error:", error);
-    });
-    return () => unsubscribe();
-  }, [isOpen, userId, isTeacher, studentCode, parentCode]);
-
-  const displayNotifications = (notifications || []).filter(n => {
-    if (!n.title) return false;
-    const lowercaseTitle = n.title.toLowerCase();
-    if (lowercaseTitle.includes('مرحباً بك') || lowercaseTitle.includes('welcome to bayraq')) return false;
-    if (lowercaseTitle.includes('خطأ في') || lowercaseTitle.includes('خطأ') || n.type === 'alarm') return false;
-    if (n.message && (n.message.includes('تم نشر الإعلان') || n.message.includes('أجهزة وواجهات جميع المستخدمين'))) return false;
-    if (n.title && (n.title.includes('تم نشر الإعلان') || (n.title === 'نجاح' && n.message?.includes('تم نشر')))) return false;
-    return true;
-  });
+  const lastMarkedReadRef = React.useRef<string>('');
 
   useEffect(() => {
-    if (isOpen && view === 'history') {
+    if (isOpen) {
       const unreadTickets = allTickets.filter(t => t.status === 'resolved' && (t.readByStudent === false || t.readByStudent === undefined));
+      const unreadNotifs = displayNotifications.filter(n => !n.read);
+      const unreadSocial = socialNotifications.filter(n => !n.read);
+
+      const stateKey = `${unreadTickets.length}-${unreadNotifs.length}-${unreadSocial.length}`;
+      if (stateKey === lastMarkedReadRef.current) return;
+      lastMarkedReadRef.current = stateKey;
+
       if (unreadTickets.length > 0) {
         markAsRead(unreadTickets);
       }
       
-      const unreadNotifs = displayNotifications.filter(n => !n.read);
       if (unreadNotifs.length > 0) {
         markNotificationsAsRead(unreadNotifs);
       }
+      
+      if (unreadSocial.length > 0) {
+        handleMarkSocialRead();
+      }
+      
+      if (unreadTickets.length > 0 || unreadNotifs.length > 0) {
+         setView('history');
+      }
     }
+  }, [isOpen, allTickets, notifications, socialNotifications]);
 
-    if (isOpen && view === 'social') {
-      handleMarkSocialRead();
-    }
-  }, [isOpen, view, allTickets, notifications, socialNotifications]);
-
-  const markAsRead = async (tickets: TicketRecord[]) => {
+  const markAsRead = async (tickets: SupportTicket[]) => {
     for (const ticket of tickets) {
-      await updateDoc(doc(db, 'support_tickets', ticket.id), { readByStudent: true });
+      await supportService.updateTicket(ticket.id, { readByStudent: true }).catch(err => {
+        console.warn("Could not mark ticket as read by student:", err);
+      });
     }
   };
 
@@ -283,7 +356,7 @@ export const StudentSupportForm: React.FC<StudentSupportFormProps> = ({
         onMarkNotificationAsRead(notif.id);
       } else {
         try {
-          await updateDoc(doc(db, 'notifications', notif.id), { read: true });
+          await fetch(`/api/notifications/${notif.id}/read`, { method: 'PATCH' });
         } catch (e) {
           console.error("Could not mark notification as read", e);
         }
@@ -299,10 +372,13 @@ export const StudentSupportForm: React.FC<StudentSupportFormProps> = ({
     const unread = socialNotifications.filter(n => !n.read);
     for (const notif of unread) {
       try {
-         await updateDoc(doc(db, 'social_notifications', notif.id), { read: true });
+         await fetch(`/api/notifications/${notif.id}/read`, { method: 'PATCH' });
       } catch (e) {
          console.warn("Could not mark social notif as read", e);
       }
+    }
+    if (unread.length > 0) {
+       setSocialNotifications(prev => prev.map(n => unread.find(u => u.id === n.id) ? { ...n, read: true } : n));
     }
   };
 
@@ -311,18 +387,19 @@ export const StudentSupportForm: React.FC<StudentSupportFormProps> = ({
     if (!message.trim()) return;
     setIsSubmitting(true);
     try {
-      await addDoc(collection(db, 'support_tickets'), {
+      await supportService.createTicket({
+        schoolId: schoolId || undefined,
         userId: userId || studentCode || parentCode || '',
-        role,
+        role: role as any,
         studentName,
         grade,
         issueType,
         message,
-        timestamp: serverTimestamp(),
         status: 'pending',
         senderType: role === 'parent' ? 'parent' : isTeacher ? 'teacher' : 'student'
       });
       setMessage('');
+      loadTickets();
       handleSwitchToHistory();
     } catch (error) {
       console.error('Error submitting ticket:', error);
@@ -330,8 +407,10 @@ export const StudentSupportForm: React.FC<StudentSupportFormProps> = ({
       setIsSubmitting(false);
     }
   };
-  const hasUnreadAlerts = allTickets.some(t => t.status === 'resolved' && (t.readByStudent === false || t.readByStudent === undefined)) || 
-                          (displayNotifications && displayNotifications.some(n => !n.read));
+  const unreadAlertsCount = useMemo(() => {
+    return displayNotifications.filter(n => !n.read).length;
+  }, [displayNotifications]);
+  const unreadSocialCount = socialNotifications.filter(n => !n.read).length;
 
   const formatNotifDate = (timestamp: any) => {
     if (!timestamp) return new Date().toLocaleDateString('ar-IQ');
@@ -345,66 +424,110 @@ export const StudentSupportForm: React.FC<StudentSupportFormProps> = ({
   
   const [confirmDeleteAllHistory, setConfirmDeleteAllHistory] = useState(false);
   const [targetDeleteHistoryId, setTargetDeleteHistoryId] = useState<string | null>(null);
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
+  const [isDeletingAllHistory, setIsDeletingAllHistory] = useState(false);
+  const [deletingHistoryIds, setDeletingHistoryIds] = useState<Set<string>>(new Set());
 
   const handleDeleteNotification = async (id: string) => {
     if (!id) return;
-    
-    // 1. Optimistic UI update
-    if (onDeleteNotification) onDeleteNotification(id);
+    const item = displayNotifications.find(n => n.id === id);
     setTargetDeleteId(null);
     
-    // 2. background firestore delete
+    // Optimistic UI update
+    setHiddenNotificationIds(prev => new Set([...Array.from(prev), id]));
+    setAllTickets(prev => prev.filter(t => t.id !== id));
+    setHistory(prev => prev.filter(h => h.id !== id));
+    if (onDeleteNotification) onDeleteNotification(id);
+    
     try {
-      await deleteDoc(doc(db, 'notifications', id));
+      const codes = [studentCode, parentCode].filter(Boolean).join(',');
+      const queryParams = new URLSearchParams();
+      if (userId) queryParams.append('userId', userId);
+      if (codes) queryParams.append('codes', codes);
+
+      if (item?.isTicket) {
+        // Use thorough deletion for tickets too
+        await fetch(`/api/support-tickets/${id}?${queryParams.toString()}`, { method: 'DELETE' });
+      } else {
+        await fetch(`/api/notifications/${id}?${queryParams.toString()}`, { method: 'DELETE' });
+      }
     } catch (err) {
-      console.warn("Firestore delete failed:", err);
+      console.warn("Delete failed:", err);
     }
   };
 
   const handleDeleteAllNotifications = async () => {
-    if (!displayNotifications.length) return;
+    if (!displayNotifications.length || isDeletingAll) return;
     
-    const count = displayNotifications.length;
-    const idsToDelete = displayNotifications.map(n => n.id);
+    setIsDeletingAll(true);
+    // Optimistically hide everything
+    const allCurrentIds = displayNotifications.map(n => String(n.id));
+    setHiddenNotificationIds(prev => new Set([...Array.from(prev), ...allCurrentIds]));
 
-    // 1. Optimistic UI update
-    if (onClearAllNotifications) onClearAllNotifications();
-    setConfirmDeleteAll(false);
-    
-    // 2. background firestore delete
     try {
-      const promises = idsToDelete.map(id => deleteDoc(doc(db, 'notifications', id)).catch(() => {}));
-      await Promise.all(promises);
+      const codes = [studentCode, parentCode].filter(Boolean).join(',');
+      const queryParams = new URLSearchParams();
+      if (userId) queryParams.append('userId', userId);
+      if (codes) queryParams.append('codes', codes);
+
+      // Delete from both places for thorough clearing
+      await Promise.all([
+        fetch(`/api/support-tickets-clear-all?${queryParams.toString()}`, { method: 'DELETE' }).catch(() => {}),
+        fetch(`/api/notifications-clear-all?${queryParams.toString()}`, { method: 'DELETE' }).catch(() => {})
+      ]);
+      
+      setAllTickets([]);
+      setHistory([]);
+      if (onClearAllNotifications) onClearAllNotifications();
     } catch (err) {
       console.error("Delete all error:", err);
+    } finally {
+      setIsDeletingAll(false);
+      setConfirmDeleteAll(false);
     }
   };
 
   const handleDeleteHistory = async (id: string) => {
-    if (!id) return;
+    if (!id || deletingHistoryIds.has(id)) return;
+    setDeletingHistoryIds(prev => new Set(prev).add(id));
     setTargetDeleteHistoryId(null);
+    
     try {
-      await deleteDoc(doc(db, 'support_tickets', id));
+      await supportService.deleteTicket(id, userId || studentCode || parentCode);
+      setHistory(prev => prev.filter(h => h.id !== id));
+      setAllTickets(prev => prev.filter(t => t.id !== id));
     } catch (err) {
-      console.warn("Firestore delete history failed:", err);
+      console.warn("Delete history failed:", err);
+    } finally {
+      setDeletingHistoryIds(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     }
   };
 
   const handleDeleteAllHistory = async () => {
-    if (!history.length) return;
-    const idsToDelete = history.map(h => h.id);
-    setConfirmDeleteAllHistory(false);
+    if (!history.length || isDeletingAllHistory) return;
+    setIsDeletingAllHistory(true);
+    
     try {
-      const promises = idsToDelete.map(id => deleteDoc(doc(db, 'support_tickets', id)).catch(() => {}));
-      await Promise.all(promises);
+      const effectiveId = userId || studentCode || parentCode || '';
+      await supportService.clearAllTickets(effectiveId);
+      setHistory([]);
+      setAllTickets([]);
     } catch (err) {
       console.error("Delete all history error:", err);
+    } finally {
+      setIsDeletingAllHistory(false);
+      setConfirmDeleteAllHistory(false);
     }
   };
 
   const handleDeleteSocialNotification = async (id: string) => {
     try {
-      await deleteDoc(doc(db, 'social_notifications', id));
+      await fetch(`/api/notifications/${id}?userId=${encodeURIComponent(userId || studentCode || parentCode || '')}`, { method: 'DELETE' });
+      setSocialNotifications(prev => prev.filter(n => n.id !== id));
     } catch (err) {
       console.warn("Delete social notification failed:", err);
     }
@@ -412,14 +535,19 @@ export const StudentSupportForm: React.FC<StudentSupportFormProps> = ({
 
   const handleDeleteAllSocialNotifications = async () => {
     if (!socialNotifications.length) return;
-    const idsToDelete = socialNotifications.map(n => n.id);
     try {
-      const promises = idsToDelete.map(id => deleteDoc(doc(db, 'social_notifications', id)).catch(() => {}));
-      await Promise.all(promises);
+      const effectiveId = userId || studentCode || parentCode || '';
+      await fetch(`/api/notifications-clear-all?userId=${encodeURIComponent(effectiveId)}`, { method: 'DELETE' });
+      setSocialNotifications([]);
     } catch (err) {
       console.error("Delete all social notifications error:", err);
     }
   };
+
+  const filteredHistory = useMemo(() => {
+    const displayIds = new Set(displayNotifications.map(n => String(n.id)));
+    return history.filter(h => !displayIds.has(String(h.id)));
+  }, [history, displayNotifications]);
 
   return (
     <>
@@ -490,8 +618,10 @@ export const StudentSupportForm: React.FC<StudentSupportFormProps> = ({
                 className={`flex-1 py-4 text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 transition-all ${view === 'social' ? 'text-[#FFD600] border-b-2 border-[#FFD600]' : 'text-white/30 truncate'}`}
               >
                 <Bell size={16} /> الإشعارات
-                {socialNotifications.some(n => !n.read) && (
-                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse shrink-0" />
+                {unreadSocialCount > 0 && (
+                  <span className="min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-black flex items-center justify-center animate-pulse shrink-0">
+                    {unreadSocialCount > 9 ? '+9' : unreadSocialCount}
+                  </span>
                 )}
               </button>
               <button 
@@ -499,8 +629,10 @@ export const StudentSupportForm: React.FC<StudentSupportFormProps> = ({
                 className={`flex-1 py-4 text-xs sm:text-sm font-bold flex items-center justify-center gap-1.5 transition-all ${view === 'history' ? 'text-[#FFD600] border-b-2 border-[#FFD600]' : 'text-white/30 truncate'}`}
               >
                 <History size={16} /> {isTeacher ? 'تبليغات الإدارة' : 'السجل والردود'}
-                {hasUnreadAlerts && (
-                  <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse shrink-0" />
+                {unreadAlertsCount > 0 && (
+                  <span className="min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[10px] font-black flex items-center justify-center animate-pulse shrink-0">
+                    {unreadAlertsCount > 9 ? '+9' : unreadAlertsCount}
+                  </span>
                 )}
               </button>
               <button 
@@ -560,26 +692,31 @@ export const StudentSupportForm: React.FC<StudentSupportFormProps> = ({
                             e.stopPropagation();
                             setConfirmDeleteAll(true);
                           }}
-                          className="text-[10px] px-4 py-2 rounded-lg font-black transition-all cursor-pointer border shadow-xl relative z-[100] active:scale-95 bg-rose-500/10 text-rose-400 border-rose-500/20"
+                          disabled={isDeletingAll}
+                          className="text-[10px] px-4 py-2 rounded-lg font-black transition-all cursor-pointer border shadow-xl relative z-[100] active:scale-95 bg-rose-500/10 text-rose-400 border-rose-500/20 disabled:opacity-50"
                         >
-                          حذف الكل
+                          {isDeletingAll ? 'جاري الحذف...' : 'حذف الكل'}
                         </button>
                       </div>
                       {displayNotifications.map((notif, idx) => (
                         <div key={`notif_${notif.id}_${idx}`} className="bg-rose-500/10 border border-rose-500/20 rounded-2xl p-5 relative overflow-hidden group">
                           <div className="flex items-center gap-2 mb-3">
                              <Bell size={14} className="text-rose-400" />
-                             <span className="text-xs font-bold text-rose-400 line-clamp-1">{typeof notif.title === 'string' ? notif.title.replace(/الأكاديمية/g, 'الإدارة') : notif.title}</span>
+                             <span className="text-xs font-bold text-rose-400 line-clamp-1">{typeof notif.title === 'string' ? notif.title.replace(/الأكاديمية/g, 'الإدارة') : (notif.title || 'رسالة إدارية')}</span>
                              <span className="text-[10px] text-white/40 mr-auto whitespace-nowrap bg-white/5 px-2 py-0.5 rounded-full">
                                {formatNotifDate(notif.timestamp)}
                              </span>
                            </div>
-                           <p className="text-white/80 text-sm leading-relaxed mb-4">{typeof notif.message === 'string' ? notif.message.replace(/الأكاديمية/g, 'الإدارة') : notif.message}</p>
+                           <p className="text-white/80 text-sm leading-relaxed mb-4">
+                             {typeof notif.message === 'string' 
+                               ? notif.message.replace(/الأكاديمية/g, 'الإدارة') 
+                               : (typeof notif.body === 'string' && notif.body ? notif.body.replace(/الأكاديمية/g, 'الإدارة') : (notif.description || 'تبليغ إداري جديد'))}
+                           </p>
                            
-                           {allTickets.filter(t => t.issueType === 'رد على تبليغ إداري' && (t.broadcastId === notif.broadcastId || t.broadcastId === notif.id))
+                           {allTickets.filter(t => t.issueType === 'رد على تبليغ إداري' && (t.broadcastId === notif.broadcastId || t.broadcastId === (notif as any).metadata?.broadcastId || t.broadcastId === notif.id))
                              .sort((a,b) => {
-                               const tA = a.timestamp?.toMillis ? a.timestamp.toMillis() : (a.timestamp?.seconds ? a.timestamp.seconds * 1000 : new Date(a.timestamp || 0).getTime());
-                               const tB = b.timestamp?.toMillis ? b.timestamp.toMillis() : (b.timestamp?.seconds ? b.timestamp.seconds * 1000 : new Date(b.timestamp || 0).getTime());
+                               const tA = new Date(a.timestamp || 0).getTime();
+                               const tB = new Date(b.timestamp || 0).getTime();
                                return tA - tB; // oldest first
                              })
                              .map((reply, rIdx) => (
@@ -622,7 +759,7 @@ export const StudentSupportForm: React.FC<StudentSupportFormProps> = ({
                                  <button
                                    type="button"
                                    disabled={!replyInputText.trim() || isReplying}
-                                   onClick={() => handleSendReply(notif.message, replyInputText, 'رد على تبليغ إداري', undefined, notif.broadcastId || notif.id)}
+                                   onClick={() => handleSendReply(notif.message, replyInputText, 'رد على تبليغ إداري', undefined, notif.broadcastId || (notif as any).metadata?.broadcastId || notif.id)}
                                    className="px-2.5 py-1 rounded bg-[#FFD600] text-black text-[10px] font-black"
                                  >
                                    {isReplying ? 'جاري الإرسال...' : 'إرسال الرد'}
@@ -649,11 +786,12 @@ export const StudentSupportForm: React.FC<StudentSupportFormProps> = ({
                                    e.stopPropagation();
                                    setTargetDeleteId(notif.id);
                                  }}
-                                 className="px-3 py-1.5 rounded-xl text-[11px] font-black bg-rose-500/25 text-rose-400 border border-rose-500/30 hover:bg-rose-500/35 transition-all flex items-center gap-1 cursor-pointer active:scale-95"
+                                 disabled={isDeletingAll}
+                                 className="px-3 py-1.5 rounded-xl text-[11px] font-black bg-rose-500/25 text-rose-400 border border-rose-500/30 hover:bg-rose-500/35 transition-all flex items-center gap-1 cursor-pointer active:scale-95 disabled:opacity-50"
                                  title="حذف التبليغ"
                                >
                                  <Trash2 size={12} />
-                                 <span>حذف</span>
+                                 <span>{isDeletingAll ? 'جاري...' : 'حذف'}</span>
                                </button>
                              </div>
                            )}
@@ -661,10 +799,10 @@ export const StudentSupportForm: React.FC<StudentSupportFormProps> = ({
                       ))}
                     </div>
                   )}
-                  {displayNotifications.length > 0 && history.length > 0 && (
+                  {displayNotifications.length > 0 && filteredHistory.length > 0 && (
                     <div className="h-[1px] w-full bg-white/10 my-6" />
                   )}
-                  {history.length > 0 && (
+                  {filteredHistory.length > 0 && (
                     <div className="space-y-3">
                       <div className="flex justify-between items-center mb-3">
                         <h4 className="text-white/60 font-bold text-sm">سجل الشكاوى السابقة</h4>
@@ -675,12 +813,13 @@ export const StudentSupportForm: React.FC<StudentSupportFormProps> = ({
                             e.stopPropagation();
                             setConfirmDeleteAllHistory(true);
                           }}
-                          className="text-[10px] px-4 py-2 rounded-lg font-black transition-all cursor-pointer border shadow-xl relative z-[100] active:scale-95 bg-rose-500/10 text-rose-400 border-rose-500/20"
+                          disabled={isDeletingAllHistory}
+                          className="text-[10px] px-4 py-2 rounded-lg font-black transition-all cursor-pointer border shadow-xl relative z-[100] active:scale-95 bg-rose-500/10 text-rose-400 border-rose-500/20 disabled:opacity-50"
                         >
-                          حذف السجل
+                          {isDeletingAllHistory ? 'جاري الحذف...' : 'حذف السجل'}
                         </button>
                       </div>
-                      {history.map((record, idx) => (
+                      {filteredHistory.map((record, idx) => (
                         <div key={`history_${record.id}_${idx}`} className="bg-white/5 border border-white/5 rounded-2xl p-5 relative overflow-hidden group">
                           <div className="flex justify-between items-start mb-3">
                             <span className="text-[10px] font-black bg-cyan-500/10 text-cyan-400 px-2 py-1 rounded uppercase tracking-widest">{record.issueType}</span>
@@ -695,10 +834,11 @@ export const StudentSupportForm: React.FC<StudentSupportFormProps> = ({
                                   e.stopPropagation();
                                   setTargetDeleteHistoryId(record.id);
                                 }}
-                                className="p-2 bg-rose-500/10 text-rose-400 rounded-lg border border-rose-500/20 hover:bg-rose-500/20 transition-all active:scale-90"
+                                disabled={deletingHistoryIds.has(record.id)}
+                                className="p-2 bg-rose-500/10 text-rose-400 rounded-lg border border-rose-500/20 hover:bg-rose-500/20 transition-all active:scale-90 disabled:opacity-50"
                                 title="حذف من السجل"
                               >
-                                <Trash2 size={12} />
+                                {deletingHistoryIds.has(record.id) ? <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }}><Trash2 size={12} /></motion.div> : <Trash2 size={12} />}
                               </button>
                             </div>
                           </div>
@@ -757,7 +897,7 @@ export const StudentSupportForm: React.FC<StudentSupportFormProps> = ({
                       ))}
                     </div>
                   )}
-                  {history.length === 0 && displayNotifications.length === 0 && (
+                  {filteredHistory.length === 0 && displayNotifications.length === 0 && (
                     <div className="text-center py-10 opacity-30 italic text-sm">لا يوجد لديك سجل تبليغات حتى الآن.</div>
                   )}
                 </div>
@@ -788,13 +928,17 @@ export const StudentSupportForm: React.FC<StudentSupportFormProps> = ({
                               </div>
                               <div className="flex-1 min-w-0 flex flex-col text-right items-start" dir="rtl">
                                 <p className="text-xs sm:text-sm font-medium text-white/90 truncate max-w-full">
-                                  <span className="text-[#00E5FF] px-1 font-bold">{notif.senderName}</span>
+                                  {notif.senderName && <span className="text-[#00E5FF] px-1 font-bold">{notif.senderName}</span>}
                                   {notif.type === 'like' && 'أعجب بمنشورك.'}
                                   {notif.type === 'comment' && 'علق على منشورك.'}
                                   {notif.type === 'mention_comment' && 'أشار إليك في تعليق.'}
                                   {notif.type === 'mention_post' && 'أشار إليك في منشور.'}
                                   {notif.type === 'mention_story' && 'أشار إليك في حالة.'}
                                   {notif.type === 'mention' && 'أشار إليك.'}
+                                  {/* Fallback for other notification types that might be in this list */}
+                                  {!['like', 'comment', 'mention_comment', 'mention_post', 'mention_story', 'mention'].includes(notif.type) && (
+                                    <span className="opacity-90">{notif.title || notif.message || notif.body || 'لديك إشعار جديد'}</span>
+                                  )}
                                 </p>
                                 <span className="text-[10px] text-white/40 block mt-0.5">{formatNotifDate(notif.timestamp)}</span>
                               </div>

@@ -11,32 +11,27 @@ import {
   AlertCircle,
   Trash2,
   Loader2,
-  Download
+  Download,
+  X
 } from 'lucide-react';
-import { collection, query, orderBy, limit, onSnapshot, Timestamp, getDocs, where, deleteDoc, doc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { auditService, AuditLog } from '../services/auditService';
+import { ConfirmDialog } from './ConfirmDialog';
 
-interface AuditLog {
-  id: string;
-  userId: string;
-  userName: string;
-  userEmail: string;
-  action: string;
-  details: string;
-  targetId?: string;
-  targetName?: string;
-  targetType?: string;
-  timestamp: Timestamp;
+interface AuditLogViewProps {
+  showToast: (message: string, type: 'success' | 'error' | 'info') => void;
 }
 
-export const AuditLogView: React.FC = () => {
+export const AuditLogView: React.FC<AuditLogViewProps> = ({ showToast }) => {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [logLimit, setLogLimit] = useState(30);
-  const [isDeletingOld, setIsDeletingOld] = useState(false);
+  const [showClearModal, setShowClearModal] = useState(false);
+  const [clearScope, setClearScope] = useState<'all' | '7days' | '30days'>('all');
+  const [isClearing, setIsClearing] = useState(false);
+  const [logToDelete, setLogToDelete] = useState<AuditLog | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filter, setFilter] = useState<'all' | 'students' | 'codes' | 'finance' | 'broadcast' | 'teachers' | 'resources' | 'support'>('all');
+  const [filter, setFilter] = useState<'all' | 'students' | 'codes' | 'finance' | 'broadcast' | 'teachers' | 'resources' | 'support' | 'portal_pulse' | 'ideas_bank' | 'sovereignty' | 'transport' | 'discipline'>('all');
 
   const [isMobile, setIsMobile] = useState(false);
 
@@ -47,73 +42,64 @@ export const AuditLogView: React.FC = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
+  const loadLogs = async (limitVal: number) => {
+    try {
+      setLoading(true);
+      const data = await auditService.fetchLogs(limitVal);
+      setLogs(data);
+    } catch (error) {
+      console.error("Error loading audit logs:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    const q = query(
-      collection(db, 'audit_logs'),
-      orderBy('timestamp', 'desc'),
-      limit(logLimit)
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const logsData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as AuditLog[];
-      setLogs(logsData);
-      setLoading(false);
-      setLoadingMore(false);
-    }, (error) => {
-      console.error("Audit log listener error:", error);
-      setLoading(false);
-      setLoadingMore(false);
-    });
-
-    return () => unsubscribe();
+    loadLogs(logLimit);
   }, [logLimit]);
 
-  const handleClearOldLogs = async () => {
-    setIsDeletingOld(true);
+  const handleExecuteClear = async () => {
+    setIsClearing(true);
     try {
-      const thirtyDaysAgo = new Date();
-      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-      const timestampLimit = Timestamp.fromDate(thirtyDaysAgo);
-
-      const oldLogsQuery = query(
-        collection(db, 'audit_logs'),
-        where('timestamp', '<', timestampLimit)
-      );
-
-      const snapshot = await getDocs(oldLogsQuery);
-      
-      if (snapshot.empty) {
-        alert("تنبيه: لا توجد سجلات أقدم من 30 يوماً متوفرة للحذف في الوقت الحالي.");
-        setIsDeletingOld(false);
-        return;
-      }
-
-      const confirmMessage = `هل أنت متأكد من رغبتك في حذف ${snapshot.size} سجل قديم؟\n\nسيتم حذفها نهائياً لتخفيف العبء عن قاعدة البيانات.`;
-      if (!window.confirm(confirmMessage)) {
-        setIsDeletingOld(false);
-        return;
-      }
-      
-      // Delete in batches or sequentially
-      let deletedCount = 0;
-      for (const document of snapshot.docs) {
-        await deleteDoc(doc(db, 'audit_logs', document.id));
-        deletedCount++;
-      }
-      
-      alert(`تم حذف ${deletedCount} سجل قديم بنجاح.`);
-    } catch (error: any) {
-      console.error("Error clearing old logs:", error);
-      if (error && error.message && error.message.includes('permission')) {
-        alert("عذراً، لا تملك الصلاحية الكافية لحذف هذه السجلات.");
+      let res: { success: boolean; count?: number; message?: string };
+      if (clearScope === 'all') {
+        res = await auditService.clearAllLogs();
+      } else if (clearScope === '7days') {
+        res = await auditService.clearOldLogs(7);
       } else {
-        alert("تنبيه: لا توجد سجلات أقدم من 30 يوماً ليتم حذفها، أو حدث خطأ أثناء جلب البيانات.");
+        res = await auditService.clearOldLogs(30);
       }
+
+      const deletedCount = res.count ?? 0;
+      if (deletedCount > 0) {
+        showToast(res.message || `تم تنظيف ${deletedCount} سجل بنجاح.`, 'success');
+        if (clearScope === 'all') {
+          setLogs([]);
+        } else {
+          await loadLogs(logLimit);
+        }
+      } else {
+        showToast(res.message || 'لا توجد سجلات تطابق شرط الحذف المختار.', 'info');
+        await loadLogs(logLimit);
+      }
+      setShowClearModal(false);
+    } catch (error: any) {
+      console.error("Error clearing logs:", error);
+      showToast(error.message || "حدث خطأ أثناء محاولة تنظيف السجلات.", "error");
     } finally {
-      setIsDeletingOld(false);
+      setIsClearing(false);
+    }
+  };
+
+  const handleDeleteSingleLog = async (log: AuditLog) => {
+    try {
+      await auditService.deleteLog(log.id);
+      setLogs(prev => prev.filter(l => l.id !== log.id));
+      showToast(`تم حذف سجل (${log.action}) بنجاح.`, 'success');
+      setLogToDelete(null);
+    } catch (error: any) {
+      console.error("Error deleting log:", error);
+      showToast(error.message || "فشل حذف السجل", "error");
     }
   };
 
@@ -165,16 +151,14 @@ export const AuditLogView: React.FC = () => {
             </thead>
             <tbody>
               ${logs.map((log, index) => {
-                const date = typeof log.timestamp === 'string' 
-                  ? log.timestamp 
-                  : log.timestamp?.toDate ? log.timestamp.toDate().toLocaleString('ar-IQ') : 'غير محدد';
+                const date = log.timestamp ? new Date(log.timestamp).toLocaleString('ar-IQ') : 'غير محدد';
                 
                 return `
                   <tr>
                     <td>${index + 1}</td>
                     <td>
-                      <strong>${log.userName || 'مدير النظام'}</strong><br/>
-                      <span style="color: #666; font-size: 11px;">${log.userEmail || ''}</span>
+                      <strong style="font-family: monospace;">${getDisplayUserEmail(log)}</strong><br/>
+                      ${log.userName && log.userName !== getDisplayUserEmail(log) && log.userName !== 'الإدارة العامة' ? `<span style="color: #666; font-size: 11px;">${log.userName}</span>` : ''}
                     </td>
                     <td><span class="action-badge">${log.action}</span></td>
                     <td class="details">
@@ -230,11 +214,31 @@ export const AuditLogView: React.FC = () => {
       case 'support':
         return matchesSearch && log.targetType === 'support_ticket';
       case 'codes':
-        return matchesSearch && log.targetType === 'codes_generation';
+        return matchesSearch && (log.targetType === 'codes_generation' || log.targetType === 'activation_codes');
+      case 'portal_pulse':
+        return matchesSearch && (log.targetType?.includes('pulse') || log.action.includes('تجميد') || log.targetType === 'account_freeze');
+      case 'ideas_bank':
+        return matchesSearch && log.targetType === 'ideas_bank';
+      case 'sovereignty':
+        return matchesSearch && log.targetType === 'sovereignty';
+      case 'transport':
+        return matchesSearch && (log.targetType === 'transport' || log.action.includes('نقل') || log.action.includes('باص'));
+      case 'discipline':
+        return matchesSearch && (log.targetType === 'discipline' || log.action.includes('سلوك') || log.action.includes('انضباط') || log.targetType === 'behavior_logs' || log.targetType === 'attendance_logs');
       default:
         return matchesSearch;
     }
   });
+
+  const getDisplayUserEmail = (log: AuditLog) => {
+    if (log.userEmail && log.userEmail.includes('@')) {
+      return log.userEmail;
+    }
+    if (log.userName && log.userName.includes('@')) {
+      return log.userName;
+    }
+    return 'abdulradhaalmayali@gmail.com';
+  };
 
   const getActionColor = (action: string) => {
     if (action.includes('حذف')) return 'text-rose-400 bg-rose-400/10 border-rose-400/20';
@@ -325,18 +329,13 @@ export const AuditLogView: React.FC = () => {
           </button>
           
           <button
-            onClick={handleClearOldLogs}
-            disabled={isDeletingOld}
-            className="flex items-center justify-center gap-3 bg-white/5 hover:bg-rose-500/10 px-6 py-4 sm:py-3 rounded-2xl border border-white/10 hover:border-rose-500/20 backdrop-blur-sm transition-all group disabled:opacity-50 text-right shadow-xl"
+            onClick={() => setShowClearModal(true)}
+            className="flex items-center justify-center gap-3 bg-white/5 hover:bg-rose-500/10 px-6 py-4 sm:py-3 rounded-2xl border border-white/10 hover:border-rose-500/20 backdrop-blur-sm transition-all group text-right shadow-xl"
           >
-            {isDeletingOld ? (
-              <Loader2 size={22} className="text-rose-400 animate-spin shrink-0" />
-            ) : (
-              <Trash2 size={22} className="text-rose-400 group-hover:scale-110 transition-transform shrink-0" />
-            )}
+            <Trash2 size={22} className="text-rose-400 group-hover:scale-110 transition-transform shrink-0" />
             <div className="flex flex-col flex-1 sm:flex-none">
               <span className="text-[10px] text-white/30 font-black uppercase leading-none mb-1">تنظيف السجلات</span>
-              <span className="text-xs text-white font-black">{isDeletingOld ? 'جاري التنظيف...' : 'حذف ما قبل 30 يوماً'}</span>
+              <span className="text-xs text-white font-black">خيارات الحذف والتنظيف</span>
             </div>
           </button>
 
@@ -363,7 +362,7 @@ export const AuditLogView: React.FC = () => {
           />
         </div>
         <div className="flex bg-[#0a0f1d] p-1.5 rounded-2xl border border-white/5 shadow-inner overflow-x-auto no-scrollbar gap-1">
-          {(['all', 'finance', 'codes', 'students', 'broadcast', 'teachers', 'resources', 'support'] as const).map((f) => (
+          {(['all', 'portal_pulse', 'finance', 'codes', 'students', 'discipline', 'transport', 'resources', 'broadcast', 'ideas_bank', 'sovereignty', 'teachers', 'support'] as const).map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}
@@ -374,12 +373,17 @@ export const AuditLogView: React.FC = () => {
               }`}
             >
               {f === 'all' ? 'الكل' : 
+               f === 'portal_pulse' ? 'نبض البوابة' :
                f === 'finance' ? 'الموقف المالي والإحصائيات' : 
                f === 'codes' ? 'مركز الأكواد' :
                f === 'students' ? 'شؤون الطلاب والدرجات' : 
+               f === 'discipline' ? 'سجل الانضباط المدرسي' :
+               f === 'transport' ? 'ادارة النقل المدرسي' :
                f === 'broadcast' ? 'الإذاعة المدرسية' : 
                f === 'teachers' ? 'الكادر والموظفين' : 
-               f === 'resources' ? 'مركز مراقبة المحتوى' : 'الدعم والشكاوى'}
+               f === 'resources' ? 'مركز مراقبة المحتوى' :
+               f === 'ideas_bank' ? 'بنك الافكار' :
+               f === 'sovereignty' ? 'منصة السيادة' : 'الدعم والشكاوى'}
             </button>
           ))}
         </div>
@@ -398,12 +402,13 @@ export const AuditLogView: React.FC = () => {
                 <th className="px-6 py-5 text-[11px] font-black text-white/30 uppercase tracking-[0.2em] text-center w-[120px]">نوع العملية</th>
                 <th className="px-6 py-5 text-[11px] font-black text-white/30 uppercase tracking-[0.2em]">وصف النشاط التفصيلي</th>
                 <th className="px-8 py-5 text-[11px] font-black text-white/30 uppercase tracking-[0.2em] text-left w-1/5">الوقت والتاريخ</th>
+                <th className="px-4 py-5 text-[11px] font-black text-white/30 uppercase tracking-[0.2em] text-center w-[60px] print:hidden">إجراء</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
               {loading && logs.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-6 py-32 text-center">
+                  <td colSpan={5} className="px-6 py-32 text-center">
                     <div className="flex flex-col items-center gap-4">
                       <div className="w-12 h-12 border-4 border-purple-500/30 border-t-purple-500 rounded-full animate-spin" />
                       <p className="text-white/20 font-black text-sm uppercase tracking-widest">جاري استرجاع سجلات الرقابة...</p>
@@ -412,7 +417,7 @@ export const AuditLogView: React.FC = () => {
                 </tr>
               ) : filteredLogs.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-6 py-32 text-center">
+                  <td colSpan={5} className="px-6 py-32 text-center">
                     <div className="flex flex-col items-center gap-3">
                       <History size={48} className="text-white/5 mb-2" />
                       <p className="text-white/20 font-black text-sm uppercase tracking-widest">لم يتم العثور على أي نتائج مطابقة</p>
@@ -428,8 +433,12 @@ export const AuditLogView: React.FC = () => {
                           <UserIcon size={20} />
                         </div>
                         <div>
-                          <p className="text-white text-sm font-black group-hover:text-purple-400 transition-colors tracking-tight leading-none mb-1.5">{log.userName}</p>
-                          <p className="text-white/20 text-[10px] font-mono tracking-tighter break-all max-w-[200px]">{log.userEmail}</p>
+                          <p className="text-white text-xs sm:text-sm font-black group-hover:text-purple-400 transition-colors tracking-tight leading-none mb-1.5 font-mono">
+                            {getDisplayUserEmail(log)}
+                          </p>
+                          {log.userName && log.userName !== getDisplayUserEmail(log) && log.userName !== 'الإدارة العامة' && (
+                            <p className="text-white/40 text-[10px] tracking-tight">{log.userName}</p>
+                          )}
                         </div>
                       </div>
                     </td>
@@ -454,13 +463,22 @@ export const AuditLogView: React.FC = () => {
                       <div className="flex flex-col items-end gap-2">
                         <div className="flex items-center gap-2 text-white font-black text-xs bg-white/5 px-3 py-1.5 rounded-xl border border-white/5 group-hover:border-white/10 transition-all">
                           <Clock size={14} className="text-purple-400" />
-                          <span>{log.timestamp?.toDate().toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' })}</span>
+                          <span>{log.timestamp ? new Date(log.timestamp).toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' }) : '---'}</span>
                         </div>
                         <div className="flex items-center gap-2 text-white/30 font-bold text-[10px] pr-2 whitespace-nowrap">
                           <CalendarIcon size={12} />
-                          <span>{log.timestamp?.toDate().toLocaleDateString('ar-IQ', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                          <span>{log.timestamp ? new Date(log.timestamp).toLocaleDateString('ar-IQ', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) : '---'}</span>
                         </div>
                       </div>
+                    </td>
+                    <td className="px-4 py-6 text-center align-middle print:hidden">
+                      <button
+                        onClick={() => setLogToDelete(log)}
+                        title="حذف هذا السجل نهائياً"
+                        className="w-8 h-8 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/30 hover:text-rose-400 border border-white/5 hover:border-rose-500/30 flex items-center justify-center transition-all opacity-60 group-hover:opacity-100 mx-auto"
+                      >
+                        <Trash2 size={15} />
+                      </button>
                     </td>
                   </tr>
                 ))
@@ -495,20 +513,31 @@ export const AuditLogView: React.FC = () => {
               
               <div className="space-y-6">
                 {/* 1. Responsibile User */}
-                <div>
-                  <div className="flex items-center gap-1.5 mb-3">
-                    <UserIcon size={14} className="text-purple-400" />
-                    <span className="text-[10px] text-white/30 font-black uppercase tracking-widest">المسؤول عن الإجراء</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-purple-400 border border-white/5 shrink-0">
-                      <UserIcon size={18} />
+                <div className="flex items-start justify-between">
+                  <div>
+                    <div className="flex items-center gap-1.5 mb-3">
+                      <UserIcon size={14} className="text-purple-400" />
+                      <span className="text-[10px] text-white/30 font-black uppercase tracking-widest">المسؤول عن الإجراء</span>
                     </div>
-                    <div>
-                      <p className="text-white text-sm font-black tracking-tight leading-loose">{log.userName}</p>
-                      <p className="text-white/20 text-[9px] font-mono break-all line-clamp-1">{log.userEmail}</p>
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center text-purple-400 border border-white/5 shrink-0">
+                        <UserIcon size={18} />
+                      </div>
+                      <div>
+                        <p className="text-white text-xs sm:text-sm font-black tracking-tight leading-tight mb-1 font-mono break-all">{getDisplayUserEmail(log)}</p>
+                        {log.userName && log.userName !== getDisplayUserEmail(log) && log.userName !== 'الإدارة العامة' && (
+                          <p className="text-white/40 text-[10px] tracking-tight">{log.userName}</p>
+                        )}
+                      </div>
                     </div>
                   </div>
+                  <button
+                    onClick={() => setLogToDelete(log)}
+                    title="حذف هذا السجل"
+                    className="p-2.5 rounded-xl bg-white/5 hover:bg-rose-500/20 text-white/40 hover:text-rose-400 border border-white/5 hover:border-rose-500/30 transition-all shrink-0 mt-1"
+                  >
+                    <Trash2 size={16} />
+                  </button>
                 </div>
 
                 {/* 2. Action Type */}
@@ -544,11 +573,11 @@ export const AuditLogView: React.FC = () => {
                 <div className="pt-2 border-t border-white/5 flex items-center justify-between">
                   <div className="flex items-center gap-1.5 text-white font-black text-[10px] bg-white/5 px-3 py-1.5 rounded-lg border border-white/5">
                     <Clock size={12} className="text-purple-400" />
-                    <span>{log.timestamp?.toDate().toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' })}</span>
+                    <span>{log.timestamp ? new Date(log.timestamp).toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' }) : '---'}</span>
                   </div>
                   <div className="flex items-center gap-1.5 text-white/30 font-bold text-[9px]">
                     <CalendarIcon size={12} />
-                    <span>{log.timestamp?.toDate().toLocaleDateString('ar-IQ', { day: 'numeric', month: 'short' })}</span>
+                    <span>{log.timestamp ? new Date(log.timestamp).toLocaleDateString('ar-IQ', { day: 'numeric', month: 'short' }) : '---'}</span>
                   </div>
                 </div>
               </div>
@@ -581,10 +610,187 @@ export const AuditLogView: React.FC = () => {
         <div>
           <h4 className="text-amber-500 text-[10px] font-black uppercase tracking-widest mb-1">تنبيه أمني</h4>
           <p className="text-[11px] text-white/40 font-bold leading-relaxed">
-            هذا السجل هو مرجع قانوني وإداري. العمليات المسجلة لا يمكن حذفها أو تعديلها من قبل أي مسؤول لضمان النزاهة التامة في (بوابة بيرق).
+            هذا السجل هو مرجع قانوني وإداري. العمليات المسجلة لا يمكن استرجاعها بعد الحذف لضمان النزاهة التامة في (بوابة بيرق).
           </p>
         </div>
       </div>
+
+      {/* Clear Modal */}
+      <AnimatePresence>
+        {showClearModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md" dir="rtl">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-[#0b1021] border border-white/10 rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-2xl relative overflow-hidden text-right"
+            >
+              {/* Glow */}
+              <div className="absolute top-0 right-0 w-64 h-64 bg-rose-500/10 rounded-full blur-3xl pointer-events-none -translate-y-20 -translate-x-20" />
+              
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6 relative z-10">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400 shrink-0 shadow-lg shadow-rose-950/40">
+                    <Trash2 size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-black text-white">إدارة وتنظيف السجلات</h3>
+                    <p className="text-xs text-white/40 font-bold mt-0.5">اختر نطاق الحذف المناسب من قاعدة البيانات</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setShowClearModal(false)}
+                  disabled={isClearing}
+                  className="w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 text-white/40 hover:text-white flex items-center justify-center transition-all"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Options */}
+              <div className="space-y-3 mb-6 relative z-10">
+                {/* Option 1: Clear All */}
+                <div 
+                  onClick={() => setClearScope('all')}
+                  className={`p-4 rounded-2xl border cursor-pointer transition-all flex items-start gap-4 ${
+                    clearScope === 'all'
+                      ? 'bg-rose-500/15 border-rose-500/50 shadow-lg shadow-rose-950/30'
+                      : 'bg-white/5 border-white/5 hover:bg-white/[0.08] hover:border-white/10'
+                  }`}
+                >
+                  <div className={`w-5 h-5 rounded-full border-2 mt-0.5 flex items-center justify-center shrink-0 transition-all ${
+                    clearScope === 'all' ? 'border-rose-500 bg-rose-500' : 'border-white/20'
+                  }`}>
+                    {clearScope === 'all' && <div className="w-2 h-2 rounded-full bg-white" />}
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-black text-white">مسح كافة السجلات بالكامل (تفريغ السجل)</span>
+                      <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30">
+                        مسح 100%
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-white/40 font-bold mt-1 leading-relaxed">
+                      حذف جميع سجلات العمليات المسجلة في النظام نهائياً (الحالية والسابقة).
+                    </p>
+                  </div>
+                </div>
+
+                {/* Option 2: Older than 7 days */}
+                <div 
+                  onClick={() => setClearScope('7days')}
+                  className={`p-4 rounded-2xl border cursor-pointer transition-all flex items-start gap-4 ${
+                    clearScope === '7days'
+                      ? 'bg-amber-500/15 border-amber-500/50 shadow-lg shadow-amber-950/30'
+                      : 'bg-white/5 border-white/5 hover:bg-white/[0.08] hover:border-white/10'
+                  }`}
+                >
+                  <div className={`w-5 h-5 rounded-full border-2 mt-0.5 flex items-center justify-center shrink-0 transition-all ${
+                    clearScope === '7days' ? 'border-amber-500 bg-amber-500' : 'border-white/20'
+                  }`}>
+                    {clearScope === '7days' && <div className="w-2 h-2 rounded-full bg-white" />}
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-black text-white">حذف ما قبل 7 أيام</span>
+                      <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                        أقدم من أسبوع
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-white/40 font-bold mt-1 leading-relaxed">
+                      الإبقاء على نشاطات الأسبوع الأخير وحذف العمليات الأقدم.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Option 3: Older than 30 days */}
+                <div 
+                  onClick={() => setClearScope('30days')}
+                  className={`p-4 rounded-2xl border cursor-pointer transition-all flex items-start gap-4 ${
+                    clearScope === '30days'
+                      ? 'bg-blue-500/15 border-blue-500/50 shadow-lg shadow-blue-950/30'
+                      : 'bg-white/5 border-white/5 hover:bg-white/[0.08] hover:border-white/10'
+                  }`}
+                >
+                  <div className={`w-5 h-5 rounded-full border-2 mt-0.5 flex items-center justify-center shrink-0 transition-all ${
+                    clearScope === '30days' ? 'border-blue-500 bg-blue-500' : 'border-white/20'
+                  }`}>
+                    {clearScope === '30days' && <div className="w-2 h-2 rounded-full bg-white" />}
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-sm font-black text-white">حذف ما قبل 30 يوماً</span>
+                      <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30">
+                        أقدم من شهر
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-white/40 font-bold mt-1 leading-relaxed">
+                      تنظيف الأرشيف المتراكم لأكثر من شهر والإبقاء على نشاطات الشهر الحالي.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Warning Note */}
+              <div className="mb-6 p-4 rounded-2xl bg-white/[0.03] border border-white/10 flex items-start gap-3 relative z-10">
+                <AlertCircle size={18} className="text-amber-400 shrink-0 mt-0.5" />
+                <p className="text-[11px] text-white/60 font-bold leading-relaxed">
+                  {clearScope === 'all' 
+                    ? `سيتم حذف جميع السجلات المعروضة في الشاشة (${logs.length} سجل) بشكل فوري من قاعدة البيانات.`
+                    : clearScope === '7days'
+                    ? 'سيتم حذف العمليات المسجلة قبل أكثر من 7 أيام فقط، ولن تتأثر نشاطات هذا الأسبوع.'
+                    : 'سيتم حذف العمليات المسجلة قبل أكثر من 30 يوماً فقط، ولن تتأثر نشاطات هذا الشهر.'}
+                </p>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-3 relative z-10">
+                <button
+                  onClick={() => setShowClearModal(false)}
+                  disabled={isClearing}
+                  className="flex-1 py-3.5 px-4 rounded-2xl bg-white/5 hover:bg-white/10 text-white font-bold text-xs transition-all border border-white/5"
+                >
+                  إلغاء
+                </button>
+                <button
+                  onClick={handleExecuteClear}
+                  disabled={isClearing}
+                  className="flex-1 py-3.5 px-4 rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-black text-xs transition-all shadow-lg shadow-rose-950/50 flex items-center justify-center gap-2 disabled:opacity-50"
+                >
+                  {isClearing ? (
+                    <>
+                      <Loader2 size={16} className="animate-spin" />
+                      <span>جاري الحذف...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 size={16} />
+                      <span>تأكيد الحذف الآن</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Individual Log Delete Confirm Dialog */}
+      <ConfirmDialog
+        isOpen={!!logToDelete}
+        onClose={() => setLogToDelete(null)}
+        onConfirm={async () => {
+          if (logToDelete) {
+            await handleDeleteSingleLog(logToDelete);
+          }
+        }}
+        title="تأكيد حذف السجل"
+        message={logToDelete ? `هل أنت متأكد من حذف هذا السجل نهائياً؟\n(${logToDelete.action} - ${logToDelete.userName})` : ''}
+        confirmText="نعم، احذف السجل"
+        cancelText="إلغاء"
+        type="danger"
+      />
     </div>
   );
 };

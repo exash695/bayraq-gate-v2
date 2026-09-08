@@ -29,7 +29,10 @@ import {
   Download,
   Bus
 } from 'lucide-react';
-import { doc, onSnapshot, collection, query, where, orderBy, limit, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot, collection, query, where, orderBy, limit, updateDoc } from '@/src/lib/firebase';
+import { academicService } from '../services/academicService';
+import { supportService } from '../services/supportService';
+import { ideaService } from '../services/ideaService';
 import { db, auth } from '../lib/firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { safeStorage } from '../lib/storage';
@@ -39,8 +42,10 @@ import { StudentSupportForm } from './StudentSupportForm';
 import { ExcellenceShareModal } from './ExcellenceShareModal';
 import { IdeaBank } from './IdeaBank';
 import { ParentTransportView } from './Transport/ParentTransportView';
+import { ComingSoonPlaceholder } from './ComingSoonPlaceholder';
 import { BerqCharacter } from './BerqCharacterManager';
-import { getSubjectsForGrade, calculateStudentFinancials, computeAcademicIdentity, computeExcellencePoints } from '../utils/studentUtils';
+import { ParentPortalSkeleton } from './shared/ShimmerSkeleton';
+import { getSubjectsForGrade, calculateStudentFinancials, computeAcademicIdentity, computeExcellencePoints, normalizeGradeCanonical } from '../utils/studentUtils';
 import { toPng, toBlob } from 'html-to-image';
 import { IRAQ_UNIVERSITIES } from '../constants/iraqColleges';
 import { flattenedColleges } from '../constants/flattenedColleges';
@@ -51,21 +56,57 @@ interface ParentPortalProps {
   schoolId?: string | null;
   schoolName?: string;
   gender?: 'male' | 'female';
+  grade?: string;
   onBack: () => void;
+  parentNotifications?: any[];
 }
 
-export const ParentPortal: React.FC<ParentPortalProps> = ({ studentName, studentCode, schoolId, schoolName, gender = 'male', onBack }) => {
+export const ParentPortal: React.FC<ParentPortalProps> = ({ 
+  studentName, 
+  studentCode, 
+  schoolId, 
+  schoolName, 
+  gender = 'male', 
+  grade, 
+  onBack,
+  parentNotifications: initialNotifications = []
+}) => {
   const [activeSubPage, setActiveSubPage] = useState<string | null>(null);
   const [showPaymentView, setShowPaymentView] = useState(false);
   const [showTransportView, setShowTransportView] = useState(false);
   const [isSupportFormOpen, setIsSupportFormOpen] = useState(false);
-  const [studentData, setStudentData] = useState<any>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [studentData, setStudentData] = useState<any>(() => {
+    try {
+      const cacheKey = `bairaq_cached_student_${studentCode || ''}`;
+      const stored = safeStorage.getItem(cacheKey);
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      return null;
+    }
+  });
+  const [isLoading, setIsLoading] = useState<boolean>(() => {
+    try {
+      const cacheKey = `bairaq_cached_student_${studentCode || ''}`;
+      const stored = safeStorage.getItem(cacheKey);
+      return !stored;
+    } catch {
+      return true;
+    }
+  });
+  const [error, setError] = useState<string | null>(null);
   const [selectedGradePeriod, setSelectedGradePeriod] = useState('month1');
-  const [parentNotifications, setParentNotifications] = useState<any[]>([]);
+  const [parentNotifications, setParentNotifications] = useState<any[]>(initialNotifications);
   const [showNotifications, setShowNotifications] = useState(false);
   const [unreadSupportCount, setUnreadSupportCount] = useState(0);
   const [unreadIdeasCount, setUnreadIdeasCount] = useState(0);
+  const [parentBroadcasts, setParentBroadcasts] = useState<any[]>([]);
+
+  // Sync with prop notifications
+  useEffect(() => {
+    if (initialNotifications && initialNotifications.length > 0) {
+      setParentNotifications(initialNotifications);
+    }
+  }, [initialNotifications]);
 
   // Auto-navigate to requested tab from Hub or navigation
   useEffect(() => {
@@ -114,6 +155,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ studentName, student
       setUnreadIdeasCount(snapshot.docs.length);
     }, (err) => {
       console.warn("Error fetching unread ideas count", err);
+      // Don't clear state on error, keep last known value
     });
 
     return () => unsub();
@@ -123,7 +165,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ studentName, student
   const [generationSuccess, setGenerationSuccess] = useState(false);
   const [subjectMapping, setSubjectMapping] = useState<any>(null);
   const [schoolInfo, setSchoolInfo] = useState<{ adminPhone?: string, adminWhatsapp?: string, schoolName?: string, name?: string }>({});
-  const [tuitionFee, setTuitionFee] = useState<number>(1000000);
+  const [tuitionFee, setTuitionFee] = useState<number>(0);
   const [discountRates, setDiscountRates] = useState<Record<string, number>>({});
   const [paymentSettings, setPaymentSettings] = useState<any>(null);
   const [schoolConfigs, setSchoolConfigs] = useState<any>(null);
@@ -333,53 +375,74 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ studentName, student
       if (d.exists()) setSubjectMapping(d.data());
     });
     
-    const unsubSchoolInfo = onSnapshot(doc(db, 'settings', 'school_info'), (d) => {
-      if (d.exists()) setSchoolInfo(d.data() as any);
-    });
-
-    const unsubTuition = onSnapshot(doc(db, 'settings', 'tuition'), (d) => {
-      if (d.exists()) {
-        const data = d.data();
-        setTuitionFee(Number(data.amount) || 1000000);
-        setDiscountRates(data.discountRates || {});
-      }
-    });
-
-    const unsubPaymentSettings = onSnapshot(doc(db, 'school_configs', schoolId || 'default'), (d) => {
-      if (d.exists()) {
-        const data = d.data();
-        setPaymentSettings(data.paymentMethods || data);
+    const effectiveSchoolId = schoolId || studentData?.schoolId || 'school1';
+    const unsubConfigs = academicService.subscribeToSchoolSettings(effectiveSchoolId, (data) => {
+      if (data) {
+        setPaymentSettings(data.paymentMethods || {});
         setSchoolConfigs(data);
+        setDiscountRates(data.discountRates || {});
+        // Merge SQL config into schoolInfo state for UI compatibility
+        setSchoolInfo({
+          adminPhone: data.adminPhone,
+          adminWhatsapp: data.adminWhatsapp,
+          schoolName: data.name || data.schoolName,
+          name: data.name || data.schoolName
+        });
       }
     });
     
     return () => {
       unsubMap();
-      unsubSchoolInfo();
-      unsubTuition();
-      unsubPaymentSettings();
+      unsubConfigs();
     };
-  }, []);
+  }, [schoolId, studentData?.schoolId]);
+
+  useEffect(() => {
+    if (schoolConfigs && studentData) {
+      const grade = studentData.grade;
+      const normalizedGrade = normalizeGradeCanonical(grade || '');
+      const byGrade = schoolConfigs.tuitionFeesByGrade || {};
+      
+      // Try exact match, then normalized match to find the BASE fee for this grade
+      let baseFee = (grade && byGrade[grade] !== undefined) ? Number(byGrade[grade]) : undefined;
+      
+      if (baseFee === undefined && normalizedGrade) {
+        // Try matching with normalized keys
+        const matchKey = Object.keys(byGrade).find(k => normalizeGradeCanonical(k) === normalizedGrade);
+        if (matchKey) {
+          baseFee = Number(byGrade[matchKey]);
+        }
+      }
+      
+      // Fallback to global tuition fee from school config
+      if (baseFee === undefined) {
+        baseFee = (Number(schoolConfigs.tuitionFee) || 0);
+      }
+
+      // If server provided a totalAmount, and we couldn't find a grade fee, use it as fallback
+      // But otherwise, we prefer the base grade fee so calculateStudentFinancials can work correctly
+      if (baseFee === 0 || baseFee === undefined) {
+        const serverTotal = studentData.totalAmount || studentData.finance?.totalTuition;
+        if (serverTotal !== undefined && serverTotal > 0) {
+           baseFee = Number(serverTotal);
+        }
+      }
+      
+      setTuitionFee(baseFee);
+    }
+  }, [schoolConfigs, studentData?.grade, studentData?.totalAmount, studentData?.finance?.totalTuition]);
 
   // Fetch Parent-Specific Notifications
   useEffect(() => {
-    const pCode = studentData?.parentCode || studentCode;
+    const pCode = studentData?.parentCode;
+    const sCode = studentData?.studentCode || studentCode;
     const currentUid = auth.currentUser?.uid;
     
-    if (!pCode && !currentUid) return;
-
     const possibleIdsSet = new Set<string>();
-    const hasSpecificCode = Boolean(pCode);
 
-    if (currentUid && !hasSpecificCode) {
-      possibleIdsSet.add(currentUid);
-      possibleIdsSet.add(currentUid.trim());
-      possibleIdsSet.add(currentUid.trim().toUpperCase());
-      possibleIdsSet.add(currentUid.trim().toLowerCase());
-    }
-    
-    if (pCode) {
-      const clean = pCode.trim();
+    const addCodes = (codeStr?: string, isParent = true) => {
+      if (!codeStr) return;
+      const clean = codeStr.trim();
       const upper = clean.toUpperCase();
       const lower = clean.toLowerCase();
       
@@ -387,89 +450,107 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ studentName, student
       possibleIdsSet.add(upper);
       possibleIdsSet.add(lower);
       
-      possibleIdsSet.add(`pcode_${clean}`);
-      possibleIdsSet.add(`pcode_${upper}`);
-      possibleIdsSet.add(`pcode_${lower}`);
+      const prefix = isParent ? 'pcode_' : 'scode_';
+      possibleIdsSet.add(`${prefix}${clean}`);
+      possibleIdsSet.add(`${prefix}${upper}`);
+      possibleIdsSet.add(`${prefix}${lower}`);
       
-      if (upper.startsWith('P-')) {
-        const pure = upper.slice(2);
+      if (upper.startsWith('P-') || upper.startsWith('S-') || upper.startsWith('PAR-') || upper.startsWith('STU-')) {
+        const pure = upper.replace(/^(STU-|PAR-|P-|S-)/i, '');
         possibleIdsSet.add(pure);
         possibleIdsSet.add(pure.toLowerCase());
-        possibleIdsSet.add(`pcode_${pure}`);
-        possibleIdsSet.add(`pcode_${pure.toLowerCase()}`);
+        possibleIdsSet.add(`${prefix}${pure}`);
+        possibleIdsSet.add(`${prefix}${pure.toLowerCase()}`);
+        if (isParent) {
+          possibleIdsSet.add(`pcode_P-${pure}`);
+        } else {
+          possibleIdsSet.add(`scode_S-${pure}`);
+        }
       } else {
-        possibleIdsSet.add(`P-${upper}`);
-        possibleIdsSet.add(`P-${lower}`);
-        possibleIdsSet.add(`pcode_P-${upper}`);
-        possibleIdsSet.add(`pcode_P-${lower}`);
+        if (isParent) {
+          possibleIdsSet.add(`P-${upper}`);
+          possibleIdsSet.add(`pcode_P-${upper}`);
+        } else {
+          possibleIdsSet.add(`S-${upper}`);
+          possibleIdsSet.add(`scode_S-${upper}`);
+        }
       }
+    };
+
+    if (currentUid) {
+      possibleIdsSet.add(currentUid);
+      possibleIdsSet.add(currentUid.trim());
+      possibleIdsSet.add(currentUid.trim().toUpperCase());
+      possibleIdsSet.add(currentUid.trim().toLowerCase());
+    }
+    
+    addCodes(pCode, true);
+    addCodes(sCode, false);
+    if (studentData?.id) {
+      possibleIdsSet.add(studentData.id);
     }
 
-    const filterIds = Array.from(possibleIdsSet).filter(Boolean).slice(0, 30);
+    const filterIds = Array.from(possibleIdsSet).filter(Boolean);
     if (filterIds.length === 0) return;
 
-    // We use two possible identifiers: the parent's UID (if logged in) or their code
-    const q1 = query(
-      collection(db, 'notifications'), 
-      where('userId', 'in', filterIds),
-      orderBy('timestamp', 'desc'),
-      limit(20)
-    );
-
-    const unsub = onSnapshot(q1, (snap) => {
-      const uniqueMessages = new Set<string>();
-      const notifs = snap.docs
-        .map((d: any) => ({ id: d.id, ...d.data() }))
-        .filter(n => n.type !== 'payment_rejected')
-        .filter((n: any) => {
-          if (n.recipientRole) {
-            return n.recipientRole === 'parent';
-          }
-          if (pCode) {
-            const pUpper = pCode.toUpperCase();
-            const pLower = pCode.toLowerCase();
-            if (n.userId === pCode || n.userId === pUpper || n.userId === pLower ||
-                n.userId === `pcode_${pCode}` || n.userId === `pcode_${pUpper}` || n.userId === `pcode_${pLower}`) {
-              return true;
-            }
-          }
-          return false;
-        })
-        .filter((n: any) => {
-          // Deduplicate by message to prevent multi-child spam
-          if (n.message && uniqueMessages.has(n.message)) {
-            return false;
-          }
-          if (n.message) uniqueMessages.add(n.message);
-          return true;
-        });
-      setParentNotifications(notifs);
-    }, (error) => {
-      console.warn("Notifications listener error:", error);
-    });
-
-    const possibleTicketIds = [...filterIds];
-    const qTickets = query(
-      collection(db, 'support_tickets'),
-      where('userId', 'in', possibleTicketIds.slice(0, 10)),
-      where('role', '==', 'parent')
-    );
-    const unsubTickets = onSnapshot(qTickets, (snap) => {
-      let unread = 0;
-      snap.forEach(doc => {
-        const data = doc.data();
-        if (data.status === 'resolved' && (data.readByStudent === false || data.readByStudent === undefined) && data.issueType !== 'تبليغ إداري') {
-          unread++;
-        }
+    let isMounted = true;
+    
+    import('../services/broadcastService').then(({ broadcastService }) => {
+      broadcastService.subscribeToBroadcasts(schoolId || 'school_awail_ghamas', (allData) => {
+        if (!isMounted) return;
+        const pBroadcasts = (allData || [])
+          .filter((b: any) => {
+            const raw = b.targetGrades || b.target_grades;
+            let grades: string[] = [];
+            if (Array.isArray(raw)) grades = raw;
+            else if (typeof raw === 'string') grades = [raw];
+            return grades.includes('parent_only');
+          })
+          .sort((a: any, b: any) => (b.timestampMs || 0) - (a.timestampMs || 0))
+          .slice(0, 5);
+        setParentBroadcasts(pBroadcasts);
       });
-      setUnreadSupportCount(unread);
-    }, (error) => {
-      console.warn("Support tickets listener error:", error);
-    });
+    }).catch(console.warn);
+
+    const fetchNotifsAndTickets = async () => {
+       try {
+         const { supportService } = await import('../services/supportService');
+         const possibleTicketIds = [...filterIds];
+         let unread = 0;
+         if (possibleTicketIds.length > 0) {
+            const tickets = await supportService.fetchTickets(schoolId, possibleTicketIds[0], possibleTicketIds, 'parent');
+            const pTickets = tickets.filter(t => t.role === 'parent' || !t.role);
+            unread = pTickets.filter(t => t.status === 'resolved' && (t.readByStudent === false || t.readByStudent === undefined)).length;
+         }
+         
+         const res = await fetch(`/api/notifications?recipientIds=${encodeURIComponent(filterIds.join(','))}`);
+         const data = await res.json();
+         if (isMounted && data.success) {
+            const notifs = data.notifications || [];
+            setParentNotifications(notifs);
+            const unreadNotifs = notifs.filter((n: any) => !n.read).length;
+            setUnreadSupportCount(unread);
+         } else if (isMounted) {
+            setUnreadSupportCount(unread);
+         }
+       } catch (err) {
+         console.warn("Error fetching tickets or notifications:", err);
+       }
+    };
+    
+    fetchNotifsAndTickets();
+    
+    import('../lib/realtimeManager').then(({ realtimeManager }) => {
+      realtimeManager.on('notifications_updated', fetchNotifsAndTickets);
+      realtimeManager.on('support_tickets_updated', fetchNotifsAndTickets);
+    }).catch(console.warn);
 
     return () => {
-      unsub();
-      unsubTickets();
+      isMounted = false;
+      import('../lib/realtimeManager').then(({ realtimeManager }) => {
+        realtimeManager.off('notifications_updated', fetchNotifsAndTickets);
+        realtimeManager.off('support_tickets_updated', fetchNotifsAndTickets);
+      }).catch(console.warn);
     };
   }, [studentData?.parentCode, studentCode]);
 
@@ -488,50 +569,100 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ studentName, student
 
   // Subscribe to student data to get real grades and financials
   useEffect(() => {
-    if (!studentCode) {
+    if (!studentCode || !schoolId) {
       setIsLoading(false);
       return;
     }
 
-    // Find student document by code and school
+    const fetchStudentData = async () => {
+      try {
+        // 1. First, try fetching from SQL API to leverage Just-In-Time finance repair
+        const apiRes = await fetch(`/api/students/by-code/${encodeURIComponent(schoolId)}/${encodeURIComponent(studentCode)}`);
+        if (apiRes.ok) {
+          const apiData = await apiRes.json();
+          if (apiData.success && apiData.student) {
+            setStudentData(apiData.student);
+            setStudentDocId(apiData.student.id);
+            setError(null);
+            
+            // Handle future path
+            if (apiData.student.futurePath) {
+              setFutureTargetCollege(apiData.student.futurePath.targetCollege || '');
+              setFutureTargetAverage(apiData.student.futurePath.targetAverage || 95);
+              setFutureParentNotes(apiData.student.futurePath.notes || '');
+            }
+            
+            if (apiData.student.lastSyncedPeriod) {
+              setSelectedGradePeriod(apiData.student.lastSyncedPeriod);
+            }
+            
+            // We have the truth from SQL, but we still subscribe to Firestore for real-time grades if needed
+            // However, for financials, SQL is the repaired source.
+          }
+        }
+      } catch (err) {
+        console.warn("API student fetch failed, falling back to Firestore:", err);
+      }
+    };
+
+    fetchStudentData();
+
+    // Add realtimeManager listener for SQL updates (finance repairs/updates)
+    let unsubRealtime: (() => void) | null = null;
+    import('../lib/realtimeManager').then(({ realtimeManager }) => {
+      unsubRealtime = realtimeManager.on('students', (payload: any) => {
+        if (payload.action === 'UPDATE' && (payload.id === studentDocId || (payload.data && payload.data.studentCode === studentCode))) {
+           console.log("[Finance] Received real-time student update from SQL", payload);
+           if (payload.data) {
+             setStudentData(prev => {
+               if (!prev) return payload.data;
+               return { ...prev, ...payload.data };
+             });
+           } else {
+             // Fallback to refetch if payload.data is missing
+             fetchStudentData();
+           }
+        }
+      });
+    }).catch(console.warn);
+
+    // Still keep Firestore subscription for real-time updates (attendance, points, etc.)
     const q = query(
       collection(db, 'school_students'),
-      where('code', '==', studentCode || 'unassigned'),
-      where('schoolId', '==', schoolId || 'unassigned')
+      where('studentCode', '==', studentCode)
     );
-    
+
     const unsub = onSnapshot(q, (snapshot) => {
       if (!snapshot.empty) {
-        const studentDoc = snapshot.docs[0];
-        const data = studentDoc.data();
-        setStudentData(data);
-        setStudentDocId(studentDoc.id);
+        const data = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
+        
+        // Merge Firestore data (like points, level, etc.) into studentData but preserve SQL financials if they are already loaded
+        setStudentData(prev => {
+          if (!prev) return data;
+          
+          // If Firestore has NO finance or totalAmount is 0, keep the SQL one
+          const hasFirestoreFinance = data.finance && data.finance.installments && data.finance.installments.length > 0;
+          const isFirestoreTotalValid = data.totalAmount && Number(data.totalAmount) > 0;
+          
+          if (!hasFirestoreFinance || !isFirestoreTotalValid) {
+            return {
+              ...data,
+              finance: prev.finance,
+              totalAmount: prev.totalAmount
+            };
+          }
+          return data;
+        });
+        
+        setStudentDocId(data.id);
+        setError(null);
         
         if (data.futurePath) {
           setFutureTargetCollege(data.futurePath.targetCollege || '');
           setFutureTargetAverage(data.futurePath.targetAverage || 95);
           setFutureParentNotes(data.futurePath.notes || '');
-
-          const collegeNameStr = data.futurePath.targetCollege || '';
-          let foundUnivId = '';
-          let foundCollegeId = '';
-          
-          const matchCol = flattenedColleges.find(col => 
-            col.collegeId === collegeNameStr || 
-            col.collegeName === collegeNameStr ||
-            (collegeNameStr && (collegeNameStr.includes(col.collegeName) || col.collegeName.includes(collegeNameStr)))
-          );
-          if (matchCol) {
-            foundUnivId = matchCol.univId;
-            foundCollegeId = matchCol.collegeId;
-          }
-          if (foundUnivId && foundCollegeId) {
-            setSelectedUnivId(foundUnivId);
-            setSelectedCollegeId(foundCollegeId);
-          }
         }
         
-        // Default to the last synced period if available and not manually changed yet
         if (data.lastSyncedPeriod) {
           setSelectedGradePeriod(data.lastSyncedPeriod);
         }
@@ -539,15 +670,25 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ studentName, student
         console.warn("Student doc not found with code:", studentCode);
       }
       setIsLoading(false);
-    }, (error) => {
-      if (error.code !== 'permission-denied') {
-        handleFirestoreError(error, OperationType.LIST, 'school_students', false);
-      }
+    }, (err) => {
+      console.error("Error subscribing to student in ParentPortal:", err);
       setIsLoading(false);
     });
 
-    return () => unsub();
-  }, [studentCode, schoolId]);
+    return () => {
+      unsub();
+      if (unsubRealtime) unsubRealtime();
+    };
+  }, [studentCode, schoolId, studentDocId]);
+
+  // Persist studentData to local cache for instant zero-lag rendering
+  useEffect(() => {
+    if (studentData && studentCode) {
+      try {
+        safeStorage.setItem(`bairaq_cached_student_${studentCode}`, JSON.stringify(studentData));
+      } catch {}
+    }
+  }, [studentData, studentCode]);
 
   // Subscribe to payment requests to show "Under Review" or "Rejected" status
   useEffect(() => {
@@ -557,7 +698,9 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ studentName, student
     const q = query(
       collection(db, 'payment_requests'),
       where('studentCode', '==', studentCode || 'unassigned'),
-      where('status', 'in', ['pending', 'rejected'])
+      where('status', 'in', ['pending', 'rejected']),
+      orderBy('timestamp', 'desc'),
+      limit(15)
     );
 
     const unsub = onSnapshot(q, (snapshot) => {
@@ -885,6 +1028,16 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ studentName, student
         </header>
 
         <div className={`flex-1 overflow-y-auto w-full no-scrollbar ${['future', 'ideas'].includes(activeSubPage || '') ? 'py-6 px-0 md:px-0' : 'px-6 py-10'}`}>
+          {error && (
+            <motion.div 
+              initial={{ opacity: 0, y: -10 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="mb-4 p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl flex items-center gap-2 text-rose-400 text-xs font-bold"
+            >
+              <AlertTriangle size={14} />
+              <span>{error}</span>
+            </motion.div>
+          )}
           {activeSubPage === "grades" ? (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
               <div className="flex items-center justify-between bg-white/5 p-4 rounded-2xl border border-white/10">
@@ -1051,91 +1204,204 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ studentName, student
                     </div>
                 
                     <div className="space-y-3">
-                      {studentData?.finance?.installments && studentData.finance.installments.length > 0 ? (
-                        (studentData.finance.installments as any[]).map((inst, idx) => {
-                          const installmentId = inst.id || idx.toString();
-                          const isPaid = inst.paid === true || ['completed', 'verified', 'verified_payment', 'مكتمل'].includes((inst.status || '').toLowerCase());
+                      {(() => {
+                        const studentInstallments = studentData?.finance?.installments || [];
+                        const hasStudentInstallments = Array.isArray(studentInstallments) && studentInstallments.length > 0;
+                        
+                        // Use the refined student financial calculation to get the target total
+                        const fin = calculateStudentFinancials(studentData, tuitionFee, discountRates);
+                        const targetTotal = fin.requiredAmount; // This is the final net amount expected from student
+                        const discountFactor = fin.discountFactor || ((100 - (fin.discountRate || 0)) / 100);
+
+                        let displayInstallments = studentInstallments;
+                        
+                        const hasPayments = studentInstallments.some((inst: any) => inst.paid === true || ['completed', 'verified', 'verified_payment', 'مكتمل'].includes((inst.status || '').toLowerCase()));
+                        const templateLength = schoolConfigs?.installmentPlan?.length || 0;
+
+                        // Fallback to school template OR hardcoded default if missing/mismatched (if no payments yet)
+                        // This ensures that if admin changes 4 to 6 installments, parent sees 6 immediately.
+                        if (!hasStudentInstallments || (!hasPayments && templateLength > 0 && studentInstallments.length !== templateLength)) {
+                          let template = schoolConfigs?.installmentPlan || [];
                           
-                          // Check active requests collection
-                          const activeRequest = pendingRequests.find((r: any) => r.installmentId === installmentId);
-                          const isPending = activeRequest?.status === 'pending';
-                          const isRejected = activeRequest?.status === 'rejected';
+                          // Fallback for missing template
+                          if (template.length === 0 && (schoolId === 'school1' || schoolId === 'school_awail_ghamas' || schoolId === 'ghamas_awail')) {
+                             template = [
+                               { id: 'def_1', name: 'القسط الأول', amount: 200000, date: '2025-10-01' },
+                               { id: 'def_2', name: 'القسط الثاني', amount: 150000, date: '2026-01-01' },
+                               { id: 'def_3', name: 'القسط الثالث', amount: 100000, date: '2026-03-01' },
+                               { id: 'def_4', name: 'القسط الرابع', amount: 100000, date: '2026-05-01' },
+                             ];
+                          }
+
+                          if (template.length > 0) {
+                            const templateSum = template.reduce((sum: number, inst: any) => sum + (Number(inst.amount) || 0), 0);
+                            // Factor to scale each template installment to match student's specific total (including their discounts)
+                            const scaleFactor = templateSum > 0 ? (targetTotal / templateSum) : 1;
+                            
+                            displayInstallments = template.map((inst: any, idx: number) => ({
+                              ...inst,
+                              id: inst.id || `template_${idx}`,
+                              amount: Math.round((Number(inst.amount) || 0) * scaleFactor),
+                              paid: false,
+                              status: 'pending'
+                            }));
+                          }
+                        } else {
+                          // Student already has installments in DB.
+                          // Ensure each installment's amount accurately reflects student's discount
+                          const rawSum = displayInstallments.reduce((sum: number, inst: any) => sum + (Number(inst.amount) || 0), 0);
                           
-                          let statusText = isPaid ? 'مكتمل' : (isPending ? 'قيد المراجعة' : (isRejected ? 'مرفوض' : 'تسديد'));
-                          let statusBg = isPaid ? 'bg-emerald-500/10 text-emerald-400' : 
-                                       isPending ? 'bg-amber-500/20 text-amber-400' : 
-                                       isRejected ? 'bg-rose-500/20 text-rose-400' : 
-                                       'bg-amber-400 text-black font-extrabold';
-                          
-                          return (
-                            <div key={`installment_${installmentId}_${idx}`} className="flex flex-col gap-2">
-                              <div className="bg-[#101935] p-5 rounded-[24px] border border-white/5 flex items-center justify-between group hover:border-blue-500/20 transition-all">
-                                <div className="flex items-center gap-4">
-                                   <div className="relative">
-                                      <div className={`w-3 h-3 rounded-full ${isPaid ? 'bg-emerald-500' : (isPending ? 'bg-amber-500' : (isRejected ? 'bg-rose-500' : 'bg-white/20'))}`} />
-                                      {isRejected && activeRequest?.viewedByParent === false && (
-                                        <div className="absolute -top-1 -right-1 w-2 h-2 bg-rose-500 rounded-full animate-pulse" />
-                                      )}
-                                   </div>
-                                   <div>
-                                      <p className="text-white font-black text-sm tabular-nums">{Number(inst.amount).toLocaleString()} <span className="text-[10px] opacity-40">د.ع</span></p>
-                                      <p className="text-white/30 text-[10px] font-bold">{inst.date}</p>
-                                   </div>
+                          if (rawSum > 0 && (fin.discountRate > 0 || Math.abs(rawSum - targetTotal) > 10)) {
+                            if (!hasPayments) {
+                              // If no payments yet, scale all installments to sum to targetTotal exactly
+                              const scaleFactor = targetTotal / rawSum;
+                              displayInstallments = displayInstallments.map((inst: any) => ({
+                                ...inst,
+                                amount: Math.round((Number(inst.amount) || 0) * scaleFactor)
+                              }));
+                            } else {
+                              // If some are paid, ensure unpaid installments reflect the discount
+                              displayInstallments = displayInstallments.map((inst: any) => {
+                                const isPaid = inst.paid === true || ['completed', 'verified', 'verified_payment', 'مكتمل'].includes((inst.status || '').toLowerCase());
+                                if (isPaid) return inst;
+                                return {
+                                  ...inst,
+                                  amount: fin.isInstallmentsAtGross ? Math.round((Number(inst.amount) || 0) * discountFactor) : Number(inst.amount)
+                                };
+                              });
+                            }
+                          }
+                        }
+
+                        if (displayInstallments && displayInstallments.length > 0) {
+                          return displayInstallments.map((inst: any, idx: number) => {
+                            const installmentId = inst.id || idx.toString();
+                            const isPaid = inst.paid === true || ['completed', 'verified', 'verified_payment', 'مكتمل'].includes((inst.status || '').toLowerCase());
+                            
+                            // Check active requests collection
+                            const activeRequest = pendingRequests.find((r: any) => r.installmentId === installmentId);
+                            const isPending = !isPaid && activeRequest?.status === 'pending';
+                            const isRejected = !isPaid && activeRequest?.status === 'rejected';
+                            
+                            let statusText = isPaid ? 'مكتمل' : (isPending ? 'قيد المراجعة' : (isRejected ? 'مرفوض' : 'تسديد'));
+                            let statusBg = isPaid ? 'bg-emerald-500/10 text-emerald-400' : 
+                                         isPending ? 'bg-amber-500/20 text-amber-400' : 
+                                         isRejected ? 'bg-rose-500/20 text-rose-400' : 
+                                         'bg-amber-400 text-black font-extrabold';
+                            
+                            return (
+                              <div key={`installment_${installmentId}_${idx}`} className="flex flex-col gap-2">
+                                <div className="bg-[#101935] p-5 rounded-[24px] border border-white/5 flex items-center justify-between group hover:border-blue-500/20 transition-all">
+                                  <div className="flex items-center gap-4">
+                                     <div className="relative">
+                                        <div className={`w-3 h-3 rounded-full ${isPaid ? 'bg-emerald-500' : (isPending ? 'bg-amber-500' : (isRejected ? 'bg-rose-500' : 'bg-white/20'))}`} />
+                                        {isRejected && activeRequest?.viewedByParent === false && (
+                                          <div className="absolute -top-1 -right-1 w-2 h-2 bg-rose-500 rounded-full animate-pulse" />
+                                        )}
+                                     </div>
+                                     <div>
+                                        <p className="text-white font-black text-sm tabular-nums">{Number(inst.amount).toLocaleString()} <span className="text-[10px] opacity-40">د.ع</span></p>
+                                        <p className="text-white/30 text-[10px] font-bold">{inst.name || 'قسط مدرسي'} • {inst.date}</p>
+                                     </div>
+                                  </div>
+                                  
+                                  <div className="flex items-center gap-2">
+                                     {isRejected && (
+                                       <button 
+                                         onClick={() => {
+                                           setSelectedInstallmentId(installmentId);
+                                           setShowPaymentView(true);
+                                         }}
+                                         className="px-3 py-2 rounded-xl bg-amber-400 text-black text-[10px] font-black shadow-lg shadow-amber-400/20 active:scale-95 transition-all"
+                                       >
+                                         إعادة تسديد
+                                       </button>
+                                     )}
+                                     {isPaid ? (() => {
+                                        let matchingTxn = uniqueTransactions.find((t: any) => 
+                                           t.status === 'completed' && 
+                                           (t.note?.replace('وصل رقمي - ', '')?.replace('وصل رقمي', '')?.trim() === inst.name?.trim() || t.installmentId === installmentId)
+                                        );
+                                        return (
+                                          <div className="flex items-center gap-2">
+                                            {matchingTxn && (
+                                              <button
+                                                onClick={() => {
+                                                  let dateVal = matchingTxn.date || matchingTxn.timestamp;
+                                                  if (dateVal && typeof dateVal === 'object') {
+                                                      if (dateVal.toDate) dateVal = dateVal.toDate();
+                                                      else if (dateVal.seconds) dateVal = new Date(dateVal.seconds * 1000);
+                                                  }
+                                                  setSelectedReceipt({
+                                                    adminName: matchingTxn.adminName || 'مدير النظام',
+                                                    studentName: studentData.name,
+                                                    studentId: studentCode,
+                                                    amount: Number(matchingTxn.amount),
+                                                    time: new Date(dateVal || 0),
+                                                    schoolName: studentData?.schoolName,
+                                                    schoolId: studentData?.schoolId,
+                                                    installmentName: matchingTxn.note?.replace('وصل رقمي - ', ''),
+                                                    isStamped: matchingTxn.isStamped,
+                                                    stampTime: matchingTxn.stampTime,
+                                                    method: matchingTxn.method || (matchingTxn.note?.includes('إلكتروني') || matchingTxn.note?.includes('AsiaPay') ? 'إلكتروني' : 'نقدي/مدير') || (matchingTxn.note?.includes('إلكتروني') || matchingTxn.note?.includes('AsiaPay') ? 'إلكتروني' : 'نقدي/مدير')
+                                                  });
+                                                }}
+                                                className="px-3 py-2 rounded-xl text-[10px] font-black transition-all bg-blue-500/10 text-blue-400 hover:bg-blue-500 hover:text-white border border-blue-500/20"
+                                              >
+                                                عرض الوصل
+                                              </button>
+                                            )}
+                                            <span className={`px-4 py-2 rounded-xl text-[10px] font-black transition-all ${statusBg}`}>
+                                              {statusText}
+                                            </span>
+                                          </div>
+                                        );
+                                     })() : (
+                                       <button 
+                                         disabled={isPending}
+                                         onClick={() => {
+                                           if (!isPending) {
+                                             setSelectedInstallmentId(installmentId);
+                                             setShowPaymentView(true);
+                                           }
+                                         }}
+                                         className={`px-4 py-2 rounded-xl text-[10px] font-black transition-all ${statusBg} ${isRejected ? 'cursor-pointer hover:bg-rose-500 hover:text-white' : ''}`}
+                                       >
+                                         {statusText}
+                                       </button>
+                                     )}
+                                  </div>
                                 </div>
                                 
-                                <div className="flex items-center gap-2">
-                                   {isRejected && (
-                                     <button 
-                                       onClick={() => {
-                                         setSelectedInstallmentId(installmentId);
-                                         setShowPaymentView(true);
-                                       }}
-                                       className="px-3 py-2 rounded-xl bg-amber-400 text-black text-[10px] font-black shadow-lg shadow-amber-400/20 active:scale-95 transition-all"
+                                {isRejected && activeRequest.rejectReason && (
+                                  <div className="mx-4 space-y-2">
+                                     <motion.div 
+                                       initial={{ opacity: 0, height: 0 }}
+                                       animate={{ opacity: 1, height: 'auto' }}
+                                       className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl flex flex-col gap-1 shadow-lg"
                                      >
-                                       إعادة تسديد
-                                     </button>
-                                   )}
-                                   <button 
-                                     disabled={isPaid || isPending}
-                                     onClick={() => {
-                                       if (!isPaid && !isPending) {
-                                         setSelectedInstallmentId(installmentId);
-                                         setShowPaymentView(true);
-                                       }
-                                     }}
-                                     className={`px-4 py-2 rounded-xl text-[10px] font-black transition-all ${statusBg} ${isRejected ? 'cursor-pointer hover:bg-rose-500 hover:text-white' : ''}`}
-                                   >
-                                     {statusText}
-                                   </button>
-                                </div>
+                                       <div className="flex items-center gap-2 text-rose-400">
+                                         <AlertTriangle size={12} />
+                                         <span className="text-[10px] font-black">ملاحظة الإدارة:</span>
+                                       </div>
+                                       <p className="text-white/70 text-[10px] font-medium pr-5 leading-relaxed">
+                                         {activeRequest.rejectReason}
+                                       </p>
+                                     </motion.div>
+                                  </div>
+                                )}
                               </div>
-                              
-                              {isRejected && activeRequest.rejectReason && (
-                                <div className="mx-4 space-y-2">
-                                   <motion.div 
-                                     initial={{ opacity: 0, height: 0 }}
-                                     animate={{ opacity: 1, height: 'auto' }}
-                                     className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl flex flex-col gap-1 shadow-lg"
-                                   >
-                                     <div className="flex items-center gap-2 text-rose-400">
-                                       <AlertTriangle size={12} />
-                                       <span className="text-[10px] font-black">ملاحظة الإدارة:</span>
-                                     </div>
-                                     <p className="text-white/70 text-[10px] font-medium pr-5 leading-relaxed">
-                                       {activeRequest.rejectReason}
-                                     </p>
-                                   </motion.div>
-                                </div>
-                              )}
+                            );
+                          });
+                        } else {
+                          return (
+                            <div className="bg-white/5 border border-white/5 rounded-3xl p-12 text-center space-y-3">
+                              <CalendarClock size={40} className="mx-auto text-white/10" />
+                              <p className="text-white/20 font-bold text-xs italic">لا يوجد جدول أقساط محدد للطالب</p>
                             </div>
                           );
-                        })
-                      ) : (
-                        <div className="bg-white/5 border border-white/5 rounded-3xl p-12 text-center space-y-3">
-                          <CalendarClock size={40} className="mx-auto text-white/10" />
-                          <p className="text-white/20 font-bold text-xs italic">لا يوجد جدول أقساط محدد للطالب</p>
-                        </div>
-                      )}
+                        }
+                      })()}
                     </div>
                  </div>
                )}
@@ -1209,7 +1475,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ studentName, student
                                   installmentName: txn.note?.replace('وصل رقمي - ', ''),
                                   isStamped: txn.isStamped,
                                   stampTime: txn.stampTime,
-                                  method: txn.method
+                                  method: txn.method || (txn.note?.includes('إلكتروني') || txn.note?.includes('AsiaPay') ? 'إلكتروني' : 'نقدي/مدير')
                                });
                                }}
                                className="text-[10px] bg-blue-500/20 px-3 py-1.5 rounded-lg text-blue-400 font-black cursor-pointer hover:bg-blue-500 hover:text-white transition-all shadow-lg relative z-50"
@@ -1298,7 +1564,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ studentName, student
                 
                 <div className="flex justify-between items-end h-20 gap-1 px-1">
                   {(() => {
-                    const days = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس'];
+                    const days = ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس'];
                     const logs = studentData?.attendance?.logs || [];
                     
                     return days.map((day) => {
@@ -1753,7 +2019,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ studentName, student
                     </div>
 
                     <div className="flex flex-wrap gap-2 pt-1">
-                      {['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس'].map((day) => {
+                      {['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'السبت'].map((day) => {
                         const isRequired = schoolConfigs?.uniformConfigs?.[getStageFromGrade(studentData?.grade || '')]?.days?.includes(day);
                         return (
                           <div
@@ -2644,8 +2910,9 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ studentName, student
             <div className="space-y-0 w-full animate-in fade-in slide-in-from-bottom-4">
               <IdeaBank 
                 userId={studentData?.parentCode || auth.currentUser?.uid} 
-                userName={studentName} 
+                userName={studentName ? `ولي أمر ${studentName.replace(/^ولي أمر\s*/, '')}` : 'ولي أمر'} 
                 studentGrade={studentData?.grade} 
+                schoolId={schoolId}
               />
             </div>
           ) : (
@@ -2668,11 +2935,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ studentName, student
   };
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen bg-[#050A18] flex items-center justify-center">
-        <motion.div animate={{ rotate: 360 }} transition={{ duration: 2, repeat: Infinity, ease: "linear" }} className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full" />
-      </div>
-    );
+    return <ParentPortalSkeleton />;
   }
 
   // Check if account is frozen
@@ -2682,13 +2945,20 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ studentName, student
                           
   if (isAccountFrozen) {
     return (
-      <div className="min-h-screen bg-[#050A18] flex flex-col items-center justify-center p-6 text-center" dir="rtl">
+      <div className="min-h-screen bg-[#050A18] flex flex-col items-center justify-center p-6 text-center relative" dir="rtl">
+        <button 
+          onClick={onBack}
+          className="absolute top-6 left-6 w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white/60 hover:text-white hover:bg-white/10 transition-all z-50"
+          title="عودة"
+        >
+          <ChevronLeft size={24} className="rotate-180" />
+        </button>
         <div className="w-24 h-24 bg-rose-500/10 rounded-full flex items-center justify-center mb-6 border border-rose-500/20">
           <AlertTriangle size={48} className="text-rose-500" />
         </div>
         <h1 className="text-2xl font-black text-white mb-2 font-sans">الحساب مجمد مؤقتاً</h1>
         <p className="text-white/60 text-sm max-w-xs leading-relaxed font-sans">
-          نعتذر منك، لقد تم تجميد حساب الطالب من قبل الإدارة. يرجى مراجعة المدرسة لتسوية الأمور الإدارية.
+          نعتذر منك، لقد تم تجميد حساب ولي الأمر من قبل الإدارة. يرجى مراجعة المدرسة لتسوية الأمور الإدارية.
         </p>
         <button onClick={() => window.location.reload()} className="mt-8 px-8 py-3 bg-white/5 border border-white/10 rounded-2xl text-white font-bold text-sm font-sans">تحديث الحالة</button>
       </div>
@@ -2766,7 +3036,9 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ studentName, student
               </button>
             </div>
 
-            <ParentTransportView parentId={studentData?.parentCode || auth.currentUser?.uid || studentCode || ''} />
+            <div className="pt-2">
+              <ComingSoonPlaceholder title="تتبع خطوط النقل الذكي" />
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -2788,6 +3060,11 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ studentName, student
           onClearAllNotifications={() => setParentNotifications([])}
           studentCode={studentData?.studentCode || studentCode}
           parentCode={studentData?.parentCode}
+          onMarkAllRead={() => {
+            setUnreadSupportCount(0);
+            setParentNotifications(prev => prev.map(n => ({ ...n, read: true })));
+          }}
+          schoolId={schoolId}
         />
 
         <ExcellenceShareModal
@@ -2801,7 +3078,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ studentName, student
 
       {/* 1. رأس الصفحة الرئيسية لولي الأمر مع رفيق بيرق الرقمي */}
       <header className="shrink-0 z-40 relative px-0 pt-0 pb-0">
-        <div className="shrink-0 relative w-full overflow-hidden bg-[#050A18] shadow-[0_10px_30px_rgba(13,71,161,0.4)] min-h-[145px] sm:min-h-[160px] flex flex-col justify-end pb-1 pt-2 px-3 sm:px-5">
+        <div className="shrink-0 relative w-full h-[125px] sm:h-[135px] overflow-hidden bg-[#050A18] shadow-[0_10px_30px_rgba(13,71,161,0.4)] flex flex-col justify-end pb-1 pt-2 px-3 sm:px-5">
           {/* خلفية مشعة وتأثيرات ضوئية */}
           <div className="absolute top-0 left-0 w-44 h-44 bg-[#FFD600]/15 rounded-full blur-2xl pointer-events-none" />
           <div className="absolute bottom-0 right-0 w-52 h-52 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
@@ -2854,7 +3131,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ studentName, student
               {/* 2. في المنتصف: اسم المرحلة بخط مباشر وبدون شارة دائرية */}
               <div className="flex items-center justify-center gap-1 text-emerald-400 font-extrabold text-[9px] sm:text-[10.5px] md:text-xs tracking-tight drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)] shrink-0 whitespace-nowrap">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_6px_rgba(52,211,153,0.8)] shrink-0" />
-                <span>المرحلة: {studentData?.grade || 'غير محدد'}</span>
+                <span>المرحلة: {studentData?.grade || grade || 'سادس علمي'}</span>
               </div>
 
               {/* 3. من اليسار: وسم مجتهد / رتبة الطالب بخط مباشر وبدون شارة دائرية */}
@@ -2887,7 +3164,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ studentName, student
           `}</style>
           <div className="flex-1 overflow-hidden h-full flex items-center relative" dir="ltr">
              {(() => {
-               const broadcastNotifs = parentNotifications.filter(n => n.type === 'broadcast' || n.title?.includes('تبليغ'));
+               const broadcastNotifs = [...parentBroadcasts, ...parentNotifications.filter(n => n.type === 'broadcast' || n.title?.includes('تبليغ'))];
                return broadcastNotifs.length === 0 ? (
                  <div className="parent-marquee-scroller font-black text-[11px] md:text-xs tracking-wide opacity-75">
                    {/* First copy */}
@@ -2941,7 +3218,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ studentName, student
       </header>
 
       {/* 2. قائمة الأقسام (أقراص التفاعل السريع) */}
-       <div className="flex-1 overflow-y-auto no-scrollbar py-6 px-6 space-y-8">
+      <div className="flex-1 overflow-y-auto no-scrollbar py-6 px-6 space-y-8" style={{ willChange: "scroll-position", WebkitOverflowScrolling: "touch" }}>
         {sections.map((section, sIdx) => (
           <div key={`${section.title}_${sIdx}_section`} className="space-y-4">
             <h2 className="text-white/30 text-xs font-black px-2 tracking-widest uppercase">
@@ -2955,10 +3232,12 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ studentName, student
                   <motion.div
                     key={`${item.id}_${sIdx}_${iIdx}_item`}
                     whileTap={{ scale: 0.98 }}
-                    onClick={() => item.id === "transport" ? setShowTransportView(true) : setActiveSubPage(item.id)}
-                    className={`bg-[#101935] p-[18px] mb-3 rounded-[20px] flex items-center gap-4 border ${item.border} cursor-pointer hover:bg-[#152042] transition-colors group relative`}
+                    onClick={() => {
+                      item.id === "transport" ? setShowTransportView(true) : setActiveSubPage(item.id)
+                    }}
+                    className={`bg-[#101935] p-[18px] mb-3 rounded-[20px] flex items-center gap-4 border ${item.border} cursor-pointer hover:bg-[#152042] transition-colors group relative overflow-hidden`}
                   >
-                    <div className={`w-11 h-11 rounded-xl ${item.bg} flex items-center justify-center transition-transform group-hover:scale-110 relative`}>
+                    <div className={`w-11 h-11 rounded-xl ${item.bg} flex items-center justify-center transition-transform group-hover:scale-110 relative z-10`}>
                       <Icon className={item.color} size={24} />
                       {item.badge && (
                         <span className="absolute -top-1 -right-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 text-[10px] font-black text-white px-1 ml-1 animate-pulse border border-[#101935]">
@@ -2969,7 +3248,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ studentName, student
                         <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-rose-500 rounded-full border-2 border-[#101935] shadow-[0_0_10px_rgba(244,63,94,0.5)] animate-pulse" />
                       )}
                     </div>
-                    <div className="flex-1">
+                    <div className="flex-1 z-10 relative">
                       <h3 className="text-white font-bold text-sm leading-tight inline-flex items-center gap-2">
                         {item.name}
                         {item.badge && (
@@ -2979,7 +3258,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({ studentName, student
                         )}
                       </h3>
                     </div>
-                    <ChevronLeft size={14} className="text-white/20 group-hover:text-white transition-colors" />
+                    <ChevronLeft size={14} className="text-white/20 group-hover:text-white transition-colors relative z-10" />
                   </motion.div>
                 );
               })}

@@ -23,25 +23,15 @@ import {
   Check,
   MessageCircle
 } from 'lucide-react';
-import { 
-  collection, 
-  query, 
-  where, 
-  getDocs, 
-  addDoc, 
-  serverTimestamp,
-  orderBy,
-  onSnapshot,
-  doc,
-  getDoc
-} from 'firebase/firestore';
-import { db, auth } from '../lib/firebase';
-import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
+import { createPaymentRequest, getStudentFinanceProfile } from '../services/financeService';
+import { academicService } from '../services/academicService';
 import { DigitalReceiptModal } from './DigitalReceiptModal';
 import { WatermarkLayer } from './WatermarkLayer';
 import { calculateStudentFinancials } from '../utils/studentUtils';
 import { BerqCharacter } from './BerqCharacterManager';
+import { realtimeManager } from '../lib/realtimeManager';
 import { getOfficialSchoolLogoUrl } from '../lib/constants';
+import { FinanceSectionSkeleton } from './shared/ShimmerSkeleton';
 
 interface ParentPaymentViewProps {
   studentCode: string;
@@ -59,7 +49,7 @@ export const ParentPaymentView: React.FC<ParentPaymentViewProps> = ({
   studentCode, 
   senderName, 
   studentData,
-  tuitionFee = 1000000,
+  tuitionFee = 0,
   discountRates = {},
   paymentSettings,
   adminWhatsapp,
@@ -87,15 +77,76 @@ export const ParentPaymentView: React.FC<ParentPaymentViewProps> = ({
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  const financials = useMemo(() => {
+    const rawStu = {
+      ...(studentData || {}),
+      ...(financeData || {}),
+      discountRate: studentData?.discountRate ?? financeData?.discountRate,
+      discountType: studentData?.discountType ?? financeData?.discountType,
+      status: studentData?.status ?? financeData?.status,
+      totalAmount: studentData?.totalAmount ?? financeData?.totalAmount
+    };
+    
+    // Resolve discountRates
+    const mergedDiscountRates = {
+      SIBLINGS: 15,
+      EARLY_REGISTRATION: 10,
+      ORPHAN: 50,
+      STAFF: 50,
+      ...(schoolSettings?.discountRates || {}),
+      ...(discountRates || {})
+    };
+
+    // Resolve base fee
+    let baseTuition = Number(tuitionFee) || 0;
+    if (baseTuition === 0 && schoolSettings) {
+      const grade = rawStu.grade;
+      const byGrade = schoolSettings.tuitionFeesByGrade || {};
+      if (grade && byGrade[grade] !== undefined) {
+        baseTuition = Number(byGrade[grade]);
+      } else if (schoolSettings.tuitionFee) {
+        baseTuition = Number(schoolSettings.tuitionFee);
+      }
+    }
+
+    return calculateStudentFinancials(rawStu, baseTuition, mergedDiscountRates);
+  }, [financeData, studentData, schoolSettings, tuitionFee, discountRates]);
+
   // Handle initial installment selection and amount fill
   useEffect(() => {
-    if (initialInstallmentId && financeData?.installments) {
-        const inst = financeData.installments.find((i: any) => i.id === initialInstallmentId || (financeData.installments.indexOf(i).toString() === initialInstallmentId));
-        if (inst) {
-            setAmount(inst.amount.toString());
+    if (initialInstallmentId) {
+        let installments = financeData?.installments || studentData?.finance?.installments || studentData?.installments || [];
+        const discountFactor = financials.discountFactor || ((100 - (financials.discountRate || 0)) / 100);
+        
+        // Handle template pre-selection
+        if (initialInstallmentId.startsWith('template_') && schoolSettings?.installmentPlan) {
+            const templateSum = schoolSettings.installmentPlan.reduce((sum: number, inst: any) => sum + (Number(inst.amount) || 0), 0);
+            const scaleFactor = templateSum > 0 ? (financials.requiredAmount / templateSum) : 1;
+            
+            const index = parseInt(initialInstallmentId.replace('template_', ''));
+            const instTemplate = schoolSettings.installmentPlan[index];
+            if (instTemplate) {
+                const calculatedAmount = Math.round((Number(instTemplate.amount) || 0) * scaleFactor);
+                setAmount(calculatedAmount.toString());
+                return;
+            }
+        }
+
+        if (installments.length > 0) {
+            const inst = installments.find((i: any) => i.id === initialInstallmentId || (installments.indexOf(i).toString() === initialInstallmentId));
+            if (inst) {
+                const rawSum = installments.reduce((sum: number, i: any) => sum + (Number(i.amount) || 0), 0);
+                let instAmt = Number(inst.amount) || 0;
+                if (financials.discountRate > 0 && Math.abs(rawSum - financials.requiredAmount) > 10 && rawSum > 0) {
+                    instAmt = Math.round(instAmt * (financials.requiredAmount / rawSum));
+                } else if (financials.isInstallmentsAtGross) {
+                    instAmt = Math.round(instAmt * discountFactor);
+                }
+                setAmount(instAmt.toString());
+            }
         }
     }
-  }, [initialInstallmentId, financeData]);
+  }, [initialInstallmentId, financeData, studentData, schoolSettings, financials]);
 
 
   // Financials calculation using shared utility for 100% accuracy
@@ -112,9 +163,9 @@ export const ParentPaymentView: React.FC<ParentPaymentViewProps> = ({
     const sortedTxns = [...financeData.transactions].sort((a: any, b: any) => {
        if (a.status === 'completed' && b.status !== 'completed') return -1;
        if (b.status === 'completed' && a.status !== 'completed') return 1;
-       const bTime = new Date(b.date || b.timestamp || 0).getTime();
-       const aTime = new Date(a.date || a.timestamp || 0).getTime();
-       return bTime - aTime;
+       const bTime = new Date(a.date || a.timestamp || 0).getTime();
+       const aTime = new Date(b.date || b.timestamp || 0).getTime();
+       return aTime - bTime;
     });
 
     const finalTxns = [];
@@ -122,7 +173,7 @@ export const ParentPaymentView: React.FC<ParentPaymentViewProps> = ({
     for (const t of sortedTxns) {
       const note = typeof t.note === 'string' ? t.note.replace(/وصل رقمي\s*-\s*/, '').replace(/وصل رقمي/, '').trim() : '';
       const amount = Number(t.amount) || 0;
-      const reqId = t.requestId;
+      const reqId = t.requestId || t.id;
       
       // CRITICAL: Ensure we don't show "completed" transactions for installments the admin marked as unpaid
       if (t.status === 'completed' && note !== '') {
@@ -154,7 +205,7 @@ export const ParentPaymentView: React.FC<ParentPaymentViewProps> = ({
       }
     }
     return finalTxns;
-  }, [financeData?.transactions]);
+  }, [financeData?.transactions, financeData?.installments]);
 
   useEffect(() => {
     console.log("DEBUG: ParentPaymentView paymentSettings:", JSON.stringify(paymentSettings));
@@ -169,8 +220,6 @@ export const ParentPaymentView: React.FC<ParentPaymentViewProps> = ({
     if (cleaned.startsWith('964')) return cleaned;
     return cleaned.replace('+', ''); 
   };
-
-  const financials = useMemo(() => calculateStudentFinancials(financeData, tuitionFee, discountRates), [financeData, tuitionFee, discountRates]);
 
   const availableMethods = useMemo(() => {
     // ParentPortal passes data.paymentMethods || data
@@ -231,7 +280,7 @@ export const ParentPaymentView: React.FC<ParentPaymentViewProps> = ({
     if (availableMethods.length > 0 && !availableMethods.find(m => m.id === method)) {
       setMethod(availableMethods[0].id);
     }
-  }, [availableMethods]);
+  }, [availableMethods, method]);
 
   const [imageError, setImageError] = useState(false);
 
@@ -243,34 +292,55 @@ export const ParentPaymentView: React.FC<ParentPaymentViewProps> = ({
   useEffect(() => {
     if (!studentCode) return;
 
-    const financeQuery = query(
-      collection(db, 'finance'),
-      where('studentCode', '==', studentCode || 'unassigned')
-    );
-
-    const unsubscribe = onSnapshot(financeQuery, async (snapshot) => {
-      if (!snapshot.empty) {
-        const data = snapshot.docs[0].data();
-        setFinanceData({ id: snapshot.docs[0].id, ...data });
-
-        if (data.schoolId) {
-          const schoolRef = doc(db, 'schools', data.schoolId);
-          const schoolSnap = await getDoc(schoolRef).catch(err => {
-            handleFirestoreError(err, OperationType.GET, `schools/${data.schoolId}`);
-            throw err;
+    const fetchFinanceData = async () => {
+      try {
+        const data = await getStudentFinanceProfile(studentCode);
+        if (data) {
+          // Map finance data to the structure expected by the UI
+          setFinanceData({
+            ...studentData,
+            ...data.finance,
+            discountRate: studentData?.discountRate ?? data.discountRate ?? data.finance?.discountRate,
+            discountType: studentData?.discountType ?? data.discountType ?? data.finance?.discountType,
+            status: studentData?.status ?? data.status,
+            totalAmount: studentData?.totalAmount ?? data.totalAmount,
+            transactions: data.transactions,
+            pendingRequests: data.pendingRequests,
+            schoolId: data.schoolId || studentData?.schoolId,
+            studentName: data.studentName || studentData?.name
           });
-          if (schoolSnap.exists()) {
-            setSchoolSettings(schoolSnap.data());
+
+          if (data.schoolId) {
+             const settings = await academicService.getSchoolSettings(data.schoolId);
+             if (settings) setSchoolSettings(settings);
           }
         }
+      } catch (error: any) {
+        if (error?.name === 'AbortError') return;
+        console.warn("[ParentPaymentView] Transient issue fetching finance profile:", error?.message || error);
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, 'finance', false);
-      setLoading(false);
+    };
+
+    fetchFinanceData();
+    const interval = setInterval(fetchFinanceData, 30000); // Poll every 30 seconds
+    
+    // Subscribe to realtime updates for this student's data
+    const unsubRealtime = realtimeManager.on('students', (event) => {
+        // We could check if it's the right student, but fetching is safe enough
+        fetchFinanceData();
+    });
+    
+    const unsubTransactions = realtimeManager.on('student_transactions', () => {
+        fetchFinanceData();
     });
 
-    return () => unsubscribe();
+    return () => {
+       clearInterval(interval);
+       unsubRealtime();
+       unsubTransactions();
+    };
   }, [studentCode]);
 
   const handleSubmitPayment = async () => {
@@ -282,7 +352,6 @@ export const ParentPaymentView: React.FC<ParentPaymentViewProps> = ({
       setTransactionDate(now.toISOString());
       
       const paymentData = {
-        studentCode,
         studentId: studentCode,
         studentName: studentData?.name || studentData?.fullName || financeData?.studentName || 'طالب غير محدد',
         senderName: senderName || studentData?.name || financeData?.studentName || 'ولي أمر',
@@ -290,30 +359,13 @@ export const ParentPaymentView: React.FC<ParentPaymentViewProps> = ({
         transactionId,
         cardholderName,
         method,
-        status: 'pending',
-        viewedByParent: false,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+        notes: `طلب تسديد من ${senderName || 'ولي أمر'}`,
         schoolId: studentData?.schoolId || financeData?.schoolId || null,
-        schoolName: schoolSettings?.name || studentData?.schoolName || financeData?.schoolName || '',
         installmentId: selectedInstallmentId
       };
 
-      await addDoc(collection(db, 'payment_requests'), paymentData);
+      await createPaymentRequest(paymentData as any);
       
-      try {
-        // Log the activity
-        await addDoc(collection(db, 'audit_logs'), {
-          action: 'طلب تسديد إلكتروني',
-          details: `قام ولي الأمر بإرسال طلب تسديد بمبلغ ${Number(amount).toLocaleString()} د.ع للطالب ${studentCode}`,
-          studentCode,
-          timestamp: serverTimestamp(),
-          type: 'finance'
-        });
-      } catch (logErr) {
-        console.warn('Logging failed but payment submitted');
-      }
-
       setStep('success');
     } catch (error) {
       console.error('Payment error:', error);
@@ -338,8 +390,8 @@ export const ParentPaymentView: React.FC<ParentPaymentViewProps> = ({
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-charcoal flex items-center justify-center">
-        <div className="w-12 h-12 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin"></div>
+      <div className="min-h-screen bg-charcoal p-6 max-w-md mx-auto space-y-6">
+        <FinanceSectionSkeleton />
       </div>
     );
   }
@@ -398,7 +450,7 @@ export const ParentPaymentView: React.FC<ParentPaymentViewProps> = ({
                 <Wallet size={24} />
               </div>
               <div>
-                <p className="text-[10px] text-white/40 font-black uppercase tracking-widest">مرحبا بك، {senderName}</p>
+                <p className="text-[10px] text-white/40 font-black uppercase tracking-widest">مرحباً بك ولي امر {senderName.replace( /ولي أمر/g, '' ).trim()}</p>
                 <h2 className="text-base font-black truncate max-w-[200px]">{financeData?.studentName}</h2>
               </div>
             </div>

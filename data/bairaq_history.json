@@ -1,0 +1,42 @@
+[
+  {
+    "id": "pose_thumbs_up_1786829075960_j74y7",
+    "assetId": "pose_thumbs_up",
+    "fileName": "thumbs_up_new.png",
+    "downloadUrl": "https://pub-r2.storage/thumbs_up_new.png",
+    "assetType": "image/png",
+    "fileSize": 10240,
+    "uploadedAt": "2026-08-15T21:24:35.960Z",
+    "status": "active"
+  },
+  {
+    "id": "captain_bairaq_guardian_restored_1786828914473",
+    "assetId": "captain_bairaq_guardian",
+    "fileName": "Restored Version",
+    "downloadUrl": "/mascot/test_persisted.jpg",
+    "assetType": "image/jpeg",
+    "fileSize": 0,
+    "uploadedAt": "2026-08-15T21:21:54.473Z",
+    "status": "restored"
+  },
+  {
+    "id": "captain_bairaq_guardian_1786828914419_4i4pi",
+    "assetId": "captain_bairaq_guardian",
+    "fileName": "v2.jpg",
+    "downloadUrl": "/mascot/version2.jpg",
+    "assetType": "image/jpeg",
+    "fileSize": 0,
+    "uploadedAt": "2026-08-15T21:21:54.419Z",
+    "status": "active"
+  },
+  {
+    "id": "captain_bairaq_guardian_1786828910163_gl7lf",
+    "assetId": "captain_bairaq_guardian",
+    "fileName": "guardian.jpg",
+    "downloadUrl": "/mascot/test_persisted.jpg",
+    "assetType": "image/jpeg",
+    "fileSize": 12345,
+    "uploadedAt": "2026-08-15T21:21:50.163Z",
+    "status": "active"
+  }
+]

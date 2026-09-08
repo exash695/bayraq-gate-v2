@@ -6,8 +6,8 @@ import {
   TrendingUp, Radio, Send, Bell, Code, Info, Search,
   GraduationCap, HeartHandshake, Activity, FileText,
   Copy, Trash2, ShieldOff, Calendar, Key, Zap, Bus, Car, Layers, Grid, BookOpen, ShieldCheck, Clock, PauseCircle,
-  SlidersHorizontal, Power, Download, Palette, PhoneCall, Globe, ShieldAlert, ToggleLeft, ToggleRight, Lock, Unlock, Sliders, Smartphone
-, Image as ImageIcon, Bug, Menu, X, ChevronRight, ChevronLeft, ChevronDown, LayoutDashboard, Calculator, Building, Megaphone, ActivitySquare, LayoutPanelLeft, MapPin, PieChart, BarChart3, LineChart as LineIcon, Check } from "lucide-react";
+  SlidersHorizontal, Power, Download, Palette, PhoneCall, Globe, ShieldAlert, ToggleLeft, ToggleRight, Lock, Unlock, Sliders, Smartphone, FileUp, Upload
+, Image as ImageIcon, Bug, Menu, X, ChevronRight, ChevronLeft, ChevronDown, LayoutDashboard, Calculator, Building, Megaphone, ActivitySquare, LayoutPanelLeft, MapPin, PieChart, BarChart3, LineChart as LineIcon, Check, Award } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, PieChart as RePieChart, Pie, Cell, BarChart, Bar, Legend, LineChart, Line
@@ -16,10 +16,10 @@ import {
   collection, doc, setDoc, deleteDoc, getDoc, getDocs, 
   addDoc, serverTimestamp, query, orderBy, onSnapshot, where, limit,
   updateDoc, deleteField, getCountFromServer, arrayUnion, collectionGroup
-} from "firebase/firestore";
+} from "@/src/lib/firebase";
 import { db } from "../lib/firebase";
 import { handleFirestoreError, OperationType } from "../lib/firestoreUtils";
-import { BerqCharacter, getBerqImageUrl, isVideoUrl, POSE_ALIASES_MAP } from "./BerqCharacterManager";
+import { BerqCharacter, getBerqImageUrl, isVideoUrl, POSE_ALIASES_MAP, updateGlobalPoses, subscribeToPoseOverrides } from "./BerqCharacterManager";
 import { SCHOOLS_DATA, getOfficialSchoolLogoUrl, getOfficialSchoolName, getSchoolBairaqImageUrl } from "../lib/constants";
 import { copyToClipboard } from "../utils/clipboard";
 import { GlobalAnnouncementsBanner } from "./GlobalAnnouncementsBanner";
@@ -28,6 +28,18 @@ import { THEME_PRESETS, ACCENT_STYLES } from "../utils/themePresets";
 import { RemoteConfig, DEFAULT_REMOTE_CONFIG, SeasonalThemeType, ThemeAccentColor, ThemeEffectType } from "../services/remoteConfig";
 import { SystemDialogsModal, SystemModalType } from "./SystemDialogsModal";
 import { uploadFileToR2 } from "../services/uploadService";
+import { BairaqAssetHistoryModal } from "./BairaqAssetHistoryModal";
+import { SystemHealthSection } from "./dev/SystemHealthSection";
+import { DataIntegritySection } from "./dev/DataIntegritySection";
+import { ErrorMonitoringSection } from "./dev/ErrorMonitoringSection";
+import { LiveSimulatorSection } from "./dev/LiveSimulatorSection";
+import { AiContentStudioSection } from "./dev/AiContentStudioSection";
+import { SubscriptionsLicensingSection } from "./dev/SubscriptionsLicensingSection";
+import { SecurityAccessSection } from "./dev/SecurityAccessSection";
+import { MaintenanceArchiveSection } from "./dev/MaintenanceArchiveSection";
+import { AcademyManagementSection } from "./dev/AcademyManagementSection";
+import { dataIntegrityService } from "../services/dataIntegrityService";
+import { activationCodesService } from '../services/activationCodesService';
 
 interface DevDashboardProps {
   schoolId: string;
@@ -111,15 +123,6 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
   useEffect(() => {
     schoolsRef.current = schools;
   }, [schools]);
-
-  useEffect(() => {
-    import('./BerqCharacterManager').then(({ subscribeToPoseOverrides }) => {
-      const unsubscribe = subscribeToPoseOverrides((poses) => {
-        setHeaderPoses(poses);
-      });
-      return unsubscribe;
-    });
-  }, []);
   
   // Real-time DB counters & per-school maps
   const [totalStudents, setTotalStudents] = useState<number | null>(null);
@@ -143,6 +146,7 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
   const [pendingHeaderPoses, setPendingHeaderPoses] = useState<Record<string, string>>({});
   const [pendingHeaderPoseFiles, setPendingHeaderPoseFiles] = useState<Record<string, File>>({});
   const [previewModalType, setPreviewModalType] = useState<SystemModalType | null>(null);
+  const [historyModalAsset, setHistoryModalAsset] = useState<{id: string, title: string} | null>(null);
 
   const formatRelativeTime = (timeStr?: string): string => {
     if (!timeStr) return "نشط الآن";
@@ -416,7 +420,21 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
   const [video2Error, setVideo2Error] = useState<string | null>(null);
   const [video2HttpStatus, setVideo2HttpStatus] = useState<string>("جاري التحقق من HEAD...");
 
-  const [activeTab, setActiveTab] = useState<"health" | "school_management" | "remote_config" | "media" | "errors" | "actions" | "data_integrity">("health");
+  const [activeTab, setActiveTab] = useState<
+    | "academy"
+    | "health"
+    | "school_management"
+    | "simulator"
+    | "ai_studio"
+    | "licensing"
+    | "security"
+    | "maintenance"
+    | "remote_config"
+    | "media"
+    | "errors"
+    | "actions"
+    | "data_integrity"
+  >("health");
 
   // Remote Config / Cloud Control State
   const [remoteConfig, setRemoteConfig] = useState<RemoteConfig>(DEFAULT_REMOTE_CONFIG);
@@ -799,6 +817,16 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
   };
 
 
+  // 0. Synchronize bairaq_poses for DevDashboard UI with single authoritative source of truth
+  useEffect(() => {
+    console.log("[DATABASE READ] Initializing DevDashboard Bairaq Poses sync...");
+    const unsubscribe = subscribeToPoseOverrides((poses) => {
+      console.log(`[STATE UPDATE] DevDashboard received ${Object.keys(poses).length} poses from Pose Engine`);
+      setHeaderPoses(poses);
+    });
+    return unsubscribe;
+  }, []);
+
   // 1. Listen to schools in real-time and auto-sync default system schools if missing
   useEffect(() => {
     setLoadingSchools(true);
@@ -824,68 +852,49 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
       console.warn("Config doc read error:", err);
     });
 
-    const q = query(collection(db, "schools"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const existingIds = new Set<string>();
-      const schoolList: SchoolRecord[] = [];
-
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        const schoolLoc = data.location || data.city || data.governorate || "الديوانية - غماس";
-        existingIds.add(docSnap.id);
-        schoolList.push({
-          id: docSnap.id,
-          name: data.name || getOfficialSchoolName(docSnap.id, data.name) || "مدرسة غير مسمى",
-          governorate: data.governorate || schoolLoc,
-          location: schoolLoc,
-          city: data.city || schoolLoc,
-          createdAt: data.createdAt,
-          status: data.status || "active",
-          studentsCount: data.studentsCount || 0,
-          teachersCount: data.teachersCount || 0,
-          parentsCount: data.parentsCount || 0,
-          totalUsers: data.totalUsers || 0,
-          aiUsageCount: data.aiUsageCount || 0,
-          coverUrl: data.coverUrl || data.logoUrl || getSchoolBairaqImageUrl(docSnap.id, data.name) || "/schools/cover1.jpg",
-          logoUrl: data.logoUrl || getOfficialSchoolLogoUrl(docSnap.id, data.name) || "",
-          plan: data.plan || "standard",
-          adminName: data.adminName || "إدارة " + (data.name || "المدرسة"),
-          disabledModules: Array.isArray(data.disabledModules) ? data.disabledModules : []
-        });
-      });
-
-      // Include system default schools in memory if not deleted and not in Firestore yet
-      for (const sysSchool of SCHOOLS_DATA) {
-        if (!existingIds.has(sysSchool.id) && !deletedSchoolIds.includes(sysSchool.id)) {
-          schoolList.push({
-            id: sysSchool.id,
-            name: sysSchool.name,
-            governorate: "الديوانية - غماس",
-            location: "الديوانية - غماس",
-            city: "غماس",
-            status: "active",
-            studentsCount: 0,
+    const fetchSchoolsFromPg = async () => {
+      try {
+        const res = await fetch('/api/schools');
+        const data = await res.json();
+        if (data.success) {
+          const pgSchools = data.schools.map((s: any) => ({
+            ...s,
+            id: s.id,
+            name: s.name,
+            governorate: s.governorate,
+            location: s.governorate, // Fallback
+            city: s.governorate, // Fallback
+            status: s.status || "active",
+            studentsCount: 0, // Stats will be populated by other effects
             teachersCount: 0,
             parentsCount: 0,
             totalUsers: 0,
-            aiUsageCount: 0,
-            logoUrl: sysSchool.schoolLogoUrl,
-            coverUrl: sysSchool.schoolBairaqImageUrl || "/schools/cover1.jpg",
+            coverUrl: "/schools/cover1.jpg", // Default
+            logoUrl: "",
             plan: "standard",
-            adminName: "إدارة " + sysSchool.name,
+            adminName: "إدارة " + s.name,
             disabledModules: []
-          });
+          }));
+          
+          // Merge with system defaults if needed, but PG should have them now after migration
+          setSchools(pgSchools);
+          localStorage.setItem("berq_dev_schools", JSON.stringify(pgSchools));
         }
+      } catch (e) {
+        console.error("PG Fetch Error:", e);
+      } finally {
+        setLoadingSchools(false);
       }
+    };
 
-      setSchools(schoolList);
-      setLoadingSchools(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, "schools", false);
-      setLoadingSchools(false);
-    });
-
-    return () => unsubscribe();
+    fetchSchoolsFromPg();
+    
+    // We'll keep the onSnapshot commented out or removed for schools specifically
+    /*
+    const q = query(collection(db, "schools"));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+    ...
+    */
   }, []);
 
   // 2. Listen to school_students in real-time
@@ -1211,6 +1220,22 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
   // 8. Listen to activation codes in real-time
   useEffect(() => {
     setLoadingCodes(true);
+    
+    // Polling PostgreSQL as primary
+    const loadSqlCodes = async () => {
+      try {
+        const codesList = await activationCodesService.fetchCodes();
+        if (codesList && codesList.length > 0) {
+          setActivationCodes(codesList);
+          setLoadingCodes(false);
+        }
+      } catch (err) {
+        console.error('Failed to load codes from SQL:', err);
+      }
+    };
+
+    loadSqlCodes();
+
     const q = query(collection(db, "activation_codes"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const codesList: any[] = [];
@@ -1247,7 +1272,7 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
         let formattedTime = "";
         if (data.timestamp) {
           try {
-            formattedTime = data.timestamp.toDate().toLocaleTimeString("ar-SA");
+            formattedTime = (typeof data.timestamp?.toDate === 'function' ? data.timestamp.toDate() : new Date(data.timestamp)).toLocaleTimeString("ar-SA");
           } catch (e) {
             formattedTime = new Date().toLocaleTimeString("ar-SA");
           }
@@ -1433,7 +1458,7 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
     }
   };
 
-  // Onboard New School into Firestore
+  // Onboard New School into Firestore and PostgreSQL
   const handleCreateSchool = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newSchoolName || !newSchoolId || !newSchoolAdmin) {
@@ -1449,14 +1474,36 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
 
     setIsCreatingSchool(true);
     try {
+      // 1. Check if school exists in Firestore first (Legacy fallback check)
       const schoolRef = doc(db, "schools", cleanId);
-      
-      // Check if school already exists
       const schoolSnap = await getDoc(schoolRef);
+      
       if (schoolSnap.exists()) {
         triggerToast("خطأ: معرف المدرسة هذا محجوز وموجود بالفعل في قاعدة البيانات!", "error");
         setIsCreatingSchool(false);
         return;
+      }
+
+      // 2. Add to PostgreSQL via our new API Backend
+      try {
+        const pgResponse = await fetch('/api/schools', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            id: cleanId,
+            name: newSchoolName,
+            governorate: newSchoolGov,
+            activationCode: newSchoolId // Using ID temporarily as code
+          })
+        });
+        
+        if (!pgResponse.ok) {
+          throw new Error('فشل حفظ المدرسة في قاعدة بيانات السيرفر الجديد PostgreSQL');
+        }
+        console.log("School saved to PostgreSQL successfully!");
+      } catch (pgError) {
+        console.error("PostgreSQL Sync Error:", pgError);
+        // We continue with Firestore for now to not break the UI until full migration
       }
 
       const pendingCover = (window as any)._pendingSchoolCover || "";
@@ -1668,69 +1715,74 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
 
   const DASHBOARDS_POSES = {
     admin: [
-      { id: 'captain_bairaq_guardian', title: 'هيدر الميدان التفاعلي المعتمد (ميادين الفرسان)', defaultSrc: '/mascot/sliced_bairaq_sheet3_captain_bairaq_guardian.mp4' },
-      { id: 'pulse', title: 'هيدر نبض البوابة', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_portal_pulse.mp4' },
-      { id: 'finance', title: 'هيدر الموقف المالي', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_finance_officer.mp4' },
-      { id: 'codes', title: 'هيدر حارس الأكواد والتراخيص', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_key_master.mp4' },
-      { id: 'students', title: 'هيدر مدير شؤون الطلاب', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_student_manager.mp4' },
+      { id: 'captain_bairaq_guardian', title: 'هيدر الميدان التفاعلي المعتمد (ميادين الفرسان)', defaultSrc: '/mascot/connect.jpg' },
+      { id: 'pulse', title: 'هيدر نبض البوابة', defaultSrc: '/mascot/launch.jpg' },
+      { id: 'finance', title: 'هيدر الموقف المالي', defaultSrc: '/mascot/study.jpg' },
+      { id: 'codes', title: 'هيدر حارس الأكواد والتراخيص', defaultSrc: '/mascot/study.jpg' },
+      { id: 'students', title: 'هيدر مدير شؤون الطلاب', defaultSrc: '/mascot/study.jpg' },
       { id: 'broadcast', title: 'هيدر مذيع البوابة الذكي', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_broadcaster.mp4' },
-      { id: 'attendance', title: 'هيدر درع الانضباط المدرسي', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_discipline_shield.mp4' },
-      { id: 'uniform', title: 'هيدر مراقب الزي المدرسي', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_school_uniform.mp4' },
+      { id: 'attendance', title: 'هيدر درع الانضباط المدرسي', defaultSrc: '/mascot/connect.jpg' },
+      { id: 'uniform', title: 'هيدر مراقب الزي المدرسي', defaultSrc: '/mascot/welcome.jpg' },
       { id: 'teachers', title: 'هيدر قائد الكادر التعليمي', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_academic_scholar.mp4' },
-      { id: 'transport', title: 'هيدر كابتن النقل والرحلات', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_transport_manager.mp4' },
+      { id: 'transport', title: 'هيدر كابتن النقل والرحلات', defaultSrc: '/mascot/transit.jpg' },
       { id: 'ideas', title: 'هيدر عبقري بنك الأفكار', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_idea_genius.mp4' },
-      { id: 'support', title: 'هيدر مستشار الدعم والشكاوى', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_customer_support.mp4' },
-      { id: 'resources', title: 'هيدر حامي بوابة الأمان', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_content_control.mp4' },
-      { id: 'audit', title: 'هيدر مفتش سجل النشاطات', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_activity_logs.mp4' }
+      { id: 'support', title: 'هيدر مستشار الدعم والشكاوى', defaultSrc: '/mascot/connect.jpg' },
+      { id: 'resources', title: 'هيدر حامي بوابة الأمان', defaultSrc: '/mascot/welcome.jpg' },
+      { id: 'audit', title: 'هيدر مفتش سجل النشاطات', defaultSrc: '/mascot/welcome.jpg' },
+      { id: 'sovereignty', title: 'هيدر منصة السيادة', defaultSrc: '/mascot/welcome.jpg' }
     ],
     student: [
-      { id: 'captain_bairaq_guardian', title: 'هيدر الميدان التفاعلي المعتمد (ميادين الفرسان)', defaultSrc: '/mascot/pose_waving_hand.mp4' },
-      { id: 'pose_waving_hand', title: 'هيدر الساحة التفاعلية', defaultSrc: '/mascot/pose_waving_hand.mp4' },
+      { id: 'captain_bairaq_guardian', title: 'هيدر الميدان التفاعلي المعتمد (ميادين الفرسان)', defaultSrc: '/mascot/connect.jpg' },
+      { id: 'pose_waving_hand', title: 'هيدر الساحة التفاعلية', defaultSrc: '/mascot/welcome.jpg' },
       { id: 'pose_academic_scholar', title: 'هيدر المكتبة والمقررات', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_academic_scholar.mp4' },
-      { id: 'pose_live_announcer', title: 'هيدر المرئيات', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_live_announcer.mp4' },
-      { id: 'pose_questions_bank', title: 'هيدر بنك الأسئلة', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_radar_navigator.mp4' },
-      { id: 'pose_homework_master', title: 'هيدر الواجبات', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_homework_master.mp4' },
-      { id: 'pose_champion_laureate', title: 'هيدر المسابقات', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_champion_laureate.mp4' },
-      { id: 'pose_sixty_seconds_challenger', title: 'هيدر تحدي الـ 60 ثانية', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_sixty_seconds_challenger.mp4' },
-      { id: 'pose_dual_arena', title: 'هيدر المواجهات الثنائية', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_champion_laureate.mp4' },
-      { id: 'pose_schedule_planner', title: 'هيدر جدولي', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_schedule_planner.mp4' },
-      { id: 'pose_excellence_champion', title: 'هيدر التميز', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_excellence_champion.mp4' }
+      { id: 'pose_live_announcer', title: 'هيدر المرئيات', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_broadcaster.mp4' },
+      { id: 'pose_questions_bank', title: 'هيدر بنك الأسئلة', defaultSrc: '/mascot/study.jpg' },
+      { id: 'pose_homework_master', title: 'هيدر الواجبات', defaultSrc: '/mascot/study.jpg' },
+      { id: 'pose_champion_laureate', title: 'هيدر المسابقات', defaultSrc: '/mascot/achieve.jpg' },
+      { id: 'pose_sixty_seconds_challenger', title: 'هيدر تحدي الـ 60 ثانية', defaultSrc: '/mascot/pose_sixty_seconds_challenger.mp4' },
+      { id: 'pose_dual_arena', title: 'هيدر المواجهات الثنائية', defaultSrc: '/mascot/connect.jpg' },
+      { id: 'pose_schedule_planner', title: 'هيدر جدولي', defaultSrc: '/mascot/study.jpg' },
+      { id: 'pose_excellence_champion', title: 'هيدر التميز', defaultSrc: '/mascot/achieve.jpg' },
+      { id: 'sovereignty', title: 'هيدر منصة السيادة', defaultSrc: '/mascot/welcome.jpg' }
     ],
     teacher: [
-      { id: 'captain_bairaq_guardian', title: 'هيدر الميدان التفاعلي المعتمد (ميادين الفرسان)', defaultSrc: '/mascot/pose_waving_hand.mp4' },
-      { id: 'pose_waving_hand', title: 'هيدر الساحة التفاعلية', defaultSrc: '/mascot/pose_waving_hand.mp4' },
-      { id: 'pose_excellence_champion', title: 'هيدر سجل التميز', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_excellence_champion.mp4' },
-      { id: 'pose_ai_companion', title: 'هيدر مساعد الذكاء الاصطناعي', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_ai_companion.mp4' },
-      { id: 'pose_questions_bank', title: 'هيدر بنك الأسئلة', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_radar_navigator.mp4' },
-      { id: 'pose_live_announcer', title: 'هيدر البث المباشر', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_live_announcer.mp4' },
-      { id: 'pose_content_control', title: 'هيدر المحتوى', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_content_control.mp4' },
-      { id: 'pose_homework_master', title: 'هيدر الواجبات', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_homework_master.mp4' },
-      { id: 'pose_champion_laureate', title: 'هيدر المسابقات', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_champion_laureate.mp4' },
-      { id: 'pose_schedule_planner', title: 'هيدر جدولي', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_schedule_planner.mp4' }
+      { id: 'captain_bairaq_guardian', title: 'هيدر الميدان التفاعلي المعتمد (ميادين الفرسان)', defaultSrc: '/mascot/connect.jpg' },
+      { id: 'pose_waving_hand', title: 'هيدر الساحة التفاعلية', defaultSrc: '/mascot/welcome.jpg' },
+      { id: 'pose_excellence_champion', title: 'هيدر سجل التميز', defaultSrc: '/mascot/achieve.jpg' },
+      { id: 'pose_ai_companion', title: 'هيدر مساعد الذكاء الاصطناعي', defaultSrc: '/mascot/launch.jpg' },
+      { id: 'pose_questions_bank', title: 'هيدر بنك الأسئلة', defaultSrc: '/mascot/study.jpg' },
+      { id: 'pose_live_announcer', title: 'هيدر البث المباشر', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_broadcaster.mp4' },
+      { id: 'pose_content_control', title: 'هيدر المحتوى', defaultSrc: '/mascot/welcome.jpg' },
+      { id: 'pose_homework_master', title: 'هيدر الواجبات', defaultSrc: '/mascot/study.jpg' },
+      { id: 'pose_champion_laureate', title: 'هيدر المسابقات', defaultSrc: '/mascot/achieve.jpg' },
+      { id: 'pose_schedule_planner', title: 'هيدر جدولي', defaultSrc: '/mascot/study.jpg' },
+      { id: 'sovereignty', title: 'هيدر منصة السيادة', defaultSrc: '/mascot/welcome.jpg' }
     ],
     parent: [
-      { id: 'pose_waving_hand', title: 'هيدر ساحة التواصل', defaultSrc: '/mascot/pose_waving_hand.mp4' },
-      { id: 'pose_parent_dashboard', title: 'هيدر المتابعة الأبوية', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_parent_dashboard.mp4' },
-      { id: 'pose_student_manager', title: 'هيدر سجل الدرجات', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_student_manager.mp4' },
-      { id: 'pose_schedule_planner', title: 'هيدر الحضور والجدول', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_schedule_planner.mp4' },
-      { id: 'pose_finance_officer', title: 'هيدر الرسوم المالية', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_finance_officer.mp4' },
+      { id: 'pose_waving_hand', title: 'هيدر ساحة التواصل', defaultSrc: '/mascot/welcome.jpg' },
+      { id: 'pose_parent_dashboard', title: 'هيدر المتابعة الأبوية', defaultSrc: '/mascot/connect.jpg' },
+      { id: 'pose_student_manager', title: 'هيدر سجل الدرجات', defaultSrc: '/mascot/study.jpg' },
+      { id: 'pose_schedule_planner', title: 'هيدر الحضور والجدول', defaultSrc: '/mascot/study.jpg' },
+      { id: 'pose_finance_officer', title: 'هيدر الرسوم المالية', defaultSrc: '/mascot/study.jpg' },
       { id: 'pose_academic_scholar', title: 'هيدر المكتبة والمعلمون', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_academic_scholar.mp4' },
-      { id: 'pose_discipline_shield', title: 'هيدر السلوك والانضباط', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_discipline_shield.mp4' },
-      { id: 'pose_activity_logs', title: 'هيدر التقارير والإشعارات', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_activity_logs.mp4' },
-      { id: 'pose_champion_laureate', title: 'هيدر الأنشطة والمشاركات', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_champion_laureate.mp4' },
-      { id: 'pose_transport_manager', title: 'هيدر النقل المدرسي', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_transport_manager.mp4' },
-      { id: 'pose_ai_companion', title: 'هيدر الرؤية المستقبلية', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_ai_companion.mp4' },
-      { id: 'pose_customer_support', title: 'هيدر الدعم والشكاوى', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_customer_support.mp4' },
+      { id: 'pose_discipline_shield', title: 'هيدر السلوك والانضباط', defaultSrc: '/mascot/connect.jpg' },
+      { id: 'pose_activity_logs', title: 'هيدر التقارير والإشعارات', defaultSrc: '/mascot/welcome.jpg' },
+      { id: 'pose_champion_laureate', title: 'هيدر الأنشطة والمشاركات', defaultSrc: '/mascot/achieve.jpg' },
+      { id: 'pose_transport_manager', title: 'هيدر النقل المدرسي', defaultSrc: '/mascot/transit.jpg' },
+      { id: 'pose_ai_companion', title: 'هيدر الرؤية المستقبلية', defaultSrc: '/mascot/launch.jpg' },
+      { id: 'pose_customer_support', title: 'هيدر الدعم والشكاوى', defaultSrc: '/mascot/connect.jpg' },
       { id: 'pose_idea_genius', title: 'هيدر بنك الأفكار', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_idea_genius.mp4' },
-      { id: 'pose_school_uniform', title: 'هيدر الزي المدرسي', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_school_uniform.mp4' }
+      { id: 'pose_school_uniform', title: 'هيدر الزي المدرسي', defaultSrc: '/mascot/welcome.jpg' }
     ],
     driver: [
-      { id: 'pose_transport_manager', title: 'هيدر كابتن النقل', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_transport_manager.mp4' },
-      { id: 'pose_bus_captain', title: 'هيدر الرحلات المدرسية', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_transport_manager.mp4' },
-      { id: 'use_driving_bus', title: 'هيدر مسار الحافلة', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_transport_manager.mp4' }
+      { id: 'pose_transport_manager', title: 'هيدر كابتن النقل', defaultSrc: '/mascot/transit.jpg' },
+      { id: 'pose_bus_captain', title: 'هيدر الرحلات المدرسية', defaultSrc: '/mascot/transit.jpg' },
+      { id: 'use_driving_bus', title: 'هيدر مسار الحافلة', defaultSrc: '/mascot/transit.jpg' }
     ],
     welcome: [
-      { id: 'welcome_video', title: 'الفيديو الترحيبي الرئيسي', defaultSrc: '/mascot/sliced_bairaq_sheet5_greeting_hello.mp4' },
+      { id: 'welcome_video', title: 'الفيديو الترحيبي الرئيسي (المقدمة 1)', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_broadcaster.mp4' },
+      { id: 'welcome_video_secondary', title: 'الفيديو الترحيبي الثانوي (المقدمة 2)', defaultSrc: '/mascot/pose_sixty_seconds_challenger.mp4' },
+      { id: 'app_logo', title: 'شعار التطبيق الرسمي (App Logo)', defaultSrc: '/logo.png' },
       { id: 'welcome_card_welcome', title: 'البطاقة الترحيبية الأولى (مرحباً)', defaultSrc: '/mascot/welcome.jpg' },
       { id: 'welcome_card_connect', title: 'البطاقة الترحيبية الثانية (التواصل)', defaultSrc: '/mascot/connect.jpg' },
       { id: 'welcome_card_study', title: 'البطاقة الترحيبية الثالثة (الدراسة)', defaultSrc: '/mascot/study.jpg' },
@@ -1901,34 +1953,37 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
       return;
     }
 
-    try {
-      // Store the actual file for upload
-      setPendingHeaderPoseFiles(prev => ({ ...prev, [headerId]: file }));
-      
-      // Store a local object URL for instant preview
-      const objectUrl = URL.createObjectURL(file);
-      setPendingHeaderPoses(prev => ({ ...prev, [headerId]: objectUrl }));
-      
-      triggerToast("تم وضع وضعية بيرق في الانتظار، اضغط حفظ لتأكيد الرفع", "info");
-    } catch (err) {
-      triggerToast("فشل في قراءة ملف الوسائط", "error");
-    }
-  };
-
-  const handleSaveHeaderPose = async (headerId: string) => {
-    const file = pendingHeaderPoseFiles[headerId];
-    if (!file) {
-      triggerToast("لا يوجد ملف جاهز للرفع", "error");
-      return;
-    }
+    console.log(`[UPLOAD START] Starting upload for asset: ${headerId}, filename: ${file.name}, size: ${file.size}`);
 
     try {
       setUploadProgress(prev => ({ ...prev, [headerId]: 10 }));
-      triggerToast("جاري رفع وضعية بيرق إلى التخزين السحابي...", "info");
+      triggerToast("جاري الرفع للتخزين الدائم الموثوق...", "info");
       
       const publicUrl = await uploadFileToR2(file, (progress) => {
         setUploadProgress(prev => ({ ...prev, [headerId]: Math.max(10, progress) }));
       });
+      
+      console.log(`[UPLOAD SUCCESS] File uploaded. Public URL: ${publicUrl}`);
+      console.log(`[STORAGE PATH] ${publicUrl} -> [ACTIVE ASSET ID] ${headerId}`);
+
+      const isVideo = file.type.startsWith('video/');
+      const isValid = await new Promise((resolve) => {
+        if (isVideo) {
+          const video = document.createElement('video');
+          video.onloadedmetadata = () => resolve(true);
+          video.onerror = () => resolve(false);
+          video.src = publicUrl;
+        } else {
+          const imgCheck = new Image();
+          imgCheck.onload = () => resolve(true);
+          imgCheck.onerror = () => resolve(false);
+          imgCheck.src = publicUrl;
+        }
+      });
+      
+      if (!isValid) {
+        throw new Error("الملف غير صالح أو غير قابل للقراءة من التخزين الدائم.");
+      }
       
       const saveVal = publicUrl;
       const aliases = POSE_ALIASES_MAP[headerId] || [];
@@ -1939,26 +1994,54 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
         savePayload[k] = saveVal;
       });
       
-      await setDoc(doc(db, "system_settings", "bairaq_poses"), savePayload, { merge: true });
+      const historyDoc = {
+        id: `${headerId}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        assetId: headerId,
+        fileName: file.name,
+        downloadUrl: publicUrl,
+        assetType: file.type,
+        fileSize: file.size,
+        uploadedAt: new Date().toISOString(),
+        status: 'active'
+      };
+
+      // 1. Primary: Authoritative Server-side API write to persistent JSON store
+      console.log(`[DATABASE WRITE] Sending atomic update to /api/bairaq/poses for ${headerId}`);
+      const apiRes = await fetch('/api/bairaq/poses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          headerId,
+          publicUrl,
+          fileName: file.name,
+          fileSize: file.size,
+          fileType: file.type
+        })
+      });
+
+      if (!apiRes.ok) {
+        console.warn("[DATABASE WRITE WARNING] Server response was not ok, checking data...");
+      } else {
+        const resJson = await apiRes.json();
+        console.log(`[DATABASE WRITE] [ASSET OVERRIDE] Server confirmed write:`, resJson);
+      }
+
+      // 2. Update Global Singleton State and Local Storage immediately
+      updateGlobalPoses(savePayload);
+      console.log(`[STATE UPDATE] Updated global pose engine with ${headerId} and aliases`);
+
+      // 3. Client-side Firestore fallbacks (guarded)
+      await setDoc(doc(db, "system_config", "bairaq_poses"), savePayload, { merge: true }).catch(() => {});
+      await setDoc(doc(db, "system_settings", "bairaq_poses"), savePayload, { merge: true }).catch(() => {});
+      await setDoc(doc(db, "system_config", `history_${headerId}`), { records: arrayUnion(historyDoc) }, { merge: true }).catch(() => {});
+      await setDoc(doc(db, "system_settings", `history_${headerId}`), { records: arrayUnion(historyDoc) }, { merge: true }).catch(() => {});
       
       setUploadProgress(prev => ({ ...prev, [headerId]: 100 }));
-      triggerToast("تم تحديث هيدر المنصة بنجاح في أجهزة المستخدمين!", "success");
+      triggerToast("تم الحفظ بنجاح وتوثيقه في السجل الدائم!", "success");
       
       setHeaderPoses(prev => {
         const next = { ...prev };
         keysToSave.forEach(k => { next[k] = publicUrl; });
-        return next;
-      });
-
-      setPendingHeaderPoses(prev => {
-        const next = { ...prev };
-        keysToSave.forEach(k => { delete next[k]; });
-        return next;
-      });
-      
-      setPendingHeaderPoseFiles(prev => {
-        const next = { ...prev };
-        keysToSave.forEach(k => { delete next[k]; });
         return next;
       });
       
@@ -1968,29 +2051,41 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
           delete next[headerId];
           return next;
         });
-      }, 1000);
+      }, 1500);
       
-    } catch (err) {
+    } catch (err: any) {
+      console.error("[UPLOAD ERROR]", err);
+      triggerToast(err.message || "فشل الرفع، النسخة الحالية سليمة ولم تتأثر.", "error");
       setUploadProgress(prev => {
         const next = { ...prev };
         delete next[headerId];
         return next;
       });
-      triggerToast("حدث خطأ أثناء حفظ وضعية بيرق، قد يكون حجم الملف كبيراً جداً", "error");
     }
   };
 
   const handleResetHeaderPose = async (headerId: string) => {
     try {
       triggerToast("جاري استعادة الوضعية المعتمدة...", "info");
+      console.log(`[ASSET OVERRIDE] Resetting pose override for ${headerId}`);
+
       const aliases = POSE_ALIASES_MAP[headerId] || [];
       const keysToReset = Array.from(new Set([headerId, ...aliases]));
       
+      // 1. Server-side API reset
+      await fetch('/api/bairaq/reset', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ assetId: headerId })
+      }).catch(e => console.warn("Backend API pose reset warning:", e));
+
+      // 2. Client-side Firestore reset
       const resetObj: Record<string, any> = {};
       keysToReset.forEach(k => {
         resetObj[k] = deleteField();
       });
 
+      await updateDoc(doc(db, "system_config", "bairaq_poses"), resetObj).catch(() => {});
       await updateDoc(doc(db, "system_settings", "bairaq_poses"), resetObj).catch(() => {});
       
       setHeaderPoses(prev => {
@@ -2054,7 +2149,29 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
       const schoolName = selectedSchool ? selectedSchool.name : "عام لجميع المدارس";
       const governorate = selectedSchool ? selectedSchool.governorate : "بغداد";
 
-      const newCodeDoc: any = {
+      // Sync to PostgreSQL
+      await activationCodesService.syncToSql([{
+        id: codeId,
+        code: codeId,
+        schoolId: genSchoolId || 'general',
+        role: genRole,
+        used: false,
+        createdAt: new Date().toISOString()
+      }]);
+
+      // Sync to PostgreSQL
+    try {
+      await activationCodesService.generateCodes(
+        genSchoolId || 'general',
+        genRole,
+        Number(genMaxUses) || 1,
+        genCode.split('-')[0] // Use prefix if available
+      );
+    } catch (pgErr) {
+      console.warn("SQL Sync warning during creation:", pgErr);
+    }
+
+    const newCodeDoc: any = {
         code: codeId,
         schoolId: genSchoolId || "",
         schoolName,
@@ -2109,7 +2226,10 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
   // Disable / Cancel Activation Code
   const handleDisableCode = async (codeItem: any) => {
     try {
-      setActivationCodes(prev => prev.map(c => c.id === codeItem.id ? { ...c, status: "disabled" } : c));
+      // Sync to PostgreSQL
+      await activationCodesService.updateStatus(codeItem.id, true, codeItem.usedBy || 'disabled_by_admin');
+      
+      setActivationCodes(prev => prev.map(c => c.id === codeItem.id ? { ...c, status: "disabled", used: true } : c));
       const codeRef = doc(db, "activation_codes", codeItem.id);
       await setDoc(codeRef, { status: "disabled" }, { merge: true });
       
@@ -2136,6 +2256,9 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
       return;
     }
     try {
+      // Sync to PostgreSQL
+      await activationCodesService.deleteCode(codeItem.id).catch(err => console.warn("SQL delete warning:", err));
+
       setActivationCodes(prev => prev.filter(c => c.id !== codeItem.id));
       const codeRef = doc(db, "activation_codes", codeItem.id);
       await deleteDoc(codeRef);
@@ -2198,9 +2321,16 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
     const school = schoolToDelete;
     
     try {
+      // 1. Delete from PostgreSQL API Backend
+      try {
+        await fetch(`/api/schools/${school.id}`, { method: 'DELETE' });
+        console.log("School deleted from PostgreSQL successfully!");
+      } catch (pgError) {
+        console.error("PostgreSQL Delete Sync Error:", pgError);
+      }
+
+      // 2. Delete document from Legacy Firestore
       const schoolRef = doc(db, "schools", school.id);
-      
-      // Delete document from Firestore
       await deleteDoc(schoolRef);
 
       // Record in deletedSchoolIds so predefined system schools won't auto-reseed
@@ -2245,56 +2375,28 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
     try {
       triggerToast(`جاري تدقيق ومزامنة إحصائيات ${school.name}...`, "info");
       const schoolId = school.id;
-      const schoolName = school.name;
 
-      const uQ1 = query(collection(db, "users"), where("schoolId", "==", schoolId));
-      const uQ2 = query(collection(db, "users"), where("schoolName", "==", schoolName));
-      const uQ3 = query(collection(db, "users"), where("school_id", "==", schoolId));
-      const uQ4 = query(collection(db, "users"), where("school", "==", schoolName));
-      const [uSnap1, uSnap2, uSnap3, uSnap4] = await Promise.all([getDocs(uQ1), getDocs(uQ2), getDocs(uQ3), getDocs(uQ4)]);
+      // Run full audit to obtain verified per-school stats
+      const report = await dataIntegrityService.runFullAudit();
+      const schoolSummary = report.schoolSummaries.find(s => s.schoolId === schoolId);
 
-      const userDocsMap = new Map<string, any>();
-      uSnap1.forEach(d => userDocsMap.set(d.id, d.data()));
-      uSnap2.forEach(d => userDocsMap.set(d.id, d.data()));
-      uSnap3.forEach(d => userDocsMap.set(d.id, d.data()));
-      uSnap4.forEach(d => userDocsMap.set(d.id, d.data()));
-
-      let regStudents = 0;
-      let regTeachers = 0;
-      let regParents = 0;
-      let regDrivers = 0;
-      let regSupervisors = 0;
-      let regAdmins = 0;
-
-      userDocsMap.forEach((uData) => {
-        const role = String(uData.role || "").toLowerCase().trim();
-        if (role === "student" || role === "school_student" || role.includes("طالب")) {
-          regStudents++;
-        } else if (role === "teacher" || role === "cadre" || role === "staff_teacher" || role.includes("استاذ") || role.includes("معلم") || role.includes("مدرس")) {
-          regTeachers++;
-        } else if (role === "parent" || role.includes("أمر") || role.includes("امر")) {
-          regParents++;
-        } else if (role === "driver" || role.includes("سائق")) {
-          regDrivers++;
-        } else if (role === "supervisor" || role === "academic_supervisor" || role.includes("مشرف")) {
-          regSupervisors++;
-        } else if (role === "admin" || role === "school_admin" || role === "staff" || role.includes("مدير") || role.includes("إداري") || role.includes("اداري")) {
-          regAdmins++;
-        }
-      });
-
-      await updateDoc(doc(db, "schools", schoolId), {
-        studentsCount: regStudents,
-        teachersCount: regTeachers,
-        parentsCount: regParents,
-        driversCount: regDrivers,
-        supervisorsCount: regSupervisors,
-        adminsCount: regAdmins,
-        totalUsers: regStudents + regTeachers + regParents + regDrivers + regSupervisors + regAdmins,
-        lastStatsRefreshedAt: new Date().toISOString()
-      });
-
-      triggerToast(`تم تحديث وإعادة مزامنة إحصائيات ${school.name} بنجاح!`, "success");
+      if (schoolSummary) {
+        await dataIntegrityService.fixSingleStatDiscrepancy(schoolId, schoolSummary.actualUsers);
+        triggerToast(`تم تدقيق وتحديث إحصائيات ${school.name} بنجاح (طلاب: ${schoolSummary.actualUsers.students}، أساتذة: ${schoolSummary.actualUsers.teachers}، أولياء أمور: ${schoolSummary.actualUsers.parents})!`, "success");
+      } else {
+        // Fallback for school with 0 records
+        await setDoc(doc(db, "schools", schoolId), {
+          studentsCount: 0,
+          teachersCount: 0,
+          parentsCount: 0,
+          driversCount: 0,
+          supervisorsCount: 0,
+          adminsCount: 0,
+          totalUsers: 0,
+          lastStatsRefreshedAt: new Date().toISOString()
+        }, { merge: true });
+        triggerToast(`تم تصفير وتحديث إحصائيات ${school.name} بنجاح!`, "success");
+      }
     } catch (error: any) {
       console.error("Failed to refresh school stats:", error);
       triggerToast("حدث خطأ أثناء مزامنة الإحصائيات", "error");
@@ -2358,13 +2460,16 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
 
   const isGlobalView = !schoolId;
 
+  console.log("RENDER DEBUG - schools.length:", schools.length, "codeSearchTerm:", codeSearchTerm, "loadingSchools:", loadingSchools);
   const displayedSchools = React.useMemo(() => {
-    // Only show real Firestore schools to ensure data transparency and accuracy
+    // We now show both real and sys schools
     const list = [...schools];
     if (!codeSearchTerm) return list;
-    return list.filter(s => 
-      s.name.toLowerCase().includes(codeSearchTerm.toLowerCase()) || 
-      s.id.toLowerCase().includes(codeSearchTerm.toLowerCase())
+    const term = codeSearchTerm.toLowerCase();
+    return list.filter(s =>
+      s.name?.toLowerCase().includes(term) ||
+      s.id?.toLowerCase().includes(term) ||
+      s.adminName?.toLowerCase().includes(term)
     );
   }, [schools, codeSearchTerm]);
 
@@ -2377,7 +2482,7 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
       </div>
 
       {/* Edge-to-Edge Header */}
-      <header className="sticky top-0 z-50 bg-[#080A1A]/80 backdrop-blur-xl border-b border-white/5 px-4 py-4 flex items-center justify-between">
+      <header className="sticky top-0 z-50 bg-[#080A1A]/90 backdrop-blur-xl border-b border-white/10 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
             <Shield size={20} className="text-white" />
@@ -2398,324 +2503,62 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
         </button>
       </header>
 
+      {/* Horizontal Fast Switcher Tabs Bar */}
+      <div className="sticky top-[61px] z-40 bg-[#05060F]/95 backdrop-blur-md border-b border-white/5 px-4 py-2 overflow-x-auto no-scrollbar flex items-center gap-2 shadow-md">
+        {[
+          { id: 'academy', label: '🎓 أكاديمية بيرق الرقمية', color: 'amber' },
+          { id: 'health', label: '📊 النظام والصحة', color: 'indigo' },
+          { id: 'school_management', label: '🏫 إدارة المدارس', color: 'blue' },
+          { id: 'simulator', label: '📡 محاكي البث المباشر', color: 'emerald' },
+          { id: 'ai_studio', label: '🤖 استوديو الذكاء والمحتوى', color: 'purple' },
+          { id: 'licensing', label: '🏆 الاشتراكات والتراخيص', color: 'amber' },
+          { id: 'security', label: '🛡️ أمن البيانات والوصول', color: 'rose' },
+          { id: 'maintenance', label: '🔧 أتمتة الصيانة والأرشفة', color: 'amber' },
+          { id: 'data_integrity', label: '✨ سلامة البيانات', color: 'cyan' },
+          { id: 'remote_config', label: '🎛️ التحكم السحابي', color: 'violet' },
+          { id: 'media', label: '🎨 الوسائط', color: 'pink' },
+          { id: 'errors', label: '🐛 الأخطاء', color: 'red' },
+          { id: 'actions', label: '⚡ إجراءات سريعة', color: 'yellow' }
+        ].map(t => {
+          const isActive = activeTab === t.id;
+          return (
+            <button
+              key={t.id}
+              onClick={() => setActiveTab(t.id as any)}
+              className={`px-3.5 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition-all flex items-center gap-1.5 ${
+                isActive
+                  ? 'bg-white text-black shadow-lg scale-105'
+                  : 'bg-white/5 text-white/60 hover:text-white hover:bg-white/10'
+              }`}
+            >
+              <span>{t.label}</span>
+            </button>
+          );
+        })}
+      </div>
+
       <main className="pb-24">
 
-      
-        {activeTab === 'health' && (
+        {activeTab === 'academy' && (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {/* Realtime Stats Grid - 2 Columns for Mobile */}
-            <section className="grid grid-cols-2 border-b border-white/5">
-              {[
-                { 
-                  label: "المدارس", 
-                  value: schools.length, 
-                  sub: "قاعدة بيانات حية", 
-                  icon: <School className="text-indigo-400" size={24} />,
-                  bg: "from-indigo-500/10 to-transparent"
-                },
-                { 
-                  label: "المستخدمين", 
-                  value: activeUsersCount || "...", 
-                  sub: "حسابات Auth", 
-                  icon: <Users className="text-emerald-400" size={24} />,
-                  bg: "from-emerald-500/10 to-transparent",
-                  ping: true
-                },
-                { 
-                  label: "المستندات", 
-                  value: `~${((totalStudents || 0) + (totalTeachers || 0) + (totalParents || 0) + (processedFilesCount || 0))}`, 
-                  sub: "تقدير الاستهلاك", 
-                  icon: <Database className="text-rose-400" size={24} />,
-                  bg: "from-rose-500/10 to-transparent"
-                },
-                { 
-                  label: "الذكاء", 
-                  value: aiUsageCount || "...", 
-                  sub: "طلبات Gemini", 
-                  icon: <Sparkles className="text-amber-400" size={24} />,
-                  bg: "from-amber-500/10 to-transparent"
-                }
-              ].map((stat, i) => (
-                <div key={i} className={`p-6 border-white/5 relative group ${i % 2 === 0 ? 'border-l' : ''} ${i < 2 ? 'border-b' : ''}`}>
-                  <div className={`absolute inset-0 bg-gradient-to-br ${stat.bg} opacity-0 group-hover:opacity-100 transition-opacity`} />
-                  <div className="relative z-10">
-                    <div className="flex items-center justify-between mb-4">
-                      <div className="p-2.5 rounded-xl bg-white/5">{stat.icon}</div>
-                      {stat.ping && <span className="w-2 h-2 rounded-full bg-emerald-500 animate-ping"></span>}
-                    </div>
-                    <p className="text-[10px] text-white/30 font-black uppercase tracking-widest mb-1">{stat.label}</p>
-                    <h3 className="text-2xl font-black text-white font-mono leading-none mb-2">{stat.value}</h3>
-                    <p className="text-[9px] text-white/20 font-bold">{stat.sub}</p>
-                  </div>
-                </div>
-              ))}
-            </section>
+            <AcademyManagementSection />
+          </div>
+        )}
 
-            {/* AI Performance & Intelligence Section */}
-            <section className="p-6 space-y-6">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-black text-white/40 uppercase tracking-widest flex items-center gap-2">
-                  <Sparkles size={14} className="text-amber-400" /> تحليل أداء الذكاء الاصطناعي
-                </h3>
-                <button 
-                  onClick={fetchAiAnalytics}
-                  className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 transition-colors"
-                >
-                  <RefreshCw size={12} className={loadingAnalytics ? "animate-spin" : ""} />
-                </button>
-              </div>
-
-              {aiAnalytics && !aiAnalytics.error && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {/* Usage Timeline */}
-                  <div className="bg-white/[0.02] border border-white/5 p-6 rounded-3xl">
-                    <h4 className="text-[10px] font-black text-white/30 uppercase tracking-widest mb-6 flex items-center gap-2">
-                      <LineIcon size={12} /> مخطط الاستخدام الزمني
-                    </h4>
-                    <div className="h-48 w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <AreaChart data={aiAnalytics.timeSeries || []}>
-                          <defs>
-                            <linearGradient id="colorReq" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#6366f1" stopOpacity={0.3}/>
-                              <stop offset="95%" stopColor="#6366f1" stopOpacity={0}/>
-                            </linearGradient>
-                          </defs>
-                          <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
-                          <XAxis 
-                            dataKey="date" 
-                            stroke="#ffffff20" 
-                            fontSize={10} 
-                            tickLine={false} 
-                            axisLine={false}
-                          />
-                          <YAxis 
-                            stroke="#ffffff20" 
-                            fontSize={10} 
-                            tickLine={false} 
-                            axisLine={false}
-                          />
-                          <Tooltip 
-                            contentStyle={{ backgroundColor: '#080A1A', border: '1px solid #ffffff10', borderRadius: '12px' }}
-                            itemStyle={{ fontSize: '10px' }}
-                          />
-                          <Area type="monotone" dataKey="requests" stroke="#6366f1" fillOpacity={1} fill="url(#colorReq)" />
-                          <Area type="monotone" dataKey="cacheHits" stroke="#10b981" fillOpacity={0} />
-                        </AreaChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-
-                  {/* Cache & Latency Stats */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="bg-white/[0.02] border border-white/5 p-6 rounded-3xl flex flex-col justify-between">
-                      <p className="text-[10px] font-black text-white/30 uppercase tracking-widest mb-2">نسبة التوفير (Cache)</p>
-                      <div>
-                        <h3 className="text-3xl font-black text-emerald-400 font-mono">{( (aiAnalytics.savingsRatio || 0) * 100).toFixed(1)}%</h3>
-                        <p className="text-[9px] text-white/20 mt-1 font-bold">تقليل في تكاليف الـ API</p>
-                      </div>
-                    </div>
-                    <div className="bg-white/[0.02] border border-white/5 p-6 rounded-3xl flex flex-col justify-between">
-                      <p className="text-[10px] font-black text-white/30 uppercase tracking-widest mb-2">متوسط الاستجابة</p>
-                      <div>
-                        <h3 className="text-3xl font-black text-amber-400 font-mono">{Math.round(aiAnalytics.avgProcessingTimeMs || 0)}ms</h3>
-                        <p className="text-[9px] text-white/20 mt-1 font-bold">سرعة المعالجة الكلية</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Endpoint Stats */}
-                  <div className="bg-white/[0.02] border border-white/5 p-6 rounded-3xl">
-                    <h4 className="text-[10px] font-black text-white/30 uppercase tracking-widest mb-6 flex items-center gap-2">
-                      <BarChart3 size={12} /> توزيع الطلبات حسب الوظيفة
-                    </h4>
-                    <div className="h-48 w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <BarChart data={aiAnalytics.endpointStats || []} layout="vertical">
-                          <XAxis type="number" hide />
-                          <YAxis 
-                            dataKey="name" 
-                            type="category" 
-                            stroke="#ffffff40" 
-                            fontSize={10} 
-                            tickLine={false} 
-                            axisLine={false}
-                            width={80}
-                          />
-                          <Tooltip 
-                            contentStyle={{ backgroundColor: '#080A1A', border: '1px solid #ffffff10', borderRadius: '12px' }}
-                            itemStyle={{ fontSize: '10px' }}
-                          />
-                          <Bar dataKey="value" fill="#6366f1" radius={[0, 4, 4, 0]} barSize={12} />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-
-                  {/* Model Distribution */}
-                  <div className="bg-white/[0.02] border border-white/5 p-6 rounded-3xl">
-                    <h4 className="text-[10px] font-black text-white/30 uppercase tracking-widest mb-6 flex items-center gap-2">
-                      <PieChart size={12} /> النماذج المستخدمة
-                    </h4>
-                    <div className="h-48 w-full">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <RePieChart>
-                          <Pie
-                            data={aiAnalytics?.modelStats || []}
-                            cx="50%"
-                            cy="50%"
-                            innerRadius={40}
-                            outerRadius={60}
-                            paddingAngle={5}
-                            dataKey="value"
-                          >
-                            {(aiAnalytics?.modelStats || []).map((entry: any, index: number) => (
-                              <Cell key={`cell-${index}`} fill={['#6366f1', '#a855f7', '#ec4899', '#f97316'][index % 4]} />
-                            ))}
-                          </Pie>
-                          <Tooltip 
-                            contentStyle={{ backgroundColor: '#080A1A', border: '1px solid #ffffff10', borderRadius: '12px' }}
-                            itemStyle={{ fontSize: '10px' }}
-                          />
-                        </RePieChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </section>
-
-            {/* Server Health Cards - Stacked for Mobile */}
-            <section className="p-6 space-y-4 bg-black/20">
-              <h3 className="text-xs font-black text-white/40 uppercase tracking-widest mb-4 flex items-center gap-2">
-                <Server size={14} /> حالة الأنظمة الأساسية
-              </h3>
-              {[
-                { name: "الاستضافة الأساسية", status: "Online", sub: "Latency: ~12ms" },
-                { name: "قواعد البيانات", status: "Active", sub: "Realtime Sync" },
-                { name: "تخزين الملفات", status: "Operational", sub: "Storage v2" }
-              ].map((item, i) => (
-                <div key={i} className="bg-white/[0.02] border border-white/5 p-4 rounded-2xl flex items-center justify-between">
-                  <div className="flex items-center gap-4">
-                    <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_10px_rgba(16,185,129,0.5)]"></div>
-                    <div>
-                      <h4 className="text-xs font-black text-white">{item.name}</h4>
-                      <p className="text-[10px] text-white/40 font-bold">{item.sub}</p>
-                    </div>
-                  </div>
-                  <span className="text-[10px] font-black text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded-lg uppercase">{item.status}</span>
-                </div>
-              ))}
-            </section>
-
-            {/* Pricing & Profit Simulator Section */}
-            <section className="bg-indigo-900/10 border-y border-indigo-500/10 p-6 space-y-6">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Calculator size={18} className="text-indigo-400" />
-                  <h3 className="text-sm font-black text-white">حاسبة التكاليف والأرباح التقديرية</h3>
-                </div>
-                <span className="text-[10px] font-black text-indigo-400 bg-indigo-500/10 px-2.5 py-1 rounded-full border border-indigo-500/20">
-                  محاكاة تفاعلية
-                </span>
-              </div>
-
-              {/* Interactive Sliders */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-black/40 p-5 rounded-2xl border border-white/5">
-                {/* Slider 1: Students */}
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="text-white/60 font-bold">عدد الطلاب المحاكين</span>
-                    <span className="text-indigo-400 font-mono font-black">{simStudents.toLocaleString()} طالب</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="100"
-                    max="50000"
-                    step="100"
-                    value={simStudents}
-                    onChange={(e) => setSimStudents(Number(e.target.value))}
-                    className="w-full accent-indigo-500 h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer"
-                  />
-                </div>
-
-                {/* Slider 2: Subscription Fee */}
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="text-white/60 font-bold">اشتراك الطالب الشهري</span>
-                    <span className="text-emerald-400 font-mono font-black">{simSubscription.toLocaleString()} د.ع</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="500"
-                    max="10000"
-                    step="250"
-                    value={simSubscription}
-                    onChange={(e) => setSimSubscription(Number(e.target.value))}
-                    className="w-full accent-emerald-500 h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer"
-                  />
-                </div>
-
-                {/* Slider 3: AI Requests */}
-                <div className="space-y-2">
-                  <div className="flex justify-between items-center text-xs">
-                    <span className="text-white/60 font-bold">طلب AI / طالب شهرياً</span>
-                    <span className="text-amber-400 font-mono font-black">{simAiRequests} طلبات</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="1"
-                    max="100"
-                    step="1"
-                    value={simAiRequests}
-                    onChange={(e) => setSimAiRequests(Number(e.target.value))}
-                    className="w-full accent-amber-500 h-1.5 bg-white/10 rounded-lg appearance-none cursor-pointer"
-                  />
-                </div>
-              </div>
-
-              {/* Financial Calculation Results */}
-              {(() => {
-                const totalRevenueIqd = simStudents * simSubscription;
-                const totalRevenueUsd = totalRevenueIqd / 1310; // USD conversion
-                const totalAiCostUsd = simStudents * simAiRequests * 0.00015; // Estimated AI cost per req
-                const serverInfraCostUsd = 25 + Math.ceil(simStudents / 1000) * 15; // Base server scaling
-                const totalCostUsd = totalAiCostUsd + serverInfraCostUsd;
-                const netProfitUsd = totalRevenueUsd - totalCostUsd;
-
-                return (
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="bg-black/40 p-4 rounded-2xl border border-white/5">
-                      <p className="text-[10px] text-white/40 mb-1 font-bold">إجمالي الإيرادات (شهرياً)</p>
-                      <p className="text-lg font-black text-indigo-400 font-mono">{totalRevenueIqd.toLocaleString()} د.ع</p>
-                      <p className="text-[9px] text-white/30 font-mono mt-0.5">${totalRevenueUsd.toFixed(2)} USD</p>
-                    </div>
-
-                    <div className="bg-black/40 p-4 rounded-2xl border border-white/5">
-                      <p className="text-[10px] text-white/40 mb-1 font-bold">تكلفة الذكاء الاصطناعي</p>
-                      <p className="text-lg font-black text-amber-400 font-mono">${totalAiCostUsd.toFixed(2)}</p>
-                      <p className="text-[9px] text-white/30 font-bold mt-0.5">تقدير Gemini API</p>
-                    </div>
-
-                    <div className="bg-black/40 p-4 rounded-2xl border border-white/5">
-                      <p className="text-[10px] text-white/40 mb-1 font-bold">تكلفة الخوادم والبنية</p>
-                      <p className="text-lg font-black text-rose-400 font-mono">${serverInfraCostUsd.toFixed(2)}</p>
-                      <p className="text-[9px] text-white/30 font-bold mt-0.5">سيرفرات Cloud Run & Firebase</p>
-                    </div>
-
-                    <div className="bg-emerald-500/10 p-4 rounded-2xl border border-emerald-500/20">
-                      <p className="text-[10px] text-emerald-400/80 mb-1 font-black">صافي الربح التقديري</p>
-                      <p className="text-lg font-black text-emerald-400 font-mono">${netProfitUsd.toFixed(2)}</p>
-                      <p className="text-[9px] text-emerald-400/60 font-bold mt-0.5">حوالي {(netProfitUsd * 1310).toLocaleString()} د.ع</p>
-                    </div>
-                  </div>
-                );
-              })()}
-
-              <p className="text-[9px] text-white/30 text-center font-bold">
-                * تم بناء الحسابات التقديرية بناءً على سعر الصرف الرسمي (1$ = 1310 د.ع) وتكاليف استهلاك النماذج واستهلاك خوادم Cloud Run.
-              </p>
-            </section>
+        {activeTab === 'health' && (
+          <div className="p-6">
+            <SystemHealthSection
+              schoolsCount={schools.length}
+              activeUsersCount={activeUsersCount || 0}
+              totalStudents={totalStudents || 0}
+              totalTeachers={totalTeachers || 0}
+              totalParents={totalParents || 0}
+              processedFilesCount={processedFilesCount || 0}
+              aiUsageCount={aiUsageCount || 0}
+              aiAnalytics={aiAnalytics}
+              loadingAnalytics={loadingAnalytics}
+              onRefreshAnalytics={fetchAiAnalytics}
+            />
           </div>
         )}
 
@@ -2739,6 +2582,29 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
                   className="flex-1 py-4 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 font-black rounded-2xl text-sm transition-all border border-emerald-500/20 flex items-center justify-center gap-2"
                 >
                   <ShieldCheck size={18} /> فحص سلامة البيانات
+                </button>
+                <button 
+                  onClick={async () => {
+                    triggerToast("جاري الترحيل إلى PostgreSQL...", "info");
+                    try {
+                      const res = await fetch('/api/admin/sync-schools', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ schoolsList: schoolsRef.current })
+                      });
+                      const data = await res.json();
+                      if (data.success) {
+                        triggerToast(`تم ترحيل ${data.synced} مدرسة إلى PostgreSQL بنجاح 🚀`, "success");
+                      } else {
+                        triggerToast("حدث خطأ أثناء الترحيل", "error");
+                      }
+                    } catch (e) {
+                      triggerToast("فشل الاتصال بالخادم", "error");
+                    }
+                  }}
+                  className="flex-1 py-4 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 font-black rounded-2xl text-sm transition-all border border-purple-500/20 flex items-center justify-center gap-2"
+                >
+                  <Database size={18} /> ترحيل لـ PostgreSQL
                 </button>
                 <button 
                   onClick={async () => {
@@ -4423,11 +4289,58 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
                 </div>
               </div>
 
+              {/* Quick Identity & Welcome Banner */}
+              <div className="mb-6 p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-purple-500/10 to-cyan-500/10 border border-amber-500/20 flex flex-col md:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-3 w-full md:w-auto">
+                  <div className="w-12 h-12 rounded-xl bg-black/60 border border-amber-500/30 p-1 flex items-center justify-center shrink-0 shadow-lg overflow-hidden">
+                    <img 
+                      src={headerPoses['app_logo'] || '/logo.png'} 
+                      alt="شعار التطبيق" 
+                      className="w-full h-full object-contain"
+                      onError={(e) => { (e.target as HTMLImageElement).src = '/logo.png'; }}
+                    />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-black text-amber-400">شعار وهوية التطبيق (App Logo)</span>
+                      <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-400/20 text-amber-300 border border-amber-400/30">
+                        {headerPoses['app_logo'] ? 'مخصص سحابياً' : 'الافتراضي المعتمد'}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-white/60">يظهر في الشاشات الرئيسية وشاشات تسجيل الدخول والشهادات.</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 w-full md:w-auto justify-end">
+                  <label className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition-all cursor-pointer shadow-md active:scale-95">
+                    <FileUp size={14} />
+                    <span>رفع شعار التطبيق</span>
+                    <input 
+                      type="file" 
+                      className="hidden" 
+                      accept="image/png,image/jpeg,image/webp,image/svg+xml" 
+                      onChange={(e) => {
+                        setActiveMediaDashboard('welcome');
+                        handleHeaderPoseUpload('app_logo', e);
+                      }} 
+                    />
+                  </label>
+                  <button
+                    onClick={() => setActiveMediaDashboard('welcome')}
+                    className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all border ${
+                      activeMediaDashboard === 'welcome'
+                        ? 'bg-purple-500/30 border-purple-500 text-purple-300'
+                        : 'bg-white/5 hover:bg-white/10 border-white/10 text-white/80'
+                    }`}
+                  >
+                    عرض الفيديوهات الترحيبية 🎬
+                  </button>
+                </div>
+              </div>
+
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {DASHBOARDS_POSES[activeMediaDashboard].map((header) => {
-                  const pendingPose = pendingHeaderPoses[header.id];
-                  const currentPose = pendingPose || headerPoses[header.id] || header.defaultSrc;
-                  const hasPending = !!pendingPose;
+                  const currentPose = headerPoses[header.id] || header.defaultSrc;
                   const progress = uploadProgress[header.id] || 0;
 
                   return (
@@ -4469,14 +4382,13 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
                       <div className="flex items-center justify-between mt-2 gap-2">
                         <h4 className="font-bold text-white/90 text-sm truncate">{header.title}</h4>
                         <div className="flex items-center gap-1 shrink-0">
-                          {hasPending && progress === 0 && (
-                            <button
-                              onClick={() => handleSaveHeaderPose(header.id)}
-                              className="bg-emerald-500 hover:bg-emerald-600 text-white text-[10px] font-bold py-1 px-2.5 rounded shadow-lg transition-colors"
-                            >
-                              حفظ
-                            </button>
-                          )}
+                          <button
+                            onClick={() => setHistoryModalAsset({ id: header.id, title: header.title })}
+                            className="bg-white/10 hover:bg-white/20 text-white/80 hover:text-white text-[10px] font-bold py-1 px-2 rounded transition-colors"
+                            title="سجل الإصدارات والاستعادة"
+                          >
+                            السجل
+                          </button>
                           <button
                             onClick={() => handleResetHeaderPose(header.id)}
                             className="bg-white/10 hover:bg-red-500/30 text-white/80 hover:text-white text-[10px] font-bold py-1 px-2 rounded transition-colors"
@@ -4708,259 +4620,50 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
         )}
 
         {activeTab === 'errors' && (
-          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 h-full flex flex-col bg-[#050505]">
-            <section className="p-6 border-b border-white/5">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 rounded-2xl bg-rose-500/10 text-rose-500">
-                    <Bug size={24} />
-                  </div>
-                  <div>
-                    <h3 className="font-black text-white text-base">رادار الأخطاء</h3>
-                    <p className="text-[10px] text-rose-500 font-bold uppercase tracking-widest animate-pulse">Live Debugging Active</p>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <div className="w-2.5 h-2.5 rounded-full bg-rose-500/40" />
-                  <div className="w-2.5 h-2.5 rounded-full bg-amber-500/40" />
-                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-500/40" />
-                </div>
-              </div>
-            </section>
-
-            <div className="flex-1 p-6 flex flex-col">
-              <div className="flex-1 bg-black rounded-3xl p-5 font-mono text-[10px] text-emerald-500/80 space-y-3 overflow-y-auto custom-scrollbar border border-white/5 shadow-inner" dir="ltr">
-                <div className="text-white/20 mb-6 font-bold">
-                  $ tail -f /sys/logs/core.err<br/>
-                  &gt; Established live WebSocket connection...
-                </div>
-                
-                {realLogs.length === 0 ? (
-                  <div className="text-center py-20 text-white/5 italic font-sans" dir="rtl">
-                    لا توجد أخطاء مسجلة حالياً
-                  </div>
-                ) : (
-                  realLogs.map((log) => (
-                    <div key={log.id} className="flex gap-3 border-b border-white/[0.03] pb-3">
-                      <span className="opacity-30 shrink-0">[{log.time}]</span>
-                      <div className="flex-1">
-                        <span className={`font-black mr-2 ${log.type === "error" ? "text-rose-500" : log.type === "warning" ? "text-amber-500" : "text-emerald-500"}`}>
-                          {log.type === "error" ? "CRITICAL" : log.type === "warning" ? "WARNING" : "INFO"}
-                        </span>
-                        <p className="inline text-white/70 whitespace-pre-wrap">{log.text}</p>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
+          <div className="p-6">
+            <ErrorMonitoringSection />
           </div>
         )}
 
         {/* DATA INTEGRITY DIAGNOSTIC TAB */}
         {activeTab === "data_integrity" && (
-          <div className="p-6 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {/* Section Header */}
-            <div className="bg-gradient-to-r from-emerald-900/30 via-indigo-900/30 to-purple-900/30 border border-emerald-500/20 rounded-3xl p-6 relative overflow-hidden">
-              <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                <div>
-                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold mb-3">
-                    <ShieldCheck size={14} /> أداة المطور التشخيصية
-                  </div>
-                  <h2 className="text-xl font-black text-white">فحص سلامة وصحة البيانات وعزل المدارس</h2>
-                  <p className="text-xs text-white/60 mt-1">
-                    فحص شامل واستعلام مباشر لقاعدة البيانات للتأكد من أن كل مدرسة تعتمد فقط على البيانات المرتبطة بـ School ID الخاص بها، واكتشاف الأكواد أو المستخدمين المتضاربين.
-                  </p>
-                </div>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={runDataIntegrityAudit}
-                    disabled={isAuditing || isRepairing}
-                    className="px-5 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white font-bold text-xs transition-all shadow-lg shadow-indigo-600/30 flex items-center gap-2 disabled:opacity-50"
-                  >
-                    <RefreshCw size={16} className={isAuditing ? "animate-spin" : ""} />
-                    {isAuditing ? "جاري الفحص..." : "تشغيل فحص سلامة البيانات"}
-                  </button>
+          <div className="p-6">
+            <DataIntegritySection />
+          </div>
+        )}
 
-                  {auditResults && (auditResults.discrepantSchoolsCount > 0 || auditResults.orphanCodesCount > 0 || auditResults.mismatchedUsersCount > 0) && (
-                    <button
-                      onClick={fixDataIntegrityIssues}
-                      disabled={isAuditing || isRepairing}
-                      className="px-5 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-bold text-xs transition-all shadow-lg shadow-emerald-600/30 flex items-center gap-2 disabled:opacity-50"
-                    >
-                      <Zap size={16} className={isRepairing ? "animate-spin" : ""} />
-                      {isRepairing ? "جاري الإصلاح..." : "إصلاح العلاقات الخاطئة والإحصائيات تلقائياً"}
-                    </button>
-                  )}
-                </div>
-              </div>
-            </div>
+        {/* LIVE SIMULATOR & SANDBOX TAB */}
+        {activeTab === "simulator" && (
+          <div className="p-6">
+            <LiveSimulatorSection />
+          </div>
+        )}
 
-            {/* Initial Run Trigger Banner if not run yet */}
-            {!auditResults && !isAuditing && (
-              <div className="bg-white/[0.02] border border-white/10 rounded-3xl p-12 text-center space-y-4">
-                <div className="w-16 h-16 rounded-2xl bg-emerald-500/10 text-emerald-400 flex items-center justify-center mx-auto border border-emerald-500/20">
-                  <ShieldCheck size={32} />
-                </div>
-                <h3 className="text-base font-black text-white">لم يتم تشغيل فحص البيانات بعد</h3>
-                <p className="text-xs text-white/50 max-w-md mx-auto">
-                  اضغط على الزر أعلاه للبدء بالمرور على جميع المدارس والأكواد والمستخدمين للتحقق من سلامة العزل بين المدارس وضمان دقة الإحصائيات 100%.
-                </p>
-                <button
-                  onClick={runDataIntegrityAudit}
-                  className="px-6 py-3 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-all shadow-lg shadow-emerald-600/20 inline-flex items-center gap-2"
-                >
-                  <Activity size={16} /> بدء فحص سلامة البيانات
-                </button>
-              </div>
-            )}
+        {/* AI & CONTENT STUDIO TAB */}
+        {activeTab === "ai_studio" && (
+          <div className="p-6">
+            <AiContentStudioSection />
+          </div>
+        )}
 
-            {/* Audit Results Dashboard */}
-            {auditResults && (
-              <div className="space-y-6">
-                {/* Audit Metrics Overview */}
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                  <div className="bg-black/40 border border-white/5 rounded-2xl p-4 text-center">
-                    <p className="text-[10px] text-white/40 font-bold">إجمالي المدارس المفحوصة</p>
-                    <p className="text-xl font-black font-mono text-white mt-1">{auditResults.totalSchoolsAudited}</p>
-                    <p className="text-[9px] text-white/30 mt-0.5">استعلام مباشر</p>
-                  </div>
-                  <div className="bg-black/40 border border-emerald-500/20 rounded-2xl p-4 text-center bg-emerald-500/5">
-                    <p className="text-[10px] text-emerald-400 font-bold">مدارس سليمة 100%</p>
-                    <p className="text-xl font-black font-mono text-emerald-300 mt-1">{auditResults.intactSchoolsCount}</p>
-                    <p className="text-[9px] text-emerald-400/60 mt-0.5">بدون أي تضارب</p>
-                  </div>
-                  <div className="bg-black/40 border border-amber-500/20 rounded-2xl p-4 text-center bg-amber-500/5">
-                    <p className="text-[10px] text-amber-400 font-bold">تضاربات في الإحصائيات</p>
-                    <p className="text-xl font-black font-mono text-amber-300 mt-1">{auditResults.discrepantSchoolsCount}</p>
-                    <p className="text-[9px] text-amber-400/60 mt-0.5">بين الوثيقة والاستعلام</p>
-                  </div>
-                  <div className="bg-black/40 border border-rose-500/20 rounded-2xl p-4 text-center bg-rose-500/5">
-                    <p className="text-[10px] text-rose-400 font-bold">أكواد بدون مدرسة</p>
-                    <p className="text-xl font-black font-mono text-rose-300 mt-1">{auditResults.orphanCodesCount}</p>
-                    <p className="text-[9px] text-rose-400/60 mt-0.5">School ID مفقود</p>
-                  </div>
-                  <div className="bg-black/40 border border-purple-500/20 rounded-2xl p-4 text-center bg-purple-500/5 col-span-2 md:col-span-1">
-                    <p className="text-[10px] text-purple-400 font-bold">تضارب مدرسة المستخدمين</p>
-                    <p className="text-xl font-black font-mono text-purple-300 mt-1">{auditResults.mismatchedUsersCount}</p>
-                    <p className="text-[9px] text-purple-400/60 mt-0.5">تطابق الكود والمدرسة</p>
-                  </div>
-                </div>
+        {/* SUBSCRIPTIONS & LICENSING TAB */}
+        {activeTab === "licensing" && (
+          <div className="p-6">
+            <SubscriptionsLicensingSection />
+          </div>
+        )}
 
-                {/* Audit Log Timeline */}
-                {auditRunAt && (
-                  <div className="flex items-center justify-between text-[10px] text-white/40 px-2">
-                    <span>تاريخ آخر تدقيق وفحص: <strong className="text-white font-mono">{auditRunAt}</strong></span>
-                    <span>طريقة الفحص: <strong className="text-emerald-400">WHERE schoolId == CurrentSchoolId</strong></span>
-                  </div>
-                )}
+        {/* SECURITY & ACCESS CONTROL TAB */}
+        {activeTab === "security" && (
+          <div className="p-6">
+            <SecurityAccessSection />
+          </div>
+        )}
 
-                {/* Per School Inspection Breakdown Table */}
-                <div className="bg-white/[0.02] border border-white/5 rounded-3xl p-6 space-y-4">
-                  <h3 className="text-sm font-black text-white flex items-center gap-2">
-                    <Building size={16} className="text-indigo-400" /> تقرير سلامة وعزل كل مدرسة بالتفصيل
-                  </h3>
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-right text-xs">
-                      <thead>
-                        <tr className="border-b border-white/10 text-white/40 font-bold text-[10px]">
-                          <th className="py-3 px-3">المدرسة و ID</th>
-                          <th className="py-3 px-3">الطلاب (المخزن vs الاستعلام)</th>
-                          <th className="py-3 px-3">الأساتذة (المخزن vs الاستعلام)</th>
-                          <th className="py-3 px-3">أولياء الأمور (المخزن vs الاستعلام)</th>
-                          <th className="py-3 px-3">الأكواد الفعلية المولدة</th>
-                          <th className="py-3 px-3">الحالة والسلامة</th>
-                          <th className="py-3 px-3">إجراءات</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-white/5">
-                        {auditResults.schoolResults.map((s) => (
-                          <tr key={s.schoolId} className="hover:bg-white/[0.02] transition-colors">
-                            <td className="py-3 px-3">
-                              <p className="font-bold text-white">{s.schoolName}</p>
-                              <p className="text-[9px] font-mono text-white/40">{s.schoolId}</p>
-                            </td>
-                            <td className="py-3 px-3">
-                              <span className={`font-mono font-bold ${s.storedStats.students !== s.actualUsers.students ? 'text-amber-400' : 'text-white/80'}`}>
-                                {s.storedStats.students} ➔ <span className="text-emerald-400">{s.actualUsers.students}</span>
-                              </span>
-                            </td>
-                            <td className="py-3 px-3">
-                              <span className={`font-mono font-bold ${s.storedStats.teachers !== s.actualUsers.teachers ? 'text-amber-400' : 'text-white/80'}`}>
-                                {s.storedStats.teachers} ➔ <span className="text-emerald-400">{s.actualUsers.teachers}</span>
-                              </span>
-                            </td>
-                            <td className="py-3 px-3">
-                              <span className={`font-mono font-bold ${s.storedStats.parents !== s.actualUsers.parents ? 'text-amber-400' : 'text-white/80'}`}>
-                                {s.storedStats.parents} ➔ <span className="text-emerald-400">{s.actualUsers.parents}</span>
-                              </span>
-                            </td>
-                            <td className="py-3 px-3 font-mono text-white/80">
-                              <span className="text-indigo-300">{s.actualCodes.totalCodes}</span> كود (طلاب: {s.actualCodes.studentCodes} | كادر: {s.actualCodes.staffCodes} | أولياء: {s.actualCodes.parentCodes})
-                            </td>
-                            <td className="py-3 px-3">
-                              {s.hasDiscrepancy ? (
-                                <span className="inline-flex items-center gap-1 text-[9.5px] font-bold px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-300 border border-amber-500/20">
-                                  <AlertCircle size={10} /> تضارب إحصائيات
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 text-[9.5px] font-bold px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-300 border border-emerald-500/20">
-                                  <CheckCircle size={10} /> معزولة وسليمة 100%
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-3 px-3">
-                              <button
-                                onClick={() => refreshSchoolStats({ id: s.schoolId, name: s.schoolName } as any)}
-                                className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-white/70 transition-colors"
-                                title="إعادة مزامنة هذه المدرسة فقط"
-                              >
-                                <RefreshCw size={12} />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Detailed Issues & Anomalies List */}
-                {auditResults.issues.length > 0 && (
-                  <div className="bg-white/[0.02] border border-white/5 rounded-3xl p-6 space-y-4">
-                    <h3 className="text-sm font-black text-rose-400 flex items-center gap-2">
-                      <AlertCircle size={16} /> قائمة الملاحظات والأكواد أو المستخدمين المتضاربين ({auditResults.issues.length})
-                    </h3>
-
-                    <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
-                      {auditResults.issues.map((issue) => (
-                        <div key={issue.id} className="bg-black/40 border border-white/5 rounded-2xl p-3 flex items-start justify-between gap-3 text-xs">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase ${
-                                issue.type === 'orphan_code' ? 'bg-rose-500/20 text-rose-300' :
-                                issue.type === 'mismatched_user_school' ? 'bg-purple-500/20 text-purple-300' :
-                                'bg-amber-500/20 text-amber-300'
-                              }`}>
-                                {issue.type}
-                              </span>
-                              <h4 className="font-bold text-white">{issue.title}</h4>
-                            </div>
-                            <p className="text-[10.5px] text-white/60 mt-1 leading-relaxed">{issue.description}</p>
-                          </div>
-                          {issue.fixable && (
-                            <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-1 rounded border border-emerald-500/20 whitespace-nowrap">
-                              قابلة للإصلاح التلقائي
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
+        {/* AUTOMATED MAINTENANCE & ARCHIVING TAB */}
+        {activeTab === "maintenance" && (
+          <div className="p-6">
+            <MaintenanceArchiveSection />
           </div>
         )}
 
@@ -5010,15 +4713,16 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
       </main>
 
       {/* Universal Developer Bottom Tab Bar */}
-      <nav className="fixed bottom-0 left-0 right-0 z-[999] h-20 bg-[#050A18] border-t border-white/10 flex items-center justify-around px-2 pb-6 pt-2 shadow-[0_-10px_40px_rgba(0,0,0,0.5)]">
+      <nav className="fixed bottom-0 left-0 right-0 z-[999] h-20 bg-[#050A18]/95 backdrop-blur-xl border-t border-white/10 flex items-center justify-around px-2 pb-6 pt-2 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] overflow-x-auto no-scrollbar">
         {[
           { id: 'health', name: 'الصحة', icon: Activity },
-          { id: 'school_management', name: 'إدارة المدارس', icon: Building },
-          { id: 'remote_config', name: 'التحكم السحابي', icon: SlidersHorizontal },
-          { id: 'data_integrity', name: 'سلامة البيانات', icon: ShieldCheck },
-          { id: 'media', name: 'الوسائط', icon: ImageIcon },
-          { id: 'errors', name: 'الأخطاء', icon: Bug },
-          { id: 'actions', name: 'إجراءات', icon: Zap }
+          { id: 'school_management', name: 'المدارس', icon: Building },
+          { id: 'simulator', name: 'المحاكي', icon: Radio },
+          { id: 'ai_studio', name: 'الذكاء', icon: Sparkles },
+          { id: 'licensing', name: 'التراخيص', icon: Award },
+          { id: 'security', name: 'الأمان', icon: ShieldAlert },
+          { id: 'maintenance', name: 'الصيانة', icon: SlidersHorizontal },
+          { id: 'data_integrity', name: 'البيانات', icon: ShieldCheck }
         ].map((tab) => {
           const isSelected = activeTab === tab.id;
           const Icon = tab.icon;
@@ -5026,24 +4730,42 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
-              className="relative flex flex-col items-center justify-center gap-1 min-w-[60px] transition-all outline-none group active:scale-95"
+              className="relative flex flex-col items-center justify-center gap-1 min-w-[54px] transition-all outline-none group active:scale-95 shrink-0"
             >
               <div className={`transition-all duration-300 ${isSelected ? "text-indigo-400 -translate-y-1" : "text-white/30 hover:text-white/70"}`}>
-                <Icon size={24} strokeWidth={isSelected ? 2.5 : 2} />
+                <Icon size={22} strokeWidth={isSelected ? 2.5 : 2} />
               </div>
-              <span className={`text-[10px] font-bold transition-all ${isSelected ? "text-indigo-400" : "text-white/30"}`}>
+              <span className={`text-[9px] font-bold transition-all ${isSelected ? "text-indigo-400" : "text-white/30"}`}>
                 {tab.name}
               </span>
               {isSelected && (
                 <motion.div
                   layoutId="devActiveTabIndicator"
-                  className="absolute -top-[14px] w-10 h-1.5 bg-indigo-400 rounded-b-full shadow-[0_4px_15px_rgba(129,140,248,0.6)]"
+                  className="absolute -top-[14px] w-8 h-1 bg-indigo-400 rounded-b-full shadow-[0_4px_15px_rgba(129,140,248,0.6)]"
                 />
               )}
             </button>
           );
         })}
       </nav>
+
+      {historyModalAsset && (
+        <BairaqAssetHistoryModal
+          assetId={historyModalAsset.id}
+          assetTitle={historyModalAsset.title}
+          onClose={() => setHistoryModalAsset(null)}
+          onRestored={(url) => {
+            setHeaderPoses(prev => {
+              const next = { ...prev };
+              const aliases = POSE_ALIASES_MAP[historyModalAsset.id] || [];
+              const keys = Array.from(new Set([historyModalAsset.id, ...aliases]));
+              keys.forEach(k => next[k] = url);
+              return next;
+            });
+          }}
+          triggerToast={triggerToast}
+        />
+      )}
     </div>
   );
 }

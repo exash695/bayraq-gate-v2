@@ -1,52 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Lightbulb, Send, MessageSquare, Clock, CheckCircle, XCircle, FileText, Heart, BrainCircuit, Users, ThumbsUp, ThumbsDown, User, Trash2 } from 'lucide-react';
-import { db, auth } from '../lib/firebase';
-import { collection, addDoc, query, onSnapshot, orderBy, where, serverTimestamp, updateDoc, doc, deleteDoc } from 'firebase/firestore';
+import { auth } from '../lib/firebase';
 import { ConfirmDialog } from './ConfirmDialog';
-
-interface SubmittedIdea {
-  id: string;
-  title: string;
-  description: string;
-  category: 'academic' | 'behavior' | 'administrative' | 'other';
-  status: 'pending' | 'under_review' | 'implemented' | 'rejected';
-  senderId?: string;
-  adminReply?: string;
-  timestamp: any;
-  readByParent?: boolean;
-  targetGrade?: string;
-}
-
-interface CouncilPoll {
-  id: string;
-  title: string;
-  description: string;
-  authorId: string;
-  authorName: string;
-  type: 'admin' | 'parent';
-  status: 'active' | 'closed' | 'implemented' | 'rejected';
-  adminReply?: string;
-  votes: Record<string, 'support' | 'reject'>;
-  comments?: {
-    id: string;
-    authorName: string;
-    text: string;
-    timestamp: number;
-  }[];
-  timestamp: any;
-  targetGrade?: string;
-  senderId?: string;
-}
+import { ideaService, IdeaSubmit, CouncilPoll } from '../services/ideaService';
+import { notificationService } from '../services/notificationService';
 
 export interface IdeaBankProps {
   userId?: string;
   userName?: string;
   studentGrade?: string;
+  schoolId?: string | null;
 }
 
-export const IdeaBank: React.FC<IdeaBankProps> = ({ userId, userName, studentGrade }) => {
-  const [ideas, setIdeas] = useState<SubmittedIdea[]>([]);
+export const IdeaBank: React.FC<IdeaBankProps> = ({ userId, userName, studentGrade, schoolId }) => {
+  const [ideas, setIdeas] = useState<IdeaSubmit[]>([]);
   const [polls, setPolls] = useState<CouncilPoll[]>([]);
   const [activeTab, setActiveTab] = useState<'submit' | 'my_ideas' | 'council'>('submit');
   const [title, setTitle] = useState('');
@@ -89,21 +57,30 @@ export const IdeaBank: React.FC<IdeaBankProps> = ({ userId, userName, studentGra
   const effectiveUserId = userId || auth.currentUser?.uid || 'guest_user';
   const effectiveUserName = userName || auth.currentUser?.displayName || 'طالب/ولي أمر';
 
+  const getParentSenderName = (name: string) => {
+    const clean = (name || '').trim();
+    if (!clean || clean === 'طالب/ولي أمر' || clean === 'طالب') return 'ولي أمر';
+    if (clean.startsWith('ولي أمر') || clean.startsWith('ولي امر')) return clean;
+    return `ولي أمر ${clean}`;
+  };
+
+  const loadData = async () => {
+    try {
+      const [ideasData, pollsData] = await Promise.all([
+        ideaService.fetchIdeas(schoolId || undefined, effectiveUserId),
+        ideaService.fetchPolls(schoolId || undefined)
+      ]);
+      setIdeas(ideasData);
+      setPolls(pollsData);
+    } catch (err) {
+      console.warn("IdeaBank fetch error:", err);
+    }
+  };
+
   useEffect(() => {
     if (!effectiveUserId) return;
-    const q = query(
-      collection(db, 'idea_bank'),
-      where('senderId', '==', effectiveUserId),
-      orderBy('timestamp', 'desc')
-    );
-    const unsub = onSnapshot(q, (snap) => {
-      const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as SubmittedIdea[];
-      setIdeas(data);
-    }, (err) => {
-      console.warn("IdeaBank fetch error:", err);
-    });
-    return () => unsub();
-  }, [effectiveUserId]);
+    loadData();
+  }, [effectiveUserId, schoolId]);
 
   const attemptedReadIds = React.useRef<Set<string>>(new Set());
 
@@ -112,26 +89,12 @@ export const IdeaBank: React.FC<IdeaBankProps> = ({ userId, userName, studentGra
       const unreadIdeas = ideas.filter(i => i.readByParent === false && !attemptedReadIds.current.has(i.id));
       unreadIdeas.forEach(idea => {
         attemptedReadIds.current.add(idea.id);
-        updateDoc(doc(db, 'idea_bank', idea.id), { readByParent: true }).catch(err => {
+        ideaService.updateIdea(idea.id, { readByParent: true }).catch(err => {
           console.warn("Error marking idea as read", err);
         });
       });
     }
   }, [activeTab, ideas]);
-
-  useEffect(() => {
-    const qPolls = query(
-      collection(db, 'council_polls'),
-      orderBy('timestamp', 'desc')
-    );
-    const unsubPolls = onSnapshot(qPolls, (snap) => {
-      const data = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as CouncilPoll[];
-      setPolls(data);
-    }, (err) => {
-      console.warn("Polls fetch error:", err);
-    });
-    return () => unsubPolls();
-  }, []);
 
   const handleVote = async (pollId: string, voteType: 'support' | 'reject') => {
     if (!effectiveUserId) return;
@@ -146,18 +109,17 @@ export const IdeaBank: React.FC<IdeaBankProps> = ({ userId, userName, studentGra
         newVotes[effectiveUserId] = voteType;
       }
 
-      await updateDoc(doc(db, 'council_polls', pollId), {
+      await ideaService.updatePoll(pollId, {
         votes: newVotes
       });
+      loadData();
 
       // Notify the poll author if it's not the same user
       if (poll.authorId && poll.authorId !== 'admin' && poll.authorId !== effectiveUserId && newVotes[effectiveUserId]) {
-        await addDoc(collection(db, 'notifications'), {
+        await notificationService.sendNotification({
           userId: poll.authorId,
           title: voteType === 'support' ? 'تأييد جديد لمقترحك 👍' : 'اعتراض جديد على مقترحك',
           message: `تم التصويت على مقترحك "${poll.title}" في مجلس الآباء.`,
-          timestamp: serverTimestamp(),
-          read: false,
           type: 'general'
         });
       }
@@ -183,20 +145,19 @@ export const IdeaBank: React.FC<IdeaBankProps> = ({ userId, userName, studentGra
 
       const newComments = [...(poll.comments || []), newComment];
 
-      await updateDoc(doc(db, 'council_polls', pollId), {
+      await ideaService.updatePoll(pollId, {
         comments: newComments
       });
 
       setCommentTexts(prev => ({ ...prev, [pollId]: '' }));
+      loadData();
 
       // Notify the poll author
       if (poll.authorId && poll.authorId !== 'admin' && poll.authorId !== effectiveUserId) {
-        await addDoc(collection(db, 'notifications'), {
+        await notificationService.sendNotification({
           userId: poll.authorId,
           title: 'تعليق جديد على مقترحك 💬',
           message: `قام ${effectiveUserName} بالتعليق على مقترحك: "${text.trim().substring(0, 30)}..."`,
-          timestamp: serverTimestamp(),
-          read: false,
           type: 'general'
         });
       }
@@ -211,22 +172,23 @@ export const IdeaBank: React.FC<IdeaBankProps> = ({ userId, userName, studentGra
 
     setIsSubmittingPoll(true);
     try {
-      await addDoc(collection(db, 'council_polls'), {
+      await ideaService.createPoll({
+        schoolId: schoolId || undefined,
         authorId: effectiveUserId,
-        authorName: effectiveUserName,
+        authorName: getParentSenderName(effectiveUserName),
         title: pollTitle.trim() || 'مقترح عام',
         description: pollDesc,
         type: 'parent',
         status: 'active',
         votes: {},
         comments: [],
-        timestamp: serverTimestamp(),
         targetGrade: studentGrade || 'all'
       });
       setPollTitle('');
       setPollDesc('');
       setShowPollForm(false);
       setShowSuccess(true);
+      loadData();
       setTimeout(() => {
         setShowSuccess(false);
         setActiveTab('council');
@@ -241,7 +203,8 @@ export const IdeaBank: React.FC<IdeaBankProps> = ({ userId, userName, studentGra
   const handleDeleteMyIdea = (ideaId: string) => {
     openConfirm('تأكيد الحذف', 'هل أنت متأكد من حذف هذا المقترح؟', async () => {
       try {
-        await deleteDoc(doc(db, 'idea_bank', ideaId));
+        await ideaService.deleteIdea(ideaId);
+        loadData();
       } catch (err) {
         console.error(err);
       }
@@ -251,9 +214,9 @@ export const IdeaBank: React.FC<IdeaBankProps> = ({ userId, userName, studentGra
   const handleDeleteAllMyIdeas = () => {
     openConfirm('تأكيد حذف الكل', 'هل أنت متأكد من حذف جميع مقترحاتك؟ لا يمكن التراجع عن هذا الإجراء.', async () => {
       try {
-        const myIdeas = ideas.filter(idea => idea.senderId === effectiveUserId);
-        const promises = myIdeas.map(idea => deleteDoc(doc(db, 'idea_bank', idea.id)));
-        await Promise.all(promises);
+        const myIdeas = ideas.filter(idea => idea.userId === effectiveUserId);
+        await Promise.all(myIdeas.map(idea => ideaService.deleteIdea(idea.id)));
+        loadData();
       } catch (err) {
         console.error(err);
       }
@@ -263,7 +226,8 @@ export const IdeaBank: React.FC<IdeaBankProps> = ({ userId, userName, studentGra
   const handleDeleteMyPoll = (pollId: string) => {
     openConfirm('تأكيد الحذف', 'هل أنت متأكد من حذف هذا المقترح؟', async () => {
       try {
-        await deleteDoc(doc(db, 'council_polls', pollId));
+        await ideaService.deletePoll(pollId);
+        loadData();
       } catch (err) {
         console.error(err);
       }
@@ -275,8 +239,8 @@ export const IdeaBank: React.FC<IdeaBankProps> = ({ userId, userName, studentGra
     if (myPolls.length === 0) return;
     openConfirm('تأكيد حذف الكل', 'هل أنت متأكد من حذف جميع مقترحاتك في المجلس؟ لا يمكن التراجع عن هذا الإجراء.', async () => {
       try {
-        const promises = myPolls.map(poll => deleteDoc(doc(db, 'council_polls', poll.id)));
-        await Promise.all(promises);
+        await Promise.all(myPolls.map(poll => ideaService.deletePoll(poll.id)));
+        loadData();
       } catch (err) {
         console.error(err);
       }
@@ -311,14 +275,14 @@ export const IdeaBank: React.FC<IdeaBankProps> = ({ userId, userName, studentGra
 
     setIsSubmitting(true);
     try {
-      await addDoc(collection(db, 'idea_bank'), {
-        senderId: effectiveUserId,
-        senderName: effectiveUserName,
+      await ideaService.createIdea({
+        schoolId: schoolId || undefined,
+        userId: effectiveUserId,
+        senderName: getParentSenderName(effectiveUserName),
         title: title.trim() || 'مقترح جديد',
         description,
         category,
         status: 'pending',
-        timestamp: serverTimestamp(),
         readByParent: true,
         targetGrade: studentGrade || 'all'
       });
@@ -326,6 +290,7 @@ export const IdeaBank: React.FC<IdeaBankProps> = ({ userId, userName, studentGra
       setDescription('');
       setCategory('academic');
       setShowSuccess(true);
+      loadData();
       setTimeout(() => {
         setShowSuccess(false);
         setActiveTab('my_ideas');
@@ -519,7 +484,7 @@ export const IdeaBank: React.FC<IdeaBankProps> = ({ userId, userName, studentGra
                           </span>
                         </div>
                         <p className="text-white/40 text-xs text-right" dir="ltr">
-                          {idea.timestamp ? new Date(idea.timestamp.seconds * 1000).toLocaleString('ar-EG') : 'جارِ الإرسال...'}
+                          {idea.timestamp ? new Date(idea.timestamp).toLocaleString('ar-EG') : 'جارِ الإرسال...'}
                         </p>
                       </div>
                       
@@ -573,7 +538,7 @@ export const IdeaBank: React.FC<IdeaBankProps> = ({ userId, userName, studentGra
                           </span>
                         </div>
                         <p className="text-white/40 text-xs text-right" dir="ltr">
-                          {poll.timestamp ? new Date(poll.timestamp.seconds * 1000).toLocaleString('ar-EG') : 'جارِ الإرسال...'}
+                          {poll.timestamp ? new Date(poll.timestamp).toLocaleString('ar-EG') : 'جارِ الإرسال...'}
                         </p>
                       </div>
                       
@@ -747,7 +712,7 @@ export const IdeaBank: React.FC<IdeaBankProps> = ({ userId, userName, studentGra
                            <div className="flex flex-wrap items-center gap-2 text-[10px] text-white/40 mb-3">
                              <span className="flex items-center gap-1"><User size={12}/> {poll.type === 'admin' ? 'الإدارة المدرسية' : poll.authorName}</span>
                              <span>•</span>
-                             <span>{poll.timestamp ? new Date(poll.timestamp.seconds * 1000).toLocaleString('ar-EG', { dateStyle: 'short' }) : 'الآن'}</span>
+                             <span>{poll.timestamp ? new Date(poll.timestamp).toLocaleString('ar-EG', { dateStyle: 'short' }) : 'الآن'}</span>
                              {poll.targetGrade && (
                                <>
                                  <span>•</span>

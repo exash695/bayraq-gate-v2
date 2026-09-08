@@ -1,5 +1,4 @@
-import { 
-  collection, 
+import { collection, 
   addDoc, 
   updateDoc, 
   deleteDoc, 
@@ -9,8 +8,7 @@ import {
   where, 
   Timestamp,
   orderBy,
-  onSnapshot
-} from 'firebase/firestore';
+  onSnapshot } from '@/src/lib/firebase';
 import { db } from '../lib/firebase';
 
 export interface SubscriptionCode {

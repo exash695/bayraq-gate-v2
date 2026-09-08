@@ -3,6 +3,8 @@ import { copyToClipboard } from '../utils/clipboard';
 import { motion } from 'motion/react';
 import { useCachedMedia } from '../hooks/useCachedMedia';
 import { getInMemoryCachedUrl } from '../utils/imageCacher';
+import { db } from '../lib/firebase';
+import { doc, getDoc, onSnapshot } from '@/src/lib/firebase';
 
 // Berq Debug Store for UI Inspection
 export type BerqDebugLog = {
@@ -35,8 +37,44 @@ export function subscribeBerqLogs(cb: (logs: BerqDebugLog[]) => void) {
   };
 }
 
-let globalPoseOverrides: Record<string, string> = {};
+const LOCAL_STORAGE_KEY = 'bairaq_active_poses_v1';
+
+const loadCachedLocalPoses = (): Record<string, string> => {
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
+      if (stored) {
+        return JSON.parse(stored) || {};
+      }
+    } catch (e) {}
+  }
+  return {};
+};
+
+let globalPoseOverrides: Record<string, string> = loadCachedLocalPoses();
 let poseSubscribers: ((poses: Record<string, string>) => void)[] = [];
+
+export const updateGlobalPoses = (newPoses: Record<string, string>) => {
+  if (!newPoses || typeof newPoses !== 'object') return;
+  const updated = { ...globalPoseOverrides, ...newPoses };
+  // Expand aliases
+  for (const [key, value] of Object.entries(updated)) {
+    if (typeof value === 'string' && value) {
+      const aliases = POSE_ALIASES_MAP[key] || [];
+      for (const alias of aliases) {
+        updated[alias] = value;
+      }
+    }
+  }
+  globalPoseOverrides = updated;
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(globalPoseOverrides));
+    } catch (e) {}
+  }
+  console.log(`[STATE UPDATE] globalPoseOverrides updated (${Object.keys(globalPoseOverrides).length} keys)`);
+  poseSubscribers.forEach(cb => cb(globalPoseOverrides));
+};
 
 export const POSE_ALIASES_MAP: Record<string, string[]> = {
   pulse: ['pose_portal_pulse'],
@@ -77,6 +115,10 @@ export const POSE_ALIASES_MAP: Record<string, string[]> = {
   pose_radar_navigator: ['pose_questions_bank'],
   welcome_video: ['greeting_welcome', 'greet_hello', 'in_app_use_welcomes_students'],
   greeting_welcome: ['welcome_video', 'greet_hello', 'in_app_use_welcomes_students'],
+  welcome_video_secondary: ['welcome_intro_secondary', 'intro_secondary_video'],
+  welcome_intro_secondary: ['welcome_video_secondary'],
+  app_logo: ['logo', 'bairaq_logo', 'application_logo', 'header_logo'],
+  logo: ['app_logo', 'bairaq_logo'],
   welcome_card_welcome: ['welcome'],
   welcome: ['welcome_card_welcome'],
   welcome_card_connect: ['connect'],
@@ -107,79 +149,107 @@ export const useBerqPoses = () => {
   return poses;
 };
 
+export const getAppLogoUrl = (): string => {
+  return globalPoseOverrides['app_logo'] || globalPoseOverrides['logo'] || globalPoseOverrides['bairaq_logo'] || '/logo.png';
+};
+
+export const useAppLogo = (): string => {
+  const poses = useBerqPoses();
+  return poses['app_logo'] || poses['logo'] || poses['bairaq_logo'] || '/logo.png';
+};
+
 export function initPoseOverrides() {
-  import('../lib/firebase').then(({ db }) => {
-    import('firebase/firestore').then(({ doc, getDoc, onSnapshot }) => {
-      onSnapshot(doc(db, "system_settings", "bairaq_poses"), async (docSnap) => {
-        if (docSnap.exists()) {
-          const poses = docSnap.data() as Record<string, string>;
-          const loadedPoses: Record<string, string> = { ...globalPoseOverrides };
-          let changed = false;
+  console.log(`[RELOAD] Initializing Berq Character Manager and Pose Overrides...`);
 
-          for (const [key, value] of Object.entries(poses)) {
-            if (typeof value === 'string' && value.startsWith('CHUNKED:')) {
-              const count = parseInt(value.split(':')[1]);
-              const chunkPromises = [];
-              for (let i = 0; i < count; i++) {
-                chunkPromises.push(
-                  getDoc(doc(db, "bairaq_pose_chunks", `${key}_${i}`)).then(async (snap) => {
-                    if (snap.exists()) return snap;
-                    if (key === 'mayadeen_tab_bairaq' || key === 'pose_dual_arena' || key === 'captain_bairaq_guardian') {
-                      const snapGuardian = await getDoc(doc(db, "bairaq_pose_chunks", `captain_bairaq_guardian_${i}`));
-                      if (snapGuardian.exists()) return snapGuardian;
-                      const snapMayadeen = await getDoc(doc(db, "bairaq_pose_chunks", `mayadeen_tab_bairaq_${i}`));
-                      if (snapMayadeen.exists()) return snapMayadeen;
-                    }
-                    return null;
-                  }).catch(err => {
-                    console.warn(`Notice: Chunk ${key}_${i} unavailable (offline/missing):`, err?.message || err);
-                    return null;
-                  })
-                );
-              }
-              try {
-                const chunkSnaps = await Promise.all(chunkPromises);
-                let full = '';
-                for (const snap of chunkSnaps) {
-                  if (snap && snap.exists()) full += snap.data().data;
+  // Fast initial fetch from backend admin API
+  try {
+    fetch('/api/bairaq/poses')
+      .then(res => res.json())
+      .then(data => {
+        if (data.poses && typeof data.poses === 'object') {
+          console.log(`[DATABASE READ] [AUTHORITATIVE SERVER SYNC] Loaded ${Object.keys(data.poses).length} poses from server`);
+          updateGlobalPoses(data.poses);
+        }
+      })
+      .catch((err) => {
+        console.warn("[DATABASE READ] Server fetch notice (using cache):", err?.message || err);
+      });
+  } catch(e) {}
+
+  const handleSnapshot = async (docSnap: any) => {
+    if (docSnap.exists()) {
+      const poses = docSnap.data() as Record<string, string>;
+      const loadedPoses: Record<string, string> = { ...globalPoseOverrides };
+      let changed = false;
+
+      for (const [key, value] of Object.entries(poses)) {
+        if (typeof value === 'string' && value.startsWith('CHUNKED:')) {
+          const count = parseInt(value.split(':')[1]);
+          const chunkPromises = [];
+          for (let i = 0; i < count; i++) {
+            chunkPromises.push(
+              getDoc(doc(db, "bairaq_pose_chunks", `${key}_${i}`)).then(async (snap) => {
+                if (snap.exists()) return snap;
+                if (key === 'mayadeen_tab_bairaq' || key === 'pose_dual_arena' || key === 'captain_bairaq_guardian') {
+                  const snapGuardian = await getDoc(doc(db, "bairaq_pose_chunks", `captain_bairaq_guardian_${i}`));
+                  if (snapGuardian.exists()) return snapGuardian;
+                  const snapMayadeen = await getDoc(doc(db, "bairaq_pose_chunks", `mayadeen_tab_bairaq_${i}`));
+                  if (snapMayadeen.exists()) return snapMayadeen;
                 }
-                if (full && loadedPoses[key] !== full) {
-                  loadedPoses[key] = full;
-                  changed = true;
-                }
-              } catch (e) {
-                console.warn("Could not load chunked pose (offline fallback in use)", e);
-              }
-            } else if (typeof value === 'string') {
-              if (loadedPoses[key] !== value) {
-                loadedPoses[key] = value;
-                changed = true;
-              }
-            }
+                return null;
+              }).catch(err => {
+                console.warn(`Notice: Chunk ${key}_${i} unavailable (offline/missing):`, err?.message || err);
+                return null;
+              })
+            );
           }
-
-          // Expand all bidirectional alias mappings into loadedPoses
-          for (const [key, value] of Object.entries(loadedPoses)) {
-            if (typeof value === 'string' && value) {
-              const aliases = POSE_ALIASES_MAP[key] || [];
-              for (const alias of aliases) {
-                if (loadedPoses[alias] !== value) {
-                  loadedPoses[alias] = value;
-                  changed = true;
-                }
-              }
+          try {
+            const chunkSnaps = await Promise.all(chunkPromises);
+            let full = '';
+            for (const snap of chunkSnaps) {
+              if (snap && snap.exists()) full += snap.data().data;
             }
+            if (full && loadedPoses[key] !== full) {
+              loadedPoses[key] = full;
+              changed = true;
+            }
+          } catch (e) {
+            console.warn("Could not load chunked pose (offline fallback in use)", e);
           }
-
-          if (changed) {
-            globalPoseOverrides = loadedPoses;
-            poseSubscribers.forEach(cb => cb(globalPoseOverrides));
+        } else if (typeof value === 'string') {
+          if (loadedPoses[key] !== value) {
+            loadedPoses[key] = value;
+            changed = true;
           }
         }
-      }, (error) => {
-        console.warn("bairaq_poses snapshot listener paused (offline/unavailable):", error?.message || error);
-      });
-    });
+      }
+
+      // Expand all bidirectional alias mappings into loadedPoses
+      for (const [key, value] of Object.entries(loadedPoses)) {
+        if (typeof value === 'string' && value) {
+          const aliases = POSE_ALIASES_MAP[key] || [];
+          for (const alias of aliases) {
+            if (loadedPoses[alias] !== value) {
+              loadedPoses[alias] = value;
+              changed = true;
+            }
+          }
+        }
+      }
+
+      if (changed) {
+        globalPoseOverrides = loadedPoses;
+        poseSubscribers.forEach(cb => cb(globalPoseOverrides));
+      }
+    }
+  };
+
+  onSnapshot(doc(db, "system_settings", "bairaq_poses"), handleSnapshot, (error) => {
+    console.warn("bairaq_poses system_settings snapshot listener paused:", error?.message || error);
+  });
+
+  onSnapshot(doc(db, "system_config", "bairaq_poses"), handleSnapshot, (error) => {
+    console.warn("bairaq_poses system_config snapshot listener paused:", error?.message || error);
   });
 }
 initPoseOverrides();
@@ -310,84 +380,18 @@ interface BerqCharacterProps {
 
 // Map short pose name to actual public URL
 export const getBerqImageUrl = (pose: BerqPose): string => {
+  // Only map to verified physically present video files in public/mascot/
   const videoMapping: Partial<Record<BerqPose, string>> = {
-    // Specific Header Poses
     'pose_academic_scholar': '/mascot/sliced_bairaq_sheet5_pose_academic_scholar.mp4',
-    'pose_activity_logs': '/mascot/sliced_bairaq_sheet5_pose_activity_logs.mp4',
-    'pose_ai_companion': '/mascot/sliced_bairaq_sheet5_pose_ai_companion.mp4',
     'pose_broadcaster': '/mascot/sliced_bairaq_sheet5_pose_broadcaster.mp4',
     'pose_digital_broadcaster': '/mascot/sliced_bairaq_sheet5_pose_broadcaster.mp4',
-    'pose_champion_laureate': '/mascot/sliced_bairaq_sheet5_pose_champion_laureate.mp4',
-    'pose_content_control': '/mascot/sliced_bairaq_sheet5_pose_content_control.mp4',
-    'pose_control_mechanic': '/mascot/sliced_bairaq_sheet5_pose_content_control.mp4',
-    'pose_customer_support': '/mascot/sliced_bairaq_sheet5_pose_customer_support.mp4',
-    'pose_discipline_shield': '/mascot/sliced_bairaq_sheet5_pose_discipline_shield.mp4',
-    'pose_excellence_champion': '/mascot/sliced_bairaq_sheet5_pose_excellence_champion.mp4',
-    'pose_staff_leader': '/mascot/sliced_bairaq_sheet5_pose_excellence_champion.mp4',
-    'pose_sovereign_leader': '/mascot/sliced_bairaq_sheet5_pose_excellence_champion.mp4',
-    'pose_finance_officer': '/mascot/sliced_bairaq_sheet5_pose_finance_officer.mp4',
-    'pose_homework_master': '/mascot/sliced_bairaq_sheet5_pose_homework_master.mp4',
     'pose_idea_genius': '/mascot/sliced_bairaq_sheet5_pose_idea_genius.mp4',
     'pose_idea_creator': '/mascot/sliced_bairaq_sheet5_pose_idea_genius.mp4',
-    'pose_key_master': '/mascot/sliced_bairaq_sheet5_pose_key_master.mp4',
-    'pose_gateway_guardian': '/mascot/sliced_bairaq_sheet5_pose_key_master.mp4',
-    'pose_live_announcer': '/mascot/sliced_bairaq_sheet5_pose_live_announcer.mp4',
-    'pose_parent_dashboard': '/mascot/sliced_bairaq_sheet5_pose_parent_dashboard.mp4',
-    'pose_portal_pulse': '/mascot/sliced_bairaq_sheet5_pose_portal_pulse.mp4',
-    'pose_radar_navigator': '/mascot/sliced_bairaq_sheet5_pose_radar_navigator.mp4',
-    'pose_schedule_planner': '/mascot/sliced_bairaq_sheet5_pose_schedule_planner.mp4',
-    'pose_school_uniform': '/mascot/sliced_bairaq_sheet5_pose_school_uniform.mp4',
-    'pose_sixty_seconds_challenger': '/mascot/sliced_bairaq_sheet5_pose_sixty_seconds_challenger.mp4',
-    'pose_student_manager': '/mascot/sliced_bairaq_sheet5_pose_student_manager.mp4',
-    'pose_transport_manager': '/mascot/sliced_bairaq_sheet5_pose_transport_manager.mp4',
-    'pose_bus_captain': '/mascot/sliced_bairaq_sheet5_pose_transport_manager.mp4',
-    'pose_waving_hand': '/mascot/pose_waving_hand.mp4',
-    'pose_questions_bank': '/mascot/sliced_bairaq_sheet5_pose_radar_navigator.mp4',
-    'pose_live_stream': '/mascot/sliced_bairaq_sheet5_live.mp4',
-    'pose_live': '/mascot/sliced_bairaq_sheet5_live.mp4',
-    'captain_bairaq_guardian': '/mascot/pose_waving_hand.mp4',
-    'mayadeen_tab_bairaq': '/mascot/pose_waving_hand.mp4',
-
-    // Role & Category fallbacks
-    'character_administrator': '/mascot/sliced_bairaq_sheet5_pose_student_manager.mp4',
-    'character_driver': '/mascot/sliced_bairaq_sheet5_pose_transport_manager.mp4',
-    'character_guardian': '/mascot/sliced_bairaq_sheet5_pose_discipline_shield.mp4',
-    'character_student': '/mascot/sliced_bairaq_sheet5_pose_school_uniform.mp4',
-    'character_teacher': '/mascot/sliced_bairaq_sheet5_pose_homework_master.mp4',
-    'excellence_tab_bairaq': '/mascot/sliced_bairaq_sheet5_pose_excellence_champion.mp4',
+    'pose_sixty_seconds_challenger': '/mascot/pose_sixty_seconds_challenger.mp4',
     'general_pose_diligent_student': '/mascot/sliced_bairaq_sheet5_pose_academic_scholar.mp4',
-    'general_pose_encouragement': '/mascot/pose_waving_hand.mp4',
-    'general_pose_excellence_achievement': '/mascot/sliced_bairaq_sheet5_pose_champion_laureate.mp4',
     'general_pose_explanation_guidance': '/mascot/sliced_bairaq_sheet5_pose_academic_scholar.mp4',
-    'general_pose_notifications': '/mascot/sliced_bairaq_sheet5_pose_live_announcer.mp4',
-    'general_pose_protection_followup': '/mascot/sliced_bairaq_sheet5_pose_discipline_shield.mp4',
-    'greet_congratulations': '/mascot/sliced_bairaq_sheet5_pose_champion_laureate.mp4',
-    'greet_hello': '/mascot/sliced_bairaq_sheet5_greeting_hello.mp4',
-    'greet_lets_go': '/mascot/sliced_bairaq_sheet5_pose_portal_pulse.mp4',
-    'greet_well_done': '/mascot/sliced_bairaq_sheet5_pose_champion_laureate.mp4',
-    'greeting_welcome': '/mascot/sliced_bairaq_sheet5_greeting_hello.mp4',
-    'in_app_use_accompanies_student': '/mascot/sliced_bairaq_sheet5_pose_discipline_shield.mp4',
-    'in_app_use_awards_medals': '/mascot/sliced_bairaq_sheet5_pose_champion_laureate.mp4',
-    'in_app_use_drives_buses': '/mascot/sliced_bairaq_sheet5_pose_transport_manager.mp4',
-    'in_app_use_helps_teachers': '/mascot/sliced_bairaq_sheet5_pose_homework_master.mp4',
-    'in_app_use_reassures_parents': '/mascot/sliced_bairaq_sheet5_pose_parent_dashboard.mp4',
-    'in_app_use_safety_first': '/mascot/sliced_bairaq_sheet5_pose_discipline_shield.mp4',
-    'in_app_use_welcomes_students': '/mascot/sliced_bairaq_sheet5_greeting_hello.mp4',
-    'logo_mascot': '/mascot/sliced_bairaq_sheet5_pose_school_uniform.mp4',
-    'main_mascot_full_body': '/mascot/sliced_bairaq_sheet5_pose_school_uniform.mp4',
-    'main_standing_pose': '/mascot/sliced_bairaq_sheet5_pose_school_uniform.mp4',
-    'standing_arms_crossed': '/mascot/sliced_bairaq_sheet5_pose_school_uniform.mp4',
-    'pose_crossed_arms': '/mascot/sliced_bairaq_sheet5_pose_school_uniform.mp4',
-    'pose_holding_tablet': '/mascot/sliced_bairaq_sheet5_pose_academic_scholar.mp4',
-    'pose_thumbs_up': '/mascot/sliced_bairaq_sheet5_pose_champion_laureate.mp4',
-    'use_achievement_excellence': '/mascot/sliced_bairaq_sheet5_pose_champion_laureate.mp4',
-    'use_driving_bus': '/mascot/sliced_bairaq_sheet5_pose_transport_manager.mp4',
-    'use_notifications_alerts': '/mascot/sliced_bairaq_sheet5_pose_live_announcer.mp4',
-    'use_parental_supervision': '/mascot/sliced_bairaq_sheet5_pose_parent_dashboard.mp4',
-    'use_safety_protection': '/mascot/sliced_bairaq_sheet5_pose_discipline_shield.mp4',
     'use_smart_education': '/mascot/sliced_bairaq_sheet5_pose_academic_scholar.mp4',
     'use_studying': '/mascot/sliced_bairaq_sheet5_pose_academic_scholar.mp4',
-    'use_tracking_trips': '/mascot/sliced_bairaq_sheet5_pose_transport_manager.mp4',
   };
 
   const imageMapping: Record<BerqPose, string> = {
@@ -455,7 +459,7 @@ export const getBerqImageUrl = (pose: BerqPose): string => {
     'logo_mascot': '/mascot/welcome.jpg',
     'main_mascot_full_body': '/mascot/welcome.jpg',
     'main_standing_pose': '/mascot/welcome.jpg',
-    'mayadeen_tab_bairaq': '/mascot/welcome.jpg',
+    'mayadeen_tab_bairaq': '/mascot/connect.jpg',
     'pose_academic_scholar': '/mascot/study.jpg',
     'pose_activity_logs': '/mascot/welcome.jpg',
     'pose_ai_companion': '/mascot/launch.jpg',
@@ -531,13 +535,16 @@ export const isVideoUrl = (url: string): boolean => {
 export const getBerqFallbackImage = (pose?: BerqPose): string => {
   if (!pose) return '/mascot/welcome.jpg';
   const imageMapping: Partial<Record<BerqPose, string>> = {
-    'captain_bairaq_guardian': '/mascot/sliced_bairaq_sheet3_captain_bairaq_guardian.mp4',
-    'mayadeen_tab_bairaq': '/mascot/sliced_bairaq_sheet3_captain_bairaq_guardian.mp4',
-    'pose_dual_arena': '/mascot/sliced_bairaq_sheet3_captain_bairaq_guardian.mp4',
+    'captain_bairaq_guardian': '/mascot/connect.jpg',
+    'mayadeen_tab_bairaq': '/mascot/connect.jpg',
+    'pose_dual_arena': '/mascot/connect.jpg',
     'pose_academic_scholar': '/mascot/study.jpg',
     'pose_excellence_champion': '/mascot/achieve.jpg',
     'pose_ai_companion': '/mascot/launch.jpg',
     'pose_transport_manager': '/mascot/transit.jpg',
+    'pose_idea_genius': '/mascot/launch.jpg',
+    'pose_finance_officer': '/mascot/study.jpg',
+    'pose_parent_dashboard': '/mascot/connect.jpg',
   };
   return imageMapping[pose] || '/mascot/welcome.jpg';
 };

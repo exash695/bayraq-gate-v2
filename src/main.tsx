@@ -1,7 +1,12 @@
 import {createRoot} from 'react-dom/client';
 import './index.css';
+import './lib/pdfWorker';
 import ErrorBoundary from './components/ErrorBoundary';
 import App from './App.tsx';
+import { errorMonitoringService } from './services/errorMonitoringService';
+
+// Initialize global error monitoring
+errorMonitoringService.init();
 
 function safeStringify(a: any): string {
   if (typeof a === 'string') return a;
@@ -29,6 +34,7 @@ function safeStringify(a: any): string {
   return String(a);
 }
 
+/*
 // Intercept and silence uncritical CSS color parsing warnings from html2canvas (e.g. oklab/oklch)
 const originalWarn = console.warn;
 console.warn = function (...args: any[]) {
@@ -104,6 +110,7 @@ console.log = function (...args: any[]) {
   } catch(e) {}
   originalLog.apply(console, args);
 };
+*/
 
 createRoot(document.getElementById('root')!).render(
     <ErrorBoundary>
@@ -116,15 +123,20 @@ if (typeof window !== 'undefined') {
     try {
       const error = event.reason;
       const errMsg = error?.message || String(error || '');
-      const isAbort = 
+      const isAbortOrNetwork = 
         error?.name === 'AbortError' || 
         errMsg.includes('aborted') || 
         errMsg.includes('abort') || 
         errMsg.includes('cancel') || 
         errMsg.includes('إلغاء') || 
         errMsg.includes('المعالجة') || 
-        errMsg.includes('without reason');
-      if (isAbort) {
+        errMsg.includes('without reason') ||
+        errMsg.includes('Failed to fetch') ||
+        errMsg.includes('NetworkError') ||
+        errMsg.includes('Load failed') ||
+        errMsg.includes('websocket') ||
+        errMsg.includes('Quota');
+      if (isAbortOrNetwork) {
         event.preventDefault();
         event.stopPropagation();
       }
@@ -135,15 +147,21 @@ if (typeof window !== 'undefined') {
     try {
       const error = event.error;
       const errMsg = error?.message || event.message || '';
-      const isAbort = 
+      const isAbortOrNetwork = 
         error?.name === 'AbortError' || 
         errMsg.includes('aborted') || 
         errMsg.includes('abort') || 
         errMsg.includes('cancel') || 
         errMsg.includes('إلغاء') || 
         errMsg.includes('المعالجة') || 
-        errMsg.includes('without reason');
-      if (isAbort) {
+        errMsg.includes('without reason') ||
+        errMsg.includes('Failed to fetch') ||
+        errMsg.includes('NetworkError') ||
+        errMsg.includes('Load failed') ||
+        errMsg.includes('websocket') ||
+        errMsg.includes('ResizeObserver') ||
+        errMsg.includes('Quota');
+      if (isAbortOrNetwork) {
         event.preventDefault();
         event.stopPropagation();
       }

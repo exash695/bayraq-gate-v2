@@ -4,8 +4,8 @@ import {
   ShieldCheck, Trash2, Eye, Search, Loader2, FileText, X, AlertTriangle, CheckCircle2
 } from 'lucide-react';
 import { db } from '../lib/firebase';
-import { collection, query, onSnapshot, deleteDoc, doc, orderBy, addDoc, serverTimestamp } from 'firebase/firestore';
-import { getStorage, ref, deleteObject } from 'firebase/storage';
+import { collection, query, onSnapshot, deleteDoc, doc, orderBy, addDoc, serverTimestamp } from '@/src/lib/firebase';
+import { getStorage, ref, deleteObject } from '@/src/lib/firebase';
 import { logActivity } from '../utils/auditLogger';
 
 interface ContentItem {
@@ -95,7 +95,7 @@ export const ResourceManager: React.FC = () => {
 
       // 3. Optional: Notify teacher/log reason
       if (deleteReason.trim() !== '') {
-        await addDoc(collection(db, 'notifications'), {
+        await fetch('/api/notifications', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
           title: 'تم حذف المحتوى الخاص بك',
           message: `تم حذف "${item.title || item.name || 'ملف'}" بواسطة الإدارة. السبب: ${deleteReason}`,
           type: 'system',
@@ -103,7 +103,7 @@ export const ResourceManager: React.FC = () => {
           teacherName: item.teacherName || item.uploaderName || 'Unknown',
           createdAt: serverTimestamp(),
           read: false
-        });
+        }) });
       }
 
       logActivity({

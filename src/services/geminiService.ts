@@ -52,9 +52,17 @@ export const extractTextFromFile = async (
         errMsg.includes("429") ||
         errMsg.includes("503") ||
         errMsg.includes("502") ||
+        errMsg.includes("500") ||
         errMsg.includes("504") ||
-        errMsg.includes("HTML Exception") ||
-        errMsg.includes("Failed to fetch");
+        errMsg.includes("HTML") ||
+        errMsg.includes("غير متاح") ||
+        errMsg.includes("غير متوقعة") ||
+        errMsg.includes("Unexpected token") ||
+        errMsg.includes("JSON") ||
+        errMsg.includes("Gateway") ||
+        errMsg.includes("Failed to fetch") ||
+        errMsg.includes("high demand") ||
+        errMsg.includes("unavailable");
 
       if (isRetryable && retries > 0) {
         const waitSecs = 3; // Reduced retry wait from 10s to 3s for faster recovery
@@ -81,7 +89,32 @@ export const extractTextFromFile = async (
                 type: "paragraph",
                 content: p.trim()
               })),
-              quiz: []
+              quiz: [
+                {
+                  type: "mcq",
+                  question: "ما هو المحور الأساسي الذي يتناوله هذا الدرس المستخرج؟",
+                  options: [
+                    "المفاهيم والشروحات العلمية الموضحة في النص",
+                    "معلومات خارجية غير واردة بالمنهج",
+                    "إلغاء التطبيقات والتمارين",
+                    "نصوص تجريبية عشوائية"
+                  ],
+                  correct: 0,
+                  explanation: "المحتوى يركز على المفاهيم العلمية المستخرجة من الصفحة."
+                },
+                {
+                  type: "mcq",
+                  question: "كيف تحقق أفضل استفادة من مراجعة هذا النص التعليمي؟",
+                  options: [
+                    "المطابقة الدقيقة مع الأمثلة وحل التحديات التفاعلية",
+                    "الحفظ السطحي دون مراجعة الشرح",
+                    "تجاوز الملاحظات والقواعد الهامة",
+                    "إهمال حل التمارين التفاعلية"
+                  ],
+                  correct: 0,
+                  explanation: "الفهم والتدريب العملي المستمر يضمنان استقرار المعلومة والدرجة الكاملة."
+                }
+              ]
             }
           ]
         };

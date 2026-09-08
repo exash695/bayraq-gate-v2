@@ -26,12 +26,12 @@ import {
   Check
 } from 'lucide-react';
 
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { db } from '../lib/firebase';
 import { safeStorage } from '../lib/storage';
 import { SCHOOLS_DATA, getSchoolBairaqImageUrl, getOfficialSchoolLogoUrl } from '../lib/constants';
 import { useCachedMedia } from '../hooks/useCachedMedia';
 import { getCachedMediaUrl, getOptimizedImageUrl } from '../utils/imageCacher';
+import { useAppLogo } from './BerqCharacterManager';
+import { schoolService, SchoolRecord } from '../services/schoolService';
 
 interface SchoolSelectionProps {
   onSelectSchool: (schoolId: string) => void;
@@ -175,20 +175,52 @@ const SCHOOL_THEMES: Record<string, SchoolThemeConfig> = {
     icon: Landmark,
   },
   school8: {
-    bgGradient: 'from-[#4D1A0A] via-[#2A0E04] to-[#120501]',
-    borderColor: 'rgba(249, 115, 22, 0.3)',
-    glowShadow: '0 4px 20px -2px rgba(249, 115, 22, 0.16)',
-    accentColor: '#F97316',
-    badgeBg: 'rgba(249, 115, 22, 0.15)',
-    badgeText: '#FDBA74',
-    tagColor: 'border-orange-500/30 text-orange-300 bg-orange-500/10',
-    city: 'الديوانية - مركز المدينة',
-    students: 360,
-    buses: 4,
+    bgGradient: 'from-[#381E02] via-[#200F01] to-[#0A0400]',
+    borderColor: 'rgba(245, 158, 11, 0.45)',
+    glowShadow: '0 4px 25px -2px rgba(245, 158, 11, 0.25)',
+    accentColor: '#F59E0B',
+    badgeBg: 'rgba(245, 158, 11, 0.18)',
+    badgeText: '#FCD34D',
+    tagColor: 'border-amber-500/40 text-amber-300 bg-amber-500/15',
+    city: 'العراق - دورات نخبة الأساتذة',
+    students: 1450,
+    buses: 0,
     category: 'institute',
-    slogan: 'برامج تقوية مركزية بإشراف نخبة من أساتذة القطر',
-    desc: 'دورات ودروس مكثفة تغطي المنهج بالكامل مع حلول وزاريات شاملة تضمن الطريق الآمن لدرجة الـ 100 الذهبية.',
-    icon: Activity,
+    slogan: 'منصة الدورات الألكترونية لنخبة الأساتذة',
+    desc: 'الملتقى الرقمي الأكاديمي لدورات نخبة الأساتذة، الملازم التفاعلية، تحديات الـ 60 ثانية وبنك الأفكار الذكية.',
+    icon: GraduationCap,
+  },
+  general: {
+    bgGradient: 'from-[#381E02] via-[#200F01] to-[#0A0400]',
+    borderColor: 'rgba(245, 158, 11, 0.45)',
+    glowShadow: '0 4px 25px -2px rgba(245, 158, 11, 0.25)',
+    accentColor: '#F59E0B',
+    badgeBg: 'rgba(245, 158, 11, 0.18)',
+    badgeText: '#FCD34D',
+    tagColor: 'border-amber-500/40 text-amber-300 bg-amber-500/15',
+    city: 'العراق - دورات نخبة الأساتذة',
+    students: 1450,
+    buses: 0,
+    category: 'institute',
+    slogan: 'منصة الدورات الألكترونية لنخبة الأساتذة',
+    desc: 'الملتقى الرقمي الأكاديمي لدورات نخبة الأساتذة، الملازم التفاعلية، تحديات الـ 60 ثانية وبنك الأفكار الذكية.',
+    icon: GraduationCap,
+  },
+  academy: {
+    bgGradient: 'from-[#381E02] via-[#200F01] to-[#0A0400]',
+    borderColor: 'rgba(245, 158, 11, 0.45)',
+    glowShadow: '0 4px 25px -2px rgba(245, 158, 11, 0.25)',
+    accentColor: '#F59E0B',
+    badgeBg: 'rgba(245, 158, 11, 0.18)',
+    badgeText: '#FCD34D',
+    tagColor: 'border-amber-500/40 text-amber-300 bg-amber-500/15',
+    city: 'العراق - دورات نخبة الأساتذة',
+    students: 1450,
+    buses: 0,
+    category: 'institute',
+    slogan: 'منصة الدورات الألكترونية لنخبة الأساتذة',
+    desc: 'الملتقى الرقمي الأكاديمي لدورات نخبة الأساتذة، الملازم التفاعلية، تحديات الـ 60 ثانية وبنك الأفكار الذكية.',
+    icon: GraduationCap,
   },
 };
 
@@ -302,7 +334,8 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
   onNavigateHallOfFame,
   onOpenNotifications
 }) => {
-  const [firestoreSchools, setFirestoreSchools] = useState<any[]>([]);
+  const appLogo = useAppLogo();
+  const [apiSchools, setApiSchools] = useState<SchoolRecord[]>([]);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState<boolean>(false);
@@ -311,60 +344,89 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
   const [sheetError, setSheetError] = useState<string>('');
   const [showNotificationModal, setShowNotificationModal] = useState<boolean>(false);
 
-  // Subscribe to real-time firestore schools
+  // Fetch active schools directly from PostgreSQL internal API
   useEffect(() => {
-    const q = query(collection(db, "schools"), where("status", "==", "active"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const schoolList: any[] = [];
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        const loc = data.location || data.city || data.governorate || data.address || '';
-        schoolList.push({
-          id: docSnap.id,
-          name: data.name,
-          type: data.plan === 'premium' ? 'ميدان متميز' : 'ميدان تعليمي',
-          city: loc || 'غماس',
-          location: loc || 'غماس',
-          students: data.studentCount || data.students || 350,
-          schoolBairaqImageUrl: data.coverUrl || data.logoUrl || '/schools/cover1.jpg',
-          schoolLogoUrl: data.logoUrl || data.coverUrl || '/school-logos/logo1.jpg'
-        });
-      });
-      setFirestoreSchools(schoolList);
-    }, (error) => {
-      console.warn("SchoolSelection onSnapshot error:", error);
-    });
-    return () => unsubscribe();
+    let isMounted = true;
+    
+    const loadSchools = async () => {
+      try {
+        const list = await schoolService.fetchSchools();
+        if (isMounted) {
+          // Filter out inactive schools
+          const activeList = list.filter((s) => s.status !== 'inactive');
+          setApiSchools(activeList);
+        }
+      } catch (err) {
+        console.warn('Error loading schools from PostgreSQL:', err);
+      }
+    };
+
+    loadSchools();
+
+    // Auto-refresh periodically to keep state fresh without Firestore costs
+    const interval = setInterval(loadSchools, 30000);
+    return () => {
+      isMounted = false;
+      clearInterval(interval);
+    };
   }, []);
 
-  // Merge predefined static list with real-time firestore updates
+  // Helper to normalize Arabic school names for duplicate detection
+  const normalizeSchoolName = (name?: string) => {
+    if (!name) return '';
+    return name
+      .toLowerCase()
+      .replace(/[أإآ]/g, 'ا')
+      .replace(/ة/g, 'ه')
+      .replace(/ى/g, 'ي')
+      .replace(/[\s\-_]/g, '')
+      .trim();
+  };
+
+  // Merge predefined static list with real-time PostgreSQL updates with strict deduplication
   const allSchools = useMemo(() => {
+    const seenIds = new Set<string>();
+    const seenNames = new Set<string>();
+
     const merged = SCHOOLS_DATA.map(sysSchool => {
-      const fs = firestoreSchools.find(f => f.id === sysSchool.id);
-      const loc = fs?.location || fs?.city || (sysSchool as any).location || (sysSchool as any).city || 'الديوانية - غماس';
-      return {
+      const sysNorm = normalizeSchoolName(sysSchool.name);
+      const fs = apiSchools.find(f => f.id === sysSchool.id || normalizeSchoolName(f.name) === sysNorm);
+      const loc = fs?.location || fs?.city || fs?.governorate || (sysSchool as any).location || (sysSchool as any).city || 'الديوانية - غماس';
+      
+      const item = {
         ...sysSchool,
         name: fs?.name || sysSchool.name,
         type: fs?.type || sysSchool.type,
         city: loc,
         location: loc,
-        students: fs?.students,
+        students: fs?.students || 350,
         schoolBairaqImageUrl: fs?.schoolBairaqImageUrl || sysSchool.schoolBairaqImageUrl,
         schoolLogoUrl: fs?.schoolLogoUrl || sysSchool.schoolLogoUrl,
       };
+
+      seenIds.add(item.id);
+      seenNames.add(normalizeSchoolName(item.name));
+      return item;
     });
 
-    firestoreSchools.forEach((fs) => {
-      if (!merged.some((s) => s.id === fs.id)) {
+    apiSchools.forEach((fs) => {
+      const fsNorm = normalizeSchoolName(fs.name);
+      if (!seenIds.has(fs.id) && !seenNames.has(fsNorm)) {
+        seenIds.add(fs.id);
+        seenNames.add(fsNorm);
         merged.push({
           ...fs,
-          city: fs.location || fs.city,
-          location: fs.location || fs.city,
+          type: fs.type || 'ميدان تعليمي',
+          city: fs.location || fs.city || fs.governorate || 'الديوانية - غماس',
+          location: fs.location || fs.city || fs.governorate || 'الديوانية - غماس',
+          students: fs.students || fs.studentsCount || 350,
+          schoolBairaqImageUrl: fs.schoolBairaqImageUrl || getSchoolBairaqImageUrl(fs.id, fs.name),
+          schoolLogoUrl: fs.schoolLogoUrl || getOfficialSchoolLogoUrl(fs.id, fs.name),
         });
       }
     });
     return merged;
-  }, [firestoreSchools]);
+  }, [apiSchools]);
 
   // Background precache school cards
   useEffect(() => {
@@ -382,7 +444,7 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
     { id: 'all', label: 'جميع المدارس' },
     { id: 'secondary', label: 'ثانويات' },
     { id: 'primary', label: 'ابتدائيات' },
-    { id: 'institute', label: 'معاهد' },
+    { id: 'institute', label: 'الأكاديمية والمعاهد' },
   ];
 
   // Filtered Schools list based on search and category
@@ -399,7 +461,7 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
         if (selectedCategory === 'primary' && !school.name.includes('ابتدائية') && theme.category !== 'primary') {
           return false;
         }
-        if (selectedCategory === 'institute' && !school.name.includes('معهد') && theme.category !== 'institute') {
+        if (selectedCategory === 'institute' && !school.name.includes('معهد') && !school.name.includes('أكاديمية') && !school.name.includes('اكاديمية') && theme.category !== 'institute') {
           return false;
         }
       }
@@ -465,18 +527,11 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
               id="bairaq-header-logo"
             >
               <img 
-                src="/logo.png" 
+                src={appLogo} 
                 alt="بوابة بيرق" 
                 className="w-full h-full object-cover scale-125 transform-gpu"
                 onError={(e) => {
-                  e.currentTarget.style.display = 'none';
-                  const parent = e.currentTarget.parentElement;
-                  if (parent && !parent.querySelector('.fallback-flag')) {
-                    const fallbackSpan = document.createElement('span');
-                    fallbackSpan.className = 'fallback-flag text-base font-black text-[#FFD600]';
-                    fallbackSpan.innerText = '🚩';
-                    parent.appendChild(fallbackSpan);
-                  }
+                  (e.target as HTMLImageElement).src = '/logo.png';
                 }} 
               />
             </div>

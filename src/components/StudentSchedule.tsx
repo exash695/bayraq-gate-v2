@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, getDocs, doc, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, getDocs, doc, onSnapshot } from '@/src/lib/firebase';
 import { db } from '../lib/firebase';
 import { Calendar, MonitorPlay, Users, Shirt, Info, Sparkles, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { academicService } from '../services/academicService';
 import { BerqCharacter } from './BerqCharacterManager';
+import { ScheduleSkeleton } from './shared/ShimmerSkeleton';
 
 interface ScheduleEntry {
   id: string;
@@ -51,19 +53,14 @@ export const StudentSchedule: React.FC<Props> = ({ grade, isTeacher, teacherId, 
   useEffect(() => {
     if (isTeacher) return;
     const targetSchoolId = schoolId || 'default';
-    const unsub = onSnapshot(doc(db, 'school_configs', targetSchoolId), (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        const resolvedStage = getStageFromGrade(grade);
-        const stageConfig = data?.uniformConfigs?.[resolvedStage];
-        if (stageConfig && stageConfig.isActive) {
-          setUniformConfig(stageConfig);
-        } else {
-          setUniformConfig(null);
-        }
+    const unsub = academicService.subscribeToSchoolSettings(targetSchoolId, (data) => {
+      const resolvedStage = getStageFromGrade(grade);
+      const stageConfig = data?.uniformConfigs?.[resolvedStage];
+      if (stageConfig && stageConfig.isActive) {
+        setUniformConfig(stageConfig);
+      } else {
+        setUniformConfig(null);
       }
-    }, (error) => {
-      console.warn("Uniform subscriber error:", error);
     });
     return () => unsub();
   }, [schoolId, grade, isTeacher]);
@@ -102,7 +99,7 @@ export const StudentSchedule: React.FC<Props> = ({ grade, isTeacher, teacherId, 
   const resolvedStage = getStageFromGrade(grade);
 
   if (loading) {
-     return <div className="p-8 text-center text-white/50 animate-pulse">جاري تحميل البيانات...</div>;
+     return <ScheduleSkeleton />;
   }
 
   return (

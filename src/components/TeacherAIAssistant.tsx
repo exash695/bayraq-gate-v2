@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Bot, FileUp, ClipboardCheck, HelpCircle, ScrollText, Edit2, Sparkles, Trophy, ChevronRight, Loader2, Copy, CheckCircle, Image as ImageIcon, X, Save, History, Trash2, Plus, Minus, Lock } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import TeacherActivities from "./TeacherActivities";
+import { TeacherSovereigntyManager } from './Sovereignty/TeacherSovereigntyManager';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
 import { uploadFileToR2 } from '../services/uploadService';
@@ -10,6 +11,8 @@ import { copyToClipboard } from '../utils/clipboard';
 import { BerqCharacter } from './BerqCharacterManager';
 import { useRemoteConfig } from '../services/remoteConfig';
 import { safeStorage } from '../lib/storage';
+import { db } from '../lib/firebase';
+import { collection, addDoc, serverTimestamp, getDocs, query, where, deleteDoc, doc } from '@/src/lib/firebase';
 
 interface TeacherAIAssistantProps {
   schoolId: string;
@@ -17,7 +20,7 @@ interface TeacherAIAssistantProps {
   selectedClass?: string;
 }
 
-type AITool = 'questions' | 'summaries' | 'homework' | 'ideas' | 'competitions' | 'history' | 'activities' | null;
+type AITool = 'questions' | 'summaries' | 'homework' | 'ideas' | 'competitions' | 'history' | 'activities' | 'sovereignty' | null;
 
 export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({ schoolId, teacherData, selectedClass }) => {
   const remoteConfig = useRemoteConfig();
@@ -148,9 +151,6 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({ schoolId
     if (!generatedContent || !schoolId) return;
     setIsPublishing(true);
     try {
-      const { db } = await import('../lib/firebase');
-      const { collection, addDoc, serverTimestamp } = await import('firebase/firestore');
-      
       const targetGrade = selectedClass || (teacherData?.classes && Array.isArray(teacherData.classes) ? teacherData.classes[0] : "الكل");
       const subject = teacherData?.subject || "عام";
       
@@ -197,6 +197,7 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({ schoolId
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const tools = [
+    { id: 'sovereignty', title: "مدير التحديات والسيادة", desc: "إدارة التحديات الصفية، منح الرايات، ومراقبة ترتيب الصف.", icon: Trophy, color: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/20" },
     { id: 'questions', title: "توليد أسئلة", desc: "استخراج أسئلة تلقائية استنتاجية أو نصية.", icon: HelpCircle, color: "text-blue-400", bg: "bg-blue-500/10", border: "border-blue-500/20" },
     { id: 'summaries', title: "إنشاء ملخصات", desc: "تلخيص الفصول الطويلة لنقاط أساسية للطالب.", icon: ScrollText, color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20" },
     { id: 'homework', title: "صناعة واجبات", desc: "تكوين أنشطة صفية وواجبات منزلية مبتكرة بضغطة زر.", icon: Edit2, color: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/20" },
@@ -452,7 +453,7 @@ ${baseFormatting}`
     <div ref={scrollContainerRef} className="h-full w-full max-w-full flex flex-col p-4 md:p-6 overflow-y-auto overflow-x-hidden custom-scrollbar relative" dir="rtl">
       <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-purple-500/10 rounded-full blur-[120px] pointer-events-none" />
       
-      {activeTool === 'activities' ? (
+            {activeTool === 'sovereignty' ? (
         <div className="relative z-10 flex-1 h-auto flex flex-col">
           <div className="flex justify-end mb-4">
             <button onClick={() => setActiveTool(null)} className="flex items-center gap-2 text-white/50 hover:text-white font-bold transition-colors bg-white/5 hover:bg-white/10 px-4 py-2 rounded-xl border border-white/10 w-fit cursor-pointer">
@@ -460,7 +461,18 @@ ${baseFormatting}`
             </button>
           </div>
           <div className="flex-1 relative">
-            <TeacherActivities schoolId={schoolId} teacherData={teacherData} />
+            <TeacherSovereigntyManager language="ar" teacherData={teacherData} />
+          </div>
+        </div>
+      ) : activeTool === 'activities' ? (
+        <div className="relative z-10 flex-1 h-auto flex flex-col">
+          <div className="flex justify-end mb-4">
+            <button onClick={() => setActiveTool(null)} className="flex items-center gap-2 text-white/50 hover:text-white font-bold transition-colors bg-white/5 hover:bg-white/10 px-4 py-2 rounded-xl border border-white/10 w-fit cursor-pointer">
+              <ChevronRight size={20} /> عودة للمساعد
+            </button>
+          </div>
+          <div className="flex-1 relative">
+            <TeacherActivities schoolId={schoolId} teacherData={teacherData} selectedClass={selectedClass} />
           </div>
         </div>
       ) : !activeTool ? (
@@ -1259,9 +1271,6 @@ ${baseFormatting}`
               <div className="flex gap-3">
                 <button
                   onClick={async () => {
-                    const { db } = await import('../lib/firebase');
-                    const { collection, getDocs, query, where, deleteDoc, doc } = await import('firebase/firestore');
-                    
                     try {
                       if (deleteConfirmTarget === 'all') {
                         setSavedResults([]);

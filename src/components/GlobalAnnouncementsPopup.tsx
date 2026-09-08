@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { collection, query, orderBy, limit, onSnapshot } from '@/src/lib/firebase';
 import { db } from '../lib/firebase';
 import { Sparkles, X, Bell, Maximize2, Megaphone } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -37,16 +37,31 @@ export const GlobalAnnouncementsPopup: React.FC<GlobalAnnouncementsPopupProps> =
           // Ignore items already dismissed locally
           if (localStorage.getItem(`dismissed_popup_${item.id}`) === 'true') return false;
 
-          // Exclude school radio broadcasts and school-level messages strictly from global popups
-          if (item.type === 'school_broadcast' || item.isSchoolBroadcast || item.targetLocation === 'ticker') {
+          // STRICT SEPARATION: Exclude all school radio broadcasts, class announcements, and ticker notices
+          if (
+            item.type === 'school_broadcast' ||
+            item.isSchoolBroadcast === true ||
+            item.targetLocation === 'ticker' ||
+            item.subject === 'الإذاعة المدرسية' ||
+            item.subject === 'شؤون الطلاب' ||
+            item.subject === 'الإذاعة'
+          ) {
             return false;
           }
 
-          if (!item.isCentralPlatform && !item.isGlobalAnnouncement) {
-            // Non-central items without explicit popup/both target location must not popup
-            if (item.targetLocation !== 'popup' && item.targetLocation !== 'both' && item.targetLocation !== 'all') {
-              return false;
-            }
+          // STRICT POPUP RULE: Only explicit platform announcements, celebrations, greetings, or condolences trigger this popup modal
+          const isCelebrationOrPlatformNews = 
+            item.isCentralPlatform === true ||
+            item.isGlobalAnnouncement === true ||
+            item.type === 'global_celebration' ||
+            item.category === 'تبريكات' ||
+            item.category === 'إعلان وتبريكات' ||
+            item.category === 'تهنئة' ||
+            item.category === 'تعزية' ||
+            item.category === 'إعلان عام للمنصة';
+
+          if (!isCelebrationOrPlatformNews) {
+            return false;
           }
 
           const loc = item.targetLocation || (item.isCentralPlatform ? 'both' : 'ticker');

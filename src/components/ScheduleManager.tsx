@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, onSnapshot, doc, addDoc, deleteDoc, writeBatch, getDoc, setDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { staffService } from '../services/staffService';
+import { realtimeManager } from '../lib/realtimeManager';
 import { Trash2, Plus, Calendar, MonitorPlay, Users, Search, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { logActivity } from '../utils/auditLogger';
@@ -10,6 +10,7 @@ interface ScheduleEntry {
   id: string;
   day: string;
   className: string;
+  sectionName?: string;
   time: string;
   teacherId: string;
   teacherName: string;
@@ -32,41 +33,49 @@ interface Props {
   showToast: (msg: string, type: 'success' | 'error') => void;
   CLASSES: string[];
   schoolId: string | null;
+  savedLists?: any[];
 }
+
+import { normalizeArabicText } from '../utils/studentUtils';
 
 const DAYS = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'السبت'];
 
-export const ScheduleManager: React.FC<Props> = ({ teachers, showToast, CLASSES, schoolId }) => {
+export const ScheduleManager: React.FC<Props> = ({ teachers, showToast, CLASSES, schoolId, savedLists = [] }) => {
   const [schedules, setSchedules] = useState<ScheduleEntry[]>([]);
   const [isAdding, setIsAdding] = useState(false);
   const [selectedDay, setSelectedDay] = useState(DAYS[0]);
   const [filterClass, setFilterClass] = useState(CLASSES[0]);
   const [times, setTimes] = useState<string[]>(['08:00 صباحاً', '09:00 صباحاً', '10:00 صباحاً', '11:00 صباحاً', '12:00 ظهراً', '01:00 ظهراً', '02:00 ظهراً', '03:00 عصراً', '04:00 عصراً', '05:00 عصراً']);
 
-  const updateTimesFirebase = async (newTimes: string[]) => {
+  const updateTimesBackend = async (newTimes: string[]) => {
       if (!schoolId) return;
-      await setDoc(doc(db, 'school_settings', schoolId), { times: newTimes }, { merge: true });
+      try {
+        await staffService.updateSchoolTimes(schoolId, newTimes);
+      } catch (err) {
+        showToast('فشل تحديث الأوقات', 'error');
+      }
   };
 
-  const handleAddFirebaseTime = (time: string) => {
+  const handleAddBackendTime = (time: string) => {
       const newTimes = [...times, time];
       setTimes(newTimes);
-      updateTimesFirebase(newTimes);
+      updateTimesBackend(newTimes);
   };
-  const handleEditFirebaseTime = (oldTime: string, newTime: string) => {
+  const handleEditBackendTime = (oldTime: string, newTime: string) => {
       const newTimes = times.map(t => t === oldTime ? newTime : t);
       setTimes(newTimes);
-      updateTimesFirebase(newTimes);
+      updateTimesBackend(newTimes);
   };
-  const handleDeleteFirebaseTime = (time: string) => {
+  const handleDeleteBackendTime = (time: string) => {
       const newTimes = times.filter(t => t !== time);
       setTimes(newTimes);
-      updateTimesFirebase(newTimes);
+      updateTimesBackend(newTimes);
   };
 
   const [formData, setFormData] = useState({
     day: DAYS[0],
     className: CLASSES[0],
+    sectionName: '',
     time: times[0],
     teacherId: '',
     type: 'physical' as 'live' | 'physical'
@@ -76,36 +85,38 @@ export const ScheduleManager: React.FC<Props> = ({ teachers, showToast, CLASSES,
 
   useEffect(() => {
     if (!schoolId) return;
-    const docRef = doc(db, 'school_settings', schoolId);
-    const unsubscribe = onSnapshot(docRef, (docSnap) => {
-      if (docSnap.exists() && docSnap.data().times) {
-        setTimes(docSnap.data().times);
+    const fetchTimes = async () => {
+      try {
+        const data = await staffService.getSchoolTimes(schoolId);
+        if (data && data.length > 0) setTimes(data);
+      } catch (err) {
+        console.warn("ScheduleManager fetchTimes error:", err);
       }
-    }, (error) => console.warn("ScheduleManager times error:", error));                
-    return () => unsubscribe();
+    };
+    fetchTimes();
   }, [schoolId]);
 
   useEffect(() => {
-    const q = query(collection(db, 'class_schedules'));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() }) as ScheduleEntry)
-        .filter(entry => entry.subject && entry.time);
-      setSchedules(data);
-    }, (error) => {
-       console.warn("ScheduleManager schedules error:", error);
-       if (error.message && error.message.includes('Unexpected state') && error.message.includes('ca9')) {
-        import('firebase/firestore').then(({ terminate, clearIndexedDbPersistence }) => {
-          terminate(db).then(() => {
-            clearIndexedDbPersistence(db).then(() => {
-              window.location.reload();
-            });
-          });
+    const fetchSchedules = async () => {
+      try {
+        const data = await staffService.getSchedules(schoolId || undefined);
+        // Enrich schedules with teacher names from the local teachers list
+        const enriched = (data as any[]).map(s => {
+          const teacher = teachers.find(t => t.id === s.teacherId);
+          return {
+            ...s,
+            teacherName: teacher ? teacher.name : s.teacherName
+          };
         });
+        setSchedules(enriched);
+      } catch (err) {
+        console.warn("ScheduleManager fetchSchedules error:", err);
       }
-    });
-    return () => unsubscribe();
-  }, []);
+    };
+    fetchSchedules();
+    const unsub = realtimeManager.on('schedules_updated', fetchSchedules);
+    return () => unsub();
+  }, [schoolId, teachers]);
 
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -144,14 +155,17 @@ export const ScheduleManager: React.FC<Props> = ({ teachers, showToast, CLASSES,
       const newEntry = {
         day: formData.day,
         className: formData.className,
+        sectionName: formData.sectionName,
         time: formData.time,
         teacherId: teacher.id,
         teacherName: teacher.name,
         subject: teacher.subject,
-        type: formData.type
+        type: formData.type,
+        schoolId: schoolId
       };
 
-      await addDoc(collection(db, 'class_schedules'), newEntry);
+      const res = await staffService.addSchedule(newEntry);
+      setSchedules(prev => [...prev, { ...newEntry, id: res.id } as any]);
       
       logActivity({
         action: 'إضافة حصة',
@@ -162,7 +176,6 @@ export const ScheduleManager: React.FC<Props> = ({ teachers, showToast, CLASSES,
 
       showToast('تمت إضافة الحصة بنجاح', 'success');
       setIsAdding(false);
-      // Reset form but keep selected day and class for convenience
       setFormData(prev => ({ ...prev, time: times[0], teacherId: '' }));
     } catch (err) {
       console.error(err);
@@ -170,20 +183,27 @@ export const ScheduleManager: React.FC<Props> = ({ teachers, showToast, CLASSES,
     }
   };
 
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+
   const handleDelete = async (id: string, entry: ScheduleEntry) => {
-    if (window.confirm('هل أنت متأكد من حذف هذه الحصة؟')) {
-      try {
-        await deleteDoc(doc(db, 'class_schedules', id));
-        logActivity({
-          action: 'حذف حصة',
-          details: `تم حذف حصة ${entry.subject} للصف ${entry.className} يوم ${entry.day} (${entry.time})`,
-          targetType: 'schedule',
-          targetName: entry.className
-        });
-        showToast('تم حذف الحصة بنجاح', 'success');
-      } catch (err) {
-        showToast('حدث خطأ أثناء الحذف', 'error');
-      }
+    if (deleteConfirmId !== id) {
+      setDeleteConfirmId(id);
+      return;
+    }
+    
+    setDeleteConfirmId(null);
+    try {
+      await staffService.deleteSchedule(id);
+      setSchedules(prev => prev.filter(s => s.id !== id));
+      logActivity({
+        action: 'حذف حصة',
+        details: `تم حذف حصة ${entry.subject} للصف ${entry.className} يوم ${entry.day} (${entry.time})`,
+        targetType: 'schedule',
+        targetName: entry.className
+      });
+      showToast('تم حذف الحصة بنجاح', 'success');
+    } catch (err) {
+      showToast('حدث خطأ أثناء الحذف', 'error');
     }
   };
 
@@ -249,9 +269,14 @@ export const ScheduleManager: React.FC<Props> = ({ teachers, showToast, CLASSES,
                     >
                       <button 
                         onClick={() => handleDelete(entry.id, entry)}
-                        className="absolute top-4 left-4 text-white/20 hover:text-rose-400 transition-colors bg-black/20 p-2 rounded-xl"
+                        className={`absolute top-4 left-4 p-2 rounded-xl transition-colors ${
+                          deleteConfirmId === entry.id 
+                            ? 'bg-rose-500/20 text-rose-500 hover:bg-rose-500/30' 
+                            : 'bg-black/20 text-white/20 hover:text-rose-400'
+                        }`}
+                        title={deleteConfirmId === entry.id ? 'تأكيد الحذف' : 'حذف'}
                       >
-                        <Trash2 size={16} />
+                        <Trash2 size={16} className={deleteConfirmId === entry.id ? 'animate-bounce' : ''} />
                       </button>
                       <div className="flex items-center gap-3 mb-4">
                         <div className={`w-10 h-10 rounded-[14px] flex items-center justify-center ${entry.type === 'live' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400'}`}>
@@ -265,7 +290,14 @@ export const ScheduleManager: React.FC<Props> = ({ teachers, showToast, CLASSES,
                         </div>
                       </div>
                       <div className="space-y-1">
-                        <p className="text-white text-lg font-black">{entry.subject}</p>
+                        <div className="flex items-center gap-2">
+                          <p className="text-white text-lg font-black">{entry.subject}</p>
+                          {entry.sectionName && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-white/10 text-white/80">
+                              {entry.sectionName}
+                            </span>
+                          )}
+                        </div>
                         <p className="text-white/60 text-sm font-medium">أ. {entry.teacherName}</p>
                       </div>
                     </motion.div>
@@ -321,11 +353,30 @@ export const ScheduleManager: React.FC<Props> = ({ teachers, showToast, CLASSES,
                   <select 
                     className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-white font-bold outline-none cursor-pointer"
                     value={formData.className}
-                    onChange={e => setFormData({...formData, className: e.target.value})}
+                    onChange={e => setFormData({...formData, className: e.target.value, sectionName: ''})}
                   >
                     {CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
+
+                {/* Section selection based on savedLists */}
+                {savedLists.filter(l => normalizeArabicText(l.students?.[0]?.grade) === normalizeArabicText(formData.className)).length > 0 && (
+                  <div>
+                    <label className="block text-white/40 text-xs font-bold mb-2">الشعبة (اختياري)</label>
+                    <select 
+                      className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-white font-bold outline-none cursor-pointer"
+                      value={formData.sectionName || ''}
+                      onChange={e => setFormData({...formData, sectionName: e.target.value})}
+                    >
+                      <option value="">كافة الشعب (عام)</option>
+                      {savedLists
+                        .filter(l => normalizeArabicText(l.students?.[0]?.grade) === normalizeArabicText(formData.className))
+                        .map(l => (
+                          <option key={l.id} value={l.name}>{l.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 <div>
                   <label className="block text-white/40 text-xs font-bold mb-2">الأستاذ والمادة</label>

@@ -16,12 +16,18 @@ import {
   Scale,
   UserX,
   Monitor,
-  User
+  User,
+  Radio,
+  Trophy,
+  Lightbulb,
+  Lock,
+  Bell
 } from 'lucide-react';
 import { UnitId, AppSection, UserProgress } from '../types';
 import { translations } from '../lib/translations';
 import { auth } from '../lib/firebase';
-import { signOut, deleteUser } from 'firebase/auth';
+import { deleteUser } from '@/src/lib/firebase';
+import { customAuth } from '../services/customAuthService';
 import { safeStorage } from '../lib/storage';
 
 interface SidebarProps {
@@ -40,75 +46,100 @@ interface SidebarProps {
 
 type MenuItemProps = {
   label: string;
+  subLabel?: string;
   icon: any;
   colorClass: string;
   isActive: boolean;
   onClick: () => void;
   showArrow?: boolean;
+  badgeCount?: number;
 };
 
 const getColors = (colorName: string) => {
   const map: Record<string, any> = {
     cyan: {
-      activeBg: 'from-cyan-500/15', activeBorder: 'border-cyan-500/30', activeShadow: 'shadow-cyan-500/10', activeLine: 'bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.8)]',
-      iconActiveBg: 'bg-cyan-500/20', iconActiveBorder: 'border-cyan-500/50', iconActiveText: 'text-cyan-400', iconActiveShadow: 'shadow-[0_0_15px_rgba(34,211,238,0.4)]',
-      iconInactiveBg: 'bg-cyan-500/10', iconInactiveBorder: 'border-cyan-500/20', iconInactiveText: 'text-cyan-500/70',
+      activeBg: 'from-cyan-500/20', activeBorder: 'border-cyan-500/40', activeShadow: 'shadow-cyan-500/20', activeLine: 'bg-cyan-400 shadow-[0_0_15px_rgba(34,211,238,0.8)]',
+      iconActiveBg: 'bg-cyan-500/30', iconActiveBorder: 'border-cyan-500/60', iconActiveText: 'text-cyan-300', iconActiveShadow: 'shadow-[0_0_20px_rgba(34,211,238,0.5)]',
+      iconInactiveBg: 'bg-white/5', iconInactiveBorder: 'border-white/10', iconInactiveText: 'text-white/50',
     },
     purple: {
-      activeBg: 'from-purple-500/15', activeBorder: 'border-purple-500/30', activeShadow: 'shadow-purple-500/10', activeLine: 'bg-purple-400 shadow-[0_0_10px_rgba(192,132,252,0.8)]',
-      iconActiveBg: 'bg-purple-500/20', iconActiveBorder: 'border-purple-500/50', iconActiveText: 'text-purple-400', iconActiveShadow: 'shadow-[0_0_15px_rgba(192,132,252,0.4)]',
-      iconInactiveBg: 'bg-purple-500/10', iconInactiveBorder: 'border-purple-500/20', iconInactiveText: 'text-purple-500/70',
+      activeBg: 'from-purple-500/20', activeBorder: 'border-purple-500/40', activeShadow: 'shadow-purple-500/20', activeLine: 'bg-purple-400 shadow-[0_0_15px_rgba(192,132,252,0.8)]',
+      iconActiveBg: 'bg-purple-500/30', iconActiveBorder: 'border-purple-500/60', iconActiveText: 'text-purple-300', iconActiveShadow: 'shadow-[0_0_20px_rgba(192,132,252,0.5)]',
+      iconInactiveBg: 'bg-white/5', iconInactiveBorder: 'border-white/10', iconInactiveText: 'text-white/50',
     },
     sky: {
-      activeBg: 'from-sky-500/15', activeBorder: 'border-sky-500/30', activeShadow: 'shadow-sky-500/10', activeLine: 'bg-sky-400 shadow-[0_0_10px_rgba(56,189,248,0.8)]',
-      iconActiveBg: 'bg-sky-500/20', iconActiveBorder: 'border-sky-500/50', iconActiveText: 'text-sky-400', iconActiveShadow: 'shadow-[0_0_15px_rgba(56,189,248,0.4)]',
-      iconInactiveBg: 'bg-sky-500/10', iconInactiveBorder: 'border-sky-500/20', iconInactiveText: 'text-sky-500/70',
+      activeBg: 'from-sky-500/20', activeBorder: 'border-sky-500/40', activeShadow: 'shadow-sky-500/20', activeLine: 'bg-sky-400 shadow-[0_0_15px_rgba(56,189,248,0.8)]',
+      iconActiveBg: 'bg-sky-500/30', iconActiveBorder: 'border-sky-500/60', iconActiveText: 'text-sky-300', iconActiveShadow: 'shadow-[0_0_20px_rgba(56,189,248,0.5)]',
+      iconInactiveBg: 'bg-white/5', iconInactiveBorder: 'border-white/10', iconInactiveText: 'text-white/50',
     },
     rose: {
-      activeBg: 'from-rose-500/15', activeBorder: 'border-rose-500/30', activeShadow: 'shadow-rose-500/10', activeLine: 'bg-rose-400 shadow-[0_0_10px_rgba(251,113,133,0.8)]',
-      iconActiveBg: 'bg-rose-500/20', iconActiveBorder: 'border-rose-500/50', iconActiveText: 'text-rose-400', iconActiveShadow: 'shadow-[0_0_15px_rgba(251,113,133,0.4)]',
-      iconInactiveBg: 'bg-rose-500/10', iconInactiveBorder: 'border-rose-500/20', iconInactiveText: 'text-rose-500/70',
+      activeBg: 'from-rose-500/20', activeBorder: 'border-rose-500/40', activeShadow: 'shadow-rose-500/20', activeLine: 'bg-rose-400 shadow-[0_0_15px_rgba(251,113,133,0.8)]',
+      iconActiveBg: 'bg-rose-500/30', iconActiveBorder: 'border-rose-500/60', iconActiveText: 'text-rose-300', iconActiveShadow: 'shadow-[0_0_20px_rgba(251,113,133,0.5)]',
+      iconInactiveBg: 'bg-white/5', iconInactiveBorder: 'border-white/10', iconInactiveText: 'text-white/50',
     },
     amber: {
-      activeBg: 'from-amber-500/15', activeBorder: 'border-amber-500/30', activeShadow: 'shadow-amber-500/10', activeLine: 'bg-amber-400 shadow-[0_0_10px_rgba(251,191,36,0.8)]',
-      iconActiveBg: 'bg-amber-500/20', iconActiveBorder: 'border-amber-500/50', iconActiveText: 'text-amber-400', iconActiveShadow: 'shadow-[0_0_15px_rgba(251,191,36,0.4)]',
-      iconInactiveBg: 'bg-amber-500/10', iconInactiveBorder: 'border-amber-500/20', iconInactiveText: 'text-amber-500/70',
+      activeBg: 'from-amber-500/20', activeBorder: 'border-amber-500/40', activeShadow: 'shadow-amber-500/20', activeLine: 'bg-amber-400 shadow-[0_0_15px_rgba(251,191,36,0.8)]',
+      iconActiveBg: 'bg-amber-500/30', iconActiveBorder: 'border-amber-500/60', iconActiveText: 'text-amber-300', iconActiveShadow: 'shadow-[0_0_20px_rgba(251,191,36,0.5)]',
+      iconInactiveBg: 'bg-white/5', iconInactiveBorder: 'border-white/10', iconInactiveText: 'text-white/50',
+    },
+    gold: {
+      activeBg: 'from-yellow-500/20', activeBorder: 'border-yellow-500/40', activeShadow: 'shadow-yellow-500/20', activeLine: 'bg-yellow-400 shadow-[0_0_15px_rgba(250,204,21,0.8)]',
+      iconActiveBg: 'bg-yellow-500/30', iconActiveBorder: 'border-yellow-500/60', iconActiveText: 'text-yellow-300', iconActiveShadow: 'shadow-[0_0_20px_rgba(250,204,21,0.5)]',
+      iconInactiveBg: 'bg-white/5', iconInactiveBorder: 'border-white/10', iconInactiveText: 'text-white/50',
     }
   };
   return map[colorName] || map.cyan;
 };
 
-const MenuItem = ({ label, icon: Icon, colorClass, isActive, onClick, showArrow = true }: MenuItemProps) => {
+const MenuItem = ({ label, subLabel, icon: Icon, colorClass, isActive, onClick, showArrow = true, badgeCount }: MenuItemProps) => {
   const c = getColors(colorClass);
   return (
     <button
       onClick={onClick}
-      className={`group relative w-full flex items-center justify-between px-3 py-3 rounded-2xl transition-all duration-300 overflow-hidden border ${
+      className={`group relative w-full flex items-center justify-between px-3 py-3 rounded-2xl transition-all duration-300 overflow-hidden border backdrop-blur-md ${
         isActive 
-          ? `bg-gradient-to-l ${c.activeBg} to-transparent ${c.activeBorder} shadow-lg ${c.activeShadow}` 
-          : 'bg-[#0a0f1d]/40 border-white/5 hover:border-white/10 hover:bg-[#0a0f1d]/80'
+          ? `bg-gradient-to-l ${c.activeBg} to-white/5 ${c.activeBorder} shadow-lg ${c.activeShadow}` 
+          : 'bg-white/5 border-white/5 hover:border-white/10 hover:bg-white/10'
       }`}
     >
+      
       {/* Active Edge Line */}
       {isActive && (
-        <div className={`absolute right-0 top-1/2 -translate-y-1/2 w-[3px] h-[60%] rounded-l-full ${c.activeLine}`}></div>
+        <div className={`absolute right-0 top-1/2 -translate-y-1/2 w-[4px] h-[70%] rounded-l-full ${c.activeLine}`}></div>
       )}
       
-      <div className="flex items-center gap-3 relative z-10">
-        <div className={`w-9 h-9 rounded-full flex items-center justify-center border transition-all duration-300 ${
-          isActive 
+      <div className="flex items-center gap-3 relative z-10 overflow-hidden flex-1">
+        <div className={`w-10 h-10 rounded-full shrink-0 flex items-center justify-center border transition-all duration-300 ${
+          isActive
             ? `${c.iconActiveBg} ${c.iconActiveBorder} ${c.iconActiveText} ${c.iconActiveShadow}` 
             : `${c.iconInactiveBg} ${c.iconInactiveBorder} ${c.iconInactiveText} group-hover:scale-110`
         }`}>
-          <Icon size={16} strokeWidth={2} />
+          <Icon size={18} strokeWidth={isActive ? 2.5 : 2} />
         </div>
-        <span className={`text-[14px] font-bold transition-colors ${isActive ? 'text-white' : 'text-white/70 group-hover:text-white/90'}`}>
-          {label}
-        </span>
+        <div className="flex flex-col items-start overflow-hidden w-full text-right">
+          <span className={`text-[14px] font-black transition-colors truncate ${isActive ? 'text-white' : 'text-white/70 group-hover:text-white/90'}`}>
+            {label}
+          </span>
+          {subLabel && (
+            <span className="text-[9px] font-medium text-white/40 italic truncate w-full">
+              {subLabel}
+            </span>
+          )}
+        </div>
       </div>
       
-      {showArrow && (
-        <ChevronLeft size={16} className={`relative z-10 transition-colors ${isActive ? 'text-white/90' : 'text-white/30 group-hover:text-white/50'}`} />
+      {badgeCount !== undefined && badgeCount > 0 && (
+        <motion.div 
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
+          className="absolute top-2 left-2 bg-rose-600 text-white text-[10px] font-black w-5 h-5 rounded-full flex items-center justify-center border border-white/20 shadow-lg"
+        >
+          {badgeCount > 9 ? '+9' : badgeCount}
+        </motion.div>
+      )}
+
+      {showArrow && !badgeCount && (
+        <ChevronLeft size={16} className={`relative z-10 transition-colors shrink-0 ${isActive ? 'text-white/90' : 'text-white/30 group-hover:text-white/50'}`} />
       )}
     </button>
   );
@@ -121,7 +152,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isOpen,
   setIsOpen,
   progress,
-  userProfile
+  userProfile,
+  onOpenNotifications,
+  notifications
 }) => {
   const t = translations[language];
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
@@ -138,7 +171,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const handleLogout = async () => {
     try {
       safeStorage.setItem('s6_user_logged_out', 'true');
-      await signOut(auth);
+      await customAuth.logout();
     } catch (error) {
       console.error("Logout error:", error);
     }
@@ -158,6 +191,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const isRtl = language === 'ar';
   const isDev = auth.currentUser?.email === "mntzralghanm527@gmail.com" || userProfile?.email === "mntzralghanm527@gmail.com";
 
+  const unreadCount = notifications.filter(n => !n.read).length;
+
   return (
     <>
       {/* Mobile Overlay */}
@@ -172,7 +207,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               setShowLogoutConfirm(false);
               setShowDeleteConfirm(false);
             }}
-            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[80] lg:hidden"
+            className="fixed inset-0 bg-black/80 backdrop-blur-md z-[80] lg:hidden"
           />
         )}
       </AnimatePresence>
@@ -266,22 +301,25 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* Sidebar Container */}
       <aside
-        className={`fixed top-0 ${isRtl ? 'right-0' : 'left-0'} h-full w-[260px] sm:w-[280px] bg-[#020510] z-[90] flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.8)] transition-transform duration-400 ease-out ${isOpen ? 'translate-x-0' : (isRtl ? 'translate-x-full' : '-translate-x-full')} rounded-none overflow-hidden`}
+        className={`fixed top-0 ${isRtl ? 'right-0' : 'left-0'} h-full w-[280px] bg-[#020510]/80 backdrop-blur-2xl z-[90] flex flex-col shadow-[0_0_50px_rgba(0,0,0,0.8)] transition-transform duration-500 cubic-bezier(0.4, 0, 0.2, 1) ${isOpen ? 'translate-x-0' : (isRtl ? 'translate-x-full' : '-translate-x-full')} rounded-none overflow-hidden border-x border-white/5`}
       >
-        {/* Outer Glow / Border for the sidebar itself */}
-        <div className={`absolute top-0 bottom-0 ${isRtl ? 'left-0' : 'right-0'} w-px bg-gradient-to-b from-blue-500/0 via-cyan-500/30 to-purple-500/0 shadow-[0_0_15px_rgba(34,211,238,0.5)]`}></div>
-        
-        {/* Background Effects */}
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-blue-900/10 via-[#020510] to-[#020510] pointer-events-none" />
+        {/* Animated Background Gradients */}
+        <div className="absolute inset-0 overflow-hidden pointer-events-none">
+          <div className="absolute top-[-10%] right-[-10%] w-[120%] h-[120%] bg-[radial-gradient(circle_at_top_right,_var(--tw-gradient-stops))] from-blue-600/10 via-transparent to-transparent" />
+          <div className="absolute bottom-[-10%] left-[-10%] w-[120%] h-[120%] bg-[radial-gradient(circle_at_bottom_left,_var(--tw-gradient-stops))] from-purple-600/10 via-transparent to-transparent" />
+        </div>
 
+        {/* Outer Glow / Border for the sidebar itself */}
+        <div className={`absolute top-0 bottom-0 ${isRtl ? 'left-0' : 'right-0'} w-[2px] bg-gradient-to-b from-transparent via-cyan-500/40 to-transparent shadow-[0_0_20px_rgba(34,211,238,0.6)]`}></div>
+        
         {/* Close Button Inside Sidebar */}
         {isOpen && (
           <button
             onClick={() => setIsOpen(false)}
-            className={`absolute ${isRtl ? 'left-2' : 'right-2'} top-[120px] p-1.5 rounded-full bg-[#0d1533]/90 hover:bg-[#14214d]/95 hover:border-cyan-500/50 text-cyan-400 transition-all z-[100] cursor-pointer shadow-[0_0_10px_rgba(34,211,238,0.15)] border border-white/10`}
+            className={`absolute ${isRtl ? 'left-4' : 'right-4'} top-[130px] p-2 rounded-full bg-white/10 hover:bg-white/20 border border-white/10 text-white transition-all z-[100] cursor-pointer shadow-xl`}
             title="طي القائمة الجانبية"
           >
-            {isRtl ? <ChevronRight size={14} strokeWidth={3} /> : <ChevronLeft size={14} strokeWidth={3} />}
+            {isRtl ? <ChevronRight size={18} strokeWidth={3} /> : <ChevronLeft size={18} strokeWidth={3} />}
           </button>
         )}
 
@@ -315,7 +353,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <div className="flex flex-col gap-0.5 overflow-hidden">
                 <h2 className="text-white font-bold text-[13px] truncate">{userProfile?.fullName || auth.currentUser?.displayName || (language === 'ar' ? 'فارس منصة بيرق' : 'Knight')}</h2>
                 <div className="px-2 py-[2px] bg-blue-500/10 border border-blue-500/20 rounded-full text-blue-300 text-[9px] font-bold w-fit">
-                  {isDev ? "مطور النظام" : (userProfile?.rank ? rankDisplay[userProfile.rank as keyof typeof rankDisplay] : t.squire)}
+                  {isDev ? "مطور النظام" : (userProfile?.rank ? rankDisplay[userProfile?.rank as keyof typeof rankDisplay] : t.squire)}
                 </div>
               </div>
             </div>
@@ -329,13 +367,68 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
         {/* Navigation Menus */}
-        <div className="flex-1 overflow-y-auto px-5 space-y-2.5 custom-scrollbar relative z-10 pb-6">
+        <div className="flex-1 overflow-y-auto px-5 space-y-3 custom-scrollbar relative z-10 pb-6 pt-2">
           <MenuItem 
             label={language === 'ar' ? 'الرئيسية' : 'Home'}
             icon={Home}
             colorClass="cyan"
             isActive={activeSection === 'hub'}
             onClick={() => { onSelectSection('hub'); setIsOpen(false); }}
+          />
+
+          <MenuItem 
+            label="📚 المحطة الأولى"
+            subLabel={userProfile?.activeUnitName || "الوحدة الأولى: الأساسيات"}
+            icon={BookOpen}
+            colorClass="sky"
+            isActive={activeSection === 'mayadeen'}
+            onClick={() => { onSelectSection('mayadeen'); setIsOpen(false); }}
+          />
+
+          <MenuItem 
+            label="🔒 المحطة الثانية"
+            subLabel="مقفلة حالياً"
+            icon={Lock}
+            colorClass="rose"
+            isActive={activeSection === 'unit-detail' && progress.currentUnit === 2}
+            onClick={() => { onSelectSection('mayadeen'); setIsOpen(false); }}
+          />
+
+          <MenuItem 
+            label="📡 رادار الذكاء"
+            subLabel="استنتاج الأسئلة الذكية"
+            icon={Radio}
+            colorClass="cyan"
+            isActive={activeSection === 'radar'}
+            onClick={() => { onSelectSection('radar'); setIsOpen(false); }}
+          />
+
+          <MenuItem 
+            label="🏆 قاعة الأبطال"
+            subLabel="لوحة الشرف والأوسمة"
+            icon={Trophy}
+            colorClass="gold"
+            isActive={activeSection === 'hall-of-fame'}
+            onClick={() => { onSelectSection('hall-of-fame'); setIsOpen(false); }}
+          />
+
+          <MenuItem 
+            label="💡 بنك الأفكار"
+            subLabel="تدوين الملاحظات الذكية"
+            icon={Lightbulb}
+            colorClass="amber"
+            isActive={activeSection === 'idea-bank'}
+            onClick={() => { onSelectSection('idea-bank'); setIsOpen(false); }}
+          />
+
+          <MenuItem 
+            label="تبليغات الإدارة"
+            subLabel="مركز الدعم والتبليغات"
+            icon={Bell}
+            colorClass="rose"
+            isActive={false}
+            badgeCount={unreadCount}
+            onClick={() => { onOpenNotifications(); setIsOpen(false); }}
           />
 
           <MenuItem 
@@ -347,14 +440,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
           />
 
           <MenuItem 
-            label={language === 'ar' ? 'الميادين' : 'Fields'}
-            icon={BookOpen}
-            colorClass="sky"
-            isActive={activeSection === 'mayadeen'}
-            onClick={() => { onSelectSection('mayadeen'); setIsOpen(false); }}
-          />
-
-          <MenuItem 
             label={language === 'ar' ? 'منصة السيادة' : 'Sovereignty'}
             icon={Crown}
             colorClass="purple"
@@ -363,8 +448,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
           />
 
           <MenuItem 
-            label={language === 'ar' ? 'غرفة التحكيم' : 'Control Room'}
-            icon={Scale}
+            label={language === 'ar' ? 'غرفة التحكم' : 'Control Room'}
+            icon={Settings}
             colorClass="sky"
             isActive={activeSection === 'control'}
             onClick={() => { onSelectSection('control'); setIsOpen(false); }}

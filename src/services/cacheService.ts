@@ -13,22 +13,63 @@ interface CacheEntry<T> {
 
 class CacheService {
   private memoryCache = new Map<string, CacheEntry<any>>();
-  private readonly STORAGE_PREFIX = 'bairaq_cache_';
+  private readonly STORAGE_PREFIX = 'bairaq_cache_v2_';
   private readonly DEFAULT_TTL = 30 * 60 * 1000; // 30 minutes
   private readonly MAX_MEMORY_ITEMS = 100;
 
+  constructor() {
+    this.purgeLegacyExtractCache();
+  }
+
   /**
-   * Simple string hash for cache keys
+   * Purge legacy cache entries that might have suffered from 200-char prefix collisions
+   */
+  private purgeLegacyExtractCache(): void {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    try {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && (k.startsWith('bairaq_cache_ai_extract') || k.startsWith('bairaq_cache_') || k.startsWith('pdf_v5_cache_'))) {
+          // If it is old v1 prefix, remove it to prevent stale identical page collisions
+          if (!k.startsWith(this.STORAGE_PREFIX)) {
+            keysToRemove.push(k);
+          }
+        }
+      }
+      keysToRemove.forEach((k) => localStorage.removeItem(k));
+    } catch (e) {
+      console.warn('[CacheService] Legacy cache purge warning:', e);
+    }
+  }
+
+  /**
+   * Fast, robust distributed hash function for arbitrary strings or objects.
+   * Handles base64 images and large text payloads without collision.
    */
   public generateHashKey(prefix: string, input: any): string {
     const str = typeof input === 'string' ? input : JSON.stringify(input || {});
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) {
-      const char = str.charCodeAt(i);
-      hash = (hash << 5) - hash + char;
-      hash |= 0; // Convert to 32bit integer
+    const len = str.length;
+    if (len === 0) return `${prefix}_empty`;
+
+    let h1 = 0xdeadbeef;
+    let h2 = 0x41c6ce57;
+
+    // Distribute sample points across the entire string length
+    const sampleCount = Math.min(len, 2000);
+    const step = len > 2000 ? Math.floor(len / sampleCount) : 1;
+
+    for (let i = 0; i < len; i += step) {
+      const ch = str.charCodeAt(i);
+      h1 = Math.imul(h1 ^ ch, 2654435761);
+      h2 = Math.imul(h2 ^ ch, 1597334677);
     }
-    return `${prefix}_${Math.abs(hash).toString(36)}`;
+
+    h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+    h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+
+    const hashStr = (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+    return `${prefix}_len${len}_${hashStr}`;
   }
 
   /**

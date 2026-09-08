@@ -1,66 +1,37 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'motion/react';
-import { collection, query, onSnapshot, doc, updateDoc, deleteDoc, orderBy, where } from 'firebase/firestore';
-import { db } from '../lib/firebase';
 import { CheckCircle2, Trash2, ShieldAlert, BadgeCheck } from 'lucide-react';
 import { logActivity } from '../utils/auditLogger';
-
-interface SupportTicket {
-  id: string;
-  studentName: string;
-  grade?: string;
-  issueType: string;
-  message: string;
-  timestamp: any;
-  status: 'pending' | 'resolved';
-  isGroup?: boolean;
-  adminReply?: string;
-  role?: 'student' | 'teacher' | 'staff' | 'parent';
-  broadcastId?: string;
-  senderType?: string;
-  readByAdmin?: boolean;
-}
+import { supportService, SupportTicket } from '../services/supportService';
+import { TableRowsSkeleton } from './shared/ShimmerSkeleton';
 
 interface SupportManagerProps {
   onSubViewChange?: (isOpen: boolean) => void;
+  schoolId?: string | null;
 }
 
-export const SupportManager: React.FC<SupportManagerProps> = ({ onSubViewChange }) => {
+export const SupportManager: React.FC<SupportManagerProps> = ({ onSubViewChange, schoolId }) => {
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
   const [loading, setLoading] = useState(true);
   const [replyTicket, setReplyTicket] = useState<SupportTicket | null>(null);
   const [replyMessage, setReplyMessage] = useState('');
   const [activeTab, setActiveTab] = useState<'student' | 'teacher' | 'parent' | 'staff'>('student');
 
-  useEffect(() => {
-    if (onSubViewChange) {
-      onSubViewChange(!!replyTicket);
+  const loadData = async () => {
+    try {
+      setLoading(true);
+      const ticketsData = await supportService.fetchTickets(schoolId || undefined);
+      setTickets(ticketsData.filter(t => !t.broadcastId && t.issueType !== 'تبليغ إداري'));
+    } catch (err) {
+      console.warn("SupportManager fetch error:", err);
+    } finally {
+      setLoading(false);
     }
-    return () => {
-      if (onSubViewChange) {
-        onSubViewChange(false);
-      }
-    };
-  }, [replyTicket, onSubViewChange]);
+  };
 
   useEffect(() => {
-    const q = query(
-      collection(db, 'support_tickets')
-    );
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const ticketsData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as SupportTicket[];
-      setTickets(ticketsData.filter(t => !t.broadcastId && t.issueType !== 'تبليغ إداري')); // Filter out broadcasts and admin notifications
-      setLoading(false);
-    }, (error) => {
-      console.warn("SupportManager error:", error);
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
-  }, []);
+    loadData();
+  }, [schoolId]);
 
   const getTicketTabId = (t: SupportTicket): 'student' | 'teacher' | 'parent' | 'staff' => {
     const rawVal = t.senderType || t.role || '';
@@ -93,11 +64,12 @@ export const SupportManager: React.FC<SupportManagerProps> = ({ onSubViewChange 
     
     const promises = unreadUnderTab.map(ticket => {
       attemptedTicketIds.current.add(ticket.id);
-      return updateDoc(doc(db, 'support_tickets', ticket.id), { readByAdmin: true }).catch(err => 
+      return supportService.updateTicket(ticket.id, { readByAdmin: true }).catch(err => 
         console.error("Could not mark ticket as read:", ticket.id, err)
       );
     });
     await Promise.all(promises);
+    loadData();
   };
 
   useEffect(() => {
@@ -136,8 +108,8 @@ export const SupportManager: React.FC<SupportManagerProps> = ({ onSubViewChange 
 
     // Sort again by timestamp descending
     return merged.sort((a, b) => {
-      const tA = a.timestamp?.toMillis ? a.timestamp.toMillis() : (a.timestamp?.seconds ? a.timestamp.seconds * 1000 : new Date(a.timestamp || 0).getTime());
-      const tB = b.timestamp?.toMillis ? b.timestamp.toMillis() : (b.timestamp?.seconds ? b.timestamp.seconds * 1000 : new Date(b.timestamp || 0).getTime());
+      const tA = new Date(a.timestamp || 0).getTime();
+      const tB = new Date(b.timestamp || 0).getTime();
       return tB - tA;
     });
   }, [tickets, activeTab]);
@@ -147,10 +119,11 @@ export const SupportManager: React.FC<SupportManagerProps> = ({ onSubViewChange 
   const handleReply = async () => {
     if (!replyTicket || !replyMessage.trim()) return;
     const targetLabel = replyTicket.role === 'teacher' ? 'الأستاذ' : 'الطالب';
-    await updateDoc(doc(db, 'support_tickets', replyTicket.id), { 
+    await supportService.updateTicket(replyTicket.id, { 
       status: 'resolved',
       adminReply: replyMessage 
     });
+    loadData();
 
     logActivity({
       action: 'الرد على شكوى',
@@ -169,8 +142,9 @@ export const SupportManager: React.FC<SupportManagerProps> = ({ onSubViewChange 
       const ticket = groupedTickets.find(t => t.id === id) as any;
       if (ticket && ticket.originalIds) {
         if (confirm(`هل أنت متأكد من حذف هذا التبليغ الجماعي لـ ${ticket.originalIds.length} مستخدم؟`)) {
-          const promises = ticket.originalIds.map((origId: string) => deleteDoc(doc(db, 'support_tickets', origId)));
+          const promises = ticket.originalIds.map((origId: string) => supportService.deleteTicket(origId));
           await Promise.all(promises);
+          loadData();
           
           logActivity({
             action: 'حذف تبليغ جماعي',
@@ -186,7 +160,8 @@ export const SupportManager: React.FC<SupportManagerProps> = ({ onSubViewChange 
     const name = ticket?.studentName || 'غير معروف';
     const targetLabel = ticket?.role === 'teacher' ? 'الأستاذ' : 'الطالب';
     
-    await deleteDoc(doc(db, 'support_tickets', id));
+    await supportService.deleteTicket(id);
+    loadData();
 
     logActivity({
       action: 'حذف شكوى',
@@ -197,7 +172,11 @@ export const SupportManager: React.FC<SupportManagerProps> = ({ onSubViewChange 
     });
   };
 
-  if (loading) return <div className="text-cyan-400 p-8 animate-pulse text-center font-bold">جاري تأمين لوحة التحكم ...</div>;
+  if (loading) return (
+    <div className="p-4 space-y-4">
+      <TableRowsSkeleton rows={6} cols={5} />
+    </div>
+  );
 
   return (
     <div className="bg-[#0b1221]/80 backdrop-blur-3xl border border-white/10 rounded-[2rem] p-8 text-white shadow-[0_0_50px_-12px_rgba(34,211,238,0.2)]">
@@ -279,7 +258,7 @@ export const SupportManager: React.FC<SupportManagerProps> = ({ onSubViewChange 
             
             <div className="flex justify-between items-center mt-auto">
               <span className="text-[11px] text-white/30 font-mono">
-                {ticket.timestamp?.toDate ? ticket.timestamp.toDate().toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
+                {ticket.timestamp ? new Date(ticket.timestamp).toLocaleString('ar-EG', { dateStyle: 'short', timeStyle: 'short' }) : '—'}
               </span>
               <div className="flex gap-2">
                 {!ticket.isGroup && ticket.status !== 'resolved' && (

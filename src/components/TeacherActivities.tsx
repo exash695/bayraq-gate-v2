@@ -1,10 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc, writeBatch, where } from 'firebase/firestore';
+import { collection, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc, writeBatch, where } from '@/src/lib/firebase';
 import { db } from '../lib/firebase';
 import { ClipboardCheck, Search, CheckCircle, XCircle, Trophy, User, Calendar, MessageSquare, Send, Sparkles, Trash2, AlertTriangle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
-export default function TeacherActivities({ schoolId, teacherData }: { schoolId: string, teacherData: any }) {
+export default function TeacherActivities({ 
+  schoolId, 
+  teacherData,
+  selectedClass
+}: { 
+  schoolId: string; 
+  teacherData: any;
+  selectedClass?: string;
+}) {
   const [submissions, setSubmissions] = useState<any[]>([]);
   const [tasks, setTasks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -121,14 +129,22 @@ export default function TeacherActivities({ schoolId, teacherData }: { schoolId:
   }, [schoolId, teacherData]);
 
   // Decoupled search lists for homeworks and competitions (Tasks)
+  const isClassMatch = (targetGrade?: string) => {
+    if (!selectedClass || selectedClass === 'ALL' || selectedClass === 'all') return true;
+    if (!targetGrade || targetGrade === 'all' || targetGrade === 'الكل') return true;
+    return targetGrade === selectedClass;
+  };
+
   const homeworkTasks = tasks.filter(t => 
     t.tool === 'صناعة واجبات' && 
+    isClassMatch(t.targetGrade) &&
     (t.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
      t.content?.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   const competitionTasks = tasks.filter(t => 
     t.tool === 'مسابقات صفية' && 
+    isClassMatch(t.targetGrade) &&
     (t.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
      t.content?.toLowerCase().includes(searchTerm.toLowerCase()))
   );
@@ -232,7 +248,7 @@ export default function TeacherActivities({ schoolId, teacherData }: { schoolId:
                           <div className="flex justify-between items-start">
                              <div>
                                <h4 className="text-lg font-bold text-white">{task.name || 'واجب دراسي'}</h4>
-                               <p className="text-sm text-white/50 mt-1">تاريخ النشر: {task.timestamp?.toDate().toLocaleDateString('ar-SA')}</p>
+                               <p className="text-sm text-white/50 mt-1">تاريخ النشر: {(typeof task.timestamp?.toDate === 'function' ? (typeof task.timestamp?.toDate === 'function' ? task.timestamp.toDate() : new Date(task.timestamp)) : new Date(task.timestamp)).toLocaleDateString('ar-SA')}</p>
                              </div>
                              <button onClick={() => setDeleteTaskConfirmId(task.id)} className="text-red-400 hover:text-red-300 p-2 hover:bg-red-500/10 rounded-xl transition-colors cursor-pointer title='حذف الواجب ككل'">
                                 <Trash2 size={18} />
@@ -320,7 +336,7 @@ export default function TeacherActivities({ schoolId, teacherData }: { schoolId:
                                   <Trophy size={18} className="text-rose-400" />
                                   {task.name || 'مسابقة صفية'}
                                </h4>
-                               <p className="text-sm text-white/50 mt-1">تاريخ النشر: {task.timestamp?.toDate().toLocaleDateString('ar-SA')}</p>
+                               <p className="text-sm text-white/50 mt-1">تاريخ النشر: {(typeof task.timestamp?.toDate === 'function' ? (typeof task.timestamp?.toDate === 'function' ? task.timestamp.toDate() : new Date(task.timestamp)) : new Date(task.timestamp)).toLocaleDateString('ar-SA')}</p>
                              </div>
                              <button onClick={() => setDeleteTaskConfirmId(task.id)} className="text-red-400 hover:text-red-300 p-2 hover:bg-red-500/10 rounded-xl transition-colors cursor-pointer" title="حذف المسابقة ككل">
                                 <Trash2 size={18} />

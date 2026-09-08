@@ -1,0 +1,111 @@
+                          setVerifiedStudentInfo({
+                            id: code,
+                            code: code,
+                            name: "إدارة المدرسة",
+                            role: "admin",
+                          });
+                          setSelectedStudentGrade(""); // They will need to select a grade next
+                        } else {
+                          setPortalType(
+                            branch === "boys" ? "admin-boys" : "admin-girls",
+                          );
+                        }
+
+                        // Permanent upgrade if user is logged in
+                        if (user) {
+                          try {
+                            await setDoc(
+                              doc(db, "users", user.uid),
+                              {
+                                isAdmin: true,
+                                role: "admin",
+                                adminBranch: branch,
+                                schoolName: institutionName,
+                                schoolId: selectedSchoolId,
+                                adminType: isAdminObserver
+                                  ? "observer"
+                                  : "master",
+                              },
+                              { merge: true },
+                            );
+                          } catch (e) {
+                            console.error(
+                              "Failed to upgrade account to admin:",
+                              e,
+                            );
+                          }
+                        }
+
+                        setVerified(true);
+                        return;
+                      } else {
+                        addNotification(
+                          "خطأ في التحقق",
+                          "كود الإدارة غير صحيح أو غير مفعل في مركز الأكواد",
+                          "alarm",
+                        );
+                        return;
+                      }
+                    } catch (e) {
+                      console.error("Admin verification error:", e);
+                      addNotification(
+                        "خطأ في النظام",
+                        "حدث خطأ أثناء التحقق من كود الإدارة",
+                        "alarm",
+                      );
+                      return;
+                    }
+                  } else if (code.startsWith("PAR-") || code.startsWith("PCODE-") || isParent) {
+                    try {
+                      const codesRef = collection(db, "activation_codes");
+                      const studentsRef = collection(db, "school_students");
+                      const cleanCode = (code || "").trim();
+                      const safeCode = cleanCode.toUpperCase() || "unassigned";
+                      const lowerCode = cleanCode.toLowerCase();
+
+                      // Search activation_codes by parentCode, code, parent, and direct document ID
+                      const [
+                        qCodesParentCode, qCodesCode, qCodesParent, docByIdSnap,
+                        qCodesParentCodeRaw, qCodesCodeRaw
+                      ] = await Promise.all([
+                        getDocs(query(codesRef, where("parentCode", "==", safeCode))),
+                        getDocs(query(codesRef, where("code", "==", safeCode))),
+                        getDocs(query(codesRef, where("parent", "==", safeCode))),
+                        getDoc(doc(db, "activation_codes", safeCode)).catch(() => null),
+                        getDocs(query(codesRef, where("parentCode", "==", cleanCode))),
+                        getDocs(query(codesRef, where("code", "==", cleanCode)))
+                      ]);
+
+                      let codeDoc: any = null;
+                      let cData: any = null;
+
+                      if (!qCodesParentCode.empty) {
+                        codeDoc = qCodesParentCode.docs[0];
+                        cData = codeDoc.data();
+                      } else if (!qCodesCode.empty) {
+                        codeDoc = qCodesCode.docs[0];
+                        cData = codeDoc.data();
+                      } else if (!qCodesParent.empty) {
+                        codeDoc = qCodesParent.docs[0];
+                        cData = codeDoc.data();
+                      } else if (!qCodesParentCodeRaw.empty) {
+                        codeDoc = qCodesParentCodeRaw.docs[0];
+                        cData = codeDoc.data();
+                      } else if (!qCodesCodeRaw.empty) {
+                        codeDoc = qCodesCodeRaw.docs[0];
+                        cData = codeDoc.data();
+                      } else if (docByIdSnap && docByIdSnap.exists()) {
+                        codeDoc = docByIdSnap;
+                        cData = docByIdSnap.data();
+                      }
+
+                      if (cData) {
+                        const maxUsesNum = typeof cData.maxUses === 'number' && cData.maxUses > 0 ? cData.maxUses : null;
+
+                        console.log("[RUNTIME DEBUG - Parent Verification]", {
+                          enteredCode: code,
+                          dbCode: cData.code || cData.parentCode || safeCode,
+                          status: cData.status || "active",
+                          createdAt: cData.createdAt ? (cData.createdAt.toDate ? cData.createdAt.toDate().toISOString() : cData.createdAt) : "N/A",
+                          expiresAt: cData.expiresAt || "N/A",
+                          usedCount: cData.usedCount || 0,

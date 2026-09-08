@@ -3,8 +3,9 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Trophy, Medal, Star, Target, Shield, Crown, CheckCircle2, Lightbulb, Lock as LockIcon, Sparkles } from 'lucide-react';
 import { UserProgress } from '../types';
 import { BerqCharacter } from './BerqCharacterManager';
-import { collection, query, where, getDocs, limit } from 'firebase/firestore';
+import { collection, query, where, getDocs, limit } from '@/src/lib/firebase';
 import { db } from '../lib/firebase';
+import { CardGridSkeleton } from './shared/ShimmerSkeleton';
 
 interface HallOfFameProps {
   language: 'ar' | 'en';
@@ -155,7 +156,9 @@ export const HallOfFame: React.FC<HallOfFameProps> = ({ language, progress }) =>
         </div>
 
         {loadingTop ? (
-          <div className="flex justify-center p-8"><div className="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin"></div></div>
+          <div className="p-4">
+            <CardGridSkeleton count={3} />
+          </div>
         ) : topStudents.length === 0 ? (
           <div className="text-center p-8 text-white/40 italic bg-white/5 rounded-3xl border border-white/5">{isAr ? 'لا يوجد أساطير مدرجين حالياً' : 'No legends listed currently'}</div>
         ) : (

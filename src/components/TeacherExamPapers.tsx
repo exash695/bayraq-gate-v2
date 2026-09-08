@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc } from '@/src/lib/firebase';
 import { db } from '../lib/firebase';
 import { FileText, Plus, Trash2, Calendar, Save, X, Image as ImageIcon, CheckCircle, Loader, Filter, Maximize2, ArrowRight } from 'lucide-react';
 import { uploadFileToR2 } from '../services/uploadService';
@@ -8,9 +8,10 @@ interface TeacherExamPapersProps {
   schoolId: string;
   teacherData?: any;
   onBack?: () => void;
+  selectedClass?: string;
 }
 
-export const TeacherExamPapers: React.FC<TeacherExamPapersProps> = ({ schoolId, teacherData, onBack }) => {
+export const TeacherExamPapers: React.FC<TeacherExamPapersProps> = ({ schoolId, teacherData, onBack, selectedClass }) => {
   const [papers, setPapers] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);

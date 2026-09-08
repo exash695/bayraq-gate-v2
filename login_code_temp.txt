@@ -1,0 +1,206 @@
+  app.post('/api/auth/login-code', async (req, res) => {
+    try {
+      const { code, schoolId: targetSchoolId } = req.body;
+      console.log('Login attempt with code:', code, 'targetSchoolId:', targetSchoolId);
+      if (!code) {
+        return res.status(400).json({ success: false, message: 'الكود مطلوب' });
+      }
+
+      const areSchoolsCompatible = (codeSchoolId?: string | null, requestedSchoolId?: string | null): boolean => {
+        if (!codeSchoolId || !requestedSchoolId) return true;
+        const norm = (s: string) => {
+          const cleaned = s.trim().toLowerCase();
+          if (cleaned === 'school_awail_ghamas' || cleaned === 'ghamas_awail') return 'school1';
+          return cleaned;
+        };
+        const nCode = norm(codeSchoolId);
+        const nReq = norm(requestedSchoolId);
+        if (nCode === 'all' || nReq === 'all' || nCode === 'general' || nReq === 'general' || nCode === 'global' || nReq === 'global') return true;
+        return nCode === nReq;
+      };
+
+      // 0. Check teachers table (Teacher Master Code)
+      const teacherDirectList = await db.select().from(teachers).where(
+        or(eq(teachers.code, code), eq(teachers.id, code))
+      );
+      if (teacherDirectList.length > 0) {
+        const tch = teacherDirectList[0];
+        if (targetSchoolId && tch.schoolId && !areSchoolsCompatible(tch.schoolId, targetSchoolId)) {
+          return res.status(403).json({ 
+            success: false, 
+            message: 'هذا الكود غير صحيح لهذه المدرسة، حيث تم توليده حصراً لمدرسة أخرى.' 
+          });
+        }
+        const token = jwt.sign(
+          { uid: tch.id, name: tch.name, role: 'teacher', schoolId: tch.schoolId || 'school8', subject: tch.subject, grade: tch.grade },
+          JWT_SECRET,
+          { expiresIn: '30d' }
+        );
+        return res.json({ 
+          success: true, 
+          token, 
+          user: { 
+            uid: tch.id, 
+            id: tch.id,
+            displayName: tch.name, 
+            name: tch.name,
+            role: 'teacher', 
+            schoolId: tch.schoolId || targetSchoolId || 'school8',
+            subject: tch.subject || 'المنهج الوزاري',
+            grade: tch.grade || 'السادس العلمي',
+            classes: tch.classes || []
+          } 
+        });
+      }
+
+      // 1. Check activation_codes (Admin, Teacher, Student, General)
+      const activationList = await db.select().from(activation_codes).where(eq(activation_codes.code, code));
+      console.log('Activation match count:', activationList.length);
+      if (activationList.length > 0) {
+        const act = activationList[0];
+        if (targetSchoolId && act.schoolId && !areSchoolsCompatible(act.schoolId, targetSchoolId)) {
+          return res.status(403).json({ 
+            success: false, 
+            message: 'هذا الكود غير صحيح لهذه المدرسة، حيث تم توليده حصراً لمدرسة أخرى.' 
+          });
+        }
+
+        // Mark activation code as used if not already
+        if (!act.used) {
+          try {
+            await db.update(activation_codes).set({ used: true }).where(eq(activation_codes.id, act.id));
+          } catch (e) {}
+        }
+
+        const roleClean = (act.role || 'student').toLowerCase();
+        const effectiveRole = roleClean.includes('teacher') ? 'teacher' : roleClean.includes('admin') ? 'admin' : 'student';
+
+        console.log('Found activation code:', act.id, 'role:', effectiveRole);
+        const token = jwt.sign(
+          { uid: act.id, name: act.role, role: effectiveRole, schoolId: act.schoolId || 'school8' },
+          JWT_SECRET,
+          { expiresIn: '30d' }
+        );
+        return res.json({ 
+          success: true, 
+          token, 
+          user: { 
+            uid: act.id, 
+            id: act.id,
+            displayName: effectiveRole === 'teacher' ? 'الأستاذ المحاضر' : effectiveRole === 'admin' ? 'الإدارة العامة' : 'مشترك الدورة', 
+            name: effectiveRole === 'teacher' ? 'الأستاذ المحاضر' : effectiveRole === 'admin' ? 'الإدارة العامة' : 'مشترك الدورة',
+            role: effectiveRole, 
+            schoolId: act.schoolId || targetSchoolId || 'school8',
+            studentCode: code,
+            subject: 'المنهج العام',
+            grade: 'السادس العلمي'
+          } 
+        });
+      }
+
+      // 2. Check students (Student)
+      const studentList = await db.select().from(students).where(eq(students.code, code));
+      console.log('Student match count:', studentList.length);
+      if (studentList.length > 0) {
+        const stu = studentList[0];
+        if (targetSchoolId && stu.schoolId && !areSchoolsCompatible(stu.schoolId, targetSchoolId)) {
+          return res.status(403).json({ 
+            success: false, 
+            message: 'هذا الكود غير صحيح لهذه المدرسة، حيث تم توليده حصراً لمدرسة أخرى.' 
+          });
+        }
+        const token = jwt.sign(
+          { uid: stu.id, name: stu.name, role: 'student', schoolId: stu.schoolId, grade: stu.grade },
+          JWT_SECRET,
+          { expiresIn: '30d' }
+        );
+        return res.json({ 
+          success: true, 
+          token, 
+          user: { 
+            uid: stu.id, 
+            id: stu.id,
+            displayName: stu.name, 
+            name: stu.name,
+            studentName: stu.name,
+            studentCode: stu.code,
+            role: 'student', 
+            schoolId: stu.schoolId || targetSchoolId,
+            grade: stu.grade || 'سادس علمي',
+            gender: (stu as any).gender || 'male'
+          } 
+        });
+      }
+
+      // 3. Check students (Parent)
+      const parentList = await db.select().from(students).where(eq(students.parentCode, code));
+      console.log('Parent match count:', parentList.length);
+      if (parentList.length > 0) {
+        const stu = parentList[0];
+        if (targetSchoolId && stu.schoolId && !areSchoolsCompatible(stu.schoolId, targetSchoolId)) {
+          return res.status(403).json({ 
+            success: false, 
+            message: 'هذا الكود غير صحيح لهذه المدرسة، حيث تم توليده حصراً لمدرسة أخرى.' 
+          });
+        }
+        const parentId = "parent_" + stu.id;
+        const token = jwt.sign(
+          { uid: parentId, name: "ولي أمر " + stu.name, role: 'parent', schoolId: stu.schoolId, grade: stu.grade },
+          JWT_SECRET,
+          { expiresIn: '30d' }
+        );
+        return res.json({ 
+          success: true, 
+          token, 
+          user: { 
+            uid: parentId, 
+            id: parentId,
+            displayName: "ولي أمر " + stu.name, 
+            name: "ولي أمر " + stu.name,
+            studentName: stu.name,
+            studentCode: stu.code,
+            parentCode: stu.parentCode || code,
+            role: 'parent', 
+            schoolId: stu.schoolId || targetSchoolId,
+            grade: stu.grade || 'سادس علمي',
+            gender: (stu as any).gender || 'male'
+          } 
+        });
+      }
+      
+      // 4. Check drivers (Driver)
+      const driverList = await db.select().from(transport_drivers).where(eq(transport_drivers.accessCode, code));
+      console.log('Driver match count:', driverList.length);
+      if (driverList.length > 0) {
+        const drv = driverList[0];
+        if (targetSchoolId && drv.schoolId && !areSchoolsCompatible(drv.schoolId, targetSchoolId)) {
+          return res.status(403).json({ 
+            success: false, 
+            message: 'هذا الكود غير صحيح لهذه المدرسة، حيث تم توليده حصراً لمدرسة أخرى.' 
+          });
+        }
+        const token = jwt.sign(
+          { uid: drv.id, name: drv.name, role: 'driver', schoolId: drv.schoolId },
+          JWT_SECRET,
+          { expiresIn: '30d' }
+        );
+        return res.json({ 
+          success: true, 
+          token, 
+          user: { 
+            uid: drv.id, 
+            id: drv.id,
+            displayName: drv.name, 
+            name: drv.name,
+            role: 'driver', 
+            schoolId: drv.schoolId || targetSchoolId 
+          } 
+        });
+      }
+
+      console.log('Login failed for code:', code);
+
+      return res.status(401).json({ success: false, message: 'كود الدخول غير صحيح' });
+    } catch (error: any) {
+      console.error('Login code error:', error);
+      res.status(500).json({ success: false, message: error.message });

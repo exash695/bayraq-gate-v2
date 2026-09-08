@@ -20,10 +20,11 @@ export type AppSection =
   | 'vault'
   | 'admin-hub'
   | 'school-content'
-  | 'knights-club'
+  | 'knights-club' | 'gate-6'
   | 'study-destinations'
   | 'support'
   | 'mascot-test'
+  | 'privacy-policy'
   | 'dev-dashboard';
 
 export type UnitSubSection = 

@@ -76,20 +76,30 @@ class AIWorkerService {
 
     if (!response.ok) {
       const errorText = await response.text();
-      let parsedError = errorText;
-      try {
-        const errObj = JSON.parse(errorText);
-        parsedError = errObj.details || errObj.error || errorText;
-      } catch (e) {}
+      let parsedError = "";
+      if (errorText.trim().startsWith("<") || errorText.toLowerCase().includes("<!doctype") || errorText.toLowerCase().includes("<html")) {
+        parsedError = `خطأ في خادم المعالجة (${response.status}): الخادم غير متاح مؤقتاً أو يواجه ضغطاً مرتفعاً.`;
+      } else {
+        try {
+          const errObj = JSON.parse(errorText);
+          parsedError = errObj.details || errObj.error || errorText;
+        } catch (e) {
+          parsedError = errorText;
+        }
+      }
       throw new Error(parsedError || `Worker Gateway error: ${response.status}`);
     }
 
-    const contentType = response.headers.get('content-type');
-    if (contentType && contentType.includes('application/json')) {
-      return await response.json();
-    }
     const rawText = await response.text();
-    return JSON.parse(rawText) as T;
+    if (rawText.trim().startsWith("<") || rawText.toLowerCase().includes("<!doctype") || rawText.toLowerCase().includes("<html")) {
+      throw new Error(`خطأ في استجابة الخادم (${response.status}): تم استلام صفحة HTML غير متوقعة.`);
+    }
+
+    try {
+      return JSON.parse(rawText) as T;
+    } catch (parseErr: any) {
+      throw new Error(`فشل تحليل الاستجابة كـ JSON: ${parseErr.message}`);
+    }
   }
 
   /**
@@ -98,8 +108,9 @@ class AIWorkerService {
   public async chat(options: AIChatOptions): Promise<string> {
     const cacheKey = cacheService.generateHashKey('ai_chat', {
       msg: options.message,
-      ctx: options.context?.slice(0, 100),
+      ctx: options.context,
       img: options.imageUrl,
+      files: options.fileUrls,
     });
 
     // Check smart cache for duplicate chat prompt
@@ -123,13 +134,18 @@ class AIWorkerService {
    * 2. Page OCR & Structural Content Extraction Gateway Call
    */
   public async extractPageContent(options: AIExtractOptions): Promise<any> {
-    const cacheKey = cacheService.generateHashKey('ai_extract', {
-      b64: options.base64Data.slice(0, 200),
-      txt: options.extractedText?.slice(0, 100),
+    // Generate unique key using complete base64 and extractedText to avoid collision across different uploaded pages
+    const cacheKey = cacheService.generateHashKey('ai_extract_page', {
+      b64: options.base64Data,
+      mime: options.mimeType || 'image/jpeg',
+      txt: options.extractedText || '',
     });
 
     const cached = cacheService.get<any>(cacheKey);
-    if (cached) return cached;
+    if (cached) {
+      console.log("[AIWorkerService] Returning distinct cached extraction for this specific page payload");
+      return cached;
+    }
 
     const result = await this.callWorkerGateway<any>('/extract', {
       base64Data: options.base64Data,
@@ -137,7 +153,7 @@ class AIWorkerService {
       extractedText: options.extractedText,
     }, options.signal);
 
-    if (result && result.pages) {
+    if (result && result.pages && result.pages.length > 0) {
       cacheService.set(cacheKey, result, 60 * 60 * 1000); // 1 hour TTL
     }
 
@@ -148,7 +164,7 @@ class AIWorkerService {
    * 3. Radar Question Generation Gateway Call
    */
   public async generateRadarQuestions(content: string): Promise<string[]> {
-    const cacheKey = cacheService.generateHashKey('ai_radar', content.slice(0, 300));
+    const cacheKey = cacheService.generateHashKey('ai_radar', content);
     const cached = cacheService.get<string[]>(cacheKey);
     if (cached) return cached;
 
@@ -171,7 +187,7 @@ class AIWorkerService {
   public async generateMockExam(options: AIMockExamOptions): Promise<any[]> {
     const cacheKey = cacheService.generateHashKey('ai_mock_exam', {
       sub: options.subject,
-      cnt: options.content?.slice(0, 200),
+      cnt: options.content,
     });
 
     const cached = cacheService.get<any[]>(cacheKey);
@@ -194,7 +210,10 @@ class AIWorkerService {
    * 5. Exam Paper Question Extraction
    */
   public async extractQuestionsFromPaper(base64Data: string, mimeType: string = 'image/jpeg'): Promise<any[]> {
-    const cacheKey = cacheService.generateHashKey('ai_paper_questions', base64Data.slice(0, 200));
+    const cacheKey = cacheService.generateHashKey('ai_paper_questions', {
+      b64: base64Data,
+      mime: mimeType
+    });
     const cached = cacheService.get<any[]>(cacheKey);
     if (cached) return cached;
 

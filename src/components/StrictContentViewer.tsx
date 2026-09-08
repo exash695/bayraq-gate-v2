@@ -596,36 +596,27 @@ export default function StrictContentViewer({ title, unit, onClose }: StrictCont
               <BookOpen size={20} />
             </div>
             <div className="flex-1 min-w-0">
-              <h3 className="text-white font-black text-xs">📚 العرض التفاعلي الأصلي</h3>
+              <h3 className="text-white font-black text-xs">📚 المحطة الأولى</h3>
               <p className="text-zinc-400 font-bold text-[9px] italic truncate mt-1">
-                {title || "العرض التفاعلي للمادّة"}
+                {unit} | {title}
               </p>
             </div>
           </button>
 
-          {/* Station 2: Smart Crossing Station */}
+          {/* Station 2: Smart Crossing Station - Locked as requested */}
           <button
-            onClick={() => {
-              playInteractionSound('click');
-              setActiveSidebarTab("station2");
-            }}
-            className={`w-full text-right p-3.5 rounded-2xl flex items-start gap-3 transition-all ${
-              activeSidebarTab === "station2"
-                ? "bg-[#0E152F] border border-[#00E5FF]/35 shadow-lg shadow-[#00E5FF]/10 scale-100"
-                : "bg-white/[0.01] hover:bg-white/[0.04] border border-transparent cursor-pointer hover:scale-101"
-            }`}
+            disabled={true}
+            className="w-full text-right p-3.5 rounded-2xl flex items-start gap-3 transition-all opacity-50 bg-white/[0.01] border border-transparent cursor-not-allowed"
           >
-            <div className={`p-2.5 rounded-xl shrink-0 mt-0.5 transition-colors ${
-              activeSidebarTab === "station2" ? "bg-[#00E5FF]/20 text-[#00E5FF]" : "bg-white/5 text-zinc-400"
-            }`}>
-              <Zap size={20} className={activeSidebarTab === "station2" ? "animate-bounce" : ""} />
+            <div className="p-2.5 rounded-xl bg-white/5 text-zinc-500 shrink-0 mt-0.5">
+              <Lock size={20} />
             </div>
             <div className="flex-1 min-w-0">
-              <h3 className="text-white font-black text-xs flex items-center justify-between">
-                <span>📡 محطة العبور الذكية</span>
+              <h3 className="text-white/60 font-black text-xs flex items-center justify-between">
+                <span>🔒 المحطة الثانية</span>
               </h3>
-              <p className="text-[#00E5FF]/85 text-[9px] font-bold mt-1">
-                تتبع كفاءة العبور وبطاقات التقدم الاستنباطي
+              <p className="text-zinc-500 text-[9px] font-bold mt-1">
+                مقفلة حالياً - ستفتح قريباً
               </p>
             </div>
           </button>
@@ -645,7 +636,7 @@ export default function StrictContentViewer({ title, unit, onClose }: StrictCont
             <div className="flex-1 min-w-0">
               <h3 className="text-white font-black text-xs">📡 رادار الذكاء</h3>
               <p className="text-amber-400/80 text-[9px] font-bold mt-1">
-                الأسئلة الاستنتاجية والتحليل العبقري
+                أسئلة ذكية تستنتج من الملزمة
               </p>
             </div>
           </button>
@@ -665,7 +656,7 @@ export default function StrictContentViewer({ title, unit, onClose }: StrictCont
             <div className="flex-1 min-w-0">
               <h3 className="text-white font-black text-xs">🏆 قاعة الأبطال</h3>
               <p className="text-emerald-400/80 text-[9px] font-bold mt-1">
-                لوحة الشرف وبطولات الفرسان
+                أوسمة افتراضية وإنجازات الطالبة
               </p>
             </div>
           </button>
@@ -685,7 +676,7 @@ export default function StrictContentViewer({ title, unit, onClose }: StrictCont
             <div className="flex-1 min-w-0">
               <h3 className="text-white font-black text-xs">💡 بنك الأفكار</h3>
               <p className="text-purple-400/80 text-[9px] font-bold mt-1">
-                تدوين الملاحظات الذكية للفرسان
+                تدوين ملاحظات الطالبة الذكية
               </p>
             </div>
           </button>
@@ -703,9 +694,9 @@ export default function StrictContentViewer({ title, unit, onClose }: StrictCont
               <Settings size={20} />
             </div>
             <div className="flex-1 min-w-0">
-              <h3 className="text-white font-black text-xs">⚙️ غرفة التحكم والتخصيص</h3>
+              <h3 className="text-white font-black text-xs">⚙️ غرفة التحكم</h3>
               <p className="text-zinc-400/80 text-[9px] font-bold mt-1">
-                تعديل حجم الخط ومستوى التباين البصري
+                إعدادات التطبيق والتخصيص
               </p>
             </div>
           </button>

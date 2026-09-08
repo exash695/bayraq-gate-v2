@@ -9,18 +9,11 @@ import { preloadSchoolAssets, preloadVideoBlob } from './imageCacher';
 const PRELOADED_ASSETS = new Set<string>();
 
 export const CRITICAL_MASCOT_VIDEOS = [
-  '/mascot/sliced_bairaq_sheet5_live.mp4',
+  '/mascot/pose_sixty_seconds_challenger.mp4',
+  '/mascot/sliced_bairaq_sheet5_greeting_hello.mp4',
   '/mascot/sliced_bairaq_sheet5_pose_academic_scholar.mp4',
-  '/mascot/sliced_bairaq_sheet5_pose_ai_companion.mp4',
-  '/mascot/sliced_bairaq_sheet5_pose_champion_laureate.mp4',
-  '/mascot/sliced_bairaq_sheet5_pose_excellence_champion.mp4',
+  '/mascot/sliced_bairaq_sheet5_pose_broadcaster.mp4',
   '/mascot/sliced_bairaq_sheet5_pose_idea_genius.mp4',
-  '/mascot/sliced_bairaq_sheet5_pose_live_announcer.mp4',
-  '/mascot/sliced_bairaq_sheet5_pose_parent_dashboard.mp4',
-  '/mascot/sliced_bairaq_sheet5_pose_radar_navigator.mp4',
-  '/mascot/sliced_bairaq_sheet5_pose_school_uniform.mp4',
-  '/mascot/sliced_bairaq_sheet5_pose_sixty_seconds_challenger.mp4',
-  '/mascot/pose_waving_hand.mp4',
 ];
 
 export const CRITICAL_MASCOT_IMAGES = [

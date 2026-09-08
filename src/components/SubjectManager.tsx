@@ -6,31 +6,32 @@ import {
   Edit2, 
   Save, 
   X, 
-  Settings, 
   GraduationCap, 
   BookOpen,
   Layout,
   ChevronDown,
   RefreshCcw,
-  Check
+  Check,
+  Sparkles
 } from 'lucide-react';
-import { doc, getDoc, setDoc, onSnapshot } from 'firebase/firestore';
+import { doc, setDoc, onSnapshot } from '@/src/lib/firebase';
 import { db } from '../lib/firebase';
 import { logActivity } from '../utils/auditLogger';
+import { CardGridSkeleton } from './shared/ShimmerSkeleton';
 
 interface Subject {
   id: string;
   name: string;
 }
 
-interface StageSubjects {
-  primary: Subject[];
-  intermediate: Subject[];
-  scientific: Subject[];
-  literary: Subject[];
-}
+const GRADES_BY_STAGE: Record<string, string[]> = {
+  primary: ['الأول الابتدائي', 'الثاني الابتدائي', 'الثالث الابتدائي', 'الرابع الابتدائي', 'الخامس الابتدائي', 'السادس الابتدائي'],
+  intermediate: ['الأول المتوسط', 'الثاني المتوسط', 'الثالث المتوسط'],
+  scientific: ['الرابع علمي', 'الخامس علمي', 'السادس علمي'],
+  literary: ['الرابع أدبي', 'الخامس أدبي', 'السادس أدبي']
+};
 
-const DEFAULT_SUBJECTS: StageSubjects = {
+const DEFAULT_SUBJECTS: Record<string, Subject[]> = {
   primary: [
     { id: 'islamic', name: 'التربية الإسلامية' },
     { id: 'arabic', name: 'اللغة العربية' },
@@ -76,223 +77,462 @@ const DEFAULT_SUBJECTS: StageSubjects = {
 
 export const SubjectManager: React.FC<{ 
   showToast: (msg: string, type?: 'success' | 'error') => void,
-  initialStage?: 'primary' | 'intermediate' | 'scientific' | 'literary'
-}> = ({ showToast, initialStage }) => {
-  const [stages, setStages] = useState<StageSubjects>(DEFAULT_SUBJECTS);
+  initialStage?: string,
+  onClose?: () => void
+}> = ({ showToast, initialStage, onClose }) => {
+  const [mappings, setMappings] = useState<Record<string, Subject[]>>(DEFAULT_SUBJECTS);
   const [loading, setLoading] = useState(true);
-  const [expandedStage, setExpandedStage] = useState<keyof StageSubjects | null>(initialStage || 'primary');
+  const [expandedStage, setExpandedStage] = useState<string | null>(initialStage || 'primary');
+  const [selectedGrade, setSelectedGrade] = useState<string>('الأول الابتدائي');
   const [newSubjectName, setNewSubjectName] = useState('');
-  const [editingSubject, setEditingSubject] = useState<{ stage: keyof StageSubjects; id: string; name: string } | null>(null);
+  const [editingSubject, setEditingSubject] = useState<{ id: string; name: string } | null>(null);
+  const [pendingDeletions, setPendingDeletions] = useState<Record<string, string[]>>({});
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
 
+  // Sync with Firestore settings
   useEffect(() => {
     const docRef = doc(db, 'settings', 'subject_mapping');
     const unsubscribe = onSnapshot(
       docRef, 
       (snapshot) => {
         if (snapshot.exists()) {
-          setStages(snapshot.data() as StageSubjects);
+          const data = snapshot.data();
+          const merged = { ...DEFAULT_SUBJECTS };
+          
+          Object.keys(data).forEach(key => {
+            if (Array.isArray(data[key])) {
+              merged[key] = data[key];
+            }
+          });
+          
+          setMappings(merged);
+          setPendingDeletions({});
+          setHasUnsavedChanges(false);
         } else {
-          setStages(DEFAULT_SUBJECTS);
+          setMappings(DEFAULT_SUBJECTS);
         }
         setLoading(false);
       },
       (error) => {
         console.error("Subject mapping listener error:", error);
-        setStages(DEFAULT_SUBJECTS);
+        setMappings(DEFAULT_SUBJECTS);
         setLoading(false);
       }
     );
     return () => unsubscribe();
   }, []);
 
-  const saveToFirebase = async (updatedStages: StageSubjects) => {
-    try {
-      await setDoc(doc(db, 'settings', 'subject_mapping'), updatedStages);
-      showToast('تم حفظ التعديلات بنجاح');
-    } catch (e) {
-      console.error(e);
-      showToast('حدث خطأ أثناء الحفظ', 'error');
+  // When expanding a stage, auto-select its first grade
+  const handleStageSelect = (stage: string) => {
+    if (expandedStage === stage) {
+      setExpandedStage(null);
+    } else {
+      setExpandedStage(stage);
+      const firstGrade = GRADES_BY_STAGE[stage]?.[0] || '';
+      setSelectedGrade(firstGrade);
+      setEditingSubject(null);
+      setNewSubjectName('');
     }
   };
 
-  const addSubject = (stage: keyof StageSubjects) => {
-    if (!newSubjectName.trim()) return;
+  // Get active subjects for current grade
+  const getCurrentGradeSubjects = (): Subject[] => {
+    if (!selectedGrade) return [];
+    if (mappings[selectedGrade] && Array.isArray(mappings[selectedGrade])) {
+      return mappings[selectedGrade];
+    }
+    // Fallback to stage default
+    const stage = expandedStage || 'intermediate';
+    return DEFAULT_SUBJECTS[stage] || [];
+  };
+
+  // Save current modifications to Firestore
+  const saveToFirebase = async () => {
+    if (!selectedGrade) return;
+
+    try {
+      const currentSubjects = getCurrentGradeSubjects();
+      const currentDeletions = pendingDeletions[selectedGrade] || [];
+      
+      // Clean up deleted subjects
+      const cleanedGradeSubjects = currentSubjects.filter(s => !currentDeletions.includes(s.id));
+
+      const updatedMappings = {
+        ...mappings,
+        [selectedGrade]: cleanedGradeSubjects
+      };
+
+      await setDoc(doc(db, 'settings', 'subject_mapping'), updatedMappings);
+      setMappings(updatedMappings);
+      setPendingDeletions(prev => ({ ...prev, [selectedGrade]: [] }));
+      setHasUnsavedChanges(false);
+      showToast(`تم حفظ وتطبيق مواد ${selectedGrade} بنجاح`, 'success');
+      
+      logActivity({
+        action: 'تطبيق مواد الصف',
+        details: `تم تحديث وتطبيق مواد (${selectedGrade}) على النظام المدرسي`,
+        targetType: 'subject_mapping'
+      });
+    } catch (e) {
+      console.error(e);
+      showToast('حدث خطأ أثناء حفظ التعديلات', 'error');
+    }
+  };
+
+  // Add subject to active grade
+  const addSubject = () => {
+    if (!newSubjectName.trim() || !selectedGrade) return;
     
-    const newSubject = {
-      id: `custom_${Date.now()}`,
+    const newSubject: Subject = {
+      id: `custom_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
       name: newSubjectName.trim()
     };
 
+    const currentSubjects = getCurrentGradeSubjects();
     const updated = {
-      ...stages,
-      [stage]: [...stages[stage], newSubject]
+      ...mappings,
+      [selectedGrade]: [...currentSubjects, newSubject]
     };
 
-    setStages(updated);
-    saveToFirebase(updated);
+    setMappings(updated);
+    setHasUnsavedChanges(true);
     setNewSubjectName('');
-
-    logActivity({
-      action: 'إضافة مادة',
-      details: `تم إضافة مادة جديدة (${newSubjectName.trim()}) للمرحلة: ${stageLabels[stage]}`,
-      targetType: 'subject_mapping'
-    });
   };
 
-  const deleteSubject = (stage: keyof StageSubjects, id: string) => {
-    const subjectName = stages[stage].find(s => s.id === id)?.name;
-    const updated = {
-      ...stages,
-      [stage]: stages[stage].filter(s => s.id !== id)
-    };
+  // Soft toggle delete subject for active grade
+  const toggleDeleteSubject = (id: string) => {
+    if (!selectedGrade) return;
+    const currentDeletions = pendingDeletions[selectedGrade] || [];
+    const isAlreadyPending = currentDeletions.includes(id);
+    
+    const updated = isAlreadyPending
+      ? currentDeletions.filter(item => item !== id)
+      : [...currentDeletions, id];
 
-    setStages(updated);
-    saveToFirebase(updated);
-
-    logActivity({
-      action: 'حذف مادة',
-      details: `تم حذف مادة (${subjectName}) من المرحلة: ${stageLabels[stage]}`,
-      targetType: 'subject_mapping'
+    setPendingDeletions({
+      ...pendingDeletions,
+      [selectedGrade]: updated
     });
+    setHasUnsavedChanges(true);
   };
 
+  // Edit subject name
   const updateSubject = () => {
-    if (!editingSubject || !editingSubject.name.trim()) return;
+    if (!editingSubject || !editingSubject.name.trim() || !selectedGrade) return;
 
-    const { stage, id, name } = editingSubject;
-    const updated = {
-      ...stages,
-      [stage]: stages[stage].map(s => s.id === id ? { ...s, name: name.trim() } : s)
-    };
+    const currentSubjects = getCurrentGradeSubjects();
+    const updatedSubjects = currentSubjects.map(s => 
+      s.id === editingSubject.id ? { ...s, name: editingSubject.name.trim() } : s
+    );
 
-    setStages(updated);
-    saveToFirebase(updated);
-    setEditingSubject(null);
-
-    logActivity({
-      action: 'تعديل مادة',
-      details: `تم تعديل اسم مادة إلى (${name.trim()}) في المرحلة: ${stageLabels[stage]}`,
-      targetType: 'subject_mapping'
+    setMappings({
+      ...mappings,
+      [selectedGrade]: updatedSubjects
     });
+    setHasUnsavedChanges(true);
+    setEditingSubject(null);
   };
 
-  const resetToDefault = () => {
-    setStages(DEFAULT_SUBJECTS);
-    saveToFirebase(DEFAULT_SUBJECTS);
+  // Reset current grade to stage defaults
+  const resetGradeToDefault = () => {
+    if (!expandedStage || !selectedGrade) return;
+    const defaultList = DEFAULT_SUBJECTS[expandedStage] || [];
+    
+    setMappings({
+      ...mappings,
+      [selectedGrade]: defaultList
+    });
+    setPendingDeletions(prev => ({ ...prev, [selectedGrade]: [] }));
+    setHasUnsavedChanges(true);
+    showToast(`تم استعادة المواد الافتراضية لـ ${selectedGrade}`);
   };
 
-  if (loading) return <div className="text-center py-20 text-white/40">جاري تحميل نظام المواد...</div>;
+  if (loading) {
+    return (
+      <div className="p-6">
+        <CardGridSkeleton count={4} />
+      </div>
+    );
+  }
 
-  const stageLabels: Record<keyof StageSubjects, string> = {
-    primary: 'المرحلة الابتدائية',
-    intermediate: 'المرحلة المتوسطة',
-    scientific: 'المرحلة الإعدادية (الفرع العلمي)',
-    literary: 'المرحلة الإعدادية (الفرع الأدبي)'
+  const stageLabels: Record<string, { label: string; desc: string }> = {
+    primary: { label: 'المرحلة الابتدائية', desc: 'من الصف الأول حتى السادس الابتدائي' },
+    intermediate: { label: 'المرحلة المتوسطة', desc: 'من الصف الأول حتى الثالث المتوسط' },
+    scientific: { label: 'المرحلة الإعدادية (الفرع العلمي)', desc: 'الرابع والخامس والسادس العلمي' },
+    literary: { label: 'المرحلة الإعدادية (الفرع الأدبي)', desc: 'الرابع والخامس والسادس الأدبي' }
   };
+
+  const stageKeys = ['primary', 'intermediate', 'scientific', 'literary'];
+  const activeSubjects = getCurrentGradeSubjects();
+  const currentDeletions = pendingDeletions[selectedGrade] || [];
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between gap-4 glass-card p-6 border-white/10">
-        <div>
-          <h2 className="text-2xl font-black text-white flex items-center gap-3">
-            <Layout className="text-amber-500" />
-            نظام التوزيع الذكي للمواد
-          </h2>
-          <p className="text-white/40 text-sm mt-1">إعداد وضبط المواد الدراسية حسب كل مرحلة تعليمية</p>
+      
+      {/* Top Header Card */}
+      <div className="bg-[#101935]/80 backdrop-blur-xl border border-white/5 rounded-3xl p-5 md:p-6 shadow-2xl flex items-center justify-between gap-4">
+        <div className="flex items-center gap-3.5">
+          <div className="w-11 h-11 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shadow-lg shadow-amber-500/10 shrink-0">
+            <Layout size={22} />
+          </div>
+          <div>
+            <h2 className="text-xl font-black text-white flex items-center gap-2">
+              <span>التوزيع النوعي للمواد الدراسية</span>
+            </h2>
+            <p className="text-white/40 text-xs font-bold mt-0.5">
+              تخصيص وتطبيق المناهج والدروس لكل صف دراسي بشكل مستقل
+            </p>
+          </div>
         </div>
+
+        {onClose && (
+          <button 
+            onClick={onClose}
+            className="w-10 h-10 rounded-2xl bg-white/10 hover:bg-rose-500/20 text-white/70 hover:text-rose-400 border border-white/10 hover:border-rose-500/30 flex items-center justify-center transition-all cursor-pointer shrink-0"
+            title="إغلاق النافذة"
+          >
+            <X size={20} />
+          </button>
+        )}
       </div>
 
-      <div className="grid gap-4">
-        {(Object.keys(stages) as Array<keyof StageSubjects>).map((stage) => (
-          <div key={stage} className="glass-card overflow-hidden border-white/5 hover:border-white/10 transition-all">
-            <button 
-              onClick={() => setExpandedStage(expandedStage === stage ? null : stage)}
-              className="w-full p-6 flex items-center justify-between text-right"
-            >
-              <div className="flex items-center gap-4">
-                <div className={`p-3 rounded-2xl ${expandedStage === stage ? 'bg-amber-500 text-black' : 'bg-white/5 text-white/40'}`}>
-                   <GraduationCap size={24} />
-                </div>
-                <div>
-                  <h3 className="text-lg font-black text-white">{stageLabels[stage]}</h3>
-                  <p className="text-xs text-white/40 font-bold">{stages[stage].length} مواد دراسية</p>
-                </div>
-              </div>
-              <ChevronDown className={`text-white/20 transition-transform ${expandedStage === stage ? 'rotate-180' : ''}`} />
-            </button>
+      {/* Stages Accordion */}
+      <div className="grid gap-3.5">
+        {stageKeys.map((stage) => {
+          const isExpanded = expandedStage === stage;
+          const grades = GRADES_BY_STAGE[stage] || [];
 
-            <AnimatePresence>
-              {expandedStage === stage && (
-                <motion.div 
-                  initial={{ height: 0, opacity: 0 }}
-                  animate={{ height: 'auto', opacity: 1 }}
-                  exit={{ height: 0, opacity: 0 }}
-                  className="px-6 pb-6 border-t border-white/5 pt-6"
-                >
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 mb-6">
-                    {stages[stage].map((subject) => (
-                      <div 
-                        key={subject.id} 
-                        className="bg-white/5 border border-white/5 rounded-2xl p-4 flex items-center justify-between group hover:border-amber-500/30 transition-all"
-                      >
-                        {editingSubject?.id === subject.id ? (
-                          <div className="flex items-center gap-2 w-full">
-                            <input 
-                              type="text" 
-                              value={editingSubject?.name || ''}
-                              onChange={e => setEditingSubject({...editingSubject, name: e.target.value})}
-                              className="flex-1 bg-black/40 border border-amber-500/50 rounded-lg p-2 text-white text-sm outline-none"
-                              autoFocus
-                            />
-                            <button onClick={updateSubject} className="text-emerald-400 hover:text-emerald-300"><Check size={18} /></button>
-                            <button onClick={() => setEditingSubject(null)} className="text-rose-400 hover:text-rose-300"><X size={18} /></button>
-                          </div>
-                        ) : (
-                          <>
-                            <span className="text-white font-bold">{subject.name}</span>
-                            <div className="flex items-center gap-1 transition-opacity">
-                              <button 
-                                onClick={() => setEditingSubject({ stage, id: subject.id, name: subject.name })}
-                                className="p-2 text-white/40 hover:text-amber-400 transition-colors bg-white/5 rounded-lg"
-                                title="تعديل"
-                              >
-                                <Edit2 size={14} />
-                              </button>
-                              <button 
-                                onClick={() => deleteSubject(stage, subject.id)}
-                                className="p-2 text-white/40 hover:text-rose-500 transition-colors bg-white/5 rounded-lg"
-                                title="حذف"
-                              >
-                                <Trash2 size={14} />
-                              </button>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    ))}
-                    
-                    <div className="relative group">
-                      <input 
-                        type="text" 
-                        placeholder="إضافة مادة جديدة..."
-                        value={expandedStage === stage ? newSubjectName : ''}
-                        onChange={e => setNewSubjectName(e.target.value)}
-                        onKeyDown={e => e.key === 'Enter' && addSubject(stage)}
-                        className="w-full bg-white/5 border-2 border-dashed border-white/10 rounded-2xl p-4 text-white text-sm outline-none focus:border-amber-500 focus:bg-amber-500/5 transition-all text-right"
-                      />
-                      <button 
-                        onClick={() => addSubject(stage)}
-                        className="absolute left-4 top-1/2 -translate-y-1/2 p-2 bg-amber-500 text-black rounded-lg hover:scale-110 transition-transform shadow-lg shadow-amber-900/20"
-                      >
-                        <Plus size={16} />
-                      </button>
-                    </div>
+          return (
+            <div 
+              key={stage} 
+              className="bg-[#0f172a]/70 border border-white/5 hover:border-white/10 rounded-2xl md:rounded-3xl overflow-hidden transition-all duration-200"
+            >
+              {/* Stage Header Button */}
+              <button 
+                onClick={() => handleStageSelect(stage)}
+                className="w-full p-4 sm:p-5 flex items-center justify-between text-right cursor-pointer group"
+              >
+                <div className="flex items-center gap-3.5">
+                  <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all shrink-0 ${
+                    isExpanded 
+                      ? 'bg-amber-400 text-black shadow-lg shadow-amber-400/20' 
+                      : 'bg-white/5 text-white/40 group-hover:text-white group-hover:bg-white/10'
+                  }`}>
+                    <GraduationCap size={20} />
                   </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
-        ))}
+                  <div>
+                    <h3 className="text-sm sm:text-base font-black text-white group-hover:text-amber-400 transition-colors">
+                      {stageLabels[stage]?.label}
+                    </h3>
+                    <p className="text-[11px] text-white/35 font-bold mt-0.5">
+                      {grades.length} صفوف دراسية • {stageLabels[stage]?.desc}
+                    </p>
+                  </div>
+                </div>
+                
+                <ChevronDown className={`text-white/30 transition-transform duration-300 ${isExpanded ? 'rotate-180 text-amber-400' : ''}`} size={18} />
+              </button>
+
+              {/* Stage Content: Grades & Grade-Specific Subjects */}
+              <AnimatePresence>
+                {isExpanded && (
+                  <motion.div 
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.25 }}
+                    className="border-t border-white/5"
+                  >
+                    
+                    {/* Grade Selector Tabs (No stage-level general button) */}
+                    <div className="p-3 sm:p-4 bg-black/30 flex flex-wrap gap-2 border-b border-white/5">
+                      {grades.map((grade) => {
+                        const isSelected = selectedGrade === grade;
+                        const gradeCount = (mappings[grade] || DEFAULT_SUBJECTS[stage] || []).length;
+
+                        return (
+                          <button
+                            key={grade}
+                            onClick={() => {
+                              setSelectedGrade(grade);
+                              setEditingSubject(null);
+                              setNewSubjectName('');
+                            }}
+                            className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+                              isSelected 
+                                ? 'bg-gradient-to-r from-amber-500 to-amber-400 text-black shadow-lg shadow-amber-500/20 font-black scale-100' 
+                                : 'bg-white/5 hover:bg-white/10 text-white/60 hover:text-white'
+                            }`}
+                          >
+                            <span>{grade}</span>
+                            <span className={`text-[10px] px-1.5 py-0.2 rounded-md ${
+                              isSelected ? 'bg-black/20 text-black' : 'bg-white/5 text-white/40'
+                            }`}>
+                              {gradeCount}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Active Grade Subjects Panel */}
+                    <div className="p-4 sm:p-6 space-y-5">
+                      
+                      {/* Active Grade Header & Actions */}
+                      <div className="flex items-center justify-between gap-3 pb-3 border-b border-white/5">
+                        <div className="flex items-center gap-2.5">
+                          <BookOpen className="text-amber-400" size={18} />
+                          <div>
+                            <span className="text-white font-black text-sm block">
+                              مواد {selectedGrade}
+                            </span>
+                            <span className="text-white/35 text-[10px] font-bold">
+                              المواد المسجلة فعلياً بنظام الدرجات لهذا الصف
+                            </span>
+                          </div>
+                        </div>
+
+                        <button 
+                          onClick={resetGradeToDefault}
+                          className="text-[11px] text-white/40 hover:text-rose-400 flex items-center gap-1.5 transition-colors cursor-pointer px-2.5 py-1 rounded-lg hover:bg-white/5"
+                          title="استعادة المواد القياسية لهذا الصف"
+                        >
+                          <RefreshCcw size={12} />
+                          <span>استعادة الافتراضي</span>
+                        </button>
+                      </div>
+
+                      {/* Subjects Grid */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                        {activeSubjects.map((subject, idx) => {
+                          const isPendingDelete = currentDeletions.includes(subject.id);
+                          const isEditing = editingSubject?.id === subject.id;
+
+                          return (
+                            <div 
+                              key={subject.id || idx} 
+                              className={`rounded-2xl p-3.5 flex items-center justify-between gap-3 transition-all border ${
+                                isPendingDelete 
+                                  ? 'bg-rose-500/5 border-rose-500/20 grayscale opacity-45' 
+                                  : 'bg-[#121a30] border-white/5 hover:border-amber-500/30'
+                              }`}
+                            >
+                              {isEditing ? (
+                                <div className="flex items-center gap-1.5 w-full">
+                                  <input 
+                                    type="text" 
+                                    value={editingSubject.name}
+                                    onChange={e => setEditingSubject({ ...editingSubject, name: e.target.value })}
+                                    onKeyDown={e => {
+                                      if (e.key === 'Enter') updateSubject();
+                                      if (e.key === 'Escape') setEditingSubject(null);
+                                    }}
+                                    className="flex-1 bg-black/50 border border-amber-500/60 rounded-xl px-3 py-1.5 text-white text-xs outline-none font-bold"
+                                    autoFocus
+                                  />
+                                  <button 
+                                    onClick={updateSubject} 
+                                    className="p-1.5 bg-emerald-500 text-black rounded-lg hover:bg-emerald-400 cursor-pointer"
+                                  >
+                                    <Check size={14} />
+                                  </button>
+                                  <button 
+                                    onClick={() => setEditingSubject(null)} 
+                                    className="p-1.5 bg-white/10 text-white/60 hover:text-white rounded-lg cursor-pointer"
+                                  >
+                                    <X size={14} />
+                                  </button>
+                                </div>
+                              ) : (
+                                <>
+                                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                                    <span className="w-6 h-6 rounded-lg bg-white/5 flex items-center justify-center text-[10px] font-mono text-white/30 shrink-0">
+                                      {idx + 1}
+                                    </span>
+                                    <div className="min-w-0 flex-1">
+                                      <span className={`text-xs sm:text-sm font-black block truncate ${
+                                        isPendingDelete ? 'line-through text-white/25' : 'text-white'
+                                      }`}>
+                                        {subject.name}
+                                      </span>
+                                      {isPendingDelete && (
+                                        <span className="text-[8px] text-rose-400 font-bold block">
+                                          سيتم حذفها عند الحفظ
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    {!isPendingDelete && (
+                                      <button 
+                                        onClick={() => setEditingSubject({ id: subject.id, name: subject.name })}
+                                        className="p-1.5 text-white/40 hover:text-amber-400 hover:bg-white/5 rounded-lg transition-colors cursor-pointer"
+                                        title="تعديل اسم المادة"
+                                      >
+                                        <Edit2 size={13} />
+                                      </button>
+                                    )}
+                                    <button 
+                                      onClick={() => toggleDeleteSubject(subject.id)}
+                                      className={`p-1.5 rounded-lg transition-colors cursor-pointer ${
+                                        isPendingDelete 
+                                          ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500 hover:text-black' 
+                                          : 'text-white/40 hover:text-rose-400 hover:bg-white/5'
+                                      }`}
+                                      title={isPendingDelete ? "تراجع عن الحذف" : "حذف المادة"}
+                                    >
+                                      {isPendingDelete ? <RefreshCcw size={13} /> : <Trash2 size={13} />}
+                                    </button>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          );
+                        })}
+
+                        {/* Add New Subject Input Card */}
+                        <div className="relative">
+                          <input 
+                            type="text" 
+                            placeholder={`إضافة مادة جديدة لـ (${selectedGrade})...`}
+                            value={newSubjectName}
+                            onChange={e => setNewSubjectName(e.target.value)}
+                            onKeyDown={e => e.key === 'Enter' && addSubject()}
+                            className="w-full h-full min-h-[48px] bg-white/[0.02] border border-dashed border-white/10 hover:border-amber-500/40 rounded-2xl pl-11 pr-4 text-xs text-white placeholder-white/25 outline-none focus:border-amber-500 transition-all text-right font-bold"
+                          />
+                          <button 
+                            onClick={addSubject}
+                            className="absolute left-2.5 top-1/2 -translate-y-1/2 w-7 h-7 bg-amber-400 hover:bg-amber-300 text-black rounded-xl flex items-center justify-center transition-transform hover:scale-105 active:scale-95 cursor-pointer shadow-md shadow-amber-900/20"
+                            title="إضافة"
+                          >
+                            <Plus size={14} />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Save & Apply Button Bar for Active Grade */}
+                      {hasUnsavedChanges && (
+                        <div className="pt-4 border-t border-white/5 flex justify-center">
+                          <motion.button
+                            initial={{ scale: 0.95, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            onClick={saveToFirebase}
+                            className="flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-emerald-400 hover:from-emerald-400 hover:to-emerald-300 text-black px-6 py-2.5 rounded-2xl text-xs font-black transition-all shadow-xl shadow-emerald-500/20 active:scale-95 cursor-pointer"
+                          >
+                            <Save size={15} />
+                            <span>حفظ وتطبيق التغييرات لـ ({selectedGrade})</span>
+                          </motion.button>
+                        </div>
+                      )}
+
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

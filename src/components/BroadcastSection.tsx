@@ -2,8 +2,7 @@ import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Megaphone, Bell, History, AlertCircle, Trash2 } from 'lucide-react';
 import { ConfirmDialog } from './ConfirmDialog';
-import { collection, query, orderBy, limit, onSnapshot, where, deleteDoc, doc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { broadcastService } from '../services/broadcastService';
 import { logActivity } from '../utils/auditLogger';
 
 interface VerticalScrollPickerProps {
@@ -162,13 +161,15 @@ interface BroadcastSectionProps {
   onUpdateMessage?: (broadcastId: string, newMessage: string) => void;
   onDeleteMessage?: (id: string) => void;
   showToast: (message: string, type?: 'success' | 'error') => void;
+  schoolId?: string;
 }
 
 export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
   onSendMessage,
   onUpdateMessage,
   onDeleteMessage,
-  showToast
+  showToast,
+  schoolId
 }) => {
   const [message, setMessage] = React.useState('');
   const [editingId, setEditingId] = React.useState<string | null>(null);
@@ -182,31 +183,11 @@ export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
   const [confirmDelete, setConfirmDelete] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    const q = query(
-      collection(db, 'broadcasts')
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs
-        .map(doc => {
-          const docData = doc.data();
-          const tMs = docData.timestamp?.toMillis ? docData.timestamp.toMillis() : (docData.timestamp || 0);
-          return {
-            id: doc.id,
-            ...docData,
-            expiryDate: docData.expiryDate || 0,
-            timestampMs: tMs,
-            timestamp: docData.timestamp
-          };
-        })
-        .filter(b => b.expiryDate > Date.now())
-        .sort((a, b) => b.timestampMs - a.timestampMs)
-        .slice(0, 10);
-      setHistory(data as any);
-    }, (error) => console.warn("BroadcastSection error:", error));
-
-    return () => unsubscribe();
-  }, []);
+    const unsub = broadcastService.subscribeToBroadcasts(schoolId, (data) => {
+      setHistory(data);
+    });
+    return () => unsub();
+  }, [schoolId]);
 
   const levels = [
     { id: 'primary', name: 'ابتدائي' },
@@ -248,36 +229,35 @@ export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
 
   const handleDelete = async () => {
     if (!confirmDelete) return;
-    if (onDeleteMessage) {
-      onDeleteMessage(confirmDelete);
-      
+    const targetId = confirmDelete;
+    const previousHistory = [...history];
+    setConfirmDelete(null);
+
+    // 1. Instantaneous optimistic removal from UI (0ms delay)
+    setHistory(prev => prev.filter(br => br.id !== targetId));
+
+    try {
+      // 2. Perform deletion in backend
+      await broadcastService.deleteBroadcast(targetId);
+      showToast('تم حذف البث الإذاعي بنجاح', 'success');
+
       logActivity({
         action: 'حذف بث إذاعي',
-        details: 'تم طلب حذف بث إذاعي من خلال النظام الخارجي',
-        targetId: confirmDelete,
+        details: 'تم حذف بث إذاعي نهائياً من قاعدة البيانات',
+        targetId: targetId,
         targetType: 'broadcast'
       });
-    } else {
-      try {
-        setHistory(prev => prev.filter(br => br.id !== confirmDelete));
-        showToast('تم الحذف بنجاح');
-        await deleteDoc(doc(db, 'broadcasts', confirmDelete));
-
-        logActivity({
-          action: 'حذف بث إذاعي',
-          details: 'تم حذف بث إذاعي نهائياً من قاعدة البيانات',
-          targetId: confirmDelete,
-          targetType: 'broadcast'
-        });
-      } catch (e: any) {
-        console.error("Error deleting broadcast: ", e);
-        alert('حدث خطأ أثناء الحذف: ' + e.message);
-      }
+    } catch (e: any) {
+      console.error("Error deleting broadcast: ", e);
+      // Rollback on failure
+      setHistory(previousHistory);
+      showToast('حدث خطأ أثناء الحذف: ' + (e.message || ''), 'error');
     }
-    setConfirmDelete(null);
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
+    if (!message.trim()) return;
+
     let finalSelection: string[] = [];
     const currentLevelGrades = gradeMap[level];
 
@@ -306,16 +286,56 @@ export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
     }
 
     const durationInHours = (durationDays * 24) + durationHours || 1;
-    onSendMessage(message, finalSelection, durationInHours);
-    
-    logActivity({
-      action: 'إطلاق بث إذاعي',
-      details: `تم إرسال رسالة إذاعية للفئات: ${finalSelection.join(', ')}`,
-      targetType: 'broadcast'
-    });
+    const msg = message.trim();
 
+    // Optimistic UI update in Smart Broadcast Log (سجل البث الذكي)
+    const optimisticBroadcast = {
+      id: `br_${Date.now()}`,
+      schoolId: schoolId || 'school1',
+      message: msg,
+      targetGrades: finalSelection,
+      durationHours: durationInHours,
+      author: 'الإدارة المدرسية',
+      subject: 'الإذاعة المدرسية',
+      targetLocation: 'ticker',
+      timestampMs: Date.now(),
+      createdAt: new Date()
+    };
+    setHistory(prev => [optimisticBroadcast, ...prev.filter(b => b.id !== optimisticBroadcast.id)]);
     setMessage('');
-    showToast('تم إرسال الرسالة بنجاح');
+
+    try {
+      if (onSendMessage) {
+        onSendMessage(msg, finalSelection, durationInHours);
+      } else {
+        await broadcastService.sendBroadcast({
+          schoolId: schoolId || 'school1',
+          message: msg,
+          targetGrades: finalSelection,
+          durationHours: durationInHours,
+          author: 'الإدارة المدرسية',
+          subject: 'الإذاعة المدرسية',
+          targetLocation: 'ticker'
+        });
+      }
+
+      logActivity({
+        action: 'إطلاق بث إذاعي',
+        details: `تم إرسال رسالة إذاعية للفئات: ${finalSelection.join(', ')}`,
+        targetType: 'broadcast'
+      });
+
+      showToast('تم إرسال ونشر البث في شاشات الطلاب وسجل البث فوراً 📡', 'success');
+
+      // Re-sync with backend
+      const latest = await broadcastService.getBroadcasts(schoolId);
+      if (latest && latest.length > 0) {
+        setHistory(latest);
+      }
+    } catch (e: any) {
+      console.error("Error sending broadcast:", e);
+      showToast('حدث خطأ أثناء إرسال البث: ' + (e.message || ''), 'error');
+    }
   };
 
   const currentGrades = gradeMap[level];
@@ -489,15 +509,24 @@ export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
                             />
                             <div className="flex gap-2">
                                 <button 
-                                  onClick={() => {
-                                    if (onUpdateMessage) onUpdateMessage(br.id, editValue);
+                                  onClick={async () => {
+                                    try {
+                                      if (onUpdateMessage) {
+                                        onUpdateMessage(br.id, editValue);
+                                      }
+                                      await broadcastService.updateBroadcast(br.id, editValue);
+                                      setHistory(prev => prev.map(p => p.id === br.id ? { ...p, message: editValue } : p));
+                                      showToast('تم تعديل البث بنجاح', 'success');
+                                    } catch (e: any) {
+                                      showToast('خطأ في تعديل البث', 'error');
+                                    }
                                     setEditingId(null);
                                   }}
-                                  className="px-6 py-2 bg-rose-500 text-white rounded-xl text-xs font-black shadow-lg shadow-rose-900/20"
+                                  className="px-6 py-2 bg-rose-500 text-white rounded-xl text-xs font-black shadow-lg shadow-rose-900/20 cursor-pointer"
                                 >حفظ التعديل</button>
                                 <button 
                                   onClick={() => setEditingId(null)}
-                                  className="px-6 py-2 bg-white/10 text-white/50 rounded-xl text-xs font-black hover:bg-white/20"
+                                  className="px-6 py-2 bg-white/10 text-white/50 rounded-xl text-xs font-black hover:bg-white/20 cursor-pointer"
                                 >إلغاء</button>
                             </div>
                         </div>
@@ -505,14 +534,14 @@ export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
                         <div className="space-y-2">
                             <p className="text-white text-base font-black leading-snug">{br.message}</p>
                             <div className="flex items-center gap-3 flex-wrap">
-                                <span className="text-[10px] bg-white/5 text-white/40 px-3 py-1 rounded-full font-black uppercase tracking-widest">
-                                    {br.targetGrades?.includes('الجميع') ? 'للجميع' : br.targetGrades?.join(', ')}
+                                <span className="text-[10px] bg-rose-500/10 text-rose-300 px-3 py-1 rounded-full font-black uppercase tracking-widest border border-rose-500/20">
+                                    {br.targetGrades?.includes('الجميع') ? 'لكافة الصفوف' : (Array.isArray(br.targetGrades) ? br.targetGrades.join(', ') : 'للجميع')}
                                 </span>
-                                <span className="text-[10px] text-white/20 font-bold">
+                                <span className="text-[10px] text-white/40 font-bold">
                                     {(() => {
-                                      if (!br.timestamp) return '...';
-                                      const date = typeof br.timestamp.toDate === 'function' ? br.timestamp.toDate() : new Date(br.timestamp);
-                                      return isNaN(date.getTime()) ? '...' : new Intl.DateTimeFormat('ar-EG', { hour: 'numeric', minute: 'numeric', day: 'numeric', month: 'short' }).format(date);
+                                      const ts = br.timestampMs || (br.createdAt ? new Date(br.createdAt).getTime() : (br.timestamp ? (typeof br.timestamp.toDate === 'function' ? br.timestamp.toDate().getTime() : new Date(br.timestamp).getTime()) : Date.now()));
+                                      const date = new Date(ts);
+                                      return isNaN(date.getTime()) ? 'الآن' : new Intl.DateTimeFormat('ar-EG', { hour: 'numeric', minute: 'numeric', day: 'numeric', month: 'short' }).format(date);
                                     })()}
                                 </span>
                             </div>
@@ -524,32 +553,26 @@ export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
                 {/* Actions Section - Only show when NOT editing */}
                 {editingId !== br.id && (
                   <div className="flex items-center gap-3 mt-4 md:mt-0 w-full md:w-auto justify-end border-t md:border-0 border-white/5 pt-3 md:pt-0">               
-                      {(onUpdateMessage || onDeleteMessage) && (
-                          <div className="flex items-center gap-2">
-                              {onUpdateMessage && (
-                                <button 
-                                    onClick={() => {
-                                        setEditingId(br.id);
-                                        setEditValue(br.message);
-                                    }}
-                                    className="h-10 px-6 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center border border-blue-500/10 hover:bg-blue-500 hover:text-white transition-all text-[11px] font-black"
-                                >
-                                    تعديل
-                                </button>
-                              )}
-                              {onDeleteMessage && (
-                                 <button 
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        setConfirmDelete(br.id);
-                                    }}
-                                    className="w-10 h-10 bg-rose-500/10 text-rose-500 rounded-xl hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center border border-rose-500/10"
-                                >
-                                    <Trash2 size={20} />
-                                </button>
-                              )}
-                          </div>
-                      )}
+                      <div className="flex items-center gap-2">
+                          <button 
+                              onClick={() => {
+                                  setEditingId(br.id);
+                                  setEditValue(br.message);
+                              }}
+                              className="h-10 px-6 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center border border-blue-500/10 hover:bg-blue-500 hover:text-white transition-all text-[11px] font-black cursor-pointer"
+                          >
+                              تعديل
+                          </button>
+                          <button 
+                              onClick={(e) => {
+                                  e.stopPropagation();
+                                  setConfirmDelete(br.id);
+                              }}
+                              className="w-10 h-10 bg-rose-500/10 text-rose-500 rounded-xl hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center border border-rose-500/10 cursor-pointer"
+                          >
+                              <Trash2 size={20} />
+                          </button>
+                      </div>
                   </div>
                 )}
              </div>

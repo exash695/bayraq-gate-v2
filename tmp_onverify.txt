@@ -1,0 +1,156 @@
+              onVerify={async (code, isParent) => {
+                setIsVerifying(true);
+                let succeeded = false;
+                const setVerified = (val: boolean) => {
+                  if (val) succeeded = true;
+                  setIsSchoolVerified(val);
+                };
+                try {
+                  const docMatchesSchool = (docData: any) => {
+                    if (!selectedSchoolId) return true;
+                    
+                    const docSchoolId = String(docData.schoolId || docData.school_id || '').trim().toLowerCase();
+                    const docSchoolName = String(docData.schoolName || docData.school || docData.academyName || '').trim();
+                    
+                    if (!docSchoolId && !docSchoolName) {
+                      return true;
+                    }
+
+                    if (docSchoolId && docSchoolId === selectedSchoolId.trim().toLowerCase()) {
+                      return true;
+                    }
+                    
+                    if (currentSchool) {
+                      const normalizeFuzzy = (str: string) => {
+                        if (!str) return '';
+                        return str
+                          .replace(/[أإآ]/g, 'ا')
+                          .replace(/ة/g, 'ه')
+                          .replace(/[ىي]/g, 'ي')
+                          .replace(/\s+/g, '')
+                          .trim()
+                          .toLowerCase();
+                      };
+                      
+                      const normalizedFilter = normalizeFuzzy(currentSchool.name);
+                      const normalizedDoc = normalizeFuzzy(docSchoolName);
+                      
+                      if (normalizedFilter && normalizedDoc === normalizedFilter) {
+                        return true;
+                      }
+                      
+                      if (!docSchoolId && normalizedFilter && (normalizedDoc.includes(normalizedFilter) || normalizedFilter.includes(normalizedDoc))) {
+                        return true;
+                      }
+                    }
+                    return false;
+                  };
+
+                  const isAdminCode =
+                    code.startsWith("ADM-") || code === "112233";
+
+                  if (isAdminCode) {
+                    try {
+                      // Test/Master Codes for verification/bypass during development
+                      const isMasterCode =
+                        code === "ADM-G-MASTER" ||
+                        code === "ADM-B-MASTER" ||
+                        code === "ADM-ROOT" ||
+                        code === "112233";
+
+                      let qSnap: any = { empty: true };
+                      if (!isMasterCode) {
+                        const codesRef = collection(db, "activation_codes");
+                        const q = query(
+                          codesRef,
+                          where("code", "==", code || "unassigned"),
+                          where("role", "==", "admin"),
+                        );
+                        qSnap = await getDocs(q);
+                      }
+
+                      if (!qSnap.empty || isMasterCode) {
+                        const adminDoc = !isMasterCode
+                          ? qSnap.docs[0].data()
+                          : null;
+                        const adminDocId = !isMasterCode ? qSnap.docs[0].id : null;
+
+                        // Check security rules
+                        if (adminDoc) {
+                          if (adminDoc.status === "disabled" || adminDoc.status === "expired") {
+                            addNotification(
+                              "خطأ في التحقق",
+                              "هذا الكود غير فعال أو تم تعطيله",
+                              "alarm",
+                            );
+                            setIsVerifying(false);
+                            return;
+                          }
+                          if (adminDoc.expiresAt) {
+                            const expiresDate = new Date(adminDoc.expiresAt);
+                            if (expiresDate < new Date()) {
+                              addNotification(
+                                "خطأ في التحقق",
+                                "هذا الكود انتهت صلاحيته",
+                                "alarm",
+                              );
+                              setIsVerifying(false);
+                              return;
+                            }
+                          }
+                          const maxUses = typeof adminDoc.maxUses === 'number' && adminDoc.maxUses > 0 ? adminDoc.maxUses : null;
+                          if (maxUses !== null && adminDoc.usedCount !== undefined && adminDoc.usedCount >= maxUses) {
+                            addNotification(
+                              "خطأ في التحقق",
+                              "تجاوز هذا الكود الحد الأقصى للاستخدام",
+                              "alarm",
+                            );
+                            setIsVerifying(false);
+                            return;
+                          }
+                        }
+
+                        // update usedCount & log
+                        if (adminDoc && adminDocId) {
+                          const codeRef = doc(db, "activation_codes", adminDocId);
+                          const newUsedCount = (adminDoc.usedCount || 0) + 1;
+                          const updates: any = { usedCount: newUsedCount, lastUsedAt: serverTimestamp() };
+                          const maxUses = typeof adminDoc.maxUses === 'number' && adminDoc.maxUses > 0 ? adminDoc.maxUses : null;
+                          if (maxUses !== null && newUsedCount >= maxUses) {
+                            updates.status = "expired";
+                          }
+                          await setDoc(codeRef, updates, { merge: true });
+
+                          await addDoc(collection(db, "developer_logs"), {
+                            action: `استخدام كود الإدارة: ${code}`,
+                            code: code,
+                            schoolId: adminDoc.schoolId || selectedSchoolId,
+                            schoolName: institutionName,
+                            userEmail: user?.email || auth.currentUser?.email || "غير معروف",
+                            timestamp: serverTimestamp(),
+                            status: "success"
+                          });
+                        }
+
+                        const isAdminObserver = adminDoc?.type === "observer";
+
+                        const branch =
+                          code.includes("-G-") ||
+                          code === "ADM-ROOT" ||
+                          code === "112233"
+                            ? "girls"
+                            : "boys";
+
+                        if (isAdminObserver) {
+                          setPortalType("admin-observer");
+                          setVerifiedStudentInfo({
+                            id: code,
+                            code: code,
+                            name: "إدارة المدرسة",
+                            role: "admin",
+                          });
+                          setSelectedStudentGrade(""); // They will need to select a grade next
+                        } else {
+                          setPortalType(
+                            branch === "boys" ? "admin-boys" : "admin-girls",
+                          );

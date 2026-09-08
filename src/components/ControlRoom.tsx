@@ -10,7 +10,6 @@ import {
   Palette, 
   Languages, 
   Eye, 
-  BarChart3, 
   Trash2, 
   RefreshCcw, 
   Bell, 
@@ -19,16 +18,16 @@ import {
   Send,
   AlertTriangle,
   Clock,
-  Trophy,
   Sun,
   Moon,
   Play,
-  X
+  X,
+  ShieldCheck
 } from 'lucide-react';
 import { AppSettings, ThemeColor, FontFamily, UserProgress } from '../types';
 import { translations } from '../lib/translations';
-import { BADGES } from '../constants/badges';
 import { clearMediaCache } from '../utils/imageCacher';
+import { PrivacyPolicy } from './PrivacyPolicy';
 
 interface ControlRoomProps {
   settings: AppSettings;
@@ -38,7 +37,7 @@ interface ControlRoomProps {
   onClearNotes: () => void;
   onResetSettings: () => void;
   onResetOnboarding?: () => void;
-  onResetRole?: () => void;
+  onOpenPrivacy?: () => void;
 }
 
 export const ControlRoom = ({ 
@@ -49,9 +48,10 @@ export const ControlRoom = ({
   onClearNotes,
   onResetSettings,
   onResetOnboarding,
-  onResetRole
+  onOpenPrivacy
 }: ControlRoomProps) => {
   const t = translations[settings.language];
+  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [flashingButtonId, setFlashingButtonId] = useState<string | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{ type: 'clear' | 'reset' | null; isOpen: boolean }>({ type: null, isOpen: false });
@@ -119,24 +119,6 @@ export const ControlRoom = ({
       console.error("Preview error:", err);
       setPlayingId(null);
     }
-  };
-
-  const formatTime = (seconds: number) => {
-    const hrs = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    if (settings.language === 'ar') {
-      return `${hrs} ${t.hours} و ${mins} ${t.minutes}`;
-    }
-    return `${hrs} ${t.hours} ${mins} ${t.minutes}`;
-  };
-
-  const getUnitStats = (unitId: number | string) => {
-    const studyTime = progress.totalStudyTime[unitId] || 0;
-    const unitBadgeCount = BADGES.filter(b => b.category === 'unit' && b.id.includes(`unit-${unitId}`)).length;
-    const earnedCount = Object.keys(progress.badges).filter(id => id.includes(`unit-${unitId}`)).length;
-    const percentage = unitBadgeCount > 0 ? Math.round((earnedCount / unitBadgeCount) * 100) : 0;
-    
-    return { studyTime, percentage };
   };
 
   return (
@@ -312,56 +294,7 @@ export const ControlRoom = ({
         </div>
       </section>
 
-      {/* 3. Analytics Card */}
-      <section className="glass-card p-6 space-y-6">
-        <div className="flex items-center gap-4">
-          <div className="p-3 rounded-xl bg-theme-primary/10 text-theme-primary">
-            <BarChart3 size={24} />
-          </div>
-          <h3 className="text-xl font-bold">{t.analytics}</h3>
-        </div>
-
-        <div className="grid gap-4 w-full">
-          {[
-            { id: 1, label: `${t.unit} 1` },
-            { id: 2, label: `${t.unit} 2` },
-            { id: 3, label: `${t.unit} 3` },
-            { id: 5, label: `${t.unit} 5` },
-            { id: 6, label: `${t.unit} 6` },
-            { id: 8, label: `${t.unit} 8` },
-            { id: 'literature', label: t.literature },
-          ].map((item, index) => {
-            const stats = getUnitStats(item.id);
-            return (
-              <div key={item.id} className="p-4 rounded-2xl bg-[#020617]/50 border border-white/10 space-y-3 hover:border-theme-primary/30 transition-colors group w-full">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                  <span className="font-black text-white group-hover:text-theme-primary transition-colors text-lg">
-                    {item.label}
-                  </span>
-                  <div className="flex gap-2 text-xs text-white/60 font-bold w-full sm:w-auto justify-between sm:justify-end">
-                    <span className="flex items-center gap-1.5 bg-white/5 px-2 py-1 rounded-lg border border-white/5">
-                      <Clock size={12} className="text-theme-primary" /> {formatTime(stats.studyTime)}
-                    </span>
-                    <span className="flex items-center gap-1.5 bg-white/5 px-2 py-1 rounded-lg border border-white/5">
-                      <Trophy size={12} className="text-yellow-400" /> {stats.percentage}%
-                    </span>
-                  </div>
-                </div>
-                <div className="relative h-3 bg-[#0f172a] rounded-full overflow-hidden border border-white/5 shadow-[inset_0_2px_4px_rgba(0,0,0,0.4)] w-full">
-                  <motion.div 
-                    initial={{ width: 0 }}
-                    animate={{ width: `${stats.percentage}%` }}
-                    transition={{ duration: 1.5, ease: "easeOut", delay: index * 0.1 }}
-                    className="absolute top-0 left-0 h-full bg-gradient-to-r from-theme-primary/40 to-theme-primary shadow-[0_0_15px_var(--theme-glow)]"
-                  />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* 4. System Management */}
+      {/* 3. System Management */}
       <section className="glass-card p-6 space-y-6">
         <div className="flex items-center gap-4">
           <div className="p-3 rounded-xl bg-theme-primary/10 text-theme-primary">
@@ -423,21 +356,6 @@ export const ControlRoom = ({
             >
               <RefreshCcw size={20} />
               {settings.language === 'ar' ? 'إعادة عرض اللوحات التعريفية' : 'Reset Onboarding Tour'}
-            </motion.button>
-          )}
-
-          {onResetRole && (
-            <motion.button
-              whileTap={{ scale: 0.95 }}
-              onClick={() => {
-                onResetRole();
-                setToastMessage(settings.language === 'ar' ? 'تمت إعادة ضبط دور المستخدم' : 'User role reset successfully');
-                setTimeout(() => setToastMessage(null), 2000);
-              }}
-              className="p-4 rounded-xl bg-purple-500/10 border border-purple-500/30 text-purple-300 font-bold flex items-center justify-center gap-3 hover:bg-purple-500/20 transition-all"
-            >
-              <RefreshCcw size={20} />
-              {settings.language === 'ar' ? 'تغيير واجهة الدور (طالب/معلم/إداري)' : 'Switch User Role'}
             </motion.button>
           )}
         </div>
@@ -562,7 +480,7 @@ export const ControlRoom = ({
         </div>
       </section>
 
-      {/* 6. Developer Support */}
+      {/* 6. Developer Support & Privacy */}
       <section className="glass-card p-6 space-y-6">
         <div className="flex items-center gap-4">
           <div className="p-3 rounded-xl bg-theme-primary/10 text-theme-primary">
@@ -591,7 +509,32 @@ export const ControlRoom = ({
             Instagram: m.4ku
           </a>
         </div>
+
+        {/* Official Privacy Policy Card */}
+        <div className="pt-2 border-t border-white/5">
+          <button
+            type="button"
+            onClick={() => onOpenPrivacy ? onOpenPrivacy() : setShowPrivacyModal(true)}
+            className="w-full p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 hover:bg-emerald-500/20 text-emerald-400 font-bold flex items-center justify-between transition-all"
+          >
+            <div className="flex items-center gap-3 text-right">
+              <ShieldCheck size={20} className="shrink-0" />
+              <div>
+                <span className="block text-sm text-white font-bold">وثيقة سياسة الخصوصية وحماية البيانات</span>
+                <span className="block text-[11px] text-white/50 font-normal">مطابقة لسياسات Google Play & Apple App Store</span>
+              </div>
+            </div>
+            <span className="text-xs bg-emerald-500/20 px-2.5 py-1 rounded-lg border border-emerald-500/30 text-emerald-300">عرض الوثيقة</span>
+          </button>
+        </div>
       </section>
+
+      {/* Standalone Privacy Policy Modal if opened locally */}
+      {showPrivacyModal && (
+        <div className="fixed inset-0 z-[9999] bg-[#050A18] overflow-y-auto">
+          <PrivacyPolicy onBack={() => setShowPrivacyModal(false)} />
+        </div>
+      )}
 
       {/* Confirmation Dialog replacement for Modal */}
       <ConfirmDialog 

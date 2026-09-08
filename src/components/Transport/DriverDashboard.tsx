@@ -26,6 +26,7 @@ interface DriverDashboardProps {
   onBack?: () => void;
   driverObj?: any;
   schoolId?: string;
+  forcedTab?: 'manifest' | 'route' | 'finance' | 'alerts';
 }
 
 // Custom structure for expanded student details with payment and phone info
@@ -36,9 +37,17 @@ interface EnhancedStudent extends StudentTransportStatus {
   shift: 'morning' | 'evening';
 }
 
-export const DriverDashboard: React.FC<DriverDashboardProps> = ({ driverId, routeId, onBack, driverObj, schoolId = "s1" }) => {
+export const DriverDashboard: React.FC<DriverDashboardProps> = ({ driverId, routeId, onBack, driverObj, schoolId = "s1", forcedTab }) => {
   // Navigation & tabs state
-  const [activeTab, setActiveTab] = useState<'manifest' | 'route' | 'finance' | 'alerts'>('manifest');
+  const [activeTab, setActiveTab] = useState<'manifest' | 'route' | 'finance' | 'alerts'>(forcedTab || 'manifest');
+  
+  // Keep activeTab in sync with forcedTab
+  useEffect(() => {
+    if (forcedTab) {
+      setActiveTab(forcedTab);
+    }
+  }, [forcedTab]);
+
   const [shiftFilter, setShiftFilter] = useState<'all' | 'morning' | 'evening'>('all');
   
   // App data state
@@ -418,183 +427,11 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({ driverId, rout
     return s.shift === shiftFilter;
   });
 
-  return (
-    <div className="min-h-screen bg-[#0A0D1A] text-white font-sans flex flex-col selection:bg-amber-500 selection:text-black overflow-x-hidden w-full max-w-none m-0 p-0 border-0" dir="rtl">
-      
-      {/* Header Bar - Sleek Single Line, Edge to Edge */}
-      <div className="w-full bg-[#11162A]/90 backdrop-blur-xl border-b border-gray-800 px-4 py-3 md:px-5 md:py-4 sticky top-0 z-30 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-3">
-          {onBack && (
-            <button 
-              onClick={onBack}
-              className="p-2.5 bg-gray-800/60 hover:bg-red-500/10 text-gray-400 hover:text-red-400 rounded-xl transition-all duration-300 border border-gray-700/50 cursor-pointer shrink-0"
-              title="خروج من لوحة السائق"
-            >
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          )}
-          <div className="relative shrink-0">
-            <div className="p-2.5 bg-gradient-to-tr from-amber-500 to-yellow-600 rounded-xl text-black shadow-lg shadow-amber-500/20">
-              <Bus className="w-5 h-5 stroke-[2.5]" />
-            </div>
-            {isGpsBroadcasting && (
-              <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
-              </span>
-            )}
-          </div>
-          <div className="min-w-0">
-            <h1 className="text-sm md:text-lg font-black tracking-tight text-white truncate">
-              {driverDetails ? `لوحة السائق: ${driverDetails.name}` : 'لوحة تحكم السائق المحترف'}
-            </h1>
-            <p className="text-[10px] md:text-xs text-gray-400 font-medium flex items-center gap-1.5 truncate mt-0.5">
-              <span className="text-amber-400 font-black">{routeInfo?.name || 'خط الحافلة'}</span>
-              <span className="text-gray-600 font-bold">|</span>
-              <span className="text-indigo-300 font-bold">{routeInfo?.busPlate || ''}</span>
-            </p>
-          </div>
-        </div>
-
-        {/* GPS Controls on the same single line */}
-        <div className="flex items-center gap-2 md:gap-4 shrink-0 ml-5 xs:ml-8 md:ml-12">
-          <div className="hidden md:flex flex-col text-left">
-            <span className="text-[9px] text-gray-500 text-right font-black block">بث الـ GPS المباشر</span>
-            <span className="font-mono text-xs text-emerald-400 font-black tracking-wider">
-              {gpsCoordinates.lat.toFixed(5)}°N, {gpsCoordinates.lng.toFixed(5)}°E
-            </span>
-          </div>
-
-          <button 
-            onClick={() => setIsGpsBroadcasting(!isGpsBroadcasting)}
-            className={`px-3 py-2 md:px-4 md:py-2.5 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer shadow-md ${
-              isGpsBroadcasting 
-                ? 'bg-emerald-500 hover:bg-emerald-600 text-black shadow-emerald-500/10' 
-                : 'bg-gray-800 hover:bg-gray-700 text-gray-300'
-            }`}
-          >
-            <Wifi className={`w-3.5 h-3.5 ${isGpsBroadcasting ? 'animate-pulse' : ''}`} />
-            <span className="hidden xs:inline">
-              {isGpsBroadcasting 
-                ? `البث نشط (${gpsCoordinates.lat.toFixed(3)}, ${gpsCoordinates.lng.toFixed(3)})`
-                : 'تشغيل بث GPS'
-              }
-            </span>
-            <span className="xs:hidden">
-              {isGpsBroadcasting ? `${gpsCoordinates.lat.toFixed(2)}, ${gpsCoordinates.lng.toFixed(2)}` : 'بث GPS'}
-            </span>
-          </button>
-        </div>
-      </div>
-
-      {/* Main Container - Edge-to-Edge Layout */}
-      <div className="flex-1 w-full flex flex-col md:flex-row gap-0">
-        
-        {/* Glassmorphism Sidebar / Right Menu Panel - Hidden on Mobile */}
-        <div className="hidden md:flex w-full md:w-80 bg-[#11162A]/80 backdrop-blur-xl border-l border-gray-800/80 p-4 md:p-5 flex-col justify-between gap-6 shrink-0">
-          <div className="space-y-6">
-            <div className="p-4 bg-gradient-to-br from-[#18213F] to-[#10162B] rounded-2xl border border-gray-800">
-              <span className="text-xs text-gray-500 block mb-1">مسار الحافلة النشط</span>
-              <p className="text-sm font-black text-white leading-relaxed">{routeInfo?.name || 'خط حي المنصور وبوابة الكفاءات'}</p>
-              
-              <div className="mt-4 flex gap-2">
-                <span className="text-xs bg-amber-500/10 text-amber-400 border border-amber-500/20 px-2.5 py-1 rounded-lg font-bold">
-                  صباحية ومسائية
-                </span>
-                <span className="text-xs bg-[#243B55] text-blue-300 border border-blue-500/10 px-2.5 py-1 rounded-lg font-bold">
-                  {routeInfo?.busPlate || 'باص 12'}
-                </span>
-              </div>
-            </div>
-
-            {/* Core Side Navigation */}
-            <div className="space-y-2">
-              <span className="text-[10px] text-gray-500 font-black tracking-wider block px-1">القائمة الرئيسية</span>
-              
-              <button 
-                onClick={() => setActiveTab('manifest')}
-                className={`w-full p-4 rounded-2xl flex items-center gap-3.5 transition-all text-right font-bold text-sm cursor-pointer ${
-                  activeTab === 'manifest' 
-                    ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-xl shadow-indigo-600/10 border-r-4 border-amber-400' 
-                    : 'text-gray-400 hover:bg-gray-800/40 hover:text-white'
-                }`}
-              >
-                <Users className="w-5 h-5 text-indigo-400" />
-                <div className="flex-1">
-                  <span>الركاب والتحضير</span>
-                  <span className="text-[10px] block font-medium opacity-75">حضور وانصراف الطلاب بالباص</span>
-                </div>
-              </button>
-
-              <button 
-                onClick={() => setActiveTab('route')}
-                className={`w-full p-4 rounded-2xl flex items-center gap-3.5 transition-all text-right font-bold text-sm cursor-pointer ${
-                  activeTab === 'route' 
-                    ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-xl shadow-indigo-600/10 border-r-4 border-amber-400' 
-                    : 'text-gray-400 hover:bg-gray-800/40 hover:text-white'
-                }`}
-              >
-                <Map className="w-5 h-5 text-amber-400" />
-                <div className="flex-1">
-                  <span>المسار والخريطة</span>
-                  <span className="text-[10px] block font-medium opacity-75">محطات التوقف وبث الـ GPS</span>
-                </div>
-              </button>
-
-              <button 
-                onClick={() => setActiveTab('finance')}
-                className={`w-full p-4 rounded-2xl flex items-center gap-3.5 transition-all text-right font-bold text-sm cursor-pointer ${
-                  activeTab === 'finance' 
-                    ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-xl shadow-indigo-600/10 border-r-4 border-amber-400' 
-                    : 'text-gray-400 hover:bg-gray-800/40 hover:text-white'
-                }`}
-              >
-                <DollarSign className="w-5 h-5 text-emerald-400" />
-                <div className="flex-1">
-                  <span>المالية والأقساط</span>
-                  <span className="text-[10px] block font-medium opacity-75">حالة سداد الركاب ومستحقاتك</span>
-                </div>
-              </button>
-
-              <button 
-                onClick={() => setActiveTab('alerts')}
-                className={`w-full p-4 rounded-2xl flex items-center gap-3.5 transition-all text-right font-bold text-sm cursor-pointer ${
-                  activeTab === 'alerts' 
-                    ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white shadow-xl shadow-indigo-600/10 border-r-4 border-amber-400' 
-                    : 'text-gray-400 hover:bg-gray-800/40 hover:text-white'
-                }`}
-              >
-                <ShieldAlert className="w-5 h-5 text-rose-500" />
-                <div className="flex-1">
-                  <span>تنبيهات الطوارئ والاتصال</span>
-                  <span className="text-[10px] block font-medium opacity-75">الإبلاغ عن ازدحامات وأعطال</span>
-                </div>
-              </button>
-            </div>
-          </div>
-
-          {/* Quick SOS Trigger in Side panel */}
-          <div className="p-4 bg-rose-950/20 rounded-2xl border border-rose-900/30">
-            <div className="flex gap-2 items-center mb-2">
-              <AlertTriangle className="w-4 h-4 text-rose-500 animate-pulse" />
-              <span className="text-xs font-black text-rose-400">حالة طوارئ فورية</span>
-            </div>
-            <p className="text-[10px] text-gray-400 mb-3 leading-relaxed">اضغط على زر الـ SOS لإخطار الإدارة والآباء بوجود عطل أو خطر على الطريق فوراً.</p>
-            <button 
-              onClick={() => handleSendAlert('sos', 'نداء طوارئ عاجل من السائق!')}
-              className="w-full py-3 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-red-600/20"
-            >
-              🚨 إرسال إشارة استغاثة SOS
-            </button>
-          </div>
-        </div>
-
-        {/* Content Panel - Pure Edge-to-Edge */}
-        <div className="flex-1 bg-[#0A0D1A] min-h-[500px] pb-24 md:pb-0">
-          
-          <AnimatePresence mode="wait">
-            {/* TAB 1: STUDENT MANIFEST */}
-            {activeTab === 'manifest' && (
+  const dashboardContent = (
+    <div className={`flex-1 w-full bg-[#0A0D1A] min-h-[500px] ${forcedTab ? 'pb-8' : 'pb-24 md:pb-0'}`}>
+      <AnimatePresence mode="wait">
+        {/* TAB 1: STUDENT MANIFEST */}
+        {activeTab === 'manifest' && (
               <motion.div 
                 key="manifest"
                 initial={{ opacity: 0, y: 10 }}
@@ -1186,10 +1023,17 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({ driverId, rout
               </motion.div>
             )}
           </AnimatePresence>
-        </div>
-      </div>
+    </div>
+  );
 
-      {/* FOOTER BAR: IMMERSIVE BOTTOM TOUCH BAR FOR MOBILE */}
+  if (forcedTab) {
+    return dashboardContent;
+  }
+
+  return (
+    <div className="min-h-screen bg-[#0A0D1A] text-white font-sans flex flex-col selection:bg-amber-500 selection:text-black overflow-x-hidden w-full max-w-none m-0 p-0 border-0" dir="rtl">
+      
+      {/* Header Bar - Sleek Single Line, Edge to Edge */}
       <div className="w-full bg-[#11162A]/90 backdrop-blur-xl border-t border-gray-800 p-2 md:p-3 sticky bottom-0 z-20 flex justify-around items-center gap-1 md:hidden">
         <button 
           onClick={() => setActiveTab('manifest')}
@@ -1271,15 +1115,11 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({ driverId, rout
 
               {/* Camera Scanning Frame Mock */}
               <div className="relative w-full aspect-square max-w-[280px] mx-auto bg-black rounded-2xl border-2 border-indigo-500/40 flex flex-col justify-center items-center overflow-hidden">
-                {/* Dynamic lasers & frames */}
                 <div className="absolute top-4 left-4 w-6 h-6 border-t-4 border-l-4 border-amber-400"></div>
                 <div className="absolute top-4 right-4 w-6 h-6 border-t-4 border-r-4 border-amber-400"></div>
                 <div className="absolute bottom-4 left-4 w-6 h-6 border-b-4 border-l-4 border-amber-400"></div>
                 <div className="absolute bottom-4 right-4 w-6 h-6 border-b-4 border-r-4 border-amber-400"></div>
-
-                {/* Blinking laser line */}
                 <div className="absolute w-full h-1 bg-red-500/80 top-0 animate-scan"></div>
-
                 {scannerSuccess ? (
                   <span className="text-xs font-black text-emerald-400 animate-bounce">تم التحضير والمسح بنجاح!</span>
                 ) : (
@@ -1289,11 +1129,8 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({ driverId, rout
                   </div>
                 )}
               </div>
-
-              {/* Simulation triggers: Allow user to pick a student to simulate scanning */}
               <div className="space-y-3">
                 <span className="text-[10px] text-gray-400 font-bold block text-center">اضغط على اسم الطالب لمحاكاة تمرير بطاقته أمام الكاميرا:</span>
-                
                 <div className="grid grid-cols-1 gap-2 max-h-44 overflow-y-auto p-1 bg-[#0A0D1A] rounded-2xl border border-gray-800/60">
                   {students.map(student => (
                     <button 
@@ -1313,7 +1150,6 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({ driverId, rout
         )}
       </AnimatePresence>
 
-      {/* TOAST SYSTEM FEEDBACK */}
       <AnimatePresence>
         {toastMessage && (
           <motion.div 
@@ -1323,8 +1159,8 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({ driverId, rout
             className="fixed bottom-6 left-6 right-6 md:left-auto md:w-96 z-50 p-4 rounded-2xl border flex items-center gap-3.5 shadow-2xl bg-[#11162A] border-indigo-500/30"
           >
             <div className={`p-2 rounded-xl text-black ${
-              toastMessage.type === 'success' ? 'bg-emerald-500' :
-              toastMessage.type === 'error' ? 'bg-rose-500 text-white' : 'bg-blue-500 text-white'
+              toastMessage.type === "success" ? "bg-emerald-500" :
+              toastMessage.type === "error" ? "bg-rose-500 text-white" : "bg-blue-500 text-white"
             }`}>
               <Check className="w-5 h-5 stroke-[3]" />
             </div>
@@ -1335,59 +1171,14 @@ export const DriverDashboard: React.FC<DriverDashboardProps> = ({ driverId, rout
           </motion.div>
         )}
       </AnimatePresence>
-
-      {/* MOBILE STICKY BOTTOM TAB BAR */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[#11162A]/90 backdrop-blur-2xl border-t border-gray-800/80 px-4 py-2 pb-5 flex justify-around items-center shadow-[0_-8px_30px_rgba(0,0,0,0.6)]">
-        <button
-          onClick={() => setActiveTab('manifest')}
-          className={`flex-1 flex flex-col justify-center items-center py-2 rounded-xl transition-all ${
-            activeTab === 'manifest' ? 'text-indigo-400 bg-indigo-500/10' : 'text-gray-400'
-          }`}
-        >
-          <Users className="w-5 h-5 mb-0.5" />
-          <span className="text-[10px] font-black">الركاب</span>
-        </button>
-        
-        <button
-          onClick={() => setActiveTab('route')}
-          className={`flex-1 flex flex-col justify-center items-center py-2 rounded-xl transition-all ${
-            activeTab === 'route' ? 'text-amber-400 bg-amber-500/10' : 'text-gray-400'
-          }`}
-        >
-          <Map className="w-5 h-5 mb-0.5" />
-          <span className="text-[10px] font-black">المسار</span>
-        </button>
-        
-        <button
-          onClick={() => setActiveTab('finance')}
-          className={`flex-1 flex flex-col justify-center items-center py-2 rounded-xl transition-all ${
-            activeTab === 'finance' ? 'text-emerald-400 bg-emerald-500/10' : 'text-gray-400'
-          }`}
-        >
-          <DollarSign className="w-5 h-5 mb-0.5" />
-          <span className="text-[10px] font-black">المالية</span>
-        </button>
-        
-        <button
-          onClick={() => setActiveTab('alerts')}
-          className={`flex-1 flex flex-col justify-center items-center py-2 rounded-xl transition-all ${
-            activeTab === 'alerts' ? 'text-rose-400 bg-rose-500/10' : 'text-gray-400'
-          }`}
-        >
-          <ShieldAlert className="w-5 h-5 mb-0.5" />
-          <span className="text-[10px] font-black">التنبيهات</span>
-        </button>
-      </div>
-
     </div>
   );
 };
 
-// Robust default mock template
 const mockStudentsTemplate: StudentTransportStatus[] = [
-  { id: 's1', studentName: 'علي محمد الدليمي', routeId: '1', status: 'waiting', stopName: 'شارع المنصور / مقابل المول', parentId: 'p1' },
-  { id: 's2', studentName: 'سارة أحمد الجبوري', routeId: '1', status: 'waiting', stopName: 'ساحة النسور / خلف البريد', parentId: 'p2' },
-  { id: 's3', studentName: 'حسن حيدر الخفاجي', routeId: '1', status: 'picked_up', stopName: 'حي الداودي / تقاطع الرواد', parentId: 'p3' },
-  { id: 's4', studentName: 'يوسف عمر الفهد', routeId: '2', status: 'waiting', stopName: 'منطقة اليرموك / قرب الساحة', parentId: 'p4' },
-  { id: 's5', studentName: 'رانيا سامي الحداد', routeId: '2', status: 'waiting', stopName: 'جامعة بغداد / الجادرية', parentId: 'p5' },
+  { id: "s1", studentName: "علي محمد الدليمي", routeId: "1", status: "waiting", stopName: "شارع المنصور / مقابل المول", parentId: "p1" },
+  { id: "s2", studentName: "سارة أحمد الجبوري", routeId: "1", status: "waiting", stopName: "ساحة النسور / خلف البريد", parentId: "p2" },
+  { id: "s3", studentName: "حسن حيدر الخفاجي", routeId: "1", status: "picked_up", stopName: "حي الداودي / تقاطع الرواد", parentId: "p3" },
+  { id: "s4", studentName: "يوسف عمر الفهد", routeId: "2", status: "waiting", stopName: "منطقة اليرموك / قرب الساحة", parentId: "p4" },
+  { id: "s5", studentName: "رانيا سامي الحداد", routeId: "2", status: "waiting", stopName: "جامعة بغداد / الجادرية", parentId: "p5" },
 ];

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, orderBy, limit, onSnapshot } from 'firebase/firestore';
+import { collection, query, orderBy, limit, onSnapshot } from '@/src/lib/firebase';
 import { db } from '../lib/firebase';
 import { Sparkles, X, Maximize2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -41,15 +41,34 @@ export const GlobalAnnouncementsBanner: React.FC<GlobalAnnouncementsBannerProps>
         })
         .filter((item: any) => {
           if (item.expiryDate && item.expiryDate < now) return false;
-          if (item.type === 'school_broadcast' || item.isSchoolBroadcast || item.targetLocation === 'ticker') {
+          // STRICT SEPARATION: Exclude all school radio broadcasts, class announcements, and ticker notices
+          if (
+            item.type === 'school_broadcast' ||
+            item.isSchoolBroadcast === true ||
+            item.targetLocation === 'ticker' ||
+            item.subject === 'الإذاعة المدرسية' ||
+            item.subject === 'شؤون الطلاب' ||
+            item.subject === 'الإذاعة'
+          ) {
             return false;
           }
-          if (!item.isCentralPlatform && !item.isGlobalAnnouncement) {
-            if (item.targetLocation !== 'top_banner' && item.targetLocation !== 'both' && item.targetLocation !== 'all') {
-              return false;
-            }
+
+          // STRICT BANNER RULE: Only explicit platform announcements, celebrations, greetings, or condolences trigger this banner
+          const isCelebrationOrPlatformNews = 
+            item.isCentralPlatform === true ||
+            item.isGlobalAnnouncement === true ||
+            item.type === 'global_celebration' ||
+            item.category === 'تبريكات' ||
+            item.category === 'إعلان وتبريكات' ||
+            item.category === 'تهنئة' ||
+            item.category === 'تعزية' ||
+            item.category === 'إعلان عام للمنصة';
+
+          if (!isCelebrationOrPlatformNews) {
+            return false;
           }
-          const loc = item.targetLocation || (item.isCentralPlatform ? 'both' : 'ticker');
+
+          const loc = item.targetLocation || (item.isCentralPlatform ? 'both' : 'top_banner');
           if (loc !== 'top_banner' && loc !== 'both' && loc !== 'all') return false;
           const targets = Array.isArray(item.targetDashboards) ? item.targetDashboards : ['all'];
           if (dashboardType && dashboardType !== 'admin' && !targets.includes('all') && !targets.includes(dashboardType)) return false;

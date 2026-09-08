@@ -3,11 +3,11 @@ import { motion } from "motion/react";
 import { GraduationCap, Users, Shield, Bus, Sparkles, CheckCircle2 } from "lucide-react";
 
 interface RoleSelectionModalProps {
-  onSelectRole: (role: "student" | "teacher" | "parent" | "admin-boys" | "driver") => void;
+  onSelectRole: (role: "student" | "teacher" | "parent" | "admin-boys" | "admin-girls" | "driver") => void;
 }
 
 export const RoleSelectionModal: React.FC<RoleSelectionModalProps> = ({ onSelectRole }) => {
-  const [selected, setSelected] = useState<"student" | "teacher" | "parent" | "admin-boys" | "driver">("student");
+  const [selected, setSelected] = useState<"student" | "teacher" | "parent" | "admin-boys" | "admin-girls" | "driver">("student");
 
   const roles = [
     {
@@ -42,12 +42,22 @@ export const RoleSelectionModal: React.FC<RoleSelectionModalProps> = ({ onSelect
     },
     {
       id: "admin-boys" as const,
-      title: "إداري / مدير مدرسة",
+      title: "إداري (بنين) / مدير مدرسة",
       subtitle: "الإحصاءات، الإعلانات، والتحكم الشامل",
       icon: <Sparkles className="w-6 h-6 text-emerald-400" />,
       gradient: "from-emerald-500/20 to-teal-500/10",
       border: "border-emerald-500/40 hover:border-emerald-500",
       glow: "shadow-[0_0_25px_rgba(34,197,94,0.25)]",
+      badge: "صلاحيات إدارية 🏛️"
+    },
+    {
+      id: "admin-girls" as const,
+      title: "إدارية (بنات) / مديرة مدرسة",
+      subtitle: "الإحصاءات، الإعلانات، والتحكم الشامل",
+      icon: <Sparkles className="w-6 h-6 text-pink-400" />,
+      gradient: "from-pink-500/20 to-rose-500/10",
+      border: "border-pink-500/40 hover:border-pink-500",
+      glow: "shadow-[0_0_25px_rgba(244,114,182,0.25)]",
       badge: "صلاحيات إدارية 🏛️"
     },
     {

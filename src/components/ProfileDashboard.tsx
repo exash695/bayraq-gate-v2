@@ -1,8 +1,8 @@
 import React, { useRef } from 'react';
 import { motion } from 'motion/react';
 import { auth, db } from '../lib/firebase';
-import { doc, updateDoc } from 'firebase/firestore';
-import { signOut } from 'firebase/auth';
+import { doc, updateDoc } from '@/src/lib/firebase';
+import { customAuth } from '../services/customAuthService';
 import { Flame, Shield, Flag, Award, BookOpen, Target, Trophy, Crosshair, Lock as LockIcon, Hourglass, Gem, ScrollText, PenLine, LogOut, Camera } from 'lucide-react';
 import { UserProgress, Badge } from '../types';
 import { translations } from '../lib/translations';
@@ -203,10 +203,10 @@ export const ProfileDashboard = ({ userProfile, progress, language }: { userProf
         {/* Stats Grid */}
         <div className="grid grid-cols-2 md:grid-cols-4 border-t border-white/10 bg-white/5">
           {[
-            { label: isAr ? 'الموارد' : 'Resources', value: userProfile.resources || 0, color: 'text-amber-400', icon: Gem },
-            { label: isAr ? 'النقاط' : 'Score', value: userProfile.totalScore || 0, color: 'text-[#00E5FF]', icon: Target },
-            { label: isAr ? 'الشعلة' : 'Streak', value: userProfile.streak || 0, color: 'text-orange-500', icon: Flame },
-            { label: isAr ? 'الكتيبة' : 'Battalion', value: userProfile.battalionName || (isAr ? 'مستقل' : 'Independent'), color: 'text-emerald-400', icon: Shield },
+            { label: isAr ? 'الموارد' : 'Resources', value: userProfile?.resources || 0, color: 'text-amber-400', icon: Gem },
+            { label: isAr ? 'النقاط' : 'Score', value: userProfile?.totalScore || 0, color: 'text-[#00E5FF]', icon: Target },
+            { label: isAr ? 'الشعلة' : 'Streak', value: userProfile?.streak || 0, color: 'text-orange-500', icon: Flame },
+            { label: isAr ? 'الكتيبة' : 'Battalion', value: userProfile?.battalionName || (isAr ? 'مستقل' : 'Independent'), color: 'text-emerald-400', icon: Shield },
           ].map((stat) => (
             <div key={stat.label} className={`p-6 flex flex-col items-center justify-center gap-2 border-r border-white/10 last:border-0 hover:bg-white/5 transition-colors group`}>
               <stat.icon size={20} className={`${stat.color} opacity-50 group-hover:opacity-100 transition-opacity`} />
@@ -289,7 +289,7 @@ export const ProfileDashboard = ({ userProfile, progress, language }: { userProf
         <button 
           onClick={() => {
             safeStorage.setItem('s6_user_logged_out', 'true');
-            signOut(auth);
+            customAuth.logout();
           }} 
           className="w-full group relative overflow-hidden py-6 bg-rose-500/5 text-rose-500 border-2 border-rose-500/20 rounded-[2rem] hover:bg-rose-500 hover:text-white transition-all duration-500 font-black text-xl shadow-lg hover:shadow-rose-500/40"
         >

@@ -57,7 +57,7 @@ export default {
           return new Response(JSON.stringify({ error: 'GEMINI_API_KEY secret is not configured in Worker environment' }), { status: 500, headers: corsHeaders });
         }
 
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`;
         const promptText = `
 ${body.context ? `المحتوى الدراسي المتاح:\n${body.context}\n` : ''}
 السؤال/الطلب من الطالب: ${body.message}
@@ -92,7 +92,7 @@ ${body.context ? `المحتوى الدراسي المتاح:\n${body.context}\n
           return new Response(JSON.stringify({ error: 'GEMINI_API_KEY is missing' }), { status: 500, headers: corsHeaders });
         }
 
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`;
         
         const cleanBase64 = body.base64Data ? body.base64Data.replace(/^data:[^;]+;base64,/, '') : '';
         const prompt = `
@@ -148,7 +148,7 @@ ${body.extractedText ? `النص المستخرج الأصلي:\n${body.extracte
       if (path === '/api/worker/ai/radar') {
         const body = await request.json();
         const apiKey = env.GEMINI_API_KEY;
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`;
 
         const prompt = `بناءً على المحتوى التالي، استنتج 3 أسئلة ذكية واستنتاجية عميقة للطلاب:\n${body.content}`;
         const geminiRes = await fetch(geminiUrl, {
@@ -170,7 +170,7 @@ ${body.extractedText ? `النص المستخرج الأصلي:\n${body.extracte
       if (path === '/api/worker/ai/mock-exam') {
         const body = await request.json();
         const apiKey = env.GEMINI_API_KEY;
-        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`;
+        const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key=${apiKey}`;
 
         const prompt = `
 أنشئ امتحان تجريبي من 20 سؤالاً اختيار من متعدد باللغة العربية لمادة [${body.subject || 'عام'}] بالهيكل التالي:

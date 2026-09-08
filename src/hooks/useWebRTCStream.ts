@@ -3,7 +3,7 @@ const debugError = (...args: any[]) => { if (process.env.NODE_ENV === 'developme
 const debugWarn = (...args: any[]) => { if (process.env.NODE_ENV === 'development') console.warn(...args); };
 import { useEffect, useRef, useState } from 'react';
 import { db } from '../lib/firebase';
-import { collection, doc, onSnapshot, setDoc, query, where, addDoc, getDocs, deleteDoc } from 'firebase/firestore';
+import { collection, doc, onSnapshot, setDoc, query, where, addDoc, getDocs, deleteDoc } from '@/src/lib/firebase';
 
 export const createDummyStream = (): MediaStream => {
   // Create black canvas video

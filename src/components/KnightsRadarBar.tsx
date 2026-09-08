@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, onSnapshot, query, where, limit, orderBy, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, limit, orderBy, addDoc, serverTimestamp } from '@/src/lib/firebase';
 import { db, auth } from '../lib/firebase';
 import { motion, AnimatePresence } from 'motion/react';
 import { Shield, X, MapPin, Users, Swords } from 'lucide-react';
@@ -27,15 +27,19 @@ export const KnightsRadarBar: React.FC<KnightsRadarBarProps> = ({ gradeFilter, i
     if (!auth.currentUser) return;
     setIsChallenging(knight.id);
     try {
-      await addDoc(collection(db, 'notifications'), {
+      await fetch('/api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
         userId: knight.id,
         type: 'challenge',
         subType: '1vs1',
         challengerId: auth.currentUser.uid,
         challengerName: auth.currentUser.displayName || 'فارس',
-        timestamp: serverTimestamp(),
+        
         read: false,
         status: 'pending'
+      })
       });
       alert(`تم إرسال طلب التحدي إلى ${knight.name}`);
     } catch (error) {

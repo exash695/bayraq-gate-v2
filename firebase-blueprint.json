@@ -264,6 +264,32 @@
         "supportChannelUrl": { "type": "string" },
         "supportButtonEnabled": { "type": "boolean" }
       }
+    },
+    "SchoolArchive": {
+      "title": "School Archive Snapshot",
+      "description": "Permanent isolated archive records for a school containing all student affairs, staff, financials, and files.",
+      "type": "object",
+      "properties": {
+        "archiveNumber": { "type": "string" },
+        "schoolId": { "type": "string" },
+        "schoolName": { "type": "string" },
+        "governorate": { "type": "string" },
+        "academicPeriod": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "createdBy": { "type": "object" },
+        "status": { "type": "string", "enum": ["archived", "read_only"] },
+        "stats": { "type": "object" },
+        "schoolProfile": { "type": "object" },
+        "students": { "type": "array" },
+        "teachersAndStaff": { "type": "array" },
+        "academicLists": { "type": "array" },
+        "financials": { "type": "object" },
+        "attendanceAndBehaviorSummary": { "type": "object" },
+        "broadcastsAndSchedules": { "type": "object" },
+        "filesAndAttachments": { "type": "array" },
+        "transport": { "type": "object" }
+      },
+      "required": ["archiveNumber", "schoolId", "schoolName", "academicPeriod"]
     }
   },
   "firestore": {
@@ -334,6 +360,10 @@
     "system_config/{configId}": {
       "schema": "RemoteConfig",
       "description": "Cloud remote control settings and feature flags."
+    },
+    "school_archives/{archiveId}": {
+      "schema": "SchoolArchive",
+      "description": "Permanent isolated archive snapshots for schools upon license expiry or archival."
     }
   }
 }

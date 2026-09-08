@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { doc, onSnapshot } from "firebase/firestore";
+import { doc, onSnapshot } from "../lib/firebase";
 import { db } from "../lib/firebase";
 import { THEME_PRESETS, ACCENT_STYLES, ThemePresetInfo, AccentStyleConfig } from "../utils/themePresets";
 

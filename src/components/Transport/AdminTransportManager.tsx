@@ -28,7 +28,7 @@ import {
   updateTransportFeeStatus
 } from '../../services/transportService';
 import { DriverDashboard } from './DriverDashboard';
-import { collection, addDoc, doc, setDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, setDoc } from '@/src/lib/firebase';
 import { db } from '../../lib/firebase';
 
 // ============================================================================

@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ShieldCheck, QrCode, Lock, Verified, Download, RefreshCw, CheckCircle2, X, ArrowRight } from 'lucide-react';
 import { db } from '../lib/firebase';
-import { collection, addDoc, doc, getDoc, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, getDoc, updateDoc } from '@/src/lib/firebase';
 import { getOfficialSchoolLogoUrl, getOfficialSchoolName } from '../lib/constants';
 
 interface DigitalReceiptModalProps {
@@ -172,7 +172,6 @@ export const DigitalReceiptModal: React.FC<DigitalReceiptModalProps> = ({
     return Array.from(data).map(b => b.toString(16).padStart(2, '0')).join('').substring(0, 48).toUpperCase();
   }, [receipt]);
 
-  if (!receipt) return null;
 
   const schoolLogoPath = useMemo(() => {
     return getOfficialSchoolLogoUrl(receipt?.schoolId || undefined, receipt?.schoolName || undefined);
@@ -208,18 +207,8 @@ export const DigitalReceiptModal: React.FC<DigitalReceiptModalProps> = ({
     try {
       console.log('--- Starting Sync ---');
       
-      // 1. Add to parent_receipts collection
-      const receiptRef = await addDoc(collection(db, 'parent_receipts'), {
-        studentName: receipt.studentName,
-        studentId: receipt.studentId,
-        amount: receipt.amount,
-        time: new Date(receipt.time || new Date()).toISOString(),
-        adminName: receipt.adminName,
-        schoolId: receipt.schoolId || null,
-        createdAt: new Date().toISOString(),
-        status: 'completed',
-        type: 'digital_receipt'
-      });
+      // 1. Generate ID for new transaction
+      const newTransactionId = Math.random().toString(36).substring(2, 15);
 
       // 2. Add to student's finance.transactions in school_students
       const studentRef = doc(db, 'school_students', receipt.studentId);
@@ -247,7 +236,7 @@ export const DigitalReceiptModal: React.FC<DigitalReceiptModalProps> = ({
         
         if (!isDuplicate) {
           const newTransaction = {
-            id: receiptRef.id,
+            id: newTransactionId,
             amount: receipt.amount,
             method: receipt.method || 'نقدي/مدير',
             status: 'completed',
@@ -461,11 +450,13 @@ export const DigitalReceiptModal: React.FC<DigitalReceiptModalProps> = ({
       ctx.fillText('بيان العملية', canvas.width - 80, labelsY);
       
       const methodMap: Record<string, string> = {
-        'asiahawala': 'آسيا حوالة',
-        'zaincash': 'زين كاش',
-        'mastercard': 'ماستر كارد',
-        'fib': 'مصرف العراق الأول FIB'
-      };
+  'asiahawala': 'آسيا حوالة',
+  'zaincash': 'زين كاش',
+  'mastercard': 'ماستر كارد',
+  'fib': 'مصرف العراق الأول FIB',
+  'نقدي/مدير': 'نقدي',
+  'cash': 'نقدي'
+};
       const methodName = methodMap[receipt?.method || ''] || receipt?.method || 'غير متاح';
       
       ctx.fillStyle = '#111827';
@@ -698,6 +689,7 @@ export const DigitalReceiptModal: React.FC<DigitalReceiptModalProps> = ({
     }
   };
 
+  if (!receipt) return null;
   return (
     <AnimatePresence>
       <motion.div
@@ -781,11 +773,13 @@ export const DigitalReceiptModal: React.FC<DigitalReceiptModalProps> = ({
               <div className="flex justify-between items-center pb-4" style={{ borderBottom: '1px solid #1f2937' }}>
                 <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: '#6b7280' }}>{receipt.method ? `بيانات العملية - ${(() => {
                                          const methodMap: Record<string, string> = {
-                                           'asiahawala': 'آسيا حوالة',
-                                           'zaincash': 'زين كاش',
-                                           'mastercard': 'ماستر كارد',
-                                           'fib': 'مصرف العراق الأول FIB'
-                                         };
+  'asiahawala': 'آسيا حوالة',
+  'zaincash': 'زين كاش',
+  'mastercard': 'ماستر كارد',
+  'fib': 'مصرف العراق الأول FIB',
+  'نقدي/مدير': 'نقدي',
+  'cash': 'نقدي'
+};
                                          return methodMap[receipt.method] || receipt.method;
                                      })()}` : 'بيانات العملية'}</span>
                 <span className="text-xs font-medium tabular-nums px-3 py-1.5 rounded-lg" style={{ color: '#d1d5db', backgroundColor: 'black', border: '1px solid #1f2937'}}>

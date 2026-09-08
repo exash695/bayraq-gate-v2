@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Users, Shield, Crown, Plus, Sword, MessageSquare, Target, Trophy, LogOut, ChevronRight, Send, UserPlus, Search, X } from 'lucide-react';
 import { db, auth } from '../lib/firebase';
-import { collection, onSnapshot, doc, updateDoc, arrayUnion, addDoc, arrayRemove, getDoc, query, where, orderBy, limit, serverTimestamp, getDocs } from 'firebase/firestore';
+import { collection, onSnapshot, doc, updateDoc, arrayUnion, addDoc, arrayRemove, getDoc, query, where, orderBy, limit, serverTimestamp, getDocs } from '@/src/lib/firebase';
 
 const BattalionChat = ({ battalionId, userProfile, language }: { battalionId: string, userProfile: any, language: 'ar' | 'en' }) => {
   const [messages, setMessages] = useState<any[]>([]);
@@ -33,8 +33,8 @@ const BattalionChat = ({ battalionId, userProfile, language }: { battalionId: st
     try {
       await addDoc(collection(db, 'battalions', battalionId, 'messages'), {
         text: newMessage,
-        senderId: userProfile.uid,
-        senderName: userProfile.fullName,
+        senderId: userProfile?.uid,
+        senderName: userProfile?.fullName,
         timestamp: serverTimestamp()
       });
       setNewMessage('');
@@ -52,9 +52,9 @@ const BattalionChat = ({ battalionId, userProfile, language }: { battalionId: st
       
       <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-hide">
         {messages.map((msg, idx) => (
-          <div key={msg.id} className={`flex flex-col ${msg.senderId === userProfile.uid ? 'items-end' : 'items-start'}`}>
+          <div key={msg.id} className={`flex flex-col ${msg.senderId === userProfile?.uid ? 'items-end' : 'items-start'}`}>
             <div className={`max-w-[80%] p-3 rounded-2xl text-sm ${
-              msg.senderId === userProfile.uid 
+              msg.senderId === userProfile?.uid 
                 ? 'bg-theme-primary text-black rounded-tr-none font-bold' 
                 : 'bg-white/10 text-white rounded-tl-none'
             }`}>
@@ -109,7 +109,7 @@ export const Battalion = ({ userProfile, language }: { userProfile: any, languag
   useEffect(() => {
     if (userProfile?.battalionId) {
       let unsubMembers: (() => void) | null = null;
-      const unsubscribeMy = onSnapshot(doc(db, 'battalions', userProfile.battalionId), (docSnap) => {
+      const unsubscribeMy = onSnapshot(doc(db, 'battalions', userProfile?.battalionId), (docSnap) => {
         if (docSnap.exists()) {
           setMyBattalion({ id: docSnap.id, ...docSnap.data() });
           const members = docSnap.data().members || [];
@@ -146,25 +146,29 @@ export const Battalion = ({ userProfile, language }: { userProfile: any, languag
     if (!userProfile?.schoolName) return;
     const q = query(
       collection(db, 'users'), 
-      where('schoolName', '==', userProfile.schoolName || 'unassigned'),
+      where('schoolName', '==', userProfile?.schoolName || 'unassigned'),
       limit(20)
     );
     const snap = await getDocs(q);
-    setSchoolKnights(snap.docs.map(d => d.data()).filter(u => u.uid !== userProfile.uid && !u.battalionId));
+    setSchoolKnights(snap.docs.map(d => d.data()).filter(u => u.uid !== userProfile?.uid && !u.battalionId));
     setShowInviteModal(true);
   };
 
   const inviteKnight = async (knight: any) => {
     if (!myBattalion) return;
     try {
-      await addDoc(collection(db, 'notifications'), {
+      await fetch('/api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
         userId: knight.uid,
         type: 'battalion_invite',
         battalionId: myBattalion.id,
         battalionName: myBattalion.name,
-        inviterName: userProfile.fullName,
-        timestamp: serverTimestamp(),
+        inviterName: userProfile?.fullName,
+        
         read: false
+      })
       });
       alert(language === 'ar' ? `تم إرسال دعوة لـ ${knight.fullName}` : `Invite sent to ${knight.fullName}`);
     } catch (error) {
@@ -173,19 +177,23 @@ export const Battalion = ({ userProfile, language }: { userProfile: any, languag
   };
 
   const requestJoin = async (battalion: any) => {
-    if (!userProfile.uid) return;
+    if (!userProfile?.uid) return;
     try {
-      await addDoc(collection(db, 'notifications'), {
+      await fetch('/api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
         userId: battalion.leaderUid,
         type: 'battalion_join_request',
         battalionId: battalion.id,
         battalionName: battalion.name,
-        requesterId: userProfile.uid,
-        requesterName: userProfile.fullName,
-        requesterScore: userProfile.totalScore || 0,
-        requesterLevel: userProfile.rank || 'Squire',
-        timestamp: serverTimestamp(),
+        requesterId: userProfile?.uid,
+        requesterName: userProfile?.fullName,
+        requesterScore: userProfile?.totalScore || 0,
+        requesterLevel: userProfile?.rank || 'Squire',
+        
         read: false
+      })
       });
       alert(language === 'ar' ? 'تم إرسال طلب الانضمام للقائد' : 'Join request sent to leader');
     } catch (error) {
@@ -194,12 +202,12 @@ export const Battalion = ({ userProfile, language }: { userProfile: any, languag
   };
 
   const leaveBattalion = async () => {
-    if (!userProfile.uid || !userProfile.battalionId) return;
+    if (!userProfile?.uid || !userProfile?.battalionId) return;
     try {
-      await updateDoc(doc(db, 'battalions', userProfile.battalionId), {
-        members: arrayRemove(userProfile.uid)
+      await updateDoc(doc(db, 'battalions', userProfile?.battalionId), {
+        members: arrayRemove(userProfile?.uid)
       });
-      await updateDoc(doc(db, 'users', userProfile.uid), {
+      await updateDoc(doc(db, 'users', userProfile?.uid), {
         battalionId: null,
         battalionName: null
       });
@@ -220,7 +228,7 @@ export const Battalion = ({ userProfile, language }: { userProfile: any, languag
         members: [uid],
         level: 1,
         exp: 0,
-        schoolName: userProfile.schoolName || '',
+        schoolName: userProfile?.schoolName || '',
         missions: [
           { id: 1, title: language === 'ar' ? 'إكمال الوحدة الأولى' : 'Complete Unit 1', progress: 0, target: 100 },
           { id: 2, title: language === 'ar' ? 'تحدي 10 فرسان' : 'Challenge 10 Knights', progress: 0, target: 10 }
@@ -263,7 +271,7 @@ export const Battalion = ({ userProfile, language }: { userProfile: any, languag
             </div>
           </div>
           
-          {myBattalion.leaderUid === userProfile.uid && (
+          {myBattalion.leaderUid === userProfile?.uid && (
             <button 
               onClick={fetchSchoolKnights}
               className="px-6 py-3 bg-theme-primary text-black font-black rounded-xl hover:scale-105 transition-all flex items-center gap-2 shadow-[0_0_20px_var(--theme-glow)]"
@@ -366,7 +374,7 @@ export const Battalion = ({ userProfile, language }: { userProfile: any, languag
 
       <div className="mt-10">
         {activeTab === 'found' && (
-          myBattalion && myBattalion.leaderUid === userProfile.uid ? renderDashboard() : (
+          myBattalion && myBattalion.leaderUid === userProfile?.uid ? renderDashboard() : (
             <div className="bg-[#0c0c14]/40 backdrop-blur-xl border-y md:border border-theme-primary/30 bg-gradient-to-br from-theme-primary/10 to-transparent relative overflow-hidden max-w-4xl mx-auto rounded-none md:rounded-[3rem] -mx-4 md:mx-0 p-10">
               <div className="absolute -right-10 -top-10 opacity-10"><Plus size={200} className="text-theme-primary" /></div>
               <div className="relative z-10 space-y-8 text-center">
@@ -409,7 +417,7 @@ export const Battalion = ({ userProfile, language }: { userProfile: any, languag
 
         {activeTab === 'others' && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto">
-            {battalions.filter(b => b.id !== userProfile.battalionId).map((b, idx) => (
+            {battalions.filter(b => b.id !== userProfile?.battalionId).map((b, idx) => (
               <div key={`battalion_${b.id}_${idx}`} className="bg-[#0c0c14]/40 backdrop-blur-xl border-y md:border border-white/10 rounded-none md:rounded-[3rem] -mx-4 md:mx-0 p-6 space-y-4 group transition-all hover:border-theme-primary/50 shadow-2xl">
                 <div className="flex justify-between items-start">
                   <h4 className="text-xl font-black text-white group-hover:text-theme-primary transition-colors">{b.name}</h4>

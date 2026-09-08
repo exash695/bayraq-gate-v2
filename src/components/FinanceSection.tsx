@@ -2,20 +2,22 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { CreditCard, AlertCircle, Bell, Clock, Check, X, Lock as LockIcon, Hourglass,
   History, Users as UsersIcon, PieChart as LucidePieChart, TrendingUp, TrendingDown, DollarSign, Settings, Wallet,
-  ChevronLeft, ArrowRight, Save, Trash2, Send, Search, CheckCircle2, Plus, Edit3, RotateCcw, Smartphone,
+  ChevronLeft, ChevronDown, ArrowRight, Save, Trash2, Send, Search, CheckCircle2, Plus, Edit3, RotateCcw, Smartphone,
   BookOpen, ShieldCheck, Calculator, Megaphone, MessageSquare, Wrench, Car, Lock, UserCog, Verified
 } from 'lucide-react';
 import { ConfirmDialog } from './ConfirmDialog';
 import { StudentPayment } from '../services/financeService';
 import { academicService } from '../services/academicService';
+import { staffService } from '../services/staffService';
 import { AccessLogsSection } from './AccessLogsSection';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { logActivity } from '../utils/auditLogger';
 import { auth, db } from '../lib/firebase';
-import { collection, query, onSnapshot, orderBy, doc, setDoc, updateDoc, writeBatch, where, addDoc } from 'firebase/firestore';
+import { collection, query, onSnapshot, orderBy, doc, setDoc, updateDoc, writeBatch, where, addDoc } from '@/src/lib/firebase';
 import { calculateStudentFinancials } from '../utils/studentUtils';
 import { DigitalReceiptModal } from './DigitalReceiptModal';
 import { safeStorage, safeSessionStorage } from '../lib/storage';
+import { realtimeManager } from '../lib/realtimeManager';
 
 interface FinanceSectionProps {
   isFinanceUnlocked: boolean;
@@ -43,6 +45,8 @@ interface FinanceSectionProps {
   schoolSettings?: any;
   gradesByStage: Record<string, string[]>;
   onSubViewChange?: (isOpen: boolean) => void;
+  installmentPlan: any[];
+  setInstallmentPlan: (plan: any[]) => void;
 }
 
 const getRoleIcon = (role: string, type: 'TEACHER' | 'STAFF', size = 24) => {
@@ -381,7 +385,9 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
   schoolName,
   schoolSettings,
   gradesByStage,
-  onSubViewChange
+  onSubViewChange,
+  installmentPlan,
+  setInstallmentPlan
 }) => {
   const safeDiscountLabels = useMemo(() => {
     try {
@@ -406,6 +412,8 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
   const [confirmCashPayment, setConfirmCashPayment] = useState<{studentCode: string, installmentId: string} | null>(null);
   const [confirmCancelPayment, setConfirmCancelPayment] = useState<{studentCode: string, installmentId: string, installmentName: string} | null>(null);
   const [cancelConfirmationInput, setCancelConfirmationInput] = useState('');
+  const [cashConfirmationInput, setCashConfirmationInput] = useState('');
+  const planSaveTimeoutRef = React.useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     if (onSubViewChange) {
@@ -439,7 +447,10 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
     if (confirmCancelPayment) {
       setCancelConfirmationInput('');
     }
-  }, [confirmCancelPayment]);
+    if (confirmCashPayment) {
+      setCashConfirmationInput('');
+    }
+  }, [confirmCancelPayment, confirmCashPayment]);
 
   // Payment requests state
   const [paymentRequests, setPaymentRequests] = useState<any[]>([]);
@@ -450,6 +461,7 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
   
   // Real-time Transaction list states
   const [txSearchQuery, setTxSearchQuery] = useState('');
+  const [sqlTransactions, setSqlTransactions] = useState<any[]>([]);
   const [txFilter, setTxFilter] = useState<'all' | 'cash' | 'electronic'>('all');
   const [txViewMode, setTxViewMode] = useState<'dense' | 'detailed'>('dense'); // Default to dense as requested
   const [txPage, setTxPage] = useState(1);
@@ -517,45 +529,81 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
 
   useEffect(() => {
     if (activeTab === 'payment_requests') {
-      let q = query(collection(db, 'payment_requests'), orderBy('createdAt', 'desc'));
-      
-    if (!selectedSchoolId) return;
+      const fetchRequests = async () => {
+        try {
+          const res = await fetch(`/api/finance/payment-requests?schoolId=${selectedSchoolId || 'all'}&t=${Date.now()}`);
+          const data = await res.json();
+          if (data.success) {
+            const sorted = data.requests.sort((a: any, b: any) => {
+              // Priority 1: Pending status
+              if (a.status === 'pending' && b.status !== 'pending') return -1;
+              if (b.status === 'pending' && a.status !== 'pending') return 1;
+              
+              // Priority 2: Newest first
+              const dateA = new Date(a.createdAt || 0);
+              const dateB = new Date(b.createdAt || 0);
+              return dateB.getTime() - dateA.getTime();
+            });
+            setPaymentRequests(sorted);
+          }
+        } catch (error: any) {
+          if (error?.name === 'AbortError') return;
+          console.warn("[FinanceSection] Payment requests fetch issue:", error?.message || error);
+        }
+      };
 
-    q = query(
-      collection(db, 'payment_requests'),
-      where('schoolId', '==', selectedSchoolId || 'unassigned'),
-      orderBy('createdAt', 'desc')
-    );
-
-      return onSnapshot(q, (snap) => {
-        const sorted = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }))
-          .sort((a: any, b: any) => {
-            // Priority 1: Pending status
-            if (a.status === 'pending' && b.status !== 'pending') return -1;
-            if (b.status === 'pending' && a.status !== 'pending') return 1;
-            
-            // Priority 2: Newest first
-            const dateA = a.createdAt?.toDate?.() || new Date(a.createdAt || a.timestamp?.seconds * 1000 || 0);
-            const dateB = b.createdAt?.toDate?.() || new Date(b.createdAt || b.timestamp?.seconds * 1000 || 0);
-            return dateB.getTime() - dateA.getTime();
-          });
-        setPaymentRequests(sorted);
-      }, (error) => {
-        console.error("Payment requests listener error:", error);
+      fetchRequests();
+      const unsub = realtimeManager.subscribe('payment_requests', () => {
+        fetchRequests();
       });
+      return () => unsub();
+    }
+  }, [activeTab, selectedSchoolId]);
+
+  useEffect(() => {
+    if (activeTab === 'overview' || activeTab === 'receipt_logs') {
+      const fetchTxs = async () => {
+        try {
+          const res = await fetch(`/api/finance/transactions?schoolId=${selectedSchoolId || 'all'}&t=${Date.now()}`);
+          const data = await res.json();
+          if (data.success) {
+            setSqlTransactions(data.transactions);
+          }
+        } catch (error) {
+          console.error("Transactions fetch error:", error);
+        }
+      };
+      fetchTxs();
+      const unsub = realtimeManager.subscribe('student_transactions', () => {
+        fetchTxs();
+      });
+      return () => unsub();
     }
   }, [activeTab, selectedSchoolId]);
 
   const handleApprovePayment = async (requestId: string) => {
     setIsProcessingRequest(requestId);
     try {
-      await academicService.approvePaymentRequest(requestId);
+      const targetReq = paymentRequests.find(r => r.id === requestId);
+      const res = await academicService.approvePaymentRequest(
+        requestId,
+        targetReq?.studentId || targetReq?.requesterId || targetReq?.studentCode,
+        targetReq?.amount,
+        'الإدارة المالية'
+      );
+      
+      if (res && res.student) {
+        setStudents(prev => prev.map(s => s.id === res.student.id ? { ...s, ...res.student } : s));
+      }
+      
       // Optimistic update for requests list
       setPaymentRequests(prev => prev.map(p => p.id === requestId ? {...p, status: 'approved'} : p));
+      // Also remove from pending payments
+      setPendingPayments(prev => prev.filter(p => p.id !== requestId));
       showToast('تم تأكيد الدفعة وتحديث حساب الطالب', 'success');
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      showToast('خطأ في تأكيد الدفعة', 'error');
+      showToast(error?.message || 'خطأ في تأكيد الدفعة', 'error');
     } finally {
       setIsProcessingRequest(null);
     }
@@ -576,11 +624,13 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
     setIsProcessingRequest(rejectionModal.id);
     try {
       await academicService.rejectPaymentRequest(rejectionModal.id, rejectionModal.reason);
+      setPaymentRequests(prev => prev.map(p => p.id === rejectionModal.id ? {...p, status: 'rejected', rejectReason: rejectionModal.reason} : p));
+      setPendingPayments(prev => prev.filter(p => p.id !== rejectionModal.id));
       showToast('تم رفض الطلب وإبلاغ ولي الأمر', 'success');
       setRejectionModal(null);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      showToast('خطأ في معالجة الرفض', 'error');
+      showToast(error?.message || 'خطأ في معالجة الرفض', 'error');
     } finally {
       setIsProcessingRequest(null);
     }
@@ -617,17 +667,20 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
   });
 
   useEffect(() => {
-    if (schoolSettings?.paymentMethods) {
-      setPaymentMethods(schoolSettings.paymentMethods);
+    if (schoolSettings?.paymentMethods && typeof schoolSettings.paymentMethods === 'object') {
+      setPaymentMethods(prev => ({
+        ...prev,
+        ...schoolSettings.paymentMethods
+      }));
     }
   }, [schoolSettings]);
 
   const savePaymentMethods = async () => {
     if (!auth.currentUser || !selectedSchoolId) return;
     try {
-      await updateDoc(doc(db, 'school_configs', selectedSchoolId), {
-        paymentMethods: paymentMethods,
-        updatedAt: new Date().toISOString()
+      await academicService.updateSchoolSettings(selectedSchoolId, {
+        ...schoolSettings,
+        paymentMethods: paymentMethods
       });
       showToast('تم حفظ وسائل الدفع بنجاح', 'success');
     } catch (error) {
@@ -638,7 +691,7 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
   
   // Staff Salaries State from Firebase
   const [staffSalaries, setStaffSalaries] = useState<any[]>([]);
-  const [teachersList, setTeachersList] = useState<any[]>([]);
+  const [teachersList, setTeachersList] = useState<any[]>(() => staffService.getCachedTeachers(selectedSchoolId || 'all'));
   const [activeFinanceSubTab, setActiveFinanceSubTab] = useState<'teachers' | 'staff'>('teachers');
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const d = new Date();
@@ -649,63 +702,33 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
 
   useEffect(() => {
     if (!selectedSchoolId && !schoolName) return;
-    
-    // Clear previous teachers list on school change
-    setTeachersList([]);
 
-    const safeSchoolId = selectedSchoolId || 'unassigned';
-    const safeSchoolName = schoolName || 'unassigned';
-
-    const constraints = [
-      where('schoolId', '==', safeSchoolId),
-      where('schoolName', '==', safeSchoolName),
-      where('school', '==', safeSchoolName)
-    ];
-
-    const unsubQueries = constraints.map(constraint => {
-      const q = query(collection(db, 'teachers'), constraint);
-      return onSnapshot(q, (snapshot) => {
-        setTeachersList(prev => {
-          const newMap = new Map(prev.map(t => [t.id, t]));
-          snapshot.docs.forEach(doc => {
-            newMap.set(doc.id, { id: doc.id, ...doc.data() });
-          });
-          return Array.from(newMap.values());
-        });
-      }, (error) => {
-        handleFirestoreError(error, OperationType.GET, 'teachers', false);
-      });
+    const unsubTeachers = staffService.subscribeToTeachers(selectedSchoolId || 'all', (teachers) => {
+      if (teachers) {
+        setTeachersList(teachers);
+      }
     });
 
-    const qLegacy = query(collection(db, 'teachers'));
-    const unsubLegacy = onSnapshot(qLegacy, (snapshot) => {
-      setTeachersList(prev => {
-        const newMap = new Map(prev.map(t => [t.id, t]));
-        snapshot.docs.forEach(doc => {
-          const data = doc.data();
-          if (!data.schoolId && !data.schoolName && !data.school) {
-            newMap.set(doc.id, { id: doc.id, ...data });
-          }
-        });
-        return Array.from(newMap.values());
-      });
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'teachers_legacy', false);
-    });
+    const fetchSalaries = async () => {
+      try {
+        const res = await fetch(`/api/finance/salaries`);
+        const data = await res.json();
+        if (data.success) {
+          setStaffSalaries(data.salaries);
+        }
+      } catch (e) {
+        console.error("Salaries fetch error:", e);
+      }
+    };
 
-    const qSalaries = query(collection(db, 'salaries'), orderBy('month', 'desc'));
-    const unsubSalaries = onSnapshot(qSalaries, (snapshot) => {
-      setStaffSalaries(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-    }, (error) => {
-      handleFirestoreError(error, OperationType.GET, 'salaries', false);
-    });
+    fetchSalaries();
+    const unsubRealtimeSalaries = realtimeManager.on('salaries_updated', fetchSalaries);
 
     return () => {
-      unsubQueries.forEach(unsub => unsub());
-      unsubLegacy();
-      unsubSalaries();
+      unsubTeachers();
+      unsubRealtimeSalaries();
     };
-  }, [selectedSchoolId, schoolName]);
+  }, [selectedSchoolId, schoolName, selectedMonth]);
 
   const updateStaffSalary = async (teacherId: string, updates: any) => {
     const salaryId = `${teacherId}_${selectedMonth}`;
@@ -716,14 +739,14 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
     
     // Find latest record from any other month to fallback if needed
     const fallbackRecord = staffSalaries
-      .filter(s => s.staffId === teacherId && s.baseSalary !== undefined)
+      .filter(s => s.staffId === teacherId && s.baseSalary !== undefined && Number(s.baseSalary) > 0)
       .sort((a, b) => b.month.localeCompare(a.month))[0] || {};
 
     // Merge updates with existing/fallback data
     const base = Number(
       updates.baseSalary !== undefined 
         ? updates.baseSalary 
-        : (existingRecord.baseSalary !== undefined ? existingRecord.baseSalary : (fallbackRecord.baseSalary ?? 0))
+        : (existingRecord.baseSalary !== undefined && Number(existingRecord.baseSalary) > 0 ? existingRecord.baseSalary : (fallbackRecord.baseSalary ?? 0))
     );
     const bonus = Number(updates.rewards !== undefined ? updates.rewards : (existingRecord.rewards ?? 0));
     const deductions = Number(updates.deductions !== undefined ? updates.deductions : (existingRecord.deductions ?? 0));
@@ -732,19 +755,45 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
     const paymentDate = updates.paymentDate !== undefined ? updates.paymentDate : (existingRecord.paymentDate || null);
 
     try {
-      await setDoc(doc(db, 'salaries', salaryId), {
-        ...existingRecord,
-        staffId: teacherId,
-        staffName: teacher?.name || '?',
-        month: selectedMonth,
-        baseSalary: base,
-        rewards: bonus,
-        deductions: deductions,
-        netSalary: net,
-        isPaid,
-        paymentDate,
-        updatedAt: new Date().toISOString()
-      }, { merge: true });
+      await fetch('/api/finance/salaries', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: salaryId,
+          staffId: teacherId,
+          staffName: teacher?.name || '?',
+          month: selectedMonth,
+          baseSalary: base,
+          rewards: bonus,
+          deductions: deductions,
+          netSalary: net,
+          isPaid,
+          paymentDate: paymentDate || null
+        })
+      });
+      
+      setStaffSalaries(prev => {
+        const idx = prev.findIndex(s => s.staffId === teacherId && s.month === selectedMonth);
+        const newRecord = {
+          id: salaryId,
+          staffId: teacherId,
+          staffName: teacher?.name || '?',
+          month: selectedMonth,
+          baseSalary: base,
+          rewards: bonus,
+          deductions: deductions,
+          netSalary: net,
+          isPaid: isPaid,
+          paymentDate: paymentDate || null
+        };
+        if (idx !== -1) {
+          const updated = [...prev];
+          updated[idx] = newRecord;
+          return updated;
+        } else {
+          return [...prev, newRecord];
+        }
+      });
       
       logActivity({
         action: 'تعديل راتب موظف',
@@ -762,10 +811,10 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
       const salaryRecord = staffSalaries.find(s => s.staffId === teacher.id && s.month === selectedMonth);
       
       const fallbackRecord = staffSalaries
-        .filter(s => s.staffId === teacher.id && s.baseSalary !== undefined)
+        .filter(s => s.staffId === teacher.id && s.baseSalary !== undefined && Number(s.baseSalary) > 0)
         .sort((a, b) => b.month.localeCompare(a.month))[0];
 
-      const baseSalary = salaryRecord?.baseSalary !== undefined 
+      const baseSalary = salaryRecord?.baseSalary !== undefined && Number(salaryRecord.baseSalary) > 0
         ? Number(salaryRecord.baseSalary) 
         : (fallbackRecord?.baseSalary !== undefined ? Number(fallbackRecord.baseSalary) : 0);
 
@@ -809,6 +858,64 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
   const [isEditingFee, setIsEditingFee] = useState(false);
   const [isEditingDiscounts, setIsEditingDiscounts] = useState(false);
   const [tempFee, setTempFee] = useState(tuitionFee.toString());
+  
+  // Per-Grade Tuition Fees State
+  const [tuitionFeesByGrade, setTuitionFeesByGrade] = useState<Record<string, number>>({});
+  const [isEditingGradeFees, setIsEditingGradeFees] = useState(false);
+  const [tempGradeFees, setTempGradeFees] = useState<Record<string, string>>({});
+  const [selectedFeeStage, setSelectedFeeStage] = useState<string>('');
+
+  useEffect(() => {
+    if (gradesByStage && Object.keys(gradesByStage).length > 0 && !selectedFeeStage) {
+      setSelectedFeeStage(schoolSettings?.activeFinanceStage || Object.keys(gradesByStage)[0]);
+    }
+  }, [gradesByStage, selectedFeeStage, schoolSettings?.activeFinanceStage]);
+
+  useEffect(() => {
+    if (schoolSettings?.tuitionFeesByGrade) {
+      setTuitionFeesByGrade(schoolSettings.tuitionFeesByGrade);
+    } else {
+      setTuitionFeesByGrade({});
+    }
+  }, [schoolSettings?.tuitionFeesByGrade]);
+
+  useEffect(() => {
+    if (!isEditingGradeFees) {
+      const initial: Record<string, string> = {};
+      Object.values(gradesByStage || {}).flat().forEach(grade => {
+        initial[grade] = (tuitionFeesByGrade[grade] !== undefined ? tuitionFeesByGrade[grade] : tuitionFee).toString();
+      });
+      setTempGradeFees(initial);
+    }
+  }, [isEditingGradeFees, tuitionFeesByGrade, gradesByStage, tuitionFee]);
+
+  const handleSaveGradeFees = async () => {
+    if (!selectedSchoolId) return;
+    const newGradeFees: Record<string, number> = {};
+    Object.entries(tempGradeFees).forEach(([g, val]) => {
+      newGradeFees[g] = parseInt(val.replace(/,/g, '')) || 0;
+    });
+
+    try {
+      await academicService.updateSchoolSettings(selectedSchoolId, {
+        ...schoolSettings,
+        tuitionFeesByGrade: newGradeFees,
+        activeFinanceStage: selectedFeeStage
+      });
+      setTuitionFeesByGrade(newGradeFees);
+      setIsEditingGradeFees(false);
+      showToast('تم تحديث خطة اشتراكات الصفوف واعتماد المرحلة بنجاح', 'success');
+      logActivity({
+        action: 'تعديل اشتراكات الصفوف',
+        details: `تم تحديث مبالغ الاشتراك واعتماد مرحلة: ${selectedFeeStage}`,
+        targetType: 'finance_config'
+      });
+    } catch (e) {
+      console.error(e);
+      showToast('حدث خطأ أثناء حفظ اشتراكات الصفوف', 'error');
+    }
+  };
+
   const [tempRates, setTempRates] = useState<Record<string, string>>({});
   const [activeData, setActiveData] = useState<any>(null);
 
@@ -856,15 +963,7 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
     });
   };
 
-  // Installment Plan Configuration
-  const [installmentPlan, setInstallmentPlan] = useState<any[]>(() => {
-    const saved = safeStorage.getItem('academy6_installment_plan_v2');
-    return saved ? JSON.parse(saved) : [
-      { id: 'initial-reg', name: 'قسط التسجيل', amount: 250000, dueDate: '2026-09-01' },
-      { id: 'initial-p1', name: 'القسط الأول', amount: 500000, dueDate: '2026-11-01' },
-      { id: 'initial-p2', name: 'القسط الثاني', amount: 500000, dueDate: '2027-02-01' },
-    ];
-  });
+  // Installment Plan Configuration managed via props
 
   // Tracking sent parent alert bells
   const [sentBells, setSentBells] = useState<Record<string, boolean>>(() => {
@@ -882,7 +981,7 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
       const displayAmount = (inst.amount || 0).toLocaleString();
       
       // Post notification to Firestore
-      await addDoc(collection(db, 'notifications'), {
+      await fetch('/api/notifications', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
         userId: targetUserId,
         studentId: stu.id,
         studentCode: stu.code || '',
@@ -892,14 +991,12 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
         recipientRole: 'parent',
         icon: 'Bell',
         read: false,
-        timestamp: new Date(),
-        createdAt: new Date()
-      });
+                      }) });
 
       // Also post a notification directly for the student as requested
       const studentUserId = stu.code || stu.student || stu.id;
       if (studentUserId && studentUserId !== targetUserId) {
-        await addDoc(collection(db, 'notifications'), {
+        await fetch('/api/notifications', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
           userId: studentUserId,
           studentId: stu.id,
           studentCode: stu.code || '',
@@ -909,9 +1006,7 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
           recipientRole: 'student',
           icon: 'Bell',
           read: false,
-          timestamp: new Date(),
-          createdAt: new Date()
-        });
+                            }) });
       }
 
       // Update state
@@ -937,6 +1032,24 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
     setInstallmentPlan(plan);
     safeStorage.setItem('academy6_installment_plan_v2', JSON.stringify(plan));
     
+    // Also persist to school settings so Parent Portal can see the default plan
+    if (selectedSchoolId) {
+      if (planSaveTimeoutRef.current) {
+        clearTimeout(planSaveTimeoutRef.current);
+      }
+      planSaveTimeoutRef.current = setTimeout(async () => {
+        try {
+          await academicService.updateSchoolSettings(selectedSchoolId, {
+            ...schoolSettings,
+            installmentPlan: plan
+          });
+          // Silently save to avoid annoying the user on every keystroke
+        } catch (error) {
+          console.error("Error saving installment plan to DB:", error);
+        }
+      }, 1500); // 1.5 seconds debounce
+    }
+
     logActivity({
       action: 'تعديل مسودة الأقساط',
       details: `تم تحديث مسودة الأقساط: ${plan.map(p => `${p.name}: ${p.amount.toLocaleString()} د.ع`).join(', ')}`,
@@ -972,13 +1085,18 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
       const stuDiscountRate = s.discountRate ?? (s.discountType ? (safeDiscountRates[s.discountType] || 0) : 0);
       const discountFactor = (100 - stuDiscountRate) / 100;
       
-      // Scale installments based on student's discount
+      const baseGradeTuition = (tuitionFeesByGrade && s.grade && tuitionFeesByGrade[s.grade]) || tuitionFee;
+      const installmentSum = newInstallments.reduce((sum, inst) => sum + inst.amount, 0);
+      const gradeProportion = installmentSum > 0 ? (baseGradeTuition / installmentSum) : 1;
+      const combinedFactor = gradeProportion * discountFactor;
+      
+      // Scale installments based on student's discount and grade tuition proportion
       const studentInstallments = newInstallments.map(inst => ({
         ...inst,
-        amount: Math.round(inst.amount * discountFactor)
+        amount: Math.round(inst.amount * combinedFactor)
       }));
       
-      const studentTotalAmount = Math.round(tuitionFee * discountFactor);
+      const studentTotalAmount = Math.round(baseGradeTuition * discountFactor);
 
       const financeData = {
         installments: studentInstallments,
@@ -1026,6 +1144,11 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
         details: `تم تطبيق خطة الأقساط على ${relevantStudents.length} طالب/طالبة بقيمة إجمالية ${tuitionFee.toLocaleString()} د.ع للقسط السنوي`,
         targetType: 'finance_config'
       });
+      
+      // Sync to PostgreSQL for parent app
+      if (selectedSchoolId) {
+        academicService.syncStudents(selectedSchoolId, updatedStudents);
+      }
     }).catch(err => {
       console.error("Error applying plan to DB:", err);
       showToast('خطأ في حفظ البيانات', 'error');
@@ -1136,7 +1259,7 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
 
       if (newPaidStatus && sendNotification) {
           const notifUserId = targetStudent.parentCode || targetStudent.code || targetStudent.student || targetStudent.id;
-          await addDoc(collection(db, 'notifications'), {
+          await fetch('/api/notifications', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
              userId: notifUserId,
              studentId: targetStudent.id,
              studentCode: targetStudent.code,
@@ -1146,9 +1269,7 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
              recipientRole: 'parent',
              icon: 'CreditCard',
              read: false,
-             timestamp: new Date(),
-             createdAt: new Date()
-          });
+                                    }) });
       }
 
       showToast('تم تحديث حالة القسط بنجاح');
@@ -1179,11 +1300,31 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
         ...list,
         students: (list.students || []).map((s: any) => {
           if (s.code === studentCode || s.id === targetStudent.id) {
-            return { 
+            const updatedStu = { 
               ...s, 
               finance: { ...s.finance, installments: newInstallments, transactions: currentTransactions, paidAmount: newPaidAmount },
               paidAmount: newPaidAmount 
             };
+            
+            // Sync specific student to PostgreSQL
+            if (selectedSchoolId) {
+              academicService.syncStudents(selectedSchoolId, [updatedStu]);
+            }
+            
+            // Auto-resolve pending requests if paid cash
+            if (newPaidStatus) {
+              fetch('/api/finance/resolve-installment-requests', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                  studentId: targetStudent.id, 
+                  studentCode: targetStudent.code || targetStudent.student, 
+                  installmentId: installmentId 
+                })
+              }).catch(e => console.error(e));
+            }
+            
+            return updatedStu;
           }
           return s;
         })
@@ -1195,7 +1336,7 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
     return calculateStudentFinancials(stu, tuitionFee, safeDiscountRates);
   };
 
-  const tuition = Number(tuitionFee || schoolSettings?.tuitionFee || 1000000);
+  const tuition = Number(tuitionFee || schoolSettings?.tuitionFee || 0);
 
   const getActiveTransactionsForStudent = React.useCallback((s: any) => {
     if (!s) return [];
@@ -1312,7 +1453,8 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
     relevantStudents.forEach(s => {
        const activeTxns = getActiveTransactionsForStudent(s);
        activeTxns.forEach((t: any) => {
-          if (t.isElectronic) {
+          const isElec = t.isElectronic || t.type === 'electronic' || (t.method && typeof t.method === 'string' && !t.method.includes('نقدي') && !t.method.includes('مدير') && t.method !== 'cash') || (t.note && typeof t.note === 'string' && t.note.includes('إلكتروني'));
+          if (isElec) {
              electronic += Number(t.amount) || 0;
           } else {
              cash += Number(t.amount) || 0;
@@ -1332,13 +1474,21 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
     let expectedSum = 0;
     let grossSum = 0;
     let discountSum = 0;
+    let validStudentsCount = 0;
+
+    const activeStage = schoolSettings?.activeFinanceStage;
+    const allowedGrades = activeStage ? (gradesByStage[activeStage] || []) : Object.values(gradesByStage || {}).flat();
 
     relevantStudents.forEach(stu => {
-       const financials = calculateStudentFinancials(stu, tuition, safeDiscountRates);
+       validStudentsCount++;
+       const baseGradeTuition = (tuitionFeesByGrade && stu.grade && tuitionFeesByGrade[stu.grade] !== undefined) 
+         ? tuitionFeesByGrade[stu.grade] 
+         : tuition;
+       const financials = calculateStudentFinancials(stu, baseGradeTuition, safeDiscountRates);
 
        collectedSum += financials.paidAmount;
        expectedSum += financials.requiredAmount;
-       grossSum += tuition;
+       grossSum += baseGradeTuition;
        discountSum += financials.discountAmount;
     });
 
@@ -1348,9 +1498,9 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
         totalRemaining: Math.max(0, expectedSum - collectedSum),
         totalGross: grossSum,
         totalDiscounts: discountSum,
-        totalStudents: relevantStudents.length
+        totalStudents: validStudentsCount
     };
-  }, [relevantStudents, tuition, safeDiscountRates]);
+  }, [relevantStudents, tuition, tuitionFeesByGrade, safeDiscountRates, schoolSettings?.activeFinanceStage, gradesByStage]);
   
   const totals = React.useMemo(() => {
     const totalSalaries = currentSalaries.reduce((acc, curr) => acc + (curr.netSalary || 0), 0);
@@ -1402,15 +1552,34 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
   const globalLogs = useMemo(() => {
     // Always derive logs directly from relevantStudents active transactions to guarantee perfect mathematical precision
     const derivedLogs: any[] = [];
+    
+    // 1. Logs from PostgreSQL
+    sqlTransactions.forEach(t => {
+      const student = students.find(s => s.id === t.studentId);
+      derivedLogs.push({
+        id: t.id,
+        studentCode: student?.code || '?',
+        studentName: student?.name || 'طالب غير معروف',
+        amount: Number(t.amount) || 0,
+        method: t.method || 'نقدي',
+        type: 'revenue',
+        timestamp: t.createdAt || new Date().toISOString()
+      });
+    });
+
+    // 2. Logs from Students (for backward compatibility if some are not yet migrated or created via old UI)
     relevantStudents.forEach(s => {
       const activeTxns = getActiveTransactionsForStudent(s);
       activeTxns.forEach((t: any) => {
+        // Skip if already in sqlTransactions
+        if (sqlTransactions.some(st => st.id === t.id)) return;
+        
         let ts = t.timestamp || t.date || s.updatedAt || new Date().toISOString();
         if (ts && typeof ts === 'object') {
           if ('seconds' in ts) {
             ts = new Date(ts.seconds * 1000).toISOString();
           } else if ('toDate' in ts && typeof ts.toDate === 'function') {
-            ts = ts.toDate().toISOString();
+            ts = (typeof ts?.toDate === 'function' ? ts.toDate() : new Date(ts)).toISOString();
           }
         }
         
@@ -1426,7 +1595,7 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
       });
     });
     return derivedLogs.sort((a,b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-  }, [relevantStudents, getActiveTransactionsForStudent]);
+  }, [relevantStudents, getActiveTransactionsForStudent, sqlTransactions, students]);
 
   const filteredLogs = useMemo(() => {
     let result = [...globalLogs];
@@ -1492,24 +1661,55 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
       if (!item.isPaid && item.netSalary > 0) {
         const salaryId = `${item.id}_${selectedMonth}`;
         try {
-          return await setDoc(doc(db, 'salaries', salaryId), {
-            staffId: item.id,
-            staffName: item.name,
-            month: selectedMonth,
-            netSalary: item.netSalary,
-            baseSalary: item.baseSalary,
-            rewards: item.rewards,
-            deductions: item.deductions,
-            isPaid: true,
-            paymentDate: new Date().toISOString()
-          }, { merge: true });
+          await fetch('/api/finance/salaries', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: salaryId,
+              staffId: item.id,
+              staffName: item.name,
+              month: selectedMonth,
+              netSalary: item.netSalary,
+              baseSalary: item.baseSalary,
+              rewards: item.rewards,
+              deductions: item.deductions,
+              isPaid: true,
+              paymentDate: new Date().toISOString()
+            })
+          });
         } catch (error) {
-          handleFirestoreError(error, OperationType.UPDATE, `salaries/${salaryId}`);
+          console.error("Disburse salary error:", error);
         }
       }
     });
 
     await Promise.all(batchPromises);
+    setStaffSalaries(prev => {
+      const updated = [...prev];
+      currentSalaries.forEach(item => {
+        if (!item.isPaid && item.netSalary > 0) {
+          const idx = updated.findIndex(s => s.staffId === item.id && s.month === selectedMonth);
+          const newRecord = {
+            id: `${item.id}_${selectedMonth}`,
+            staffId: item.id,
+            staffName: item.name,
+            month: selectedMonth,
+            baseSalary: item.baseSalary,
+            rewards: item.rewards,
+            deductions: item.deductions,
+            netSalary: item.netSalary,
+            isPaid: true,
+            paymentDate: new Date().toISOString()
+          };
+          if (idx !== -1) {
+            updated[idx] = newRecord;
+          } else {
+            updated.push(newRecord);
+          }
+        }
+      });
+      return updated;
+    });
     setIsPaying(false);
     setShowConfirmPayment(false);
     showToast('تم صرف رواتب الشهر لجميع الكادر بنجاح', 'success');
@@ -1525,26 +1725,32 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
      const months = ['كانون الثاني', 'شباط', 'آذار', 'نيسان', 'أيار', 'حزيران', 'تموز', 'آب', 'أيلول', 'تشرين الأول', 'تشرين الثاني', 'كانون الأول'];
      const monthlyData = months.reduce((acc, month) => ({ ...acc, [month]: { value: 0, count: 0 } }), {} as Record<string, { value: number; count: number }>);
      
-     // Derive monthly data from ALL relevant students' paid installments
+     // Derive monthly data from ALL relevant students' completed transactions using unified active txns
      relevantStudents.forEach(stu => {
-       const installments = stu.finance?.installments || stu.installments || [];
-       installments.forEach((inst: any) => {
-         const isPaid = inst.paid === true || 
-                        ['paid', 'completed', 'verified', 'approved', 'verified_payment'].includes((inst.status || '').toLowerCase());
-         
-         if (isPaid && inst.paidAt) {
-           const date = inst.paidAt.toDate ? inst.paidAt.toDate() : new Date(inst.paidAt);
-           const monthIndex = date.getMonth();
-           const monthName = months[monthIndex];
-           
-           if (monthlyData[monthName]) {
-             // Use proper effective amount if installments were gross
-             const financials = calculateStudentFinancials(stu, tuition, safeDiscountRates);
-             const discountFactor = financials.discountFactor;
-             const amount = financials.isInstallmentsAtGross ? Math.round(Number(inst.amount) * discountFactor) : Number(inst.amount);
+       const activeTxns = getActiveTransactionsForStudent(stu);
+       activeTxns.forEach((tx: any) => {
+         // Count only completed transactions
+         if (tx.status === 'completed' || tx.status === 'success' || tx.paid === true) {
+           const txDateValue = tx.timestamp || tx.date || tx.time || tx.createdAt || tx.paidAt;
+           if (txDateValue) {
+             let date: Date;
+             if (txDateValue.toDate) {
+               date = txDateValue.toDate();
+             } else if (txDateValue.seconds) {
+               date = new Date(txDateValue.seconds * 1000);
+             } else {
+               date = new Date(txDateValue);
+             }
              
-             monthlyData[monthName].value += (amount || 0);
-             monthlyData[monthName].count += 1;
+             if (!isNaN(date.getTime())) {
+               const monthIndex = date.getMonth();
+               const monthName = months[monthIndex];
+               
+               if (monthlyData[monthName]) {
+                 monthlyData[monthName].value += (Number(tx.amount) || 0);
+                 monthlyData[monthName].count += 1;
+               }
+             }
            }
          }
        });
@@ -1555,7 +1761,7 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
        value: data.value,
        count: data.count 
      }));
-   }, [relevantStudents, tuition, safeDiscountRates]);
+   }, [relevantStudents, getActiveTransactionsForStudent]);
 
   const spotlightData = useMemo(() => {
     const monthsAlphabetical = ['كانون الثاني', 'شباط', 'آذار', 'نيسان', 'أيار', 'حزيران', 'تموز', 'آب', 'أيلول', 'تشرين الأول', 'تشرين الثاني', 'كانون الأول'];
@@ -2870,51 +3076,83 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
               <div className="lg:col-span-5 flex flex-col justify-between p-6 md:p-8 rounded-[28px] bg-gradient-to-br from-[#101935]/80 to-[#0c1229]/80 border border-white/5 relative overflow-hidden group shadow-xl">
                 <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/[0.015] blur-2xl rounded-full pointer-events-none" />
                 <div className="space-y-2">
-                  <span className="text-[9px] text-amber-400 font-extrabold tracking-wider bg-amber-500/10 px-2.5 py-0.5 rounded-full border border-amber-500/20 inline-block">الاشتراك السنوي العام</span>
-                  <h3 className="text-white font-black text-lg">مبلغ الاشتراك الموحد</h3>
-                  <p className="text-white/40 text-[10px] sm:text-xs font-bold">المبلغ المالي الأساسي المعتمد للمقاعد السنوية لكل الطلبة قبل أي خصومات.</p>
+                  <span className="text-[9px] text-amber-400 font-extrabold tracking-wider bg-amber-500/10 px-2.5 py-0.5 rounded-full border border-amber-500/20 inline-block">الاشتراك السنوي لكل صف</span>
+                  <h3 className="text-white font-black text-lg">اشتراكات المراحل الدراسية</h3>
+                  <p className="text-white/40 text-[10px] sm:text-xs font-bold">المبالغ المالية الأساسية المعتمدة لكل صف دراسي قبل أي خصومات.</p>
                 </div>
 
-                <div className="space-y-4 mt-8">
-                  <div className="relative group">
-                    <input 
-                      type="text" 
-                      value={isEditingFee ? tempFee : (parseInt(tempFee) || 0).toLocaleString()}
-                      onChange={(e) => setTempFee(e.target.value.replace(/[^\d]/g, ''))}
-                      readOnly={!isEditingFee}
-                      className={`w-full h-14 bg-black/40 text-white font-black text-2xl rounded-xl text-center outline-none border transition-all pl-12 ${
-                        isEditingFee 
-                          ? 'border-amber-400/80 text-amber-500 ring-2 ring-amber-400/10 shadow-[inner_0_0_10px_rgba(245,158,11,0.2)] pr-4' 
-                          : 'border-white/5 focus:border-white/10 text-white/90 group-hover:border-white/10 pr-12'
-                      }`}
-                    />
-                    <div className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30 font-black text-xs">
-                      د.ع
-                    </div>
-                    {!isEditingFee && (
-                      <div className="absolute top-1/2 -translate-y-1/2 right-3 w-7 h-7 bg-[#101935] border border-white/10 rounded-lg flex items-center justify-center text-white/30 shadow-md">
-                        <LockIcon size={11} />
+                <div className="space-y-4 mt-6 flex-1 max-h-[300px] flex flex-col pb-2">
+                  {Object.keys(gradesByStage || {}).length > 0 ? (
+                    <>
+                      <div className="relative mb-2 shrink-0">
+                        <select
+                          value={selectedFeeStage}
+                          onChange={(e) => setSelectedFeeStage(e.target.value)}
+                          className="w-full h-12 bg-black/40 text-white font-black text-sm rounded-xl outline-none border border-white/5 appearance-none px-4 pl-10 focus:border-amber-500/50 transition-all cursor-pointer shadow-inner"
+                        >
+                          {Object.keys(gradesByStage || {}).map(stage => (
+                            <option key={stage} value={stage} className="bg-[#101935] text-white font-bold">
+                              {stage}
+                            </option>
+                          ))}
+                        </select>
+                        <div className="absolute left-4 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none">
+                          <ChevronDown size={18} />
+                        </div>
                       </div>
-                    )}
-                  </div>
 
+                      <div className="space-y-3 overflow-y-auto no-scrollbar flex-1 pr-1">
+                        {(gradesByStage[selectedFeeStage] || []).map((grade) => (
+                          <div key={grade} className="flex flex-col gap-1.5">
+                            <label className="text-white/60 text-[10px] font-bold px-1">{grade}</label>
+                            <div className="relative group">
+                              <input 
+                                type="text" 
+                                value={isEditingGradeFees ? (tempGradeFees[grade] || '') : (parseInt(tempGradeFees[grade] || '0') || tuitionFee || 0).toLocaleString()}
+                                onChange={(e) => setTempGradeFees(prev => ({ ...prev, [grade]: e.target.value.replace(/[^\d]/g, '') }))}
+                                readOnly={!isEditingGradeFees}
+                                className={`w-full h-11 bg-black/40 text-white font-black text-lg rounded-xl text-center outline-none border transition-all pl-12 ${
+                                  isEditingGradeFees 
+                                    ? 'border-amber-400/80 text-amber-500 ring-2 ring-amber-400/10 shadow-[inner_0_0_10px_rgba(245,158,11,0.2)] pr-4' 
+                                    : 'border-white/5 focus:border-white/10 text-white/90 group-hover:border-white/10 pr-12'
+                                }`}
+                              />
+                              <div className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30 font-black text-xs">
+                                د.ع
+                              </div>
+                              {!isEditingGradeFees && (
+                                <div className="absolute top-1/2 -translate-y-1/2 right-3 w-6 h-6 bg-[#101935] border border-white/10 rounded-lg flex items-center justify-center text-white/30 shadow-md">
+                                  <LockIcon size={10} />
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="text-white/40 text-xs font-bold text-center py-6">لا توجد صفوف مضافة حالياً. يرجى إضافة الصفوف من الإعدادات الأكاديمية.</div>
+                  )}
+                </div>
+
+                <div className="mt-4 pt-4 border-t border-white/5">
                   <button 
-                    onClick={() => isEditingFee ? handleSaveFee() : setIsEditingFee(true)}
+                    onClick={() => isEditingGradeFees ? handleSaveGradeFees() : setIsEditingGradeFees(true)}
                     className={`w-full h-12 rounded-xl font-black text-xs flex items-center justify-center gap-2 transition-all active:scale-95 shadow-md cursor-pointer shrink-0 ${
-                      isEditingFee 
+                      isEditingGradeFees 
                         ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-500/25' 
                         : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-indigo-600/25'
                     }`}
                   >
-                    {isEditingFee ? (
+                    {isEditingGradeFees ? (
                       <>
                         <Save size={14} />
-                        <span>حفظ التعديل المالي فوراً</span>
+                        <span>حفظ مبالغ الاشتراك فوراً</span>
                       </>
                     ) : (
                       <>
                         <Edit3 size={14} />
-                        <span>تعديل القيمة المالية</span>
+                        <span>تعديل اشتراكات الصفوف</span>
                       </>
                     )}
                   </button>
@@ -3346,33 +3584,45 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
                             </div>
                           </td>
 
-                          {/* Installment dynamic columns - Dense structure */}
-                          {studentInstallments.length > 0 ? (
-                            studentInstallments.map((inst: any, i: number) => {
-                              const instStatus = (inst.status || '').toLowerCase().trim();
-                              const isPaid = inst.paid === true || 
-                                             ['paid', 'completed', 'verified', 'approved', 'verified_payment', 'success'].includes(instStatus) || instStatus.includes('مكتمل');
-                              
-                              const isPending = instStatus === 'pending';
-                              const rawAmount = Number(inst.amount) || 0;
-                              const effectiveAmount = financials.isInstallmentsAtGross ? Math.round(rawAmount * financials.discountFactor) : rawAmount;
-                              const displayAmount = effectiveAmount.toLocaleString();
-                              const isLate = !isPaid && inst.dueDate && new Date(inst.dueDate) < new Date();
-                              const isElectronic = checkPaymentMethodIsElectronic(inst, stu.finance?.transactions);
-                              
-                              const bellKey = `${stu.code || stu.student || stu.id}_${inst.id || i}`;
-                              const hasSentBell = sentBells[bellKey] === true;
-                              
+                          {/* Installment dynamic columns - Aligned with template headers */}
+                          {installmentPlan.map((planItem, i) => {
+                            const inst = studentInstallments[i];
+                            
+                            if (!inst) {
                               return (
-                                <td key={inst.id || i} className="px-2 py-1.5 text-center min-w-[140px]">
-                                  {/* Glassmorphic compact student installment cells */}
-                                  <div className={`p-2 rounded-xl border transition-all duration-300 relative group/cell ${
-                                    isPaid 
-                                      ? 'bg-emerald-500/5 hover:bg-emerald-500/10 border-emerald-500/10 hover:border-emerald-500/20 text-emerald-400' 
-                                      : isLate 
-                                        ? 'bg-rose-500/5 hover:bg-rose-500/10 border-rose-500/15 hover:border-rose-500/25 text-rose-400'
-                                        : 'bg-white/[0.01] hover:bg-white/[0.02] border-white/5 hover:border-white/10 text-white/50'
-                                  }`}>
+                                <td key={`missing_${i}`} className="px-2 py-1.5 text-center min-w-[140px]">
+                                  <div className="p-2 rounded-xl border border-dashed border-white/5 bg-white/[0.01] text-white/10 text-[9px] flex flex-col items-center justify-center gap-1">
+                                    <AlertCircle size={12} className="opacity-20" />
+                                    <span>غير مخصص</span>
+                                  </div>
+                                </td>
+                              );
+                            }
+
+                            const instStatus = (inst.status || '').toLowerCase().trim();
+                            const isPaid = inst.paid === true || 
+                                           ['paid', 'completed', 'verified', 'approved', 'verified_payment', 'success'].includes(instStatus) || instStatus.includes('مكتمل');
+                            
+                            const isPending = instStatus === 'pending';
+                            const rawAmount = Number(inst.amount) || 0;
+                            const effectiveAmount = financials.isInstallmentsAtGross ? Math.round(rawAmount * financials.discountFactor) : rawAmount;
+                            const displayAmount = effectiveAmount.toLocaleString();
+                            const isLate = !isPaid && inst.dueDate && new Date(inst.dueDate) < new Date();
+                            const isElectronic = checkPaymentMethodIsElectronic(inst, stu.finance?.transactions);
+                            
+                            const bellKey = `${stu.code || stu.student || stu.id}_${inst.id || i}`;
+                            const hasSentBell = sentBells[bellKey] === true;
+                            
+                            return (
+                              <td key={inst.id || i} className="px-2 py-1.5 text-center min-w-[140px]">
+                                {/* Glassmorphic compact student installment cells */}
+                                <div className={`p-2 rounded-xl border transition-all duration-300 relative group/cell ${
+                                  isPaid 
+                                    ? 'bg-emerald-500/5 hover:bg-emerald-500/10 border-emerald-500/10 hover:border-emerald-500/20 text-emerald-400' 
+                                    : isLate 
+                                      ? 'bg-rose-500/5 hover:bg-rose-500/10 border-rose-500/15 hover:border-rose-500/25 text-rose-400'
+                                      : 'bg-white/[0.01] hover:bg-white/[0.02] border-white/5 hover:border-white/10 text-white/50'
+                                }`}>
                                     {/* Action Status Indicators adjacent right inside cells */}
                                     <div className="flex items-center justify-between gap-1 mb-1.5">
                                       <div className="flex items-center gap-1 shrink-0">
@@ -3455,12 +3705,12 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
                                             });
                                          }
                                       }}
-                                      disabled={isPending}
+                                      disabled={false}
                                       className={`w-full py-1.5 px-2 rounded-lg text-[9.5px] font-black transition-all flex items-center justify-center gap-1 ${
                                         isPaid 
                                           ? 'bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/15 text-emerald-400 active:scale-95' 
                                           : isPending 
-                                            ? 'bg-amber-500/10 border border-amber-500/20 text-amber-500 cursor-wait' 
+                                            ? 'bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 hover:border-amber-500/40 text-amber-500 active:scale-95' 
                                             : isLate
                                               ? 'bg-rose-500/20 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/20 active:scale-95'
                                               : 'bg-white/5 hover:bg-white/10 border border-white/5 hover:border-cyan-500/30 text-white/80 active:scale-95'
@@ -3471,8 +3721,6 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
                                           <Verified size={10} className="fill-emerald-400/20" />
                                           مستلم
                                         </span>
-                                      ) : isPending ? (
-                                        'منتظر'
                                       ) : (
                                         <span>{displayAmount} د.ع</span>
                                       )}
@@ -3482,7 +3730,7 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
                                     <div className="mt-1.5 text-[8.5px] font-bold flex flex-col items-center gap-0.5">
                                       {isPaid ? (
                                         <>
-                                          {inst.transactionId && (
+                                          {true && (
                                             <button 
                                                 onClick={() => {
                                                   const studentTxns = stu.finance?.transactions || [];
@@ -3491,7 +3739,10 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
                                                     if (inst.transactionId && t.id && t.id !== inst.transactionId) return false;
                                                     return Number(t.amount || 0) === Number(inst.amount) && t.note && t.note.includes(inst.name);
                                                   });
-                                                  const finalMethod = matchingTx?.method || inst.method || 'نقدي/مدير';
+                                                  const isTxElectronic = inst.transactionId && !String(inst.transactionId).startsWith('TXN_MANUAL');
+                                                  const isMatchingTxElectronic = matchingTx?.transactionId && !String(matchingTx.transactionId).startsWith('TXN_MANUAL');
+                                                  const isElectronic = isTxElectronic || isMatchingTxElectronic || (matchingTx?.note && (matchingTx.note.includes('إلكتروني') || matchingTx.note.includes('AsiaPay') || matchingTx.note.includes('زين كاش')));
+const finalMethod = matchingTx?.method || inst.method || (isElectronic ? 'إلكتروني' : 'نقدي');
                                                   
                                                   setSelectedTransaction({
                                                       adminName: auth.currentUser?.displayName || 'الإدارة',
@@ -3505,7 +3756,8 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
                                                       method: finalMethod,
                                                       id: matchingTx?.id,
                                                       isStamped: matchingTx?.isStamped || false,
-                                                      stampTime: matchingTx?.stampTime || null
+                                                      stampTime: matchingTx?.stampTime || null,
+                                                      isSyncedToParent: matchingTx?.isSyncedToParent || false
                                                   });
                                                 }}
                                                 className="text-[#00E5FF] hover:underline transition-all text-[9.5px] font-extrabold flex items-center gap-0.5"
@@ -3531,13 +3783,10 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
                                   </div>
                                 </td>
                               );
-                            })
-                          ) : (
-                            <td colSpan={installmentPlan.length} className="px-3 py-4 text-center text-white/10 text-[10px]">لا توجد أقساط</td>
-                          )}
-                        </tr>
-                      );
-                    })}
+                            })}
+                          </tr>
+                        );
+                      })}
                 </tbody>
               </table>
             </div>
@@ -4083,12 +4332,16 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex flex-col md:flex-row md:items-baseline md:gap-3">
-                            <h4 className="text-white font-black text-sm md:text-base tracking-wide truncate">{req.studentCode || req.studentId}</h4>
+                            <h4 className="text-white font-black text-sm md:text-base tracking-wide truncate">{req.studentCode || req.studentId || req.requesterId || 'رمز غير متوفر'}</h4>
                             <span className="text-white/40 text-[10px] md:text-[11px] font-bold truncate mt-0.5 md:mt-0">{displayStudentName}</span>
                           </div>
                           <div className="flex flex-wrap items-center gap-2 mt-2 w-full text-xs">
-                            <span className="bg-white/5 border border-white/5 px-2 py-1 rounded text-white/60 font-bold whitespace-nowrap text-[9px] md:text-[10px]">بواسطة: {req.method}</span>
-                            <span className="bg-white/5 border border-white/5 px-2 py-1 rounded text-white/60 font-mono tracking-tighter whitespace-nowrap text-[9px] md:text-[10px]">العملية: {req.transactionId || req.transactionNote}</span>
+                            <span className="bg-white/5 border border-white/5 px-2 py-1 rounded text-white/60 font-bold whitespace-nowrap text-[9px] md:text-[10px]">
+                              بواسطة: {req.method || 'AsiaPay (آسيا حوالة)'}
+                            </span>
+                            <span className="bg-white/5 border border-white/5 px-2 py-1 rounded text-white/60 font-mono tracking-tighter whitespace-nowrap text-[9px] md:text-[10px]">
+                              العملية: {req.transactionId || req.transactionNote || req.id}
+                            </span>
                             {req.cardholderName && (
                               <span className="bg-blue-500/10 border border-blue-500/20 px-2 py-1 rounded text-blue-300 font-bold whitespace-nowrap text-[9px] md:text-[10px]">
                                 الحساب: {req.cardholderName}
@@ -4105,7 +4358,7 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
                           <p className="text-white/30 text-[9px] font-bold mt-1">
                             {(() => {
                               try {
-                                if (req.createdAt?.toDate) return req.createdAt.toDate().toLocaleDateString('ar-IQ');
+                                if (req.createdAt?.toDate) return (typeof req.createdAt?.toDate === 'function' ? req.createdAt.toDate() : new Date(req.createdAt)).toLocaleDateString('ar-IQ');
                                 if (req.timestamp?.seconds) return new Date(req.timestamp.seconds * 1000).toLocaleDateString('ar-IQ');
                                 if (req.createdAt) return new Date(req.createdAt).toLocaleDateString('ar-IQ');
                                 return 'تاريخ غير متوفر';
@@ -4164,7 +4417,7 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
              animate={{ opacity: 1, y: 0 }} 
              exit={{ opacity: 0, y: -10 }}
            >
-             <AccessLogsSection gradesByStage={gradesByStage} students={relevantStudents} showToast={showToast} />
+             <AccessLogsSection gradesByStage={gradesByStage} students={relevantStudents} showToast={showToast} installmentPlan={installmentPlan} />
            </motion.div>
          )}
       </AnimatePresence>
@@ -4270,24 +4523,46 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
                   <DollarSign size={32} />
                 </div>
                 
-                <h3 className="text-xl font-black text-white">تأكيد استلام نقدي</h3>
-                <p className="text-white/60 text-sm leading-relaxed pb-4">
-                  هل أنت متأكد من استلام المبلغ بشكل (نقدي)؟ <br/>
-                  <span className="text-emerald-400 mt-2 block text-xs">سيتم إرسال إشعار فوري لولي الأمر بتأكيد الاستلام.</span>
+                <h3 className="text-xl font-black text-white">تأكيد التسديد النقدي</h3>
+                <p className="text-white/60 text-sm leading-relaxed pb-2">
+                  هل انت متأكد من التسديد النقدي؟ <br/>
+                  <span className="text-emerald-400 mt-2 block text-xs">سيتم تحديث إحصائيات الموقف العام فوراً وتسجيل الدفعة.</span>
                 </p>
+                
+                <div className="w-full text-right space-y-2 pb-4">
+                  <label className="text-white/60 text-xs font-bold block mb-1">
+                    يرجى كتابة كلمة <span className="text-emerald-400 font-black">"تأكيد"</span> لإتمام العملية:
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="اكتب كلمة: تأكيد"
+                    value={cashConfirmationInput}
+                    onChange={(e) => setCashConfirmationInput(e.target.value)}
+                    className="w-full h-11 px-4 bg-black/40 border border-white/10 focus:border-emerald-500/50 rounded-xl text-center font-black text-sm text-white outline-none transition-all placeholder:text-white/20"
+                  />
+                </div>
 
                 <div className="flex flex-row-reverse items-center justify-between gap-3 w-full pt-4 border-t border-white/10">
                   <button 
                     onClick={() => {
                         toggleInstallmentPayment(confirmCashPayment.studentCode, confirmCashPayment.installmentId, true);
                         setConfirmCashPayment(null);
+                        setCashConfirmationInput('');
                     }}
-                    className="flex-1 py-3.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold transition-all active:scale-95 shadow-lg shadow-emerald-900/50"
+                    disabled={cashConfirmationInput.trim() !== 'تأكيد'}
+                    className={`flex-1 py-3.5 rounded-xl font-bold transition-all active:scale-95 shadow-lg ${
+                      cashConfirmationInput.trim() === 'تأكيد'
+                        ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/50'
+                        : 'bg-emerald-900/30 text-white/30 cursor-not-allowed shadow-none'
+                    }`}
                   >
                     نعم، استلمت نقداً
                   </button>
                   <button 
-                    onClick={() => setConfirmCashPayment(null)}
+                    onClick={() => {
+                        setConfirmCashPayment(null);
+                        setCashConfirmationInput('');
+                    }}
                     className="flex-1 py-3.5 bg-white/5 hover:bg-white/10 text-white rounded-xl font-bold transition-all active:scale-95"
                   >
                     إلغاء
@@ -4321,10 +4596,10 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
                   <AlertCircle size={32} />
                 </div>
                 
-                <h3 className="text-xl font-black text-rose-400">تنبيه: القسط مسدد بالفعل!</h3>
+                <h3 className="text-xl font-black text-rose-400">تنبيه: القسط مسدد!</h3>
                 <p className="text-white/75 text-xs md:text-sm leading-relaxed pb-2">
-                  هذا القسط ({confirmCancelPayment.installmentName}) مُسجل ومُثبت في سجل المدفوعات كقسط مستلم للرقم التعريفي المالي للطالب.<br/>
-                  <span className="text-rose-400/80 mt-2 block font-black">هل تريد بالتأكيد تصفير القسط وإلغاء حالة السداد بشكل رجعي؟</span>
+                  هذا الوصل مسدد الكترونياً او نقدياً هل ترغب بألغائه؟<br/>
+                  <span className="text-rose-400/80 mt-2 block font-black">سيؤدي هذا إلى تصفير القسط وإلغاء حالة السداد بشكل رجعي وسيتم تحديث إحصائيات الموقف العام.</span>
                 </p>
 
                 <div className="w-full text-right space-y-2 pb-4">

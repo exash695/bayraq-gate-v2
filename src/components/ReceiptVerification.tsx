@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { db } from '../lib/firebase';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc } from '@/src/lib/firebase';
 import { ShieldCheck, Calendar, Wallet, User, ShieldAlert, BadgeCheck } from 'lucide-react';
 import { SCHOOLS_DATA, getOfficialSchoolLogoUrl, getOfficialSchoolName } from '../lib/constants';
+import { Skeleton } from './shared/ShimmerSkeleton';
 
 interface VerificationProps {
   receiptId: string;
@@ -38,10 +39,11 @@ export function ReceiptVerification({ receiptId }: VerificationProps) {
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4 dir-rtl">
-        <div className="bg-white p-8 rounded-2xl shadow-xl flex flex-col items-center max-w-sm w-full border border-gray-100">
-          <div className="w-16 h-16 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-4"></div>
-          <h2 className="text-xl font-bold text-gray-800">جاري التحقق الرقمي...</h2>
-          <p className="text-gray-500 mt-2 text-sm text-center">يرجى الانتظار، يتم الآن مطابقة تفاصيل الوصل مع قاعدة بيانات بوابة بيرق.</p>
+        <div className="bg-white p-8 rounded-3xl shadow-xl flex flex-col items-center max-w-sm w-full border border-gray-100 space-y-4">
+          <Skeleton variant="circular" className="w-16 h-16" />
+          <Skeleton variant="rounded" className="w-48 h-6" />
+          <Skeleton variant="rounded" className="w-full h-12" />
+          <Skeleton variant="rounded" className="w-3/4 h-4" />
         </div>
       </div>
     );

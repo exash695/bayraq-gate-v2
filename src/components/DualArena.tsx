@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Swords, Timer, Zap, Shield, Trophy, X } from 'lucide-react';
-import { doc, updateDoc, increment } from 'firebase/firestore';
+import { doc, updateDoc, increment } from '@/src/lib/firebase';
 import { db, auth } from '../lib/firebase';
 import { updatePoints } from '../lib/pointsEngine';
 import { INITIAL_PAGES } from '../data';

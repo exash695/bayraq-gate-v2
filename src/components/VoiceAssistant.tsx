@@ -72,15 +72,15 @@ export const VoiceAssistant = ({ textToCompare, onResult }: VoiceAssistantProps)
       };
 
       recognitionRef.current.onerror = (event: any) => {
-        console.error('Speech recognition error:', event.error);
+        console.warn('Speech recognition status:', event?.error);
         setIsRecording(false);
         setIsProcessing(false);
-        if (event.error === 'not-allowed') {
+        if (event?.error === 'not-allowed' || event?.error === 'service-not-allowed') {
           setFeedback('blocked');
-        } else if (event.error === 'network') {
+        } else if (event?.error === 'network') {
           setFeedback('network-error');
           sounds.playError();
-        } else if (event.error !== 'no-speech') {
+        } else if (event?.error !== 'no-speech') {
           setFeedback('try-again');
           sounds.playError();
         }
@@ -104,7 +104,7 @@ export const VoiceAssistant = ({ textToCompare, onResult }: VoiceAssistantProps)
 
       recognitionRef.current.start();
     } catch (err) {
-      console.error('Speech recognition start error:', err);
+      console.warn('Speech recognition initialization notice:', err);
       setFeedback('not-supported');
     }
   };

@@ -25,7 +25,7 @@ import {
   Target,
   Glasses
 } from 'lucide-react';
-import { collection, query, onSnapshot, orderBy, updateDoc, doc, increment, getDoc, where } from 'firebase/firestore';
+import { collection, query, onSnapshot, orderBy, updateDoc, doc, increment, getDoc, where } from '@/src/lib/firebase';
 import { db, auth } from '../lib/firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { sounds } from '../lib/sounds';

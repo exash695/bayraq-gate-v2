@@ -27,6 +27,7 @@ interface FirestoreErrorInfo {
 
 import { auth } from './firebase';
 import { safeStorage, safeSessionStorage } from '../lib/storage';
+import { errorMonitoringService } from '../services/errorMonitoringService';
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null, shouldThrow = true) {
   if (!error) return;
@@ -50,6 +51,18 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     console.warn("WARNING: Firebase Free Tier Quota Exceeded (resource-exhausted). The app reached its daily limit. Consider upgrading to the Blaze plan or wait until tomorrow. Suppressing crash to keep UI active.");
     return; // Do not throw or crash
   }
+
+  // Capture into centralized Error Monitoring Service
+  errorMonitoringService.captureError({
+    service: 'firestore',
+    module: path ? `collection:${path}` : 'firestore',
+    action: `firestore_${operationType}`,
+    errorMessage: `[Firestore ${operationType.toUpperCase()}] ${path || 'global'}: ${errorMessage}`,
+    stackTrace: error instanceof Error ? error.stack : undefined,
+    severity: errorMessage.includes('permission-denied') ? 'critical' : 'warning',
+    userId: auth.currentUser?.uid,
+    schoolId: null
+  });
 
   const errInfo: FirestoreErrorInfo = {
     error: errorMessage,

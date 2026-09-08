@@ -8,8 +8,7 @@
  */
 
 import { auth, db } from '../lib/firebase';
-import {
-  collection,
+import { collection,
   doc,
   getDoc,
   getDocs,
@@ -20,8 +19,7 @@ import {
   orderBy,
   limit,
   DocumentData,
-  QueryConstraint
-} from 'firebase/firestore';
+  QueryConstraint } from '@/src/lib/firebase';
 import { cacheService } from './cacheService';
 
 export class FirebaseService {

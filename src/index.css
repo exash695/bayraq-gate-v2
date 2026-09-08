@@ -319,8 +319,59 @@ body {
 }
 
 @media print {
+  @page {
+    size: A4 portrait;
+    margin: 6mm;
+  }
   html, body {
-    background: #111827 !important; /* Keep original dark */
+    background: #ffffff !important;
+    color: #0f172a !important;
+    width: 100% !important;
+    height: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  .screen-only, nav, header, aside, .bottom-nav, #knights-radar-bar, [data-screen-only="true"] {
+    display: none !important;
+  }
+  /* Remove modal overlay backdrop in print */
+  .fixed.inset-0.z-\[9999\] {
+    position: static !important;
+    background: transparent !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    width: 100% !important;
+    display: block !important;
+    overflow: visible !important;
+  }
+  .fixed.inset-0.z-\[9999\] > div {
+    max-width: 100% !important;
+    padding: 0 !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    margin: 0 !important;
+  }
+  #official-license-receipt-print-area {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    border: 2px solid #d97706 !important;
+    box-shadow: none !important;
+    margin: 0 auto !important;
+    width: 100% !important;
+    max-width: 198mm !important;
+    min-height: 280mm !important;
+    padding: 8mm !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+  #official-license-receipt-print-area * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
   }
 }
 
@@ -386,6 +437,28 @@ body {
   100% { transform: translateX(100%); }
 }
 
+@keyframes shimmer-sweep {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* Fast List Containment to eliminate layout thrashing & 60fps virtualization feel */
+.fast-list-contain {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 120px;
+}
+
+.fast-card-contain {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 240px;
+}
+
+.smooth-render-panel {
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  perspective: 1000px;
+}
+
 /* Leaflet Customizations */
 .custom-glowing-icon {
   background: transparent;
@@ -421,4 +494,12 @@ body {
 /* Custom Leaflet Filter to make standard OpenStreetMap dark but keep details */
 .map-tiles-dark-filter {
   filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out forwards;
 }
