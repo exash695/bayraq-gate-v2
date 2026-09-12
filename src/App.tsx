@@ -1159,7 +1159,7 @@ export default function App() {
               governorate: "غير محدد",
               profileCompleted: true,
               status: "online",
-              role: "student",
+              role: user.role || "student",
               lastActive: new Date().toISOString(),
             },
             { merge: true }
@@ -1412,9 +1412,9 @@ export default function App() {
 
     let isMounted = true;
     
-    const fetchAppNotifs = async () => {
+    const fetchAppNotifs = async (signal?: AbortSignal) => {
        try {
-         const res = await fetch(`/api/notifications?recipientIds=${encodeURIComponent(possibleIds.filter(id => id && id !== 'undefined').join(','))}`);
+         const res = await fetch(`/api/notifications?recipientIds=${encodeURIComponent(possibleIds.filter(id => id && id !== 'undefined').join(','))}`, { signal });
          if (!res.ok) {
            console.warn(`[App] Notification fetch failed: ${res.status}`);
            return;
@@ -1481,12 +1481,18 @@ export default function App() {
            setNotification(null);
          }
          isInitialLoad = false;
-       } catch (err) {
+       } catch (err: any) {
+         if (err.name === 'AbortError') return;
+         if (err.message?.includes('Failed to fetch')) {
+             console.warn("Network drop while fetching app notifs");
+             return;
+         }
          console.error("Error fetching app notifs:", err);
        }
     };
     
-    fetchAppNotifs();
+    const abortController = new AbortController();
+    fetchAppNotifs(abortController.signal);
     
     // Fast sync when coming back from background
     const handleVisibilityChange = () => {
@@ -1502,6 +1508,7 @@ export default function App() {
 
     return () => {
        isMounted = false;
+       abortController.abort();
        document.removeEventListener("visibilitychange", handleVisibilityChange);
        import('./lib/realtimeManager').then(({ realtimeManager }) => {
           realtimeManager.off('notifications_updated', fetchAppNotifs);
@@ -1921,11 +1928,15 @@ export default function App() {
                 user.role === "admin" ||
                 (user as any).role === "ADMIN"
               ) {
-                setPortalType(
-                  user.schoolId && user.schoolId.includes("boys")
-                    ? "admin-boys"
-                    : "admin-girls",
-                );
+                const branch = user.schoolId && user.schoolId.includes("boys") ? "admin-boys" : "admin-girls";
+                setPortalType(branch);
+                safeStorage.setItem("bayraq_user_role", branch);
+                
+                try {
+                  const docRef = doc(db, "users", user.uid || (user as any).id);
+                  setDoc(docRef, { role: "admin", adminBranch: user.schoolId && user.schoolId.includes("boys") ? "boys" : "girls" }, { merge: true });
+                } catch(e) {}
+
                 setVerifiedStudentInfo({
                   id: user.uid,
                   code: code,
@@ -2107,9 +2118,7 @@ export default function App() {
         }
 
         if (
-          (portalType === "admin-boys" || portalType === "admin-girls") &&
-          !safeStorage.getItem("s6_target_tab") &&
-          !highlightTasksSection
+          (portalType === "admin-boys" || portalType === "admin-girls")
         ) {
           return (
             <AdminDashboard

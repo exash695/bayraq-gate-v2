@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import "dotenv/config";
@@ -47,7 +48,7 @@ const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME || "al-sadis-academy";
 
 let s3Client: S3Client | null = null;
 let realtimeServerInstance: RealtimeServer | null = null;
-if (R2_ENDPOINT && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY) {
+if (R2_ENDPOINT && R2_ACCESS_KEY_ID && R2_SECRET_ACCESS_KEY && !R2_ENDPOINT.includes('dummy')) {
   s3Client = new S3Client({
     region: "auto",
     endpoint: R2_ENDPOINT,
@@ -6926,7 +6927,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
   app.post('/api/lounge-messages', async (req, res) => {
     try {
       const msg = req.body;
-      const { v4: uuidv4 } = require('uuid');
+      const uuidv4 = crypto.randomUUID.bind(crypto);
       const newMsg = {
         id: uuidv4(),
         text: msg.text,
@@ -6959,15 +6960,41 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
   app.get('/api/users', async (req, res) => {
     try {
       const { schoolId } = req.query;
-      let query = db.select().from(users);
+      
+      let userList: any[] = [];
+      let studentList: any[] = [];
       
       if (schoolId) {
-        // @ts-ignore
-        query = db.select().from(users).where(eq(users.schoolId, schoolId as string)).orderBy(desc(users.lastLogin));
+        userList = await db.select().from(users).where(eq(users.schoolId, schoolId as string)).orderBy(desc(users.lastLogin));
+        studentList = await db.select().from(students).where(eq(students.schoolId, schoolId as string));
+      } else {
+        userList = await db.select().from(users).orderBy(desc(users.lastLogin));
+        studentList = await db.select().from(students);
       }
       
-      const userList = await query;
-      res.json({ success: true, users: userList, data: userList });
+      const mappedStudents = studentList.map(s => ({
+        id: s.id,
+        name: s.name,
+        photo: s.avatar,
+        role: 'student',
+        grade: s.grade,
+        schoolId: s.schoolId,
+        lastActive: s.lastLogin
+      }));
+      
+      const nonStudents = userList.filter(u => u.role !== 'student' && u.role !== 'parent' && u.role !== 'driver');
+      const combined = [...nonStudents, ...mappedStudents];
+      
+      for (const st of combined) {
+        if (st.role === 'student') {
+          const userMatch = userList.find(u => u.id === st.id);
+          if (userMatch && userMatch.lastLogin) {
+            st.lastActive = userMatch.lastLogin;
+          }
+        }
+      }
+
+      res.json({ success: true, users: combined, data: combined });
     } catch (error: any) {
       console.error('Error fetching users:', error);
       res.status(500).json({ success: false, message: error.message });

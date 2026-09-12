@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Send, Image as ImageIcon, Smile, MoreVertical, Coffee, Search, Check, CheckCheck, User, MessageCircle, ArrowRight, Lock } from 'lucide-react';
+import { X, Send, Image as ImageIcon, Smile, MoreVertical, Coffee, Search, Check, CheckCheck, User, MessageCircle, ArrowRight, Lock, Paperclip, FileText, Video, Headphones, Loader2, Mic } from 'lucide-react';
 import { db, auth } from '../lib/firebase';
 import { collection, query, where, orderBy, getDocs, addDoc, updateDoc, doc, serverTimestamp, onSnapshot, limit } from '@/src/lib/firebase';
 import { realtimeManager } from '../lib/realtimeManager';
@@ -42,6 +42,11 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
 }, ref) => {
   const [messages, setMessages] = useState<LoungeMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
   const [knights, setKnights] = useState<any[]>([]); 
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
   const [teachersList, setTeachersList] = useState<any[]>([]);
@@ -169,6 +174,154 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
     });
     return () => unsubMessages();
   }, [currentChatRoomId, isGeneralChat, selectedChatUser, currentUserUid]);
+
+
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+      
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          audioChunksRef.current.push(e.data);
+        }
+      };
+      
+      mediaRecorder.onstop = async () => {
+        if (audioChunksRef.current.length > 0) {
+           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+           const audioFile = new File([audioBlob], 'voice_message.webm', { type: audioBlob.type || 'audio/webm' });
+           await uploadVoiceMessage(audioFile);
+        }
+        stream.getTracks().forEach(track => track.stop());
+      };
+      
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error('Error accessing microphone:', err);
+      alert('لا يمكن الوصول إلى الميكروفون. يرجى التحقق من الصلاحيات.');
+    }
+  };
+  
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  };
+
+  const cancelRecording = () => {
+     if (mediaRecorderRef.current && isRecording) {
+       mediaRecorderRef.current.onstop = () => {
+           mediaRecorderRef.current?.stream.getTracks().forEach(t => t.stop());
+           audioChunksRef.current = [];
+       };
+       mediaRecorderRef.current.stop();
+       setIsRecording(false);
+     }
+  };
+
+  const uploadVoiceMessage = async (file: File) => {
+    if (!auth.currentUser || !currentChatRoomId) return;
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      const uploadRes = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      
+      const uploadData = await uploadRes.json();
+      if (!uploadRes.ok) throw new Error(uploadData.error || 'Failed to upload');
+      
+      const fileUrl = uploadData.publicUrl || uploadData.url;
+      const currentName = isTeacher ? (teacherData?.name || auth.currentUser.displayName) : (userProfile?.name || userProfile?.fullName || 'طالب');
+      const currentPhoto = isTeacher ? teacherData?.photoURL : userProfile?.photoURL;
+      const currentRole = isTeacher ? 'teacher' : (userProfile?.role === 'admin' ? 'admin' : 'student');
+      
+      await fetch('/api/lounge-messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+        text: 'بصمة صوتية',
+        userId: auth.currentUser.uid,
+        userName: currentName || 'مستخدم',
+        userPhoto: currentPhoto || null,
+        userRole: currentRole,
+        schoolId: currentChatRoomId,
+        realSchoolId: schoolId,
+        recipientId: isGeneralChat ? 'all' : selectedChatUser?.id,
+        imageUrl: fileUrl, 
+        read: false,
+        grade: grade || 'all',
+      }) });
+    } catch (err) {
+      console.error("Upload error", err);
+      alert("فشل إرسال البصمة الصوتية.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !auth.currentUser || !currentChatRoomId) return;
+
+    if (isLocked && !isTeacher && userProfile?.role !== 'admin' && userProfile?.role !== 'manager' && userProfile?.role !== 'super_admin') {
+      alert("الدردشة مقفلة حالياً من قبل الإدارة.");
+      return;
+    }
+
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      const uploadRes = await fetch('/api/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      
+      const uploadData = await uploadRes.json();
+      if (!uploadRes.ok) throw new Error(uploadData.error || 'Failed to upload');
+      
+      const fileUrl = uploadData.publicUrl || uploadData.url;
+      
+      // Determine type
+      let typeText = 'مرفق';
+      const type = file.type;
+      if (type.startsWith('image/')) typeText = 'صورة';
+      else if (type.startsWith('video/')) typeText = 'فيديو';
+      else if (type.startsWith('audio/')) typeText = 'مقطع صوتي';
+      else typeText = 'ملف';
+
+      const currentName = isTeacher ? (teacherData?.name || auth.currentUser.displayName) : (userProfile?.name || userProfile?.fullName || 'طالب');
+      const currentPhoto = isTeacher ? teacherData?.photoURL : userProfile?.photoURL;
+      const currentRole = isTeacher ? 'teacher' : (userProfile?.role === 'admin' ? 'admin' : 'student');
+      
+      await fetch('/api/lounge-messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+        text: typeText,
+        userId: auth.currentUser.uid,
+        userName: currentName || 'مستخدم',
+        userPhoto: currentPhoto || null,
+        userRole: currentRole,
+        schoolId: currentChatRoomId,
+        realSchoolId: schoolId,
+        recipientId: isGeneralChat ? 'all' : selectedChatUser?.id,
+        imageUrl: fileUrl, // using imageUrl to store the file url
+        read: false
+      }) });
+    } catch (err) {
+      console.error("Upload error", err);
+      alert("فشل رفع الملف. يرجى المحاولة مرة أخرى.");
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   const handleSendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -325,11 +478,14 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
               
               {(() => {
                 const currentGrade = grade || 'غير محدد';
+                const getBaseGrade = (g: string) => g ? g.split('-')[0].split('/')[0].trim() : '';
                 const gradeMatch = (k: any) => {
                    if (isTeacher || !grade) return true;
                    const kg = k.grade || 'غير محدد';
                    if (kg === 'غير محدد' || kg === 'all') return true;
-                   return kg === currentGrade || kg.includes(currentGrade) || currentGrade.includes(kg);
+                   const currentBase = getBaseGrade(currentGrade);
+                   const userBase = getBaseGrade(kg);
+                   return currentBase === userBase || kg.includes(currentBase) || currentBase.includes(kg);
                 };
                 
                 // Merge knights with users who have unread messages but might be offline
@@ -405,7 +561,17 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
               </div>
               
               {(() => {
-                const filteredTeachers = teachersList.filter(t => t.name?.includes(searchQuery) && t.role === 'TEACHER');
+                const getBaseGrade = (g: string) => g ? g.split('-')[0].split('/')[0].trim() : '';
+                const teacherMatch = (t: any) => {
+                   if (isTeacher || !grade || grade === 'غير محدد') return true;
+                   const tClasses = Array.isArray(t.classes) ? t.classes : [];
+                   const tGrade = t.grade || '';
+                   if (tClasses.includes(grade)) return true;
+                   if (tGrade === grade) return true;
+                   const currentBase = getBaseGrade(grade);
+                   return tClasses.some((c: string) => c === currentBase || grade.includes(c)) || tGrade === currentBase || grade.includes(tGrade);
+                };
+                const filteredTeachers = teachersList.filter(t => t.name?.includes(searchQuery) && t.role === 'TEACHER' && teacherMatch(t));
 
                 return filteredTeachers.length === 0 ? (
                     <div className="flex-1 flex flex-col items-center justify-center opacity-50 grayscale mt-10">
@@ -510,7 +676,25 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                                             ? 'bg-blue-600 text-white rounded-br-sm shadow-[0_4px_15px_rgba(37,99,235,0.2)]' 
                                             : 'bg-[#1A233A] text-white/90 rounded-bl-sm border border-white/5 shadow-sm'
                                       }`}>
-                                          <p className="text-[13px] leading-relaxed whitespace-pre-wrap break-words">{msg.text}</p>
+                                          {msg.imageUrl && (
+                                              <div className="mb-2">
+                                                  {msg.imageUrl.match(/\.(jpeg|jpg|gif|png|webp|svg)$/i) ? (
+                                                      <img src={msg.imageUrl} alt="attachment" className="max-w-[200px] sm:max-w-xs rounded-xl border border-white/10" />
+                                                  ) : msg.imageUrl.match(/\.(mp4|webm|ogg)$/i) ? (
+                                                      <video src={msg.imageUrl} controls className="max-w-[200px] sm:max-w-xs rounded-xl border border-white/10" />
+                                                  ) : msg.imageUrl.match(/\.(mp3|wav|ogg)$/i) ? (
+                                                      <audio src={msg.imageUrl} controls className="max-w-[200px] sm:max-w-[250px]" />
+                                                  ) : (
+                                                      <a href={msg.imageUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 bg-black/20 p-2 rounded-lg hover:bg-black/30 transition-colors">
+                                                          <FileText size={24} className={isMe ? 'text-white' : 'text-blue-400'} />
+                                                          <span className="text-xs truncate max-w-[150px]">{msg.imageUrl.split('/').pop() || 'تحميل الملف'}</span>
+                                                      </a>
+                                                  )}
+                                              </div>
+                                          )}
+                                          {msg.text && msg.text !== 'مرفق' && msg.text !== 'صورة' && msg.text !== 'فيديو' && msg.text !== 'مقطع صوتي' && msg.text !== 'ملف' && (
+                                              <p className="text-[13px] leading-relaxed whitespace-pre-wrap break-words">{msg.text}</p>
+                                          )}
                                           
                                           {/* Timestamp */}
                                           <div className={`text-[9px] mt-1 flex items-center gap-1 ${isMe ? 'text-blue-200/70 justify-end' : 'text-white/30 justify-start'}`}>
@@ -549,44 +733,113 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                     ) : (
                     <form onSubmit={handleSendMessage} className="w-full flex items-end gap-2 bg-[#050A18] rounded-3xl border border-white/10 p-1 pl-4">
                         
-                        <textarea 
-                            value={newMessage}
-                            onChange={(e) => setNewMessage(e.target.value)}
-                            dir="auto"
-                            onKeyDown={(e) => {
-                                if (e.key === 'Enter' && !e.shiftKey) {
-                                    e.preventDefault();
-                                    handleSendMessage();
-                                }
-                            }}
-                            placeholder="اكتب رسالتك..."
-                            className="w-full bg-transparent border-none outline-none text-white text-sm py-2.5 max-h-32 min-h-[40px] resize-none no-scrollbar font-sans"
-                            rows={1}
-                        />
-                        
+                        <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
                         <button 
-                            type="submit"
-                            disabled={!newMessage.trim()}
-                            className="w-10 h-10 rounded-full bg-blue-600 hover:bg-blue-500 disabled:bg-white/5 disabled:text-white/30 text-white flex items-center justify-center transition-all shrink-0 shadow-lg mb-0.5"
+                            type="button" 
+                            onClick={() => fileInputRef.current?.click()}
+                            disabled={isUploading || isRecording}
+                            className="w-10 h-10 rounded-full hover:bg-white/5 text-white/50 hover:text-white flex items-center justify-center transition-all shrink-0 mb-0.5"
                         >
-                            <div dir="ltr" className="flex items-center justify-center mr-0.5 mt-0.5" style={{ transform: 'rotate(225deg)' }}>
-                                <Send size={18} />
-                            </div>
+                            {isUploading ? <Loader2 size={20} className="animate-spin" /> : <Paperclip size={20} />}
                         </button>
+                        
+                        {isRecording ? (
+                             <div className="flex-1 flex items-center gap-3 bg-red-500/10 px-4 rounded-xl py-2 animate-pulse border border-red-500/20 max-h-12">
+                                 <div className="w-2 h-2 rounded-full bg-red-500"></div>
+                                 <span className="text-red-400 text-sm font-bold flex-1">جاري التسجيل...</span>
+                                 <button type="button" onClick={cancelRecording} className="text-white/50 hover:text-red-400 p-1">
+                                    <X size={18} />
+                                 </button>
+                             </div>
+                        ) : (
+                            <textarea 
+                                value={newMessage}
+                                onChange={(e) => setNewMessage(e.target.value)}
+                                dir="auto"
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' && !e.shiftKey) {
+                                        e.preventDefault();
+                                        handleSendMessage();
+                                    }
+                                }}
+                                placeholder="اكتب رسالتك..."
+                                className="w-full bg-transparent border-none outline-none text-white text-sm py-2.5 max-h-32 min-h-[40px] resize-none no-scrollbar font-sans"
+                                rows={1}
+                            />
+                        )}
+                        
+                        {newMessage.trim() || isUploading ? (
+                            <button 
+                                type="submit"
+                                disabled={!newMessage.trim() || isUploading}
+                                className="w-10 h-10 rounded-full bg-blue-600 hover:bg-blue-500 disabled:bg-white/5 disabled:text-white/30 text-white flex items-center justify-center transition-all shrink-0 shadow-lg mb-0.5"
+                            >
+                                <div dir="ltr" className="flex items-center justify-center mr-0.5 mt-0.5" style={{ transform: 'rotate(225deg)' }}>
+                                    <Send size={18} />
+                                </div>
+                            </button>
+                        ) : (
+                            <button 
+                                type="button"
+                                onClick={isRecording ? stopRecording : startRecording}
+                                disabled={isUploading}
+                                className={`w-10 h-10 rounded-full flex items-center justify-center transition-all shrink-0 shadow-lg mb-0.5 ${isRecording ? 'bg-red-500 text-white animate-pulse' : 'bg-blue-600 hover:bg-blue-500 text-white'}`}
+                            >
+                                {isRecording ? <Send size={18} /> : <Mic size={18} />}
+                            </button>
+                        )}
                     </form>
                     )}
                 </div>
              </>
           ) : (
-             <div className="flex-1 flex flex-col items-center justify-center px-4 bg-[#050A18]">
-                <div className="w-20 h-20 bg-blue-500/10 rounded-full flex items-center justify-center mb-4">
+             <div className="flex-1 flex flex-col items-center justify-start px-4 pt-10 bg-[#050A18] overflow-y-auto">
+                <div className="w-20 h-20 bg-blue-500/10 rounded-full flex items-center justify-center mb-4 shrink-0">
                   <MessageCircle size={32} className="text-blue-400" />
                 </div>
-                <h3 className="text-white font-bold text-lg mb-2">محادثة خاصة</h3>
-                <p className="text-white/50 text-sm text-center mb-6 max-w-xs">يرجى اختيار فارس من قائمة الفرسان النشطين لبدء محادثة خاصة ومعزولة.</p>
+                <h3 className="text-white font-bold text-lg mb-2 shrink-0">محادثة خاصة</h3>
+                <p className="text-white/50 text-sm text-center mb-6 max-w-xs shrink-0">يرجى اختيار فارس من قائمة الفرسان النشطين لبدء محادثة خاصة ومعزولة.</p>
+                
+                {Object.keys(unreadCounts).filter(id => unreadCounts[id] > 0).length > 0 && (
+                   <div className="w-full max-w-md mt-4 flex flex-col gap-2">
+                       <h4 className="text-white/70 font-bold text-sm mb-2 text-right">رسائل غير مقروءة:</h4>
+                       {knights.filter(k => unreadCounts[k.id] > 0).map(user => (
+                          <div 
+                              key={user.id} 
+                              onClick={() => {
+                                setSelectedChatUser(user);
+                                setActiveTab('chat');
+                              }}
+                              className="flex items-center justify-between p-3 bg-white/[0.02] hover:bg-white/5 border border-white/5 rounded-2xl cursor-pointer transition-colors group"
+                          >
+                              <div className="flex items-center gap-3">
+                                  <div className="relative">
+                                      <div className={`w-11 h-11 rounded-full border border-white/10 overflow-hidden ${user.role === 'teacher' ? 'ring-1 ring-amber-400/50' : ''}`}>
+                                          {user.photo ? (
+                                             <img src={user.photo} alt={user.name} className="w-full h-full object-cover" />
+                                          ) : (
+                                             <div className="w-full h-full bg-white/5 flex items-center justify-center">
+                                                 <User size={18} className="text-white/30" />
+                                             </div>
+                                          )}
+                                      </div>
+                                      <div className="absolute -top-1 -left-1 bg-red-600 rounded-full min-w-[16px] h-[16px] px-1 flex items-center justify-center shadow-lg border-2 border-[#050A18]">
+                                          <span className="text-[9px] font-black text-white">{unreadCounts[user.id]}</span>
+                                      </div>
+                                  </div>
+                                  <div className="flex flex-col text-right">
+                                      <span className="text-[13px] text-white/90 font-bold">{user.name}</span>
+                                      <span className="text-[9px] font-bold text-white/40">اضغط للرد</span>
+                                  </div>
+                              </div>
+                          </div>
+                       ))}
+                   </div>
+                )}
+                
                 <button 
                   onClick={() => setActiveTab('knights')}
-                  className="px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-full font-bold text-sm transition-colors"
+                  className="mt-6 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-full font-bold text-sm transition-colors shrink-0"
                 >
                   العودة لقائمة الفرسان
                 </button>
