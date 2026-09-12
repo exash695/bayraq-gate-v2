@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Bot, FileUp, ClipboardCheck, HelpCircle, ScrollText, Edit2, Sparkles, Trophy, ChevronRight, Loader2, Copy, CheckCircle, Image as ImageIcon, X, Save, History, Trash2, Plus, Minus, Lock } from 'lucide-react';
+import { Bot, FileUp, ClipboardCheck, HelpCircle, ScrollText, Edit2, Sparkles, Trophy, ChevronRight, Loader2, Copy, CheckCircle, Image as ImageIcon, X, Save, History, Trash2, Plus, Minus, Lock, Search } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import TeacherActivities from "./TeacherActivities";
 import { TeacherSovereigntyManager } from './Sovereignty/TeacherSovereigntyManager';
@@ -151,7 +151,11 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({ schoolId
     if (!generatedContent || !schoolId) return;
     setIsPublishing(true);
     try {
-      const targetGrade = selectedClass || (teacherData?.classes && Array.isArray(teacherData.classes) ? teacherData.classes[0] : "الكل");
+      const isAll = !selectedClass || selectedClass === 'ALL' || selectedClass === 'كافة الشُعب' || selectedClass === 'all';
+      const teacherSecNames = (teacherData?.classes || []).filter(Boolean);
+      const targetGrade = isAll ? "الكل" : selectedClass;
+      const targetSections = isAll ? teacherSecNames : [selectedClass];
+      const targetSectionLabel = isAll ? "كافة الشُعب" : selectedClass;
       const subject = teacherData?.subject || "عام";
       
       const savedItem = savedResults.find(r => r.content === generatedContent);
@@ -165,6 +169,9 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({ schoolId
         tool: toolName,
         subject: subject,
         targetGrade: targetGrade,
+        section: isAll ? null : selectedClass,
+        targetSections: targetSections,
+        targetSectionLabel: targetSectionLabel,
         teacherId: teacherData?.id || teacherData?.code || "unknown",
         teacherName: teacherData?.name || "الأستاذ",
         timestamp: serverTimestamp(),
@@ -192,12 +199,23 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({ schoolId
     }
   });
 
+  const [historySearch, setHistorySearch] = useState('');
+
   const [deleteConfirmTarget, setDeleteConfirmTarget] = useState<'all' | string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const tools = [
-    { id: 'sovereignty', title: "مدير التحديات والسيادة", desc: "إدارة التحديات الصفية، منح الرايات، ومراقبة ترتيب الصف.", icon: Trophy, color: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/20" },
+    { 
+      id: 'sovereignty', 
+      title: "إدارة التحديات والسيادة", 
+      desc: "نعمل على تجهيزها، قريباً بين أيديكم", 
+      badge: "نعمل على تجهيزها، قريباً بين أيديكم",
+      icon: Trophy, 
+      color: "text-amber-400", 
+      bg: "bg-amber-500/10", 
+      border: "border-amber-500/20" 
+    },
     { id: 'questions', title: "توليد أسئلة", desc: "استخراج أسئلة تلقائية استنتاجية أو نصية.", icon: HelpCircle, color: "text-blue-400", bg: "bg-blue-500/10", border: "border-blue-500/20" },
     { id: 'summaries', title: "إنشاء ملخصات", desc: "تلخيص الفصول الطويلة لنقاط أساسية للطالب.", icon: ScrollText, color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20" },
     { id: 'homework', title: "صناعة واجبات", desc: "تكوين أنشطة صفية وواجبات منزلية مبتكرة بضغطة زر.", icon: Edit2, color: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/20" },
@@ -254,12 +272,22 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({ schoolId
         break;
       case 'homework':
         promptMessage = isEnglish
-          ? `Hello. Based on the attached files (Subject: English, Grade: ${gradeLevel}), design an innovative, high-quality, and interactive homework assignment in English. 
+          ? `Hello. Based on the attached files (Subject: English, Grade: ${gradeLevel}), design an innovative, high-quality, and interactive homework assignment in English.
 
-CRITICAL REQUIREMENT: For each question, card, or activity in this homework, you must write the English question/task first, and immediately below it, provide a clear Arabic translation or a simplified explanation in Arabic. Do not make it only in English.
+STRICT HOMEWORK RULES:
+1. The homework is strictly for the STUDENT to solve independently.
+2. ABSOLUTELY NO ANSWERS, SOLUTIONS, HINTS, OR EXPLANATIONS. Do NOT write answers or clues in parentheses (e.g., do NOT write '(faster) الشرح:' or explain why an answer is correct).
+3. Provide ONLY the exercises, numbered questions, and clear student instructions. If Arabic translation is needed, provide ONLY the direct Arabic translation of the question/instruction without any clues, hints, or answers.
+4. Do NOT include any 'Explanation', 'Answer', or 'Hint' sections or lines anywhere.
 
 ${baseFormatting}`
-          : `أهلاً. بناءً على الملفات المرفقة (مادة ${subject} لـ ${gradeLevel})، اصنع واجبًا منزليًا مبتكرًا صفحة بصفحة يجمع بين التطبيق العملي/البحثي والأسئلة التحليلية. أريد واجباً يكسر الروتين ويثير فضول الطلاب. \n\n${baseFormatting}`;
+          : `أهلاً. بناءً على الملفات المرفقة (مادة ${subject} لـ ${gradeLevel})، اصنع واجبًا منزليًا مبتكرًا صفحة بصفحة يجمع بين التطبيق العملي/البحثي والأسئلة التحليلية.
+قواعد صارمة جداً للواجب:
+1. هذا الواجب مخصص ليحله الطالب بنفسه دون أي مساعدة.
+2. ممنوع منعاً باتاً كتابة الحلول أو الإجابات النموذجية أو التلميحات أو الشروحات للنقاط أو الأسئلة (لا تكتب الشرح أو الحل أو تلميح إطلاقاً).
+3. يجب أن يحتوي الواجب على نص الأسئلة والتمارين والتعليمات فقط دون إعطاء الطالب أي مفتاح حل أو توضيح للإجابة.
+
+${baseFormatting}`;
         break;
       case 'ideas':
         promptMessage = isEnglish
@@ -340,6 +368,7 @@ ${baseFormatting}`
         credentials: 'same-origin',
         signal: controller.signal,
         body: JSON.stringify({
+          isTeacherMode: true,
           context: "أنت مساعد ذكي للأكاديميين والمعلمين في منصة تعليمية احترافية. دورك الأساسي هو توفير محتوى ومواد تعليمية جاهزة للاستخدام من قبل الأستاذ. تخاطب الأستاذ باحترام وبمسميات تليق به (يا أستاذنا، زميلي العزيز)، وتصيغ المحتوى بحيث يكون مرتباً ومنسقاً بصرياً (Markdown) وجاهزاً للنسخ مباشرة. اعمل على الملفات صفحة بصفحة بشكل دقيق وشامل.",
           message: promptMessage,
           fileUrls: fileUrls,
@@ -455,23 +484,38 @@ ${baseFormatting}`
       
             {activeTool === 'sovereignty' ? (
         <div className="relative z-10 flex-1 h-auto flex flex-col">
-          <div className="flex justify-end mb-4">
-            <button onClick={() => setActiveTool(null)} className="flex items-center gap-2 text-white/50 hover:text-white font-bold transition-colors bg-white/5 hover:bg-white/10 px-4 py-2 rounded-xl border border-white/10 w-fit cursor-pointer">
-              <ChevronRight size={20} /> عودة للمساعد
+          <div className="flex justify-between items-center mb-4">
+            <button onClick={() => setActiveTool(null)} className="flex items-center gap-2 text-white/70 hover:text-white font-bold transition-colors bg-white/5 hover:bg-white/10 px-4 py-2 rounded-xl border border-white/10 w-fit cursor-pointer">
+              <ChevronRight size={20} /> العودة للمساعد الذكي
             </button>
+            <span className="text-xs text-amber-400/80 font-bold hidden sm:inline">✨ إدارة التحديات والسيادة</span>
           </div>
-          <div className="flex-1 relative">
-            <TeacherSovereigntyManager language="ar" teacherData={teacherData} />
+          <div className="flex-1 flex flex-col items-center justify-center p-8 sm:p-12 text-center bg-[#0C1229]/90 border border-amber-500/20 rounded-3xl backdrop-blur-md shadow-2xl min-h-[420px]">
+            <div className="w-20 h-20 rounded-3xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 mb-6 shadow-[0_0_30px_rgba(245,158,11,0.2)]">
+              <Trophy size={40} className="animate-pulse" />
+            </div>
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-amber-500/15 border border-amber-500/30 text-amber-300 rounded-full text-xs sm:text-sm font-black mb-4 shadow-sm animate-pulse">
+              <span>⏳</span>
+              <span>قريباً في التحديث القادم</span>
+            </div>
+            <h3 className="text-2xl sm:text-3xl font-black text-white mb-3">إدارة التحديات والسيادة</h3>
+            <p className="text-lg sm:text-xl text-amber-300 font-black max-w-lg leading-relaxed">
+              نعمل على تجهيزها، قريباً بين أيديكم
+            </p>
+            <p className="text-xs sm:text-sm text-white/50 mt-3 max-w-md font-medium leading-relaxed">
+              يتم العمل حالياً على تجهيز قسم إدارة التحديات والسيادة الصفية وتكامله مع نظام الرايات والمسابقات التفاعلية لتقديم تجربة حماسية متميزة.
+            </p>
           </div>
         </div>
       ) : activeTool === 'activities' ? (
-        <div className="relative z-10 flex-1 h-auto flex flex-col">
-          <div className="flex justify-end mb-4">
-            <button onClick={() => setActiveTool(null)} className="flex items-center gap-2 text-white/50 hover:text-white font-bold transition-colors bg-white/5 hover:bg-white/10 px-4 py-2 rounded-xl border border-white/10 w-fit cursor-pointer">
-              <ChevronRight size={20} /> عودة للمساعد
+        <div className="relative z-10 flex-1 h-auto flex flex-col -mx-4 md:-mx-6 -my-4 md:-my-6 w-[calc(100%+2rem)] md:w-[calc(100%+3rem)]">
+          <div className="flex justify-between items-center px-4 sm:px-6 py-3 bg-[#0A0F24]/90 border-b border-white/10 shrink-0">
+            <button onClick={() => setActiveTool(null)} className="flex items-center gap-2 text-white/70 hover:text-white font-bold transition-colors bg-white/5 hover:bg-white/10 px-3.5 py-1.5 rounded-xl border border-white/10 text-xs sm:text-sm cursor-pointer shadow-sm">
+              <ChevronRight size={18} /> العودة للمساعد الذكي
             </button>
+            <span className="text-xs text-indigo-400 font-bold hidden sm:inline">📊 قسم متابعة أنشطة الطلاب (شاشة كاملة)</span>
           </div>
-          <div className="flex-1 relative">
+          <div className="flex-1 relative w-full">
             <TeacherActivities schoolId={schoolId} teacherData={teacherData} selectedClass={selectedClass} />
           </div>
         </div>
@@ -524,8 +568,15 @@ ${baseFormatting}`
                 className={`bg-[#0C1229]/80 backdrop-blur-md border ${item.border} rounded-3xl p-5 md:p-6 transition-all duration-300 cursor-pointer group shadow-[0_4px_20px_rgba(0,0,0,0.2)] overflow-hidden relative`}
               >
                 <div className={`absolute -right-10 -top-10 w-32 h-32 ${item.bg} rounded-full blur-2xl group-hover:scale-150 transition-all duration-500`} />
-                <div className={`w-12 h-12 rounded-2xl ${item.bg} ${item.color} flex items-center justify-center mb-5 border ${item.border} group-hover:scale-110 transition-transform duration-300`}>
-                  <item.icon size={24} />
+                <div className="flex items-start justify-between gap-2 mb-5">
+                  <div className={`w-12 h-12 rounded-2xl ${item.bg} ${item.color} flex items-center justify-center border ${item.border} group-hover:scale-110 transition-transform duration-300 shrink-0`}>
+                    <item.icon size={24} />
+                  </div>
+                  {(item as any).badge && (
+                    <span className="px-2.5 py-1 text-[10px] sm:text-[11px] font-black bg-amber-500/20 border border-amber-500/35 text-amber-300 rounded-full shadow-sm animate-pulse text-right leading-tight">
+                      {(item as any).badge}
+                    </span>
+                  )}
                 </div>
                 <h3 className="text-lg md:text-xl font-black text-white mb-2">{item.title}</h3>
                 <p className="text-white/50 text-xs md:text-sm font-bold leading-relaxed">{item.desc}</p>
@@ -593,8 +644,13 @@ ${baseFormatting}`
               <div className="bg-[#0A1024]/80 border border-white/5 rounded-3xl p-5 shadow-lg h-fit max-h-[500px] overflow-y-auto custom-scrollbar">
                 {activeTool === 'history' ? (
                   <>
-                    <div className="flex items-center justify-between mb-4 pb-2 border-b border-white/5 gap-2">
-                      <label className="text-sm font-bold text-white/70">النتائج المحفوظة ({savedResults.length})</label>
+                    <div className="flex items-center justify-between mb-3 pb-2 border-b border-white/5 gap-2">
+                      <label className="text-sm font-bold text-white/70">
+                        النتائج المحفوظة ({historySearch.trim() ? `${savedResults.filter(r => {
+                          const q = historySearch.trim().toLowerCase();
+                          return String(r.name || '').toLowerCase().includes(q) || String(r.tool || '').toLowerCase().includes(q) || String(r.content || '').toLowerCase().includes(q);
+                        }).length} من ${savedResults.length}` : savedResults.length})
+                      </label>
                       {savedResults.length > 0 && (
                         <button
                           onClick={() => setDeleteConfirmTarget('all')}
@@ -606,42 +662,93 @@ ${baseFormatting}`
                         </button>
                       )}
                     </div>
+
+                    {/* Filter search bar for history */}
+                    {savedResults.length > 0 && (
+                      <div className="relative mb-3">
+                        <input
+                          type="text"
+                          value={historySearch}
+                          onChange={(e) => setHistorySearch(e.target.value)}
+                          placeholder="ابحث بالاسم، نوع الأداة أو المحتوى..."
+                          className="w-full bg-[#050A18] border border-white/10 rounded-xl pr-8 pl-8 py-2 text-xs text-white placeholder:text-white/30 focus:border-teal-500/50 outline-none transition-all"
+                        />
+                        <Search size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none" />
+                        {historySearch && (
+                          <button
+                            onClick={() => setHistorySearch('')}
+                            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-white/40 hover:text-white p-0.5 rounded transition-colors cursor-pointer"
+                            title="مسح البحث"
+                          >
+                            <X size={12} />
+                          </button>
+                        )}
+                      </div>
+                    )}
+
                     {savedResults.length === 0 ? (
                       <div className="flex flex-col items-center justify-center p-6 text-white/40">
                         <History size={32} className="mb-2 opacity-50" />
                         <span className="text-xs font-bold text-center">لا توجد نتائج محفوظة بعد</span>
                       </div>
-                    ) : (
-                      <div className="flex flex-col gap-2">
-                        {savedResults.map((result) => (
-                          <div 
-                            key={result.id}
-                            onClick={() => {
-                              setGeneratedContent(result.content);
-                            }}
-                            className="bg-white/5 border border-white/10 hover:border-teal-500/30 hover:bg-white/10 p-3 rounded-xl cursor-pointer transition-all flex flex-col gap-1 group relative overflow-hidden pl-10"
-                          >
-                            <div className="flex items-center justify-between">
-                              <span className="text-sm font-bold text-white truncate max-w-[150px]">{result.name}</span>
-                              <span className="text-[10px] text-teal-400 bg-teal-400/10 px-1.5 py-0.5 rounded font-bold">{result.tool}</span>
-                            </div>
-                            <span className="text-[10px] text-white/40 font-medium">
-                              {new Date(result.date).toLocaleDateString('ar-SA')} - {new Date(result.date).toLocaleTimeString('ar-SA', {hour: '2-digit', minute:'2-digit'})}
-                            </span>
+                    ) : (() => {
+                      const filtered = savedResults.filter((result) => {
+                        if (!historySearch.trim()) return true;
+                        const q = historySearch.trim().toLowerCase();
+                        return (
+                          String(result.name || '').toLowerCase().includes(q) ||
+                          String(result.tool || '').toLowerCase().includes(q) ||
+                          String(result.content || '').toLowerCase().includes(q)
+                        );
+                      });
+
+                      if (filtered.length === 0) {
+                        return (
+                          <div className="flex flex-col items-center justify-center p-6 text-white/40">
+                            <Search size={28} className="mb-2 opacity-40 text-teal-400" />
+                            <span className="text-xs font-bold text-center">لا توجد نتائج مطابقة لبحثك</span>
                             <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setDeleteConfirmTarget(result.id);
-                              }}
-                              className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center opacity-60 group-hover:opacity-100 transition-opacity hover:bg-rose-500/20 cursor-pointer border border-rose-500/20"
-                              title="حذف"
+                              onClick={() => setHistorySearch('')}
+                              className="mt-2 text-[11px] text-teal-400 hover:underline cursor-pointer"
                             >
-                              <Trash2 size={13} />
+                              مسح فلتر البحث
                             </button>
                           </div>
-                        ))}
-                      </div>
-                    )}
+                        );
+                      }
+
+                      return (
+                        <div className="flex flex-col gap-2">
+                          {filtered.map((result) => (
+                            <div 
+                              key={result.id}
+                              onClick={() => {
+                                setGeneratedContent(result.content);
+                              }}
+                              className="bg-white/5 border border-white/10 hover:border-teal-500/30 hover:bg-white/10 p-3 rounded-xl cursor-pointer transition-all flex flex-col gap-1 group relative overflow-hidden pl-10"
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="text-sm font-bold text-white truncate max-w-[150px]">{result.name}</span>
+                                <span className="text-[10px] text-teal-400 bg-teal-400/10 px-1.5 py-0.5 rounded font-bold">{result.tool}</span>
+                              </div>
+                              <span className="text-[10px] text-white/40 font-medium">
+                                {new Date(result.date).toLocaleDateString('ar-SA')} - {new Date(result.date).toLocaleTimeString('ar-SA', {hour: '2-digit', minute:'2-digit'})}
+                              </span>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeleteConfirmTarget(result.id);
+                                }}
+                                className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center opacity-60 group-hover:opacity-100 transition-opacity hover:bg-rose-500/20 cursor-pointer border border-rose-500/20"
+                                title="حذف"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </>
                 ) : (
                   <>

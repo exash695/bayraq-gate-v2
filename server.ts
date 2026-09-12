@@ -186,6 +186,14 @@ async function startServer() {
     next();
   });
 
+  // Client error logging endpoint
+  app.post('/api/log-client-error', (req, res) => {
+    try {
+      require('fs').writeFileSync('client-error.log', JSON.stringify(req.body, null, 2));
+    } catch (e) {}
+    res.send({ status: 'logged' });
+  });
+
   // System cache flush endpoints
   app.post('/api/system/flush-cache', (req, res) => {
     res.json({ success: true, message: 'System cache flushed successfully' });
@@ -3200,7 +3208,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
   });
 
   app.post(["/api/gemini/chat", "/api/worker/ai/chat"], async (req, res) => {
-    const { context, message, history = [], imageUrl, fileUrls = [] } = req.body;
+    const { context, message, history = [], imageUrl, fileUrls = [], isTeacherMode } = req.body;
     if (!process.env.GEMINI_API_KEY) {
       return res.status(500).json({ error: "GEMINI_API_KEY is not set" });
     }
@@ -3243,7 +3251,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
       }
     }
 
-    const systemInstruction = `
+    const systemInstruction = isTeacherMode ? context : `
       أنت مساعد ذكي لمنصة تعليمية.
       مهمتك هي الإجابة على أسئلة الطلاب بناءً حصراً على المحتوى الدراسي المقدم لك أدناه.
       المحتوى الدراسي للصفحة الحالية:
@@ -4460,69 +4468,152 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
   });
 
   // --- قسم جدول الحصص (Class Schedules) ---
-
-  app.get('/api/schedules', async (req, res) => {
+  const handleGetClassSchedules = async (req: express.Request, res: express.Response) => {
     try {
-      const { schoolId } = req.query;
+      const { schoolId, className, teacherId } = req.query;
       let queryBuilder = db.select().from(class_schedules);
-      
-      if (schoolId && schoolId !== 'all') {
-        queryBuilder = queryBuilder.where(eq(class_schedules.schoolId, schoolId as string)) as any;
+      const filters = [];
+      if (schoolId && schoolId !== 'all') filters.push(eq(class_schedules.schoolId, schoolId as string));
+      if (teacherId && teacherId !== 'all') filters.push(eq(class_schedules.teacherId, teacherId as string));
+      if (filters.length > 0) {
+        queryBuilder = queryBuilder.where(and(...filters)) as any;
       }
-      
       const results = await queryBuilder.orderBy(asc(class_schedules.dayOfWeek), asc(class_schedules.startTime));
-      // Map to the structure expected by the frontend
-      const mapped = results.map(s => ({
+
+      // Fetch teachers to resolve teacher names
+      const teacherMap = new Map<string, string>();
+      try {
+        const allTeachers = await db.select().from(teachers);
+        allTeachers.forEach(t => {
+          if (t.id && t.name) teacherMap.set(t.id, t.name);
+        });
+      } catch (tErr) {
+        console.warn("Schedule: failed to resolve teachers", tErr);
+      }
+
+      // Flexible className filter if requested
+      let filtered = results;
+      if (className && className !== 'all') {
+        const targetClean = String(className).trim();
+        const normTarget = targetClean.replace(/[\u064B-\u065F\u0670]/g, '').replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/(?:^|\s)ال/g, ' ').replace(/\s+/g, '');
+        filtered = results.filter(s => {
+          if (!s.className) return false;
+          if (s.className.trim() === targetClean) return true;
+          const normA = s.className.replace(/[\u064B-\u065F\u0670]/g, '').replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/(?:^|\s)ال/g, ' ').replace(/\s+/g, '');
+          return normA === normTarget || normA.includes(normTarget) || normTarget.includes(normA);
+        });
+      }
+
+      const mapped = filtered.map(s => ({
         id: s.id,
+        schoolId: s.schoolId,
         day: s.dayOfWeek,
+        dayOfWeek: s.dayOfWeek,
         className: s.className,
-        sectionName: s.sectionName,
+        sectionName: s.sectionName || null,
         time: s.startTime,
+        startTime: s.startTime,
+        endTime: s.endTime || s.startTime,
         teacherId: s.teacherId,
-        teacherName: '', // Frontend expects teacherName, but we might need to join or fetch separately
+        teacherName: (s.teacherId ? teacherMap.get(s.teacherId) : '') || '',
         subject: s.subject,
-        type: s.classType || 'physical'
+        type: s.classType || 'physical',
+        classType: s.classType || 'physical'
       }));
-      res.json({ success: true, schedules: mapped });
+      res.json({ success: true, schedules: mapped, data: mapped });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }
-  });
+  };
 
-  app.post('/api/schedules', async (req, res) => {
+  const handlePostClassSchedule = async (req: express.Request, res: express.Response) => {
     try {
-      const { day, className, sectionName, time, teacherId, teacherName, subject, type, schoolId } = req.body;
-      const id = `sch_${Date.now()}`;
-      
-      await db.insert(class_schedules).values({
-        id,
-        schoolId,
-        teacherId,
-        className,
-        sectionName: sectionName || null,
-        classType: type || 'physical',
-        subject,
-        dayOfWeek: day,
-        startTime: time,
-        endTime: time,
-        createdAt: new Date()
+      const body = req.body || {};
+      const id = body.id || `sch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const dayOfWeek = body.dayOfWeek || body.day || '';
+      const className = body.className || body.class_name || '';
+      const startTime = body.startTime || body.start_time || body.time || '';
+      const endTime = body.endTime || body.end_time || startTime;
+      const teacherId = body.teacherId || body.teacher_id || null;
+      const subject = body.subject || '';
+      const schoolId = body.schoolId || body.school_id || 'school1';
+      const sectionName = body.sectionName || body.section_name || null;
+      const classType = body.type || body.class_type || 'physical';
+
+      const newSched = { id, schoolId, teacherId, className, sectionName, classType, subject, dayOfWeek, startTime, endTime, createdAt: new Date() };
+      await db.insert(class_schedules).values(newSched).onConflictDoUpdate({
+        target: class_schedules.id,
+        set: { teacherId, className, sectionName, classType, subject, dayOfWeek, startTime, endTime, schoolId }
       });
-      
-      res.json({ success: true, id });
+
+      realtimeServerInstance?.broadcastManual('class_schedules', id, 'INSERT', newSched);
+      realtimeServerInstance?.broadcastManual('schedules', id, 'INSERT', newSched);
+      res.json({ success: true, id, schedule: newSched, data: newSched });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }
-  });
+  };
 
-  app.delete('/api/schedules/:id', async (req, res) => {
+  const handlePatchClassSchedule = async (req: express.Request, res: express.Response) => {
     try {
       const { id } = req.params;
-      await db.delete(class_schedules).where(eq(class_schedules.id, id));
+      const updates = req.body || {};
+      const mapped: any = {};
+
+      if (updates.incrementViews) {
+        await db.execute(sql`UPDATE recorded_lessons SET views = COALESCE(views, 0) + 1 WHERE id = ${id}`);
+        realtimeServerInstance?.broadcastManual('recorded_lessons', id, 'UPDATE', { id, incrementViews: true });
+        return res.json({ success: true });
+      }
+
+      if (updates.dayOfWeek !== undefined || updates.day !== undefined) mapped.dayOfWeek = updates.dayOfWeek ?? updates.day;
+      if (updates.className !== undefined || updates.class_name !== undefined) mapped.className = updates.className ?? updates.class_name;
+      if (updates.sectionName !== undefined || updates.section_name !== undefined) mapped.sectionName = updates.sectionName ?? updates.section_name;
+      if (updates.startTime !== undefined || updates.time !== undefined) mapped.startTime = updates.startTime ?? updates.time;
+      if (updates.endTime !== undefined) mapped.endTime = updates.endTime;
+      if (updates.teacherId !== undefined || updates.teacher_id !== undefined) mapped.teacherId = updates.teacherId ?? updates.teacher_id;
+      if (updates.subject !== undefined) mapped.subject = updates.subject;
+      if (updates.schoolId !== undefined || updates.school_id !== undefined) mapped.schoolId = updates.schoolId ?? updates.school_id;
+      if (updates.classType !== undefined || updates.type !== undefined) mapped.classType = updates.classType ?? updates.type;
+
+      if (Object.keys(mapped).length > 0) {
+        await db.update(class_schedules).set(mapped).where(eq(class_schedules.id, id));
+        realtimeServerInstance?.broadcastManual('class_schedules', id, 'UPDATE', { id, ...mapped });
+        realtimeServerInstance?.broadcastManual('schedules', id, 'UPDATE', { id, ...mapped });
+      }
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }
-  });
+  };
+
+  const handleDeleteClassSchedule = async (req: express.Request, res: express.Response) => {
+    try {
+      const { id } = req.params;
+      await db.delete(class_schedules).where(eq(class_schedules.id, id));
+      realtimeServerInstance?.broadcastManual('class_schedules', id, 'DELETE', { id });
+      realtimeServerInstance?.broadcastManual('schedules', id, 'DELETE', { id });
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  };
+
+  app.get('/api/schedules', handleGetClassSchedules);
+  app.get('/api/class-schedules', handleGetClassSchedules);
+  app.get('/api/class_schedules', handleGetClassSchedules);
+  app.post('/api/schedules', handlePostClassSchedule);
+  app.post('/api/class-schedules', handlePostClassSchedule);
+  app.post('/api/class_schedules', handlePostClassSchedule);
+  app.patch('/api/schedules/:id', handlePatchClassSchedule);
+  app.patch('/api/class-schedules/:id', handlePatchClassSchedule);
+  app.patch('/api/class_schedules/:id', handlePatchClassSchedule);
+  app.put('/api/schedules/:id', handlePatchClassSchedule);
+  app.put('/api/class-schedules/:id', handlePatchClassSchedule);
+  app.put('/api/class_schedules/:id', handlePatchClassSchedule);
+  app.delete('/api/schedules/:id', handleDeleteClassSchedule);
+  app.delete('/api/class-schedules/:id', handleDeleteClassSchedule);
+  app.delete('/api/class_schedules/:id', handleDeleteClassSchedule);
 
   // إعدادات الأوقات في الجدول
   app.get('/api/school-settings/:schoolId/times', async (req, res) => {
@@ -6850,6 +6941,10 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         timestamp: new Date()
       };
       await db.insert(lounge_messages).values(newMsg);
+      
+      // Broadcast to both sender and recipient for realtime updates
+      realtimeServerInstance?.broadcastManual('lounge_messages', newMsg.id, 'INSERT', newMsg);
+      
       res.json({ success: true, message: newMsg });
     } catch (error: any) {
       console.error('Error sending msg', error);
@@ -6863,7 +6958,15 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
   
   app.get('/api/users', async (req, res) => {
     try {
-      const userList = await db.select().from(users);
+      const { schoolId } = req.query;
+      let query = db.select().from(users);
+      
+      if (schoolId) {
+        // @ts-ignore
+        query = db.select().from(users).where(eq(users.schoolId, schoolId as string)).orderBy(desc(users.lastLogin));
+      }
+      
+      const userList = await query;
       res.json({ success: true, users: userList, data: userList });
     } catch (error: any) {
       console.error('Error fetching users:', error);
@@ -7569,6 +7672,17 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         console.warn("Could not query video_comments count map:", e);
       }
 
+      // Lookup teacher names
+      const teacherMap = new Map<string, string>();
+      try {
+        const allTeachers = await db.select({ id: teachers.id, name: teachers.name }).from(teachers);
+        for (const t of allTeachers) {
+          if (t.id && t.name) teacherMap.set(t.id, t.name);
+        }
+      } catch (e) {
+        console.warn("Could not query teachers map:", e);
+      }
+
       const mappedResults = results.map((item: any) => {
         let desc = item.description;
         const g = (item.grade && item.grade !== 'الكل' && item.grade !== 'عام') ? item.grade : '';
@@ -7585,8 +7699,10 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         }
         const dynamicCount = commentCountMap.get(item.id) || 0;
         const finalCount = Math.max(Number(item.commentCount ?? item.comment_count ?? 0), dynamicCount);
+        const resolvedTeacherName = item.teacherName || (item.teacherId ? teacherMap.get(item.teacherId) : null) || 'حسين هاشم';
         return {
           ...item,
+          teacherName: resolvedTeacherName,
           commentCount: finalCount,
           comment_count: finalCount,
           description: desc
@@ -7681,6 +7797,15 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
               return res.json({ success: true, duration, seconds });
             }
           }
+          try {
+            const noembedRes = await fetch(`https://noembed.com/embed?url=${encodeURIComponent(url)}`);
+            if (noembedRes.ok) {
+              const noembedData: any = await noembedRes.json();
+              if (noembedData?.title) {
+                return res.json({ success: true, title: noembedData.title, duration: null });
+              }
+            }
+          } catch (neErr) {}
         } catch (ytErr) {
           console.warn("YouTube server-side fetch failed", ytErr);
         }
@@ -7839,6 +7964,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
       }
 
       if (updates.title !== undefined) mapped.title = updates.title;
+      if (updates.duration !== undefined) mapped.duration = updates.duration;
       if (updates.videoUrl !== undefined || updates.video_url !== undefined) mapped.videoUrl = updates.videoUrl ?? updates.video_url;
       if (updates.grade !== undefined) mapped.grade = updates.grade;
       if (updates.description !== undefined) mapped.description = updates.description;
@@ -8781,115 +8907,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
     }
   });
 
-  // --- 8. Class Schedules Enhanced ---
-  const handleGetClassSchedules = async (req: express.Request, res: express.Response) => {
-    try {
-      const { schoolId, className, teacherId } = req.query;
-      let queryBuilder = db.select().from(class_schedules);
-      const filters = [];
-      if (schoolId && schoolId !== 'all') filters.push(eq(class_schedules.schoolId, schoolId as string));
-      if (className && className !== 'all') filters.push(eq(class_schedules.className, className as string));
-      if (teacherId && teacherId !== 'all') filters.push(eq(class_schedules.teacherId, teacherId as string));
-      if (filters.length > 0) {
-        queryBuilder = queryBuilder.where(and(...filters)) as any;
-      }
-      const results = await queryBuilder.orderBy(asc(class_schedules.dayOfWeek), asc(class_schedules.startTime));
-      const mapped = results.map(s => ({
-        id: s.id,
-        schoolId: s.schoolId,
-        day: s.dayOfWeek,
-        dayOfWeek: s.dayOfWeek,
-        className: s.className,
-        time: s.startTime,
-        startTime: s.startTime,
-        endTime: s.endTime,
-        teacherId: s.teacherId,
-        subject: s.subject,
-        type: 'physical'
-      }));
-      res.json({ success: true, schedules: mapped, data: mapped });
-    } catch (error: any) {
-      res.status(500).json({ success: false, message: error.message });
-    }
-  };
-  app.get('/api/class-schedules', handleGetClassSchedules);
-  app.get('/api/class_schedules', handleGetClassSchedules);
-
-  const handlePostClassSchedule = async (req: express.Request, res: express.Response) => {
-    try {
-      const body = req.body || {};
-      const id = body.id || `sch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-      const dayOfWeek = body.dayOfWeek || body.day || '';
-      const className = body.className || body.class_name || '';
-      const startTime = body.startTime || body.start_time || body.time || '';
-      const endTime = body.endTime || body.end_time || startTime;
-      const teacherId = body.teacherId || body.teacher_id || null;
-      const subject = body.subject || '';
-      const schoolId = body.schoolId || body.school_id || 'school1';
-      const sectionName = body.sectionName || body.section_name || null;
-      const classType = body.type || body.class_type || 'physical';
-
-      const newSched = { id, schoolId, teacherId, className, sectionName, classType, subject, dayOfWeek, startTime, endTime, createdAt: new Date() };
-      await db.insert(class_schedules).values(newSched).onConflictDoUpdate({
-        target: class_schedules.id,
-        set: { teacherId, className, sectionName, classType, subject, dayOfWeek, startTime, endTime, schoolId }
-      });
-
-      realtimeServerInstance?.broadcastManual('class_schedules', id, 'INSERT', newSched);
-      res.json({ success: true, id, schedule: newSched, data: newSched });
-    } catch (error: any) {
-      res.status(500).json({ success: false, message: error.message });
-    }
-  };
-  app.post('/api/class-schedules', handlePostClassSchedule);
-  app.post('/api/class_schedules', handlePostClassSchedule);
-
-  const handlePatchClassSchedule = async (req: express.Request, res: express.Response) => {
-    try {
-      const { id } = req.params;
-      const updates = req.body || {};
-      const mapped: any = {};
-
-      if (updates.incrementViews) {
-        await db.execute(sql`UPDATE recorded_lessons SET views = COALESCE(views, 0) + 1 WHERE id = ${id}`);
-        realtimeServerInstance?.broadcastManual('recorded_lessons', id, 'UPDATE', { id, incrementViews: true });
-        return res.json({ success: true });
-      }
-
-      if (updates.dayOfWeek !== undefined || updates.day !== undefined) mapped.dayOfWeek = updates.dayOfWeek ?? updates.day;
-      if (updates.className !== undefined || updates.class_name !== undefined) mapped.className = updates.className ?? updates.class_name;
-      if (updates.startTime !== undefined || updates.time !== undefined) mapped.startTime = updates.startTime ?? updates.time;
-      if (updates.endTime !== undefined) mapped.endTime = updates.endTime;
-      if (updates.teacherId !== undefined || updates.teacher_id !== undefined) mapped.teacherId = updates.teacherId ?? updates.teacher_id;
-      if (updates.subject !== undefined) mapped.subject = updates.subject;
-      if (updates.schoolId !== undefined || updates.school_id !== undefined) mapped.schoolId = updates.schoolId ?? updates.school_id;
-
-      if (Object.keys(mapped).length > 0) {
-        await db.update(class_schedules).set(mapped).where(eq(class_schedules.id, id));
-        realtimeServerInstance?.broadcastManual('class_schedules', id, 'UPDATE', { id, ...mapped });
-      }
-      res.json({ success: true });
-    } catch (error: any) {
-      res.status(500).json({ success: false, message: error.message });
-    }
-  };
-  app.patch('/api/class-schedules/:id', handlePatchClassSchedule);
-  app.patch('/api/class_schedules/:id', handlePatchClassSchedule);
-  app.put('/api/class-schedules/:id', handlePatchClassSchedule);
-  app.put('/api/class_schedules/:id', handlePatchClassSchedule);
-
-  const handleDeleteClassSchedule = async (req: express.Request, res: express.Response) => {
-    try {
-      const { id } = req.params;
-      await db.delete(class_schedules).where(eq(class_schedules.id, id));
-      realtimeServerInstance?.broadcastManual('class_schedules', id, 'DELETE', { id });
-      res.json({ success: true });
-    } catch (error: any) {
-      res.status(500).json({ success: false, message: error.message });
-    }
-  };
-  app.delete('/api/class-schedules/:id', handleDeleteClassSchedule);
-  app.delete('/api/class_schedules/:id', handleDeleteClassSchedule);
+  // --- 8. Class Schedules Enhanced (handled above) ---
 
   // --- 9. Transport Module ---
   app.get('/api/transport/routes', async (req, res) => {
@@ -9173,7 +9191,13 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         queryBuilder = queryBuilder.where(and(...filters)) as any;
       }
       const results = await queryBuilder.orderBy(desc(exam_papers.createdAt));
-      res.json({ success: true, papers: results, data: results });
+      const formatted = results.map(p => ({
+        ...p,
+        title: p.title || `${p.subject || 'امتحان'} - ${p.role || ''} ${p.year || ''}`.trim(),
+        targetGrade: p.targetGrade || p.grade || '',
+        imageUrl: p.imageUrl || ''
+      }));
+      res.json({ success: true, papers: formatted, data: formatted });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }
@@ -9183,6 +9207,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
     try {
       const body = req.body || {};
       const id = body.id || `exam_${Date.now()}`;
+      const targetGrade = body.targetGrade || body.grade || '';
       const newExam = {
         id,
         schoolId: body.schoolId || body.school_id || 'school1',
@@ -9190,6 +9215,10 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         subject: body.subject || '',
         year: body.year || '2025/2026',
         role: body.role || 'دور أول',
+        title: body.title || `${body.subject || 'امتحان'} - ${body.role || 'امتحان'} ${body.year || ''}`.trim(),
+        grade: targetGrade,
+        targetGrade,
+        targetSections: Array.isArray(body.targetSections) ? body.targetSections : [],
         imageUrl: body.imageUrl || body.image_url || body.url || '',
         createdAt: new Date()
       };
@@ -9217,17 +9246,34 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
 
   const handleGetQuestionBank = async (req: express.Request, res: express.Response) => {
     try {
-      const { schoolId, subject, grade } = req.query;
+      const { schoolId, subject, grade, category } = req.query;
       let queryBuilder = db.select().from(question_bank);
       const filters = [];
       if (schoolId && schoolId !== 'all') filters.push(eq(question_bank.schoolId, schoolId as string));
       if (subject && subject !== 'all') filters.push(eq(question_bank.subject, subject as string));
-      if (grade && grade !== 'all') filters.push(eq(question_bank.grade, grade as string));
+      if (grade && grade !== 'all') filters.push(or(eq(question_bank.grade, grade as string), eq(question_bank.targetGrade, grade as string)));
+      if (category && category !== 'all') filters.push(eq(question_bank.category, category as string));
       if (filters.length > 0) {
         queryBuilder = queryBuilder.where(and(...filters)) as any;
       }
       const results = await queryBuilder.orderBy(desc(question_bank.createdAt));
-      res.json({ success: true, questions: results, data: results });
+      const formatted = results.map(q => {
+        const text = q.question || (q as any).text || '';
+        const categoryVal = q.category || 'ministerial';
+        const tagsVal = Array.isArray(q.tags) ? q.tags : [];
+        const gradeVal = q.grade || q.targetGrade || '';
+        return {
+          ...q,
+          text,
+          question: text,
+          category: categoryVal,
+          tags: tagsVal,
+          grade: gradeVal,
+          targetGrade: gradeVal,
+          options: Array.isArray(q.options) ? q.options : []
+        };
+      });
+      res.json({ success: true, questions: formatted, data: formatted });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }
@@ -9239,16 +9285,26 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
     try {
       const body = req.body || {};
       const id = body.id || `q_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const text = body.question || body.text || '';
+      const gradeVal = body.grade || body.targetGrade || '';
+      const tagsVal = Array.isArray(body.tags) 
+        ? body.tags 
+        : (typeof body.tags === 'string' ? body.tags.split(',').map((t: string) => t.trim()).filter(Boolean) : []);
+      
       const newQ = {
         id,
         schoolId: body.schoolId || body.school_id || 'school1',
         teacherId: body.teacherId || body.teacher_id || null,
         teacherName: body.teacherName || body.teacher_name || null,
         subject: body.subject || '',
-        grade: body.grade || '',
-        type: body.type || 'mcq',
-        question: body.question || '',
-        options: body.options || [],
+        grade: gradeVal,
+        targetGrade: gradeVal,
+        category: body.category || 'ministerial',
+        tags: tagsVal,
+        targetSections: Array.isArray(body.targetSections) ? body.targetSections : [],
+        type: body.type || 'custom',
+        question: text,
+        options: Array.isArray(body.options) ? body.options : [],
         correctAnswer: body.correctAnswer || body.correct_answer || '',
         explanation: body.explanation || '',
         difficulty: body.difficulty || 'medium',
@@ -9259,8 +9315,12 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         target: question_bank.id,
         set: newQ
       });
-      realtimeServerInstance?.broadcastManual('question_bank', id, 'INSERT', newQ);
-      res.json({ success: true, id, question: newQ, data: newQ });
+      const responsePayload = {
+        ...newQ,
+        text: newQ.question
+      };
+      realtimeServerInstance?.broadcastManual('question_bank', id, 'INSERT', responsePayload);
+      res.json({ success: true, id, question: responsePayload, data: responsePayload });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }

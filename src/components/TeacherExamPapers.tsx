@@ -37,14 +37,31 @@ export const TeacherExamPapers: React.FC<TeacherExamPapersProps> = ({ schoolId, 
     
     const unsub = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      const filtered = data.filter(d => (d as any).subject === subject);
-      filtered.sort((a: any, b: any) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
+      const isAll = !selectedClass || selectedClass === 'ALL' || selectedClass === 'كافة الشُعب';
+      const filtered = data.filter(d => {
+        const item = d as any;
+        if (item.subject !== subject) return false;
+        if (isAll) return true;
+        if (!item.section && (!item.targetGrade || item.targetGrade === 'all' || item.targetGrade === 'ALL')) return true;
+        return item.section === selectedClass || item.targetGrade === selectedClass || (Array.isArray(item.targetSections) && item.targetSections.includes(selectedClass));
+      });
+      const getTs = (item: any) => {
+        if (!item?.createdAt) return 0;
+        if (typeof item.createdAt.toMillis === 'function') return item.createdAt.toMillis();
+        if (typeof item.createdAt.toDate === 'function') return item.createdAt.toDate().getTime();
+        if (typeof item.createdAt.seconds === 'number') return item.createdAt.seconds * 1000;
+        if (item.createdAt instanceof Date) return item.createdAt.getTime();
+        if (typeof item.createdAt === 'number') return item.createdAt;
+        const ms = new Date(item.createdAt).getTime();
+        return isNaN(ms) ? (Number(item.createdAt) || 0) : ms;
+      };
+      filtered.sort((a: any, b: any) => getTs(b) - getTs(a));
       setPapers(filtered);
       setLoading(false);
     });
     
     return () => unsub();
-  }, [schoolId, teacherData]);
+  }, [schoolId, teacherData, selectedClass]);
 
   const handleAddPaper = async () => {
     if (!paperImage) return alert("يرجى اختيار صورة الورقة الامتحانية");
@@ -63,6 +80,9 @@ export const TeacherExamPapers: React.FC<TeacherExamPapersProps> = ({ schoolId, 
         throw new Error(errMsg || 'فشل رفع الصورة');
       }
 
+      const isAll = !selectedClass || selectedClass === 'ALL' || selectedClass === 'كافة الشُعب';
+      const teacherSecNames = (teacherData?.classes || []).filter(Boolean);
+
       await addDoc(collection(db, 'exam_papers'), {
         schoolId,
         teacherId: teacherData?.id || teacherData?.code || 'unknown',
@@ -70,6 +90,10 @@ export const TeacherExamPapers: React.FC<TeacherExamPapersProps> = ({ schoolId, 
         year,
         role,
         imageUrl: finalUrl,
+        targetGrade: isAll ? 'all' : selectedClass,
+        section: isAll ? null : selectedClass,
+        targetSections: isAll ? teacherSecNames : [selectedClass],
+        targetSectionLabel: isAll ? "كافة الشُعب" : selectedClass,
         createdAt: serverTimestamp()
       });
       
@@ -141,7 +165,12 @@ export const TeacherExamPapers: React.FC<TeacherExamPapersProps> = ({ schoolId, 
             <div className="w-10 h-10 rounded-xl bg-fuchsia-500/10 flex items-center justify-center border border-fuchsia-500/20 shrink-0">
               <FileText size={20} className="text-fuchsia-400" />
             </div>
-            <h2 className="text-xl font-black text-white tracking-tight whitespace-nowrap">الأوراق الامتحانية</h2>
+            <div className="flex flex-col text-right">
+              <h2 className="text-xl font-black text-white tracking-tight whitespace-nowrap">الأوراق الامتحانية</h2>
+              <span className="text-[10px] text-fuchsia-300/80 font-bold">
+                الشعبة المستهدفة: {(!selectedClass || selectedClass === 'ALL' || selectedClass === 'كافة الشُعب') ? 'كافة الشُعب الموكلة' : selectedClass}
+              </span>
+            </div>
           </div>
           <button 
             onClick={() => setShowAddModal(true)}

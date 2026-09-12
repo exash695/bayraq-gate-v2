@@ -115,7 +115,18 @@ export default function TeacherActivities({
     
     const unsubscribeTasks = onSnapshot(qTasks, (snap) => {
       const list = snap.docs.map(doc => ({ id: doc.id, ...doc.data() })) as any[];
-      setTasks(list.sort((a, b) => (b.timestamp?.toMillis() || 0) - (a.timestamp?.toMillis() || 0)));
+      const getTs = (item: any) => {
+        const val = item?.timestamp ?? item?.createdAt;
+        if (!val) return 0;
+        if (typeof val.toMillis === 'function') return val.toMillis();
+        if (typeof val.toDate === 'function') return val.toDate().getTime();
+        if (typeof val.seconds === 'number') return val.seconds * 1000;
+        if (val instanceof Date) return val.getTime();
+        if (typeof val === 'number') return val;
+        const ms = new Date(val).getTime();
+        return isNaN(ms) ? (Number(val) || 0) : ms;
+      };
+      setTasks(list.sort((a, b) => getTs(b) - getTs(a)));
       setLoading(false);
     }, (err) => {
       console.error(err);
@@ -129,36 +140,47 @@ export default function TeacherActivities({
   }, [schoolId, teacherData]);
 
   // Decoupled search lists for homeworks and competitions (Tasks)
-  const isClassMatch = (targetGrade?: string) => {
-    if (!selectedClass || selectedClass === 'ALL' || selectedClass === 'all') return true;
+  const isClassMatch = (targetGrade?: string, targetSections?: string[], section?: string) => {
+    if (!selectedClass || selectedClass === 'ALL' || selectedClass === 'all' || selectedClass === 'كافة الشُعب') return true;
     if (!targetGrade || targetGrade === 'all' || targetGrade === 'الكل') return true;
-    return targetGrade === selectedClass;
+    if (targetGrade === selectedClass || section === selectedClass) return true;
+    if (Array.isArray(targetSections) && targetSections.includes(selectedClass)) return true;
+    return false;
   };
 
   const homeworkTasks = tasks.filter(t => 
     t.tool === 'صناعة واجبات' && 
-    isClassMatch(t.targetGrade) &&
+    isClassMatch(t.targetGrade, t.targetSections, t.section) &&
     (t.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
      t.content?.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
   const competitionTasks = tasks.filter(t => 
     t.tool === 'مسابقات صفية' && 
-    isClassMatch(t.targetGrade) &&
+    isClassMatch(t.targetGrade, t.targetSections, t.section) &&
     (t.name?.toLowerCase().includes(searchTerm.toLowerCase()) || 
      t.content?.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
+  const activeScopeLabel = (!selectedClass || selectedClass === 'ALL' || selectedClass === 'all' || selectedClass === 'كافة الشُعب')
+    ? 'كافة الشُعب الموكلة'
+    : selectedClass;
+
   return (
-    <div className="flex flex-col min-h-[600px] bg-[#050A18] text-white rounded-3xl border border-white/10" dir="rtl">
+    <div className="flex flex-col min-h-[600px] w-full bg-[#050A18] text-white rounded-none sm:rounded-3xl border-0 sm:border sm:border-white/10 overflow-hidden" dir="rtl">
       {/* Upper header section with search and modern segmented tabs */}
-      <div className="p-6 border-b border-white/5 bg-white/5 flex flex-col xl:flex-row gap-5 justify-between items-start xl:items-center shrink-0">
+      <div className="p-4 sm:p-5 md:p-6 border-b border-white/5 bg-white/5 flex flex-col xl:flex-row gap-4 justify-between items-start xl:items-center shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center border border-indigo-500/20">
             <ClipboardCheck size={24} />
           </div>
           <div>
-            <h2 className="text-2xl font-black text-white">متابعة الأنشطة</h2>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-xl sm:text-2xl font-black text-white">متابعة الأنشطة</h2>
+              <span className="text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-2.5 py-0.5 rounded-full font-bold">
+                📌 {activeScopeLabel}
+              </span>
+            </div>
             <p className="text-white/40 text-xs mt-1">تتبع إنجازات الطلاب وتقييم الواجبات والمسابقات</p>
           </div>
         </div>
@@ -207,7 +229,7 @@ export default function TeacherActivities({
       </div>
 
       {/* Main Content Area */}
-      <div className="flex-1 p-6">
+      <div className="flex-1 p-3 sm:p-5 md:p-6 w-full">
         {loading ? (
           <div className="flex items-center justify-center text-white/40 min-h-[300px]">جاري التحميل...</div>
         ) : (
@@ -240,50 +262,53 @@ export default function TeacherActivities({
                     {searchTerm ? "لا توجد واجبات تطابق بحثك حالياً" : "لم تقم بإنشاء أي واجبات بعد"}
                   </div>
                 ) : (
-                  <div className="flex flex-col gap-6">
+                  <div className="flex flex-col gap-5 sm:gap-6 w-full">
                     {homeworkTasks.map(task => {
                       const taskSubmissions = submissions.filter(s => s.taskId === task.id);
                       return (
-                        <div key={task.id} className="bg-white/5 border border-white/10 rounded-3xl p-5 flex flex-col gap-4">
+                        <div key={task.id} className="bg-white/5 border border-white/10 rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 flex flex-col gap-4 w-full">
                           <div className="flex justify-between items-start">
                              <div>
-                               <h4 className="text-lg font-bold text-white">{task.name || 'واجب دراسي'}</h4>
-                               <p className="text-sm text-white/50 mt-1">تاريخ النشر: {(typeof task.timestamp?.toDate === 'function' ? (typeof task.timestamp?.toDate === 'function' ? task.timestamp.toDate() : new Date(task.timestamp)) : new Date(task.timestamp)).toLocaleDateString('ar-SA')}</p>
+                               <h4 className="text-base sm:text-lg font-bold text-white">{task.name || 'واجب دراسي'}</h4>
+                               <p className="text-xs sm:text-sm text-white/50 mt-1">تاريخ النشر: {(typeof task.timestamp?.toDate === 'function' ? (typeof task.timestamp?.toDate === 'function' ? task.timestamp.toDate() : new Date(task.timestamp)) : new Date(task.timestamp)).toLocaleDateString('ar-SA')}</p>
                              </div>
-                             <button onClick={() => setDeleteTaskConfirmId(task.id)} className="text-red-400 hover:text-red-300 p-2 hover:bg-red-500/10 rounded-xl transition-colors cursor-pointer title='حذف الواجب ككل'">
+                             <button onClick={() => setDeleteTaskConfirmId(task.id)} className="text-red-400 hover:text-red-300 p-2 hover:bg-red-500/10 rounded-xl transition-colors cursor-pointer" title="حذف الواجب ككل">
                                 <Trash2 size={18} />
                              </button>
                           </div>
                           
-                          <div className="bg-[#050A18] rounded-2xl p-4 border border-white/5">
-                            <h5 className="text-sm font-bold text-amber-400/80 mb-4 flex items-center gap-2">
+                          <div className="bg-[#050A18] rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-white/5 w-full">
+                            <h5 className="text-sm font-bold text-amber-400/80 mb-3 sm:mb-4 flex items-center gap-2">
                               <User size={16} /> إجابات الطلاب ({taskSubmissions.length})
                             </h5>
                             
                             {taskSubmissions.length === 0 ? (
                               <p className="text-xs text-white/30 text-center py-4">لم يقم أي طالب بالرد على هذا الواجب حتى الآن</p>
                             ) : (
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 sm:gap-3 w-full">
                                 {taskSubmissions.map(sub => (
                                   <div 
                                     key={sub.id} 
                                     onClick={() => { setSelectedSubmission(sub); setFeedback(sub.feedback || ''); }} 
-                                    className="bg-white/5 border border-white/10 rounded-xl p-3 cursor-pointer hover:border-amber-500/40 hover:bg-white/[0.08] transition-all flex items-center gap-3"
+                                    className="bg-white/5 border border-white/10 rounded-xl p-2.5 sm:p-3 cursor-pointer hover:border-amber-500/40 hover:bg-white/[0.08] transition-all flex items-center justify-between gap-3 w-full"
                                   >
-                                    <div className="w-8 h-8 rounded-full bg-amber-500/10 flex items-center justify-center shrink-0 text-amber-500">
-                                      <User size={16} />
-                                    </div>
-                                    <div className="flex-1 min-w-0">
-                                      <h6 className="font-bold text-xs text-white truncate">{sub.studentName}</h6>
-                                      <div className="flex gap-2 items-center mt-1">
-                                        <span className={`text-[10px] ${sub.aiGraded ? 'text-indigo-400' : sub.feedback ? 'text-emerald-400' : 'text-white/40'}`}>
-                                          {sub.aiGraded ? 'تقييم تلقائي' : sub.feedback ? 'تم التقييم' : 'بانتظار التقييم'}
-                                        </span>
+                                    <div className="flex items-center gap-2.5 sm:gap-3 flex-1 min-w-0">
+                                      <div className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-amber-500/10 flex items-center justify-center shrink-0 text-amber-500">
+                                        <User size={16} />
+                                      </div>
+                                      <div className="flex-1 min-w-0">
+                                        <h6 className="font-bold text-xs sm:text-sm text-white break-words leading-snug" title={sub.studentName}>{sub.studentName}</h6>
+                                        <div className="flex gap-2 items-center mt-1">
+                                          <span className={`text-[10px] ${sub.aiGraded ? 'text-indigo-400' : sub.feedback ? 'text-emerald-400' : 'text-white/40'}`}>
+                                            {sub.aiGraded ? 'تقييم تلقائي' : sub.feedback ? 'تم التقييم' : 'بانتظار التقييم'}
+                                          </span>
+                                        </div>
                                       </div>
                                     </div>
                                     <button 
                                       onClick={(e) => { e.stopPropagation(); setDeleteConfirmId(sub.id); }}
-                                      className="text-white/20 hover:text-red-400 p-1 transition-colors"
+                                      className="text-white/20 hover:text-red-400 p-1.5 sm:opacity-0 sm:group-hover:opacity-100 transition-colors shrink-0 cursor-pointer"
+                                      title="حذف الإجابة"
                                     >
                                       <Trash2 size={14} />
                                     </button>
@@ -325,40 +350,40 @@ export default function TeacherActivities({
                     {searchTerm ? "لا توجد مسابقات تطابق بحثك حالياً" : "لم تقم بإنشاء أي مسابقات بعد"}
                   </div>
                 ) : (
-                  <div className="flex flex-col gap-6">
+                  <div className="flex flex-col gap-5 sm:gap-6 w-full">
                     {competitionTasks.map(task => {
                       const taskSubmissions = submissions.filter(s => s.taskId === task.id).sort((a, b) => b.score - a.score);
                       return (
-                        <div key={task.id} className="bg-gradient-to-br from-rose-500/5 to-fuchsia-500/5 border border-rose-500/10 rounded-3xl p-5 flex flex-col gap-4">
+                        <div key={task.id} className="bg-gradient-to-br from-rose-500/5 to-fuchsia-500/5 border border-rose-500/10 rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 flex flex-col gap-4 w-full">
                           <div className="flex justify-between items-start">
                              <div>
-                               <h4 className="text-lg font-bold text-white flex items-center gap-2">
+                               <h4 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
                                   <Trophy size={18} className="text-rose-400" />
                                   {task.name || 'مسابقة صفية'}
                                </h4>
-                               <p className="text-sm text-white/50 mt-1">تاريخ النشر: {(typeof task.timestamp?.toDate === 'function' ? (typeof task.timestamp?.toDate === 'function' ? task.timestamp.toDate() : new Date(task.timestamp)) : new Date(task.timestamp)).toLocaleDateString('ar-SA')}</p>
+                               <p className="text-xs sm:text-sm text-white/50 mt-1">تاريخ النشر: {(typeof task.timestamp?.toDate === 'function' ? (typeof task.timestamp?.toDate === 'function' ? task.timestamp.toDate() : new Date(task.timestamp)) : new Date(task.timestamp)).toLocaleDateString('ar-SA')}</p>
                              </div>
                              <button onClick={() => setDeleteTaskConfirmId(task.id)} className="text-red-400 hover:text-red-300 p-2 hover:bg-red-500/10 rounded-xl transition-colors cursor-pointer" title="حذف المسابقة ككل">
                                 <Trash2 size={18} />
                              </button>
                           </div>
                           
-                          <div className="bg-[#0A0F24]/80 rounded-2xl p-4 border border-white/5">
-                            <h5 className="text-sm font-bold text-rose-400/80 mb-4 flex items-center gap-2">
+                          <div className="bg-[#0A0F24]/80 rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-white/5 w-full">
+                            <h5 className="text-sm font-bold text-rose-400/80 mb-3 sm:mb-4 flex items-center gap-2">
                               <Trophy size={16} /> الترتيب ونتائج الطلاب ({taskSubmissions.length})
                             </h5>
                             
                             {taskSubmissions.length === 0 ? (
                               <p className="text-xs text-white/30 text-center py-4">لم يقم أي طالب بإنهاء هذه المسابقة حتى الآن</p>
                             ) : (
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 sm:gap-3 w-full">
                                 {taskSubmissions.map((sub, i) => (
                                   <div 
                                     key={sub.id} 
-                                    className="bg-white/5 border border-white/10 rounded-xl p-3 flex items-center justify-between group hover:bg-black/40 hover:border-rose-500/30 transition-all"
+                                    className="bg-white/5 border border-white/10 rounded-xl p-2.5 sm:p-3 flex items-center justify-between gap-3 group hover:bg-black/40 hover:border-rose-500/30 transition-all w-full"
                                   >
-                                    <div className="flex items-center gap-3 overflow-hidden">
-                                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-black shrink-0 text-xs ${
+                                    <div className="flex items-center gap-2.5 sm:gap-3 flex-1 min-w-0">
+                                      <div className={`w-8 h-8 sm:w-9 sm:h-9 rounded-lg flex items-center justify-center font-black shrink-0 text-xs sm:text-sm ${
                                         i === 0 
                                           ? 'bg-amber-500 text-black shadow-lg shadow-amber-500/20' 
                                           : i === 1 
@@ -369,17 +394,20 @@ export default function TeacherActivities({
                                       }`}>
                                         {i + 1}
                                       </div>
-                                      <div className="min-w-0">
-                                        <h4 className="font-bold text-sm text-white truncate">{sub.studentName}</h4>
+                                      <div className="flex-1 min-w-0">
+                                        <h4 className="font-bold text-xs sm:text-sm text-white break-words leading-snug" title={sub.studentName}>
+                                          {sub.studentName}
+                                        </h4>
                                       </div>
                                     </div>
-                                    <div className="flex items-center gap-3 shrink-0">
-                                      <div className="text-rose-400 font-black text-sm px-2.5 py-1 bg-rose-500/10 rounded-lg border border-rose-500/20">
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      <div className="text-rose-400 font-black text-xs sm:text-sm px-2.5 py-1 bg-rose-500/10 rounded-lg border border-rose-500/20 whitespace-nowrap">
                                         {sub.score} <span className="text-[10px] text-rose-400/50 font-normal">/ {sub.totalQuestions}</span>
                                       </div>
                                       <button 
                                         onClick={() => setDeleteConfirmId(sub.id)}
-                                        className="text-white/20 hover:text-red-400 p-1 opacity-0 group-hover:opacity-100 transition-all"
+                                        className="text-white/20 hover:text-red-400 p-1.5 sm:opacity-0 sm:group-hover:opacity-100 transition-all cursor-pointer shrink-0"
+                                        title="حذف النتيجة"
                                       >
                                         <Trash2 size={14} />
                                       </button>

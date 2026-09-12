@@ -97,7 +97,27 @@ import type { Teacher, MaterialField, Post, SchoolPlatformProps, PlatformTab, Ha
 import { useSchoolPlatform } from "./SchoolPlatformContext";
 
 export const TeacherControlContentTab: React.FC = () => {
-  const { academyPages, activeWorkingClass, aiExtractionAbortControllerRef, aiExtractionError, aiExtractionLogs, aiExtractionPercent, aiExtractionProgress, aiExtractionTimeRemaining, debugFileName, debugFileSize, debugLastOperation, debugPageCount, debugStartTime, editingQueueIndex, extractedAiTitle, getFileNameFromStack, getFunctionNameFromStack, isExtractingAiText, isMountedRef, navTriggers, pendingEditorTab, pendingExtractedAi, pendingUnitTitle, previewPageIndex, progress, revealedSolutions, schoolId, setAcademyPages, setAiExtractionError, setAiExtractionLogs, setAiExtractionPercent, setAiExtractionProgress, setAiExtractionTimeRemaining, setDebugFileName, setDebugFileSize, setDebugLastOperation, setDebugPageCount, setDebugStartTime, setDeletingAcademyPageId, setEditingQueueIndex, setExtractedAiTitle, setIsExtractingAiText, setPendingEditorTab, setPendingExtractedAi, setPendingUnitTitle, setPreviewPageIndex, setRevealedSolutions, setSelectedAcademyPage, setShowAiCancelConfirm, setShowDebugLogsPanel, setShowTransformerLogs, setSingleUploadedPagesQueue, showAiCancelConfirm, showDebugLogsPanel, showToast, showTransformerLogs, singleUploadedPagesQueue, teacherData, userProfile } = useSchoolPlatform();
+  const { academyPages, activeWorkingClass, aiExtractionAbortControllerRef, aiExtractionError, aiExtractionLogs, aiExtractionPercent, aiExtractionProgress, aiExtractionTimeRemaining, debugFileName, debugFileSize, debugLastOperation, debugPageCount, debugStartTime, editingQueueIndex, extractedAiTitle, getFileNameFromStack, getFunctionNameFromStack, isExtractingAiText, isMountedRef, navTriggers, pendingEditorTab, pendingExtractedAi, pendingUnitTitle, previewPageIndex, progress, revealedSolutions, schoolId, selectedTeacherClass, teacherAssignedSections, targetBroadcastGrade, setAcademyPages, setAiExtractionError, setAiExtractionLogs, setAiExtractionPercent, setAiExtractionProgress, setAiExtractionTimeRemaining, setDebugFileName, setDebugFileSize, setDebugLastOperation, setDebugPageCount, setDebugStartTime, setDeletingAcademyPageId, setEditingQueueIndex, setExtractedAiTitle, setIsExtractingAiText, setPendingEditorTab, setPendingExtractedAi, setPendingUnitTitle, setPreviewPageIndex, setRevealedSolutions, setSelectedAcademyPage, setShowAiCancelConfirm, setShowDebugLogsPanel, setShowTransformerLogs, setSingleUploadedPagesQueue, showAiCancelConfirm, showDebugLogsPanel, showToast, showTransformerLogs, singleUploadedPagesQueue, teacherData, userProfile } = useSchoolPlatform();
+
+  const isAllSections = !selectedTeacherClass || selectedTeacherClass === "ALL" || selectedTeacherClass === "كافة الشُعب";
+  const displayTargetClass = isAllSections
+    ? `كافة الشُعب الموكلة (${targetBroadcastGrade || "عام"})`
+    : selectedTeacherClass;
+
+  const filteredAcademyPages = useMemo(() => {
+    if (isAllSections) {
+      const teacherSecNames = (teacherAssignedSections || []).map((s: any) => s.name).filter(Boolean);
+      return academyPages.filter((p: any) => {
+        if (!p.section || p.section === 'ALL' || p.section === 'all' || p.section === 'كافة الشُعب') return true;
+        if (teacherSecNames.length === 0) return true;
+        return teacherSecNames.includes(p.section) || (Array.isArray(p.targetSections) && p.targetSections.some((ts: string) => teacherSecNames.includes(ts)));
+      });
+    }
+    return academyPages.filter((p: any) => {
+      if (!p.section || p.section === 'ALL' || p.section === 'all' || p.section === 'كافة الشُعب') return true;
+      return p.section === selectedTeacherClass || (Array.isArray(p.targetSections) && p.targetSections.includes(selectedTeacherClass));
+    });
+  }, [academyPages, isAllSections, selectedTeacherClass, teacherAssignedSections]);
 
   return (
                 <div className="flex flex-col lg:flex-row gap-4 sm:gap-6 w-full max-w-full px-0 sm:px-4 md:px-6 pb-6">
@@ -364,11 +384,17 @@ export const TeacherControlContentTab: React.FC = () => {
                                   });
 
                                   const generatedBookletId = `booklet_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+                                  const targetSections = isAllSections
+                                    ? (teacherAssignedSections || []).map((s: any) => s.name).filter(Boolean)
+                                    : (selectedTeacherClass ? [selectedTeacherClass] : []);
                                   const finalBooklet = {
                                     title: extractedAiTitle || "الملزمة المدمجة الشاملة",
                                     schoolId: schoolIdToUse,
                                     pages: allMergedPages,
-                                    order: Date.now()
+                                    order: Date.now(),
+                                    section: isAllSections ? null : selectedTeacherClass,
+                                    targetSections,
+                                    targetSectionLabel: displayTargetClass,
                                   };
 
                                   setAcademyPages(prev => {
@@ -1019,6 +1045,11 @@ export const TeacherControlContentTab: React.FC = () => {
                                                 ministerialQuestions: allPagesToSave[0]?.ministerialQuestions || [],
                                                 rawText: allPagesToSave[0]?.rawText || "",
                                                 extractedText: allPagesToSave[0]?.extractedText || "",
+                                                section: isAllSections ? (dataToUpdate.section || null) : selectedTeacherClass,
+                                                targetSections: isAllSections
+                                                  ? (dataToUpdate.targetSections || (teacherAssignedSections || []).map((s: any) => s.name).filter(Boolean))
+                                                  : (selectedTeacherClass ? [selectedTeacherClass] : []),
+                                                targetSectionLabel: displayTargetClass,
                                               });
                                               try {
                                                 await updateDoc(pageRef, payload);
@@ -1029,6 +1060,9 @@ export const TeacherControlContentTab: React.FC = () => {
                                               const { id: _, ...cleanData } = pendingExtractedAi;
                                               const schoolIdToUse = schoolId || userProfile?.schoolId || teacherData?.schoolId || "school1";
                                               const generatedId = `page_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+                                              const targetSections = isAllSections
+                                                ? (teacherAssignedSections || []).map((s: any) => s.name).filter(Boolean)
+                                                : (selectedTeacherClass ? [selectedTeacherClass] : []);
                                               const newPageObj = {
                                                 ...cleanData,
                                                 title: extractedAiTitle || pendingExtractedAi.title || "بدون عنوان",
@@ -1041,6 +1075,9 @@ export const TeacherControlContentTab: React.FC = () => {
                                                 extractedText: allPagesToSave[0]?.extractedText || "",
                                                 schoolId: schoolIdToUse,
                                                 order: Date.now(),
+                                                section: isAllSections ? null : selectedTeacherClass,
+                                                targetSections,
+                                                targetSectionLabel: displayTargetClass,
                                               };
 
                                               setAcademyPages(prev => {
@@ -1957,16 +1994,21 @@ export const TeacherControlContentTab: React.FC = () => {
 
                     {/* Existing Pages List */}
                     <div className="bg-[#0E152D]/30 border border-white/5 rounded-none sm:rounded-2xl border-x-0 sm:border-x border-y p-3 sm:p-4">
-                      <h4 className="text-[11px] text-white/50 font-black mb-3 pb-2 border-b border-white/5">
-                        الملزمة التفاعلية النشطة ({activeWorkingClass})
-                      </h4>
+                      <div className="flex items-center justify-between mb-3 pb-2 border-b border-white/5">
+                        <h4 className="text-[11px] text-white/50 font-black">
+                          الملزمة التفاعلية النشطة ({displayTargetClass})
+                        </h4>
+                        <span className="text-[9px] font-bold text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 px-2 py-0.5 rounded-full font-mono">
+                          {filteredAcademyPages.length} ملزمة / صفحة
+                        </span>
+                      </div>
                       <div className="space-y-2.5">
-                        {academyPages.length === 0 ? (
+                        {filteredAcademyPages.length === 0 ? (
                           <div className="text-center py-6 text-white/30 text-xs font-bold font-mono">
-                            لم يتم رفع أي صفحات للملزمة التفاعلية حتى الآن
+                            لم يتم رفع أي صفحات للملزمة التفاعلية لهذه الشعبة حتى الآن
                           </div>
                         ) : (
-                          academyPages.map((item, i) => (
+                          filteredAcademyPages.map((item, i) => (
                             <div
                               key={item.id}
                               className="flex items-center justify-between p-2.5 sm:p-3 bg-[#0B0F21]/80 border border-white/5 rounded-xl hover:border-white/10 transition-colors gap-2"
@@ -1976,9 +2018,16 @@ export const TeacherControlContentTab: React.FC = () => {
                                   <span className="text-[11px] font-black text-white/95 block max-w-full truncate overflow-hidden">
                                     {item.title || "بدون عنوان"}
                                   </span>
-                                  <span className="text-[9px] text-white/40 font-bold font-mono block mt-0.5 truncate">
-                                    مضاف تلقائياً بالذكاء الاصطناعي
-                                  </span>
+                                  <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+                                    <span className="text-[9px] text-white/40 font-bold font-mono truncate">
+                                      مضاف تلقائياً بالذكاء الاصطناعي
+                                    </span>
+                                    {(item.targetSectionLabel || item.section) && (
+                                      <span className="text-[8px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 font-bold shrink-0">
+                                        📌 {item.targetSectionLabel || item.section}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
                               <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">

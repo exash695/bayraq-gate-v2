@@ -49,13 +49,28 @@ export const TeacherQuestionBank: React.FC<TeacherQuestionBankProps> = ({ school
 
     const unsub = onSnapshot(q, (snapshot) => {
       const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-      const filtered = data.filter(d => (d as any).subject === subject);
+      const isAll = !selectedClass || selectedClass === 'ALL' || selectedClass === 'كافة الشُعب';
+      const filtered = data.filter(d => {
+        const item = d as any;
+        if (item.subject !== subject) return false;
+        if (isAll) return true;
+        if (!item.section && (!item.targetGrade || item.targetGrade === 'all' || item.targetGrade === 'ALL')) return true;
+        return item.section === selectedClass || item.targetGrade === selectedClass || (Array.isArray(item.targetSections) && item.targetSections.includes(selectedClass));
+      });
       
       // Sort by descending createdAt
       filtered.sort((a: any, b: any) => {
-          const tA = a.createdAt?.toMillis() || 0;
-          const tB = b.createdAt?.toMillis() || 0;
-          return tB - tA;
+          const getTs = (item: any) => {
+            if (!item?.createdAt) return 0;
+            if (typeof item.createdAt.toMillis === 'function') return item.createdAt.toMillis();
+            if (typeof item.createdAt.toDate === 'function') return item.createdAt.toDate().getTime();
+            if (typeof item.createdAt.seconds === 'number') return item.createdAt.seconds * 1000;
+            if (item.createdAt instanceof Date) return item.createdAt.getTime();
+            if (typeof item.createdAt === 'number') return item.createdAt;
+            const ms = new Date(item.createdAt).getTime();
+            return isNaN(ms) ? (Number(item.createdAt) || 0) : ms;
+          };
+          return getTs(b) - getTs(a);
       });
 
       setAllQuestions(filtered);
@@ -77,7 +92,7 @@ export const TeacherQuestionBank: React.FC<TeacherQuestionBankProps> = ({ school
     });
 
     return () => unsub();
-  }, [schoolId, teacherData]);
+  }, [schoolId, teacherData, selectedClass]);
 
   useEffect(() => {
       if (activeCategory) {
@@ -90,13 +105,19 @@ export const TeacherQuestionBank: React.FC<TeacherQuestionBankProps> = ({ school
   const handleAddQuestion = async () => {
     if (!qText.trim()) return alert("يرجى كتابة نص السؤال");
 
+    const isAll = !selectedClass || selectedClass === 'ALL' || selectedClass === 'كافة الشُعب';
+    const teacherSecNames = (teacherData?.classes || []).filter(Boolean);
+
     try {
       await addDoc(collection(db, 'question_bank'), {
         schoolId,
         teacherId: teacherData?.id || teacherData?.code || 'unknown',
         subject: teacherData?.subject || 'مادة عامة',
         category: activeCategory,
-        targetGrade: (selectedClass && selectedClass !== 'ALL') ? selectedClass : (teacherData?.classes?.[0] || 'all'),
+        targetGrade: isAll ? (teacherData?.classes?.[0] || 'all') : selectedClass,
+        section: isAll ? null : selectedClass,
+        targetSections: isAll ? teacherSecNames : [selectedClass],
+        targetSectionLabel: isAll ? "كافة الشُعب" : selectedClass,
         text: qText,
         type: 'custom',
         difficulty: qDifficulty,
@@ -398,6 +419,10 @@ export const TeacherQuestionBank: React.FC<TeacherQuestionBankProps> = ({ school
           <div className="flex items-center gap-1 text-white/80 font-semibold text-[11px] sm:text-xs tracking-wide drop-shadow-sm mt-0.5 min-w-0">
             <span className="shrink-0 text-[10px]">📂</span>
             <span className="truncate">المستودع الذكي لإدارة وحفظ الأسئلة</span>
+          </div>
+          <div className="flex items-center gap-1 text-cyan-300 font-bold text-[10px] sm:text-[11px] tracking-wide drop-shadow-sm mt-0.5 min-w-0">
+            <span className="shrink-0 text-[10px]">📌</span>
+            <span className="truncate">الشعبة المستهدفة: {(!selectedClass || selectedClass === 'ALL' || selectedClass === 'كافة الشُعب') ? 'كافة الشُعب الموكلة' : selectedClass}</span>
           </div>
         </div>
       </div>

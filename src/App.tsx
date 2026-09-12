@@ -10,6 +10,7 @@ import { matchesTargetGrades, isSchoolMatch } from './utils/gradeMatcher';
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { customAuth } from "./services/customAuthService";
 import { auth, db, purgeFirestore } from "./lib/firebase";
+import { api } from "./lib/api";
 import { safeStorage, safeSessionStorage } from "./lib/storage";
 import {
   doc,

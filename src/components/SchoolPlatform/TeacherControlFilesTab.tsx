@@ -103,6 +103,76 @@ export const TeacherControlFilesTab: React.FC = () => {
   const [isPublishing, setIsPublishing] = useState(false);
   const [allowDownload, setAllowDownload] = useState(false);
 
+  // ⏱️ إدارة وتعديل مدة المحاضرة المباشرة
+  const [editingLessonDurationId, setEditingLessonDurationId] = useState<string | null>(null);
+  const [newLessonDuration, setNewLessonDuration] = useState<string>("45:00");
+  const [isUpdatingDuration, setIsUpdatingDuration] = useState(false);
+  const [detectingVideoId, setDetectingVideoId] = useState<string | null>(null);
+
+  const handleSaveDuration = async (lessonId: string) => {
+    if (!newLessonDuration.trim()) {
+      showToast("يرجى كتابة مدة صالحة للمحاضرة", "error");
+      return;
+    }
+    setIsUpdatingDuration(true);
+    try {
+      const res = await fetch(`/api/recorded-lessons/${lessonId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ duration: newLessonDuration.trim() })
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        if (setRecordedLessons) {
+          setRecordedLessons((prev: any[]) => 
+            (prev || []).map((l: any) => l.id === lessonId ? { ...l, duration: newLessonDuration.trim() } : l)
+          );
+        }
+        showToast("تم تحديث مدة المحاضرة بنجاح! ⏱️", "success");
+        setEditingLessonDurationId(null);
+      } else {
+        showToast(data.message || "فشل حفظ المدة", "error");
+      }
+    } catch (e: any) {
+      showToast("تعذر تحديث مدة المحاضرة", "error");
+    } finally {
+      setIsUpdatingDuration(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleMsg = (e: MessageEvent) => {
+      try {
+        let data = e.data;
+        if (typeof data === 'string') {
+          try {
+            data = JSON.parse(data);
+          } catch (err) {
+            return;
+          }
+        }
+        let sec = 0;
+        if (data?.event === 'infoDelivery' && data?.info?.duration) {
+          sec = Math.round(data.info.duration);
+        } else if (data?.info && typeof data.info.duration === 'number') {
+          sec = Math.round(data.info.duration);
+        }
+        if (sec > 0) {
+          const h = Math.floor(sec / 3600);
+          const m = Math.floor((sec % 3600) / 60);
+          const s = sec % 60;
+          const formatted = h > 0 
+            ? `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+            : `${m}:${s.toString().padStart(2, '0')}`;
+          setUploadedVideoDuration(formatted);
+          setDetectingVideoId(null);
+        }
+      } catch (err) {}
+    };
+    window.addEventListener('message', handleMsg);
+    return () => window.removeEventListener('message', handleMsg);
+  }, [setUploadedVideoDuration]);
+
   const tData = currentTeacherData || teacherData;
   const inferredTeacherSubject = (tData?.subject ? (Array.isArray(tData.subject) ? tData.subject[0] : tData.subject) : null) || tData?.specialty || tData?.specialization || "عام";
 
@@ -119,9 +189,45 @@ export const TeacherControlFilesTab: React.FC = () => {
     return targetBroadcastGrade || (teacherAssignedSections?.[0]?.grade ? mapGradeForDocument(teacherAssignedSections[0].grade) : null) || (teacherAssignedSections?.[0]?.name ? mapGradeForDocument(teacherAssignedSections[0].name) : null) || (tData?.classes?.[0] ? mapGradeForDocument(tData.classes[0]) : null) || (tData?.grade ? mapGradeForDocument(tData.grade) : null) || "الكل";
   };
 
+  const filteredSchoolFiles = useMemo(() => {
+    if (isAllSections) {
+      const teacherSecNames = (teacherAssignedSections || []).map((s: any) => s.name).filter(Boolean);
+      return schoolFiles.filter((f: any) => {
+        if (!f.section || f.section === 'ALL' || f.section === 'all' || f.section === 'كافة الشُعب') return true;
+        if (teacherSecNames.length === 0) return true;
+        return teacherSecNames.includes(f.section) || (Array.isArray(f.targetSections) && f.targetSections.some((ts: string) => teacherSecNames.includes(ts)));
+      });
+    }
+    return schoolFiles.filter((f: any) => {
+      if (!f.section || f.section === 'ALL' || f.section === 'all' || f.section === 'كافة الشُعب') return true;
+      return f.section === selectedTeacherClass || (Array.isArray(f.targetSections) && f.targetSections.includes(selectedTeacherClass));
+    });
+  }, [schoolFiles, isAllSections, selectedTeacherClass, teacherAssignedSections]);
+
+  const filteredRecordedLessons = useMemo(() => {
+    if (isAllSections) {
+      const teacherSecNames = (teacherAssignedSections || []).map((s: any) => s.name).filter(Boolean);
+      return recordedLessons.filter((l: any) => {
+        if (!l.section || l.section === 'ALL' || l.section === 'all' || l.section === 'كافة الشُعب') return true;
+        if (teacherSecNames.length === 0) return true;
+        return teacherSecNames.includes(l.section) || (Array.isArray(l.targetSections) && l.targetSections.some((ts: string) => teacherSecNames.includes(ts)));
+      });
+    }
+    return recordedLessons.filter((l: any) => {
+      if (!l.section || l.section === 'ALL' || l.section === 'all' || l.section === 'كافة الشُعب') return true;
+      return l.section === selectedTeacherClass || (Array.isArray(l.targetSections) && l.targetSections.includes(selectedTeacherClass));
+    });
+  }, [recordedLessons, isAllSections, selectedTeacherClass, teacherAssignedSections]);
+
   useEffect(() => {
     const trimmed = (uploadedVideoUrl || "").trim();
     if (!trimmed || (!trimmed.includes("youtube.com") && !trimmed.includes("youtu.be") && !trimmed.includes("vimeo.com"))) return;
+
+    // Detect YouTube ID for client-side iframe duration extraction
+    const ytMatch = trimmed.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/|youtube\.com\/shorts\/)([^"&?\/\s]{11})/);
+    if (ytMatch && ytMatch[1]) {
+      setDetectingVideoId(ytMatch[1]);
+    }
 
     const fetchVideoMeta = async () => {
       try {
@@ -161,7 +267,20 @@ export const TeacherControlFilesTab: React.FC = () => {
   }, [uploadedVideoUrl]);
 
   return (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6" dir="rtl">
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 relative" dir="rtl">
+      {detectingVideoId && (
+        <iframe
+          key={detectingVideoId}
+          src={`https://www.youtube-nocookie.com/embed/${detectingVideoId}?enablejsapi=1`}
+          className="hidden w-0 h-0 opacity-0 pointer-events-none absolute"
+          title="yt-duration-detector"
+          onLoad={(e) => {
+            try {
+              (e.currentTarget as HTMLIFrameElement).contentWindow?.postMessage(JSON.stringify({ event: 'listening' }), '*');
+            } catch (err) {}
+          }}
+        />
+      )}
                   {/* Left Column: Upload Forms */}
                   <div className="lg:col-span-2 space-y-4">
                     {/* Sub-tab Navigation */}
@@ -435,6 +554,10 @@ export const TeacherControlFilesTab: React.FC = () => {
                                     subject: finalSubject,
                                     grade: finalGrade,
                                     section: isAllSections ? null : selectedTeacherClass,
+                                    targetSections: isAllSections
+                                      ? (teacherAssignedSections || []).map((s: any) => s.name).filter(Boolean)
+                                      : [selectedTeacherClass],
+                                    targetSectionLabel: displayTargetClass,
                                     schoolId: resolvedSchoolId,
                                     fileUrl: uploadedFileUrl || "",
                                     allowDownload,
@@ -448,7 +571,7 @@ export const TeacherControlFilesTab: React.FC = () => {
                                   if (createdFile && setSchoolFiles) {
                                     setSchoolFiles((prev: any[]) => [createdFile, ...prev.filter((f: any) => f.id !== createdFile.id)]);
                                   }
-                                  showToast("تم نشر وتعميم الملزمة بنجاح لفرسان الميدان! 🚀", "success");
+                                  showToast(`تم نشر وتعميم الملزمة بنجاح لفرسان (${displayTargetClass})! 🚀`, "success");
                                   setUploadedAssetTitle("");
                                   setUploadedAssetTag("ملخص شامل");
                                   setUploadedFileMeta(null);
@@ -471,7 +594,7 @@ export const TeacherControlFilesTab: React.FC = () => {
                                 : 'bg-amber-500 hover:bg-amber-400 text-black'
                             }`}
                           >
-                            {isPublishing ? "جاري النشر والتعميم للفرسان... ⏳" : "نشر وتعميم الملف الآن للفرسان 📚"}
+                            {isPublishing ? "جاري النشر والتعميم للفرسان... ⏳" : `نشر وتعميم الملف لـ (${displayTargetClass}) 📚`}
                           </button>
                         </div>
 
@@ -479,20 +602,20 @@ export const TeacherControlFilesTab: React.FC = () => {
                         <div className="mt-6 border-t border-white/5 pt-5 space-y-3">
                           <div className="flex items-center justify-between pb-2 border-b border-white/5">
                             <h4 className="text-[10px] text-amber-400 font-black uppercase tracking-wider">
-                              📚 سجل الملازم والملخصات المنشورة حالياً في هذا الصف
+                              📚 سجل الملازم والملخصات لـ ({displayTargetClass})
                             </h4>
                             <span className="text-[9px] text-white/40 font-mono font-bold">
-                              إجمالي الملازم: {schoolFiles.length}
+                              إجمالي الملازم: {filteredSchoolFiles.length}
                             </span>
                           </div>
 
-                          {schoolFiles.length === 0 ? (
+                          {filteredSchoolFiles.length === 0 ? (
                             <p className="text-[10px] text-white/20 py-4 text-center font-bold">
-                              لا توجد ملازم مرفوعة حالياً
+                              لا توجد ملازم مرفوعة حالياً لهذا الصف أو الشعبة
                             </p>
                           ) : (
                             <div className="space-y-2 max-h-[300px] overflow-y-auto no-scrollbar">
-                              {schoolFiles.map((file) => (
+                              {filteredSchoolFiles.map((file) => (
                                 <div
                                   key={file.id}
                                   className="flex items-center justify-between p-2.5 bg-[#0B0F21]/85 border border-white/5 rounded-xl hover:border-white/10 transition-all"
@@ -631,9 +754,16 @@ export const TeacherControlFilesTab: React.FC = () => {
                           </div>
 
                           <div>
-                            <label className="text-[10px] text-white/40 font-bold block mb-1">
-                              مدة المحاضرة (مثال: 45:00)
-                            </label>
+                            <div className="flex items-center justify-between mb-1">
+                              <label className="text-[10px] text-white/40 font-bold block">
+                                مدة المحاضرة (مثال: 45:00)
+                              </label>
+                              {uploadedVideoDuration && uploadedVideoDuration !== "جاري الاستخراج..." && uploadedVideoDuration !== "0:00" && (
+                                <span className="text-[9px] text-emerald-400 font-bold flex items-center gap-1">
+                                  <CheckCircle size={10} /> تم التحديد: {uploadedVideoDuration}
+                                </span>
+                              )}
+                            </div>
                             <input
                               type="text"
                               value={uploadedVideoDuration}
@@ -641,6 +771,23 @@ export const TeacherControlFilesTab: React.FC = () => {
                               placeholder="مثال: 45:00 أو 1:20:00"
                               className="w-full bg-[#070B19] border border-white/5 rounded-xl px-3 py-2 text-xs text-white placeholder-white/20 outline-none focus:border-[#00E5FF]/40 transition-all font-sans font-semibold text-right"
                             />
+                            <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                              <span className="text-[8px] text-white/30 font-bold">خيارات شائعة:</span>
+                              {["30:00", "40:00", "45:00", "50:00", "1:00:00"].map((preset) => (
+                                <button
+                                  key={preset}
+                                  type="button"
+                                  onClick={() => setUploadedVideoDuration(preset)}
+                                  className={`px-2 py-0.5 rounded text-[8px] font-mono font-bold transition-all cursor-pointer ${
+                                    uploadedVideoDuration === preset
+                                      ? "bg-[#00E5FF] text-black shadow-sm"
+                                      : "bg-white/5 text-white/60 hover:text-white hover:bg-white/10 border border-white/5"
+                                  }`}
+                                >
+                                  {preset}
+                                </button>
+                              ))}
+                            </div>
                           </div>
                         </div>
 
@@ -682,7 +829,11 @@ export const TeacherControlFilesTab: React.FC = () => {
                                      subject: finalSubject,
                                      grade: finalGrade,
                                      section: isAllSections ? null : selectedTeacherClass,
-                                     duration: uploadedVideoDuration || "0:00",
+                                     targetSections: isAllSections
+                                       ? (teacherAssignedSections || []).map((s: any) => s.name).filter(Boolean)
+                                       : [selectedTeacherClass],
+                                     targetSectionLabel: displayTargetClass,
+                                     duration: (uploadedVideoDuration && uploadedVideoDuration.trim() && uploadedVideoDuration !== "جاري الاستخراج...") ? uploadedVideoDuration.trim() : "45:00",
                                      date: today,
                                      videoUrl: finalVideoUrl,
                                      description: uploadedVideoDesc || defaultLectureDesc,
@@ -725,79 +876,170 @@ export const TeacherControlFilesTab: React.FC = () => {
                         <div className="mt-6 border-t border-white/5 pt-5 space-y-3">
                           <div className="flex items-center justify-between pb-2 border-b border-white/5">
                             <h4 className="text-[10px] text-[#00E5FF] font-black uppercase tracking-wider">
-                              🎥 سجل المحاضرات المرئية المنشورة حالياً في هذا الصف
+                              🎥 سجل المحاضرات المرئية لـ ({displayTargetClass})
                             </h4>
                             <span className="text-[9px] text-white/40 font-mono font-bold">
-                              إجمالي الفيديوهات: {recordedLessons.length}
+                              إجمالي الفيديوهات: {filteredRecordedLessons.length}
                             </span>
                           </div>
 
-                          {recordedLessons.length === 0 ? (
+                          {filteredRecordedLessons.length === 0 ? (
                             <p className="text-[10px] text-white/20 py-4 text-center font-bold">
-                              لا توجد محاضرات منشورة حالياً
+                              لا توجد محاضرات منشورة حالياً لهذا الصف أو الشعبة
                             </p>
                           ) : (
                             <div className="space-y-2 max-h-[300px] overflow-y-auto no-scrollbar">
-                              {recordedLessons.map((lesson) => (
+                              {filteredRecordedLessons.map((lesson) => (
                                 <div
                                   key={lesson.id}
-                                  className="flex items-center justify-between p-2.5 bg-[#0B0F21]/85 border border-white/5 rounded-xl hover:border-white/10 transition-all"
+                                  className="p-2.5 bg-[#0B0F21]/85 border border-white/5 rounded-xl hover:border-white/10 transition-all"
                                 >
-                                  <div className="flex items-center gap-2 truncate">
-                                    <div className="w-7 h-7 rounded-lg bg-[#00E5FF]/10 flex items-center justify-center text-[#00E5FF] shrink-0">
-                                      <Play size={10} fill="currentColor" />
-                                    </div>
-                                    <div className="truncate text-right">
-                                      <div className="flex items-center gap-1.5">
-                                        <span className="text-[10px] font-black text-white/90 block truncate leading-tight">
-                                          {lesson.title}
-                                        </span>
-                                        {lesson.grade && (
-                                          <span className="text-[8px] font-black text-amber-300 bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.2 rounded shrink-0">
-                                            {lesson.grade}
-                                          </span>
-                                        )}
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center gap-2 truncate">
+                                      <div className="w-7 h-7 rounded-lg bg-[#00E5FF]/10 flex items-center justify-center text-[#00E5FF] shrink-0">
+                                        <Play size={10} fill="currentColor" />
                                       </div>
-                                      <span className="text-[8px] text-white/40 font-mono font-bold block mt-0.5 flex items-center gap-1">
-                                        {lesson.subject} • {lesson.duration} • <Eye size={8} /> {lesson.views ?? lesson.viewCount ?? 0} • <MessageSquare size={8} /> {lesson.comment_count ?? lesson.commentCount ?? 0}
-                                      </span>
-                                      <p className="text-[8px] text-white/50 font-sans font-bold truncate mt-0.5">
-                                        {formatLectureDescription(lesson.description, lesson.grade)}
-                                      </p>
+                                      <div className="truncate text-right">
+                                        <div className="flex items-center gap-1.5">
+                                          <span className="text-[10px] font-black text-white/90 block truncate leading-tight">
+                                            {lesson.title}
+                                          </span>
+                                          {lesson.grade && (
+                                            <span className="text-[8px] font-black text-amber-300 bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.2 rounded shrink-0">
+                                              {lesson.grade}
+                                            </span>
+                                          )}
+                                        </div>
+                                        <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                                          <span className="text-[8px] text-white/40 font-mono font-bold">
+                                            {lesson.subject} •
+                                          </span>
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              setEditingLessonDurationId(editingLessonDurationId === lesson.id ? null : lesson.id);
+                                              setNewLessonDuration(lesson.duration && lesson.duration !== '0:00' && lesson.duration !== '00:00' ? lesson.duration : '45:00');
+                                            }}
+                                            className={`px-1.5 py-0.5 rounded text-[8px] font-mono font-bold transition-all flex items-center gap-1 cursor-pointer ${
+                                              !lesson.duration || lesson.duration === '0:00' || lesson.duration === '00:00'
+                                                ? 'bg-amber-500/20 text-amber-300 hover:bg-amber-500/30 border border-amber-500/40 animate-pulse'
+                                                : 'bg-white/5 text-[#00E5FF] hover:bg-white/15 border border-white/10'
+                                            }`}
+                                            title="انقر لتعديل مدة المحاضرة"
+                                          >
+                                            <Clock size={8} className="text-[#00E5FF]" />
+                                            <span>{!lesson.duration || lesson.duration === '0:00' || lesson.duration === '00:00' ? 'تحديد المدة ⏱️' : lesson.duration}</span>
+                                            <Edit2 size={7} className="opacity-60" />
+                                          </button>
+                                          <span className="text-[8px] text-white/40 font-mono font-bold flex items-center gap-1">
+                                            • <Eye size={8} /> {lesson.views ?? lesson.viewCount ?? 0} • <MessageSquare size={8} /> {lesson.comment_count ?? lesson.commentCount ?? 0}
+                                          </span>
+                                        </div>
+                                        <p className="text-[8px] text-white/50 font-sans font-bold truncate mt-0.5">
+                                          {formatLectureDescription(lesson.description, lesson.grade)}
+                                        </p>
+                                      </div>
+                                    </div>
+
+                                    <div className="flex items-center gap-1.5 shrink-0">
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setEditingLessonDurationId(editingLessonDurationId === lesson.id ? null : lesson.id);
+                                          setNewLessonDuration(lesson.duration && lesson.duration !== '0:00' && lesson.duration !== '00:00' ? lesson.duration : '45:00');
+                                        }}
+                                        className="p-1 hover:bg-amber-500/10 text-amber-300/80 hover:text-amber-300 rounded transition-colors cursor-pointer"
+                                        title="تعديل مدة المحاضرة ⏱️"
+                                      >
+                                        <Clock size={11} />
+                                      </button>
+                                      <button
+                                        onClick={() => {
+                                          sounds.playClick();
+                                          setViewingRecordedLesson(lesson);
+                                        }}
+                                        className="p-1 hover:bg-white/10 text-[#00E5FF] rounded transition-colors cursor-pointer"
+                                        title="مشاهدة وتشغيل المحاضرة"
+                                      >
+                                        <Play size={11} fill="currentColor" />
+                                      </button>
+                                      <button
+                                        onClick={async () => {
+                                          try {
+                                            const res = await fetch(`/api/recorded-lessons/${lesson.id}`, { method: 'DELETE' });
+                                            if (res.ok) {
+                                              setRecordedLessons((prev: any) => prev.filter((l: any) => l.id !== lesson.id));
+                                              showToast("تم سحب وإلغاء نشر المحاضرة بنجاح!", "success");
+                                            } else {
+                                              showToast("فشل الحذف، حاول مجدداً", "error");
+                                            }
+                                          } catch (err) {
+                                            showToast("خطأ أثناء الحذف", "error");
+                                          }
+                                        }}
+                                        className="p-1 hover:bg-red-500/10 text-red-400/80 hover:text-red-400 rounded transition-colors cursor-pointer"
+                                        title="حذف المحاضرة"
+                                      >
+                                        <Trash2 size={11} />
+                                      </button>
                                     </div>
                                   </div>
 
-                                  <div className="flex items-center gap-1.5">
-                                    <button
-                                      onClick={() => {
-                                        sounds.playClick();
-                                        setViewingRecordedLesson(lesson);
-                                      }}
-                                      className="p-1 hover:bg-white/10 text-[#00E5FF] rounded transition-colors cursor-pointer"
-                                      title="مشاهدة وتشغيل المحاضرة"
-                                    >
-                                      <Play size={11} fill="currentColor" />
-                                    </button>
-                                    <button
-                                      onClick={async () => {
-                                        try {
-                                          const res = await fetch(`/api/recorded-lessons/${lesson.id}`, { method: 'DELETE' });
-                                          if (res.ok) {
-                                            setRecordedLessons((prev: any) => prev.filter((l: any) => l.id !== lesson.id));
-                                            showToast("تم سحب وإلغاء نشر المحاضرة بنجاح!", "success");
-                                          } else {
-                                            showToast("فشل الحذف، حاول مجدداً", "error");
-                                          }
-                                        } catch (err) {
-                                          showToast("خطأ أثناء الحذف", "error");
-                                        }
-                                      }}
-                                      className="p-1 hover:bg-red-500/10 text-red-400/80 hover:text-red-400 rounded transition-colors cursor-pointer"
-                                      title="حذف المحاضرة"
-                                    >
-                                      <Trash2 size={11} />
-                                    </button>
-                                  </div>
+                                  {/* Inline Quick Duration Editor */}
+                                  {editingLessonDurationId === lesson.id && (
+                                    <div className="mt-2.5 p-2.5 rounded-xl bg-[#070B19] border border-[#00E5FF]/30 space-y-2 text-right" dir="rtl">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-[10px] font-bold text-white flex items-center gap-1.5">
+                                          <Clock size={11} className="text-[#00E5FF]" />
+                                          تعديل مدة المحاضرة:
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => setEditingLessonDurationId(null)}
+                                          className="text-white/40 hover:text-white p-0.5 cursor-pointer"
+                                        >
+                                          <X size={11} />
+                                        </button>
+                                      </div>
+                                      
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <span className="text-[8px] text-white/40 font-bold">خيارات سريعة:</span>
+                                        {["25:00", "30:00", "40:00", "45:00", "50:00", "1:00:00"].map((preset) => (
+                                          <button
+                                            key={preset}
+                                            type="button"
+                                            onClick={() => setNewLessonDuration(preset)}
+                                            className={`px-1.5 py-0.5 rounded text-[8px] font-mono font-bold transition-all cursor-pointer ${
+                                              newLessonDuration === preset
+                                                ? "bg-[#00E5FF] text-black shadow-sm"
+                                                : "bg-white/5 text-white/70 hover:text-white hover:bg-white/10 border border-white/5"
+                                            }`}
+                                          >
+                                            {preset}
+                                          </button>
+                                        ))}
+                                      </div>
+
+                                      <div className="flex items-center gap-2 pt-1">
+                                        <input
+                                          type="text"
+                                          value={newLessonDuration}
+                                          onChange={(e) => setNewLessonDuration(e.target.value)}
+                                          placeholder="مثال: 45:00 أو 1:15:00"
+                                          className="flex-1 bg-[#050814] border border-white/10 rounded-lg px-2.5 py-1 text-xs text-white placeholder-white/20 outline-none focus:border-[#00E5FF]/50 font-mono text-right"
+                                        />
+                                        <button
+                                          type="button"
+                                          disabled={isUpdatingDuration}
+                                          onClick={() => handleSaveDuration(lesson.id)}
+                                          className="px-3 py-1 bg-[#00E5FF] hover:bg-[#00E5FF]/80 text-black font-bold text-[10px] rounded-lg transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50"
+                                        >
+                                          {isUpdatingDuration ? <RefreshCw size={10} className="animate-spin" /> : <Save size={10} />}
+                                          <span>حفظ المدة</span>
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )}
                                 </div>
                               ))}
                             </div>

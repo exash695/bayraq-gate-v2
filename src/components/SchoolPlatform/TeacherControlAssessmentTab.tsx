@@ -97,7 +97,12 @@ import type { Teacher, MaterialField, Post, SchoolPlatformProps, PlatformTab, Ha
 import { useSchoolPlatform } from "./SchoolPlatformContext";
 
 export const TeacherControlAssessmentTab: React.FC = () => {
-  const { activeClassStudents, activeMetricModal, activeTeacherSubject, activeWorkingClass, customPointsInput, evaluationOverrides, getDynamicOutstandingBadges, getLatestGrade, getStudentSubjectPoints, grade, prideMessageText, progress, selectedEvaluationStudentId, selectedEvaluationSubTab, setActiveMetricModal, setCustomPointsInput, setEvaluationOverrides, setPrideMessageText, setSelectedEvaluationStudentId, setSelectedEvaluationSubTab, setStudentSearchQuery, showToast, studentSearchQuery } = useSchoolPlatform();
+  const { activeClassStudents, activeMetricModal, activeTeacherSubject, activeWorkingClass, customPointsInput, evaluationOverrides, getDynamicOutstandingBadges, getLatestGrade, getStudentSubjectPoints, grade, prideMessageText, progress, selectedEvaluationStudentId, selectedEvaluationSubTab, selectedTeacherClass, targetBroadcastGrade, setActiveMetricModal, setCustomPointsInput, setEvaluationOverrides, setPrideMessageText, setSelectedEvaluationStudentId, setSelectedEvaluationSubTab, setStudentSearchQuery, showToast, studentSearchQuery } = useSchoolPlatform();
+
+  const isAllSections = !selectedTeacherClass || selectedTeacherClass === "ALL" || selectedTeacherClass === "كافة الشُعب";
+  const displayTargetClass = isAllSections
+    ? `كافة الشُعب الموكلة (${targetBroadcastGrade || "عام"})`
+    : selectedTeacherClass;
 
   return (
                 <div className="space-y-6">
@@ -397,7 +402,7 @@ export const TeacherControlAssessmentTab: React.FC = () => {
                           <p className="text-[9px] text-white/40">اختر طالباً لتعديل أوسمته وتقييماته فوراً</p>
                         </div>
                         <span className="text-[9px] font-bold text-[#FFD600] font-mono bg-[#FFD600]/10 border border-[#FFD600]/10 px-2 py-0.5 rounded-lg">
-                          صف: {activeWorkingClass || "جميع الصفوف"}
+                          الشعبة: {displayTargetClass} ({activeClassStudents.length})
                         </span>
                       </div>
 

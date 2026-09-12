@@ -8,6 +8,36 @@ import { errorMonitoringService } from './services/errorMonitoringService';
 // Initialize global error monitoring
 errorMonitoringService.init();
 
+// Global polyfills for date/timestamp compatibility across Firebase and PostgreSQL APIs
+if (typeof (String.prototype as any).toMillis !== 'function') {
+  Object.defineProperty(String.prototype, 'toMillis', {
+    value: function () {
+      const ms = new Date(this as string).getTime();
+      return isNaN(ms) ? (Number(this) || 0) : ms;
+    },
+    writable: true,
+    configurable: true
+  });
+}
+if (typeof (Date.prototype as any).toMillis !== 'function') {
+  Object.defineProperty(Date.prototype, 'toMillis', {
+    value: function () {
+      return this.getTime();
+    },
+    writable: true,
+    configurable: true
+  });
+}
+if (typeof (Number.prototype as any).toMillis !== 'function') {
+  Object.defineProperty(Number.prototype, 'toMillis', {
+    value: function () {
+      return Number(this);
+    },
+    writable: true,
+    configurable: true
+  });
+}
+
 function safeStringify(a: any): string {
   if (typeof a === 'string') return a;
   if (!a) return String(a);

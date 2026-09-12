@@ -7,11 +7,12 @@ import { matchesTargetGrades, isSchoolMatch } from '../utils/gradeMatcher';
 interface BroadcastTickerProps {
   schoolId: string;
   grade: string;
+  section?: string;
   isVisible: boolean;
   isTeacher?: boolean;
 }
 
-export const BroadcastTicker: React.FC<BroadcastTickerProps> = ({ schoolId, grade, isVisible, isTeacher }) => {
+export const BroadcastTicker: React.FC<BroadcastTickerProps> = ({ schoolId, grade, section, isVisible, isTeacher }) => {
   const remoteConfig = useRemoteConfig();
   const [broadcasts, setBroadcasts] = useState<{ message: string; id: string }[]>([]);
 
@@ -44,6 +45,19 @@ export const BroadcastTicker: React.FC<BroadcastTickerProps> = ({ schoolId, grad
             if (grades.includes('parent_only')) return false; // Handled by ParentPortal
             if (grades.includes('teacher_only') && !isTeacher) return false;
             if (isTeacher) return true;
+
+            // Section check for students
+            if (section) {
+              const targetSec = b.targetSection;
+              const targetSecs = b.targetSections;
+              if (targetSec && targetSec !== 'ALL' && targetSec !== 'all' && targetSec !== 'الكل') {
+                const matchPrimary = targetSec === section || targetSec.includes(section) || section.includes(targetSec);
+                const matchArray = Array.isArray(targetSecs) && targetSecs.some((s: string) => s === section || s.includes(section) || section.includes(s));
+                if (!matchPrimary && !matchArray) {
+                  return false;
+                }
+              }
+            }
 
             // Grade / stage matching
             return matchesTargetGrades(grade, grades);

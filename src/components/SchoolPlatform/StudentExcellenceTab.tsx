@@ -60,7 +60,7 @@ import {
   ChevronRight, ChevronDown, ChevronUp, Mic, MicOff, VideoOff, ThumbsUp, Send, Clock,
   HelpCircle, Hand as HandIcon, PenTool, Search, Filter, MailQuestion, ShieldAlert,
   Database, Bot, ClipboardCheck, Play, Target, Terminal, Bug, Info, Unlock, Download,
-  Minimize2, Scan, XCircle, MessageSquare
+  Minimize2, Scan, XCircle, MessageSquare, BarChart3
 } from "lucide-react";
 import { SchoolContent } from "../SchoolContent";
 import { BroadcastTicker } from "../BroadcastTicker";
@@ -98,8 +98,78 @@ import type { Teacher, MaterialField, Post, SchoolPlatformProps, PlatformTab, Ha
 import { useSchoolPlatform } from "./SchoolPlatformContext";
 
 export const StudentExcellenceTab: React.FC = () => {
-  const { activeCommentPostId, activeStudent, avatarInputRef, editingPhraseText, editingPostContent, editingPostId, excellenceSubTab, getCurrentUserId, getUserPhoto, grade, gradeName, handleAddAdminNoteClick, handleComment, handleDeletePost, handleEditPost, handleSaveEditPost, handleSaveInspiringPhrase, handleToggleLockPost, handleTogglePinPost, isEditingPhrase, isTeacher, loadingExcellence, openMenuPostId, posts, schoolConfigs, schoolName, selectedBadge, setActiveTab, setEditingPhraseText, setEditingPostContent, setEditingPostId, setExcellenceSubTab, setIsEditingPhrase, setOpenMenuPostId, setSelectedBadge, subjectMapping, toggleLike, topStudents, userCode, userProfile } = useSchoolPlatform();
+  const { 
+    activeClassStudents,
+    activeCommentPostId, 
+    activeStudent, 
+    avatarInputRef, 
+    currentTeacherData, 
+    editingPhraseText, 
+    editingPostContent, 
+    editingPostId, 
+    excellenceSubTab, 
+    getCurrentUserId, 
+    getUserPhoto, 
+    grade, 
+    gradeName, 
+    handleAddAdminNoteClick, 
+    handleComment, 
+    handleDeletePost, 
+    handleEditPost, 
+    handleSaveEditPost, 
+    handleSaveInspiringPhrase, 
+    handleToggleLockPost, 
+    handleTogglePinPost, 
+    isEditingPhrase, 
+    isTeacher, 
+    loadingExcellence, 
+    openMenuPostId, 
+    posts, 
+    schoolConfigs, 
+    schoolName, 
+    selectedBadge, 
+    selectedTeacherClass,
+    setActiveTab, 
+    setEditingPhraseText, 
+    setEditingPostContent, 
+    setEditingPostId, 
+    setExcellenceSubTab, 
+    setIsEditingPhrase, 
+    setOpenMenuPostId, 
+    setSelectedBadge, 
+    setSelectedTeacherClass,
+    subjectMapping, 
+    teacherAssignedSections,
+    teacherData, 
+    toggleLike, 
+    topStudents, 
+    userCode, 
+    userProfile 
+  } = useSchoolPlatform();
   const [isExcellenceShareModalOpen, setIsExcellenceShareModalOpen] = useState(false);
+  const [selectedGradePeriod, setSelectedGradePeriod] = useState<string>("month1");
+
+  const examPeriods = [
+    { id: 'month1', name: 'الشهر الأول' },
+    { id: 'month2', name: 'الشهر الثاني' },
+    { id: 'midterm', name: 'نصف السنة' },
+    { id: 'month3', name: 'الشهر الثالث' },
+    { id: 'month4', name: 'الشهر الرابع' },
+    { id: 'annual_quest', name: 'معدل السعي السنوي' },
+    { id: 'final', name: 'آخر السنة' },
+    { id: 'final_grade', name: 'الدرجة النهائية' }
+  ];
+
+  const effectiveTeacher = currentTeacherData || teacherData;
+  const teacherName = effectiveTeacher?.name || userProfile?.name || auth.currentUser?.displayName || "أستاذ المادة";
+  const teacherSpecialization = effectiveTeacher?.subject || userProfile?.subject || userProfile?.specialization || "كادر التدريس والتفوق الأكاديمي";
+  const teacherCode = effectiveTeacher?.code || effectiveTeacher?.id || userProfile?.code || "TCH-ACTIVE";
+
+  useEffect(() => {
+    if (isTeacher && excellenceSubTab === "badges") {
+      setExcellenceSubTab("knights");
+    }
+  }, [isTeacher, excellenceSubTab, setExcellenceSubTab]);
 
         const activeExcPoints = computeExcellencePoints(
           activeStudent,
@@ -178,8 +248,23 @@ export const StudentExcellenceTab: React.FC = () => {
             },
           );
         }
-        const classroomColleagues = topStudents;
-        const topThree = classroomColleagues.slice(0, 3);
+        const classroomColleagues = useMemo(() => {
+          if (isTeacher) {
+            const list = [...(activeClassStudents || [])];
+            return list.sort((a: any, b: any) => {
+              const aPts = Number(a.totalPoints !== undefined ? a.totalPoints : (a.excellencePoints || 0));
+              const bPts = Number(b.totalPoints !== undefined ? b.totalPoints : (b.excellencePoints || 0));
+              if (bPts !== aPts) return bPts - aPts;
+              const aAvg = Number(a.averagePercent) || 0;
+              const bAvg = Number(b.averagePercent) || 0;
+              if (bAvg !== aAvg) return bAvg - aAvg;
+              return (a.name || "").localeCompare(b.name || "", "ar");
+            });
+          }
+          return topStudents || [];
+        }, [isTeacher, activeClassStudents, topStudents]);
+
+        const topThree = useMemo(() => classroomColleagues.slice(0, 3), [classroomColleagues]);
 
         const levelsList = [
           { levelNum: 1, label: "مجتهد برونزي 🥉", pointsRange: "0 - 20 XP" },
@@ -244,47 +329,63 @@ export const StudentExcellenceTab: React.FC = () => {
             </div>
 
             {/* Sub-tab segmented controller */}
-            <div className="flex p-1.5 bg-white/[0.02] backdrop-blur-md border border-white/5 rounded-2xl max-w-2xl mx-auto relative z-10 shadow-2xl">
+            <div className="flex w-full p-1.5 bg-white/[0.02] backdrop-blur-md border border-white/5 rounded-2xl max-w-3xl mx-auto relative z-10 shadow-2xl">
               <button
                 id="subtab-knights"
                 onClick={() => setExcellenceSubTab("knights")}
-                className={`flex-grow py-3 px-4 sm:px-6 rounded-xl font-bold text-xs sm:text-sm transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer ${
+                className={`flex-1 py-2 sm:py-3 px-1 sm:px-4 rounded-xl font-bold text-[10px] sm:text-sm transition-all duration-300 flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 cursor-pointer ${
                   excellenceSubTab === "knights"
                     ? "bg-gradient-to-r from-amber-500 to-yellow-500 text-black shadow-lg shadow-amber-500/10 scale-[1.01]"
                     : "text-white/60 hover:text-white hover:bg-white/5"
                 }`}
               >
-                <Trophy size={16} />
-                <span>سجل شرف الفرسان</span>
+                <Trophy size={16} className="shrink-0" />
+                <span className="text-center leading-tight whitespace-nowrap">سجل الشرف</span>
               </button>
-              <button
-                id="subtab-badges"
-                onClick={() => setExcellenceSubTab("badges")}
-                className={`flex-grow py-3 px-4 sm:px-6 rounded-xl font-bold text-xs sm:text-sm transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer ${
-                  excellenceSubTab === "badges"
-                    ? "bg-gradient-to-r from-amber-500 to-yellow-500 text-black shadow-lg shadow-amber-500/10 scale-[1.01]"
-                    : "text-white/60 hover:text-white hover:bg-white/5"
-                }`}
-              >
-                <Award size={16} />
-                <span>أوسمتي الخاصة</span>
-              </button>
+              {!isTeacher && (
+                <button
+                  id="subtab-badges"
+                  onClick={() => setExcellenceSubTab("badges")}
+                  className={`flex-1 py-2 sm:py-3 px-1 sm:px-4 rounded-xl font-bold text-[10px] sm:text-sm transition-all duration-300 flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 cursor-pointer ${
+                    excellenceSubTab === "badges"
+                      ? "bg-gradient-to-r from-amber-500 to-yellow-500 text-black shadow-lg shadow-amber-500/10 scale-[1.01]"
+                      : "text-white/60 hover:text-white hover:bg-white/5"
+                  }`}
+                >
+                  <Award size={16} className="shrink-0" />
+                  <span className="text-center leading-tight whitespace-nowrap">أوسمتي</span>
+                </button>
+              )}
+              {!isTeacher && (
+                <button
+                  id="subtab-grades"
+                  onClick={() => setExcellenceSubTab("grades")}
+                  className={`flex-1 py-2 sm:py-3 px-1 sm:px-4 rounded-xl font-bold text-[10px] sm:text-sm transition-all duration-300 flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 cursor-pointer ${
+                    excellenceSubTab === "grades"
+                      ? "bg-gradient-to-r from-amber-500 to-yellow-500 text-black shadow-lg shadow-amber-500/10 scale-[1.01]"
+                      : "text-white/60 hover:text-white hover:bg-white/5"
+                  }`}
+                >
+                  <BarChart3 size={16} className="shrink-0" />
+                  <span className="text-center leading-tight whitespace-nowrap">درجاتي</span>
+                </button>
+              )}
               <button
                 id="subtab-profile"
                 onClick={() => setExcellenceSubTab("profile")}
-                className={`flex-grow py-3 px-4 sm:px-6 rounded-xl font-bold text-xs sm:text-sm transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer ${
+                className={`flex-1 py-2 sm:py-3 px-1 sm:px-4 rounded-xl font-bold text-[10px] sm:text-sm transition-all duration-300 flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 cursor-pointer ${
                   excellenceSubTab === "profile"
                     ? "bg-gradient-to-r from-amber-500 to-yellow-500 text-black shadow-lg shadow-amber-500/10 scale-[1.01]"
                     : "text-white/60 hover:text-white hover:bg-white/5"
                 }`}
               >
-                <User size={16} />
-                <span>الملف الشخصي</span>
+                <User size={16} className="shrink-0" />
+                <span className="text-center leading-tight whitespace-nowrap">الملف الشخصي</span>
               </button>
             </div>
 
             <AnimatePresence mode="wait">
-              {excellenceSubTab === "badges" && (
+              {!isTeacher && excellenceSubTab === "badges" && (
                 <motion.div
                   key="personal_badges"
                   initial={{ opacity: 0, y: 15 }}
@@ -576,8 +677,9 @@ export const StudentExcellenceTab: React.FC = () => {
                         سجل شرف الفرسان والصف الدراسي
                       </h3>
                       <p className="text-white/40 text-xs">
-                        قائمة فرسان صفك الدراسي الحالية مرتبة تلقائياً ومتزامنة
-                        آنياً مع أي ترصيد من المشرف 📡
+                        {isTeacher
+                          ? `قائمة فرسان ${selectedTeacherClass === "ALL" || !selectedTeacherClass ? "كافة الشُعب الموكلة" : `شعبة (${selectedTeacherClass})`} مرتبة تلقائياً حسب النقاط ومتزامنة آنياً 📡`
+                          : "قائمة فرسان صفك الدراسي الحالية مرتبة تلقائياً ومتزامنة آنياً مع أي ترصيد من المشرف 📡"}
                       </p>
                     </div>
                     <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 px-3.5 py-1.5 rounded-full">
@@ -587,6 +689,67 @@ export const StudentExcellenceTab: React.FC = () => {
                       </span>
                     </div>
                   </div>
+
+                  {/* Teacher Section Switcher & Active Indicator in Excellence Tab */}
+                  {isTeacher && teacherAssignedSections && teacherAssignedSections.length > 0 && (
+                    <div className="bg-[#0A0E24]/80 border border-amber-500/20 rounded-2xl p-4 shadow-[0_4px_25px_rgba(0,0,0,0.3)]">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3 pb-3 border-b border-white/5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-base">🔀</span>
+                          <span className="text-xs font-black text-white">
+                            تحديد الشعبة لعرض سجل الشرف:
+                          </span>
+                          <span className="text-[11px] font-black px-2.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                            {selectedTeacherClass === "ALL" || !selectedTeacherClass
+                              ? "كافة الشُعب الموكلة"
+                              : selectedTeacherClass}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-white/40 font-mono">
+                          {classroomColleagues.length} فرسان مسجلين
+                        </span>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setSelectedTeacherClass && setSelectedTeacherClass("ALL")}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer border ${
+                            selectedTeacherClass === "ALL" || !selectedTeacherClass
+                              ? "bg-amber-500 text-black border-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.35)] scale-105"
+                              : "bg-white/5 text-white/60 border-white/10 hover:bg-white/10 hover:text-white"
+                          }`}
+                        >
+                          🌟 كافة الشُعب الموكلة
+                        </button>
+
+                        {teacherAssignedSections.map((sec: any) => {
+                          const isSelected = selectedTeacherClass === sec.name;
+                          return (
+                            <button
+                              key={`sec_exc_${sec.name}`}
+                              type="button"
+                              onClick={() => setSelectedTeacherClass && setSelectedTeacherClass(sec.name)}
+                              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer border flex items-center gap-1.5 ${
+                                isSelected
+                                  ? "bg-amber-500 text-black border-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.35)] scale-105"
+                                  : "bg-white/5 text-white/60 border-white/10 hover:bg-white/10 hover:text-white"
+                              }`}
+                            >
+                              <span>{sec.name}</span>
+                              {sec.studentCount !== undefined && (
+                                <span className={`text-[10px] px-1.5 py-0.2 rounded-md ${
+                                  isSelected ? "bg-black/20 text-black" : "bg-white/10 text-white/50"
+                                }`}>
+                                  {sec.studentCount}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
                   {loadingExcellence ? (
                     <div className="py-20 text-center">
@@ -612,7 +775,9 @@ export const StudentExcellenceTab: React.FC = () => {
                         className="relative bg-gradient-to-b from-[#0a0f24] to-transparent rounded-[3rem] p-6 sm:p-10 border border-white/5 shadow-2xl"
                       >
                         <h4 className="text-center font-black text-white/50 text-xs tracking-widest uppercase mb-4">
-                          منصة التتويج الثلاثي لأبطال الصف 🥇
+                          {isTeacher
+                            ? `منصة التتويج الثلاثي - ${selectedTeacherClass === "ALL" || !selectedTeacherClass ? "كافة الشُعب الموكلة" : selectedTeacherClass} 🥇`
+                            : "منصة التتويج الثلاثي لأبطال الصف 🥇"}
                         </h4>
 
                         <div className="flex justify-center items-end gap-3 sm:gap-6 pt-10 pb-6">
@@ -770,7 +935,9 @@ export const StudentExcellenceTab: React.FC = () => {
                       {/* Class Leaderboard Grid / Rows (جدول الفرسان التفاعلي) */}
                       <div className="space-y-4">
                         <h4 className="text-white text-xs font-black tracking-widest uppercase mb-4 text-right">
-                          رتبة فرسان الصف من الأعلى للأقل ⚔️
+                          {isTeacher && selectedTeacherClass && selectedTeacherClass !== "ALL"
+                            ? `رتبة فرسان شعبة (${selectedTeacherClass}) من الأعلى للأقل ⚔️`
+                            : "رتبة فرسان الصف من الأعلى للأقل ⚔️"}
                         </h4>
                         <div className="space-y-3">
                           {classroomColleagues.map((stu, idx) => {
@@ -845,14 +1012,6 @@ export const StudentExcellenceTab: React.FC = () => {
                                   <div className="flex gap-4 sm:gap-8">
                                     <div className="text-right">
                                       <p className="text-white/30 text-[8px] sm:text-[9px] font-black uppercase tracking-wider">
-                                        المعدل العام
-                                      </p>
-                                      <p className="text-amber-400 font-black text-base italic">
-                                        {stu.averagePercent || 0}%
-                                      </p>
-                                    </div>
-                                    <div className="text-right">
-                                      <p className="text-white/30 text-[8px] sm:text-[9px] font-black uppercase tracking-wider">
                                         نقاط التميز
                                       </p>
                                       <p className="text-[#00E5FF] font-black text-base italic">
@@ -916,54 +1075,112 @@ export const StudentExcellenceTab: React.FC = () => {
                             </button>
                           </div>
                           <div>
-                            <h3 className="text-2xl sm:text-3xl font-black text-white leading-tight">
-                              {userProfile?.name ||
-                                auth.currentUser?.displayName ||
-                                "طالب متميز"}
-                            </h3>
-                            <p className="text-white/40 text-xs sm:text-sm mt-1">
-                              كود الطالب:{" "}
-                              <span className="text-[#00E5FF] font-mono font-black">
-                                {activeStudent.studentCode ||
-                                  activeStudent.code ||
-                                  "STU-6TH-ELITE"}
-                              </span>
-                            </p>
-                            <p className="text-[#00E5FF] text-xs font-bold mt-1 bg-[#00E5FF]/5 border border-[#00E5FF]/10 px-3 py-1 rounded-full inline-block">
-                              {activeLevelData.label} | {currentPoints} XP
-                            </p>
+                            {isTeacher ? (
+                              <>
+                                <div className="flex items-center justify-center sm:justify-start gap-2">
+                                  <h3 className="text-2xl sm:text-3xl font-black text-white leading-tight">
+                                    {teacherName}
+                                  </h3>
+                                  <span className="text-[10px] bg-gradient-to-r from-amber-500 to-yellow-500 text-black font-black px-2.5 py-0.5 rounded-full shadow-md">
+                                    أستاذ قدير
+                                  </span>
+                                </div>
+                                <div className="text-[#00E5FF] text-xs sm:text-sm font-black mt-1.5 flex flex-wrap items-center justify-center sm:justify-start gap-1.5">
+                                  <span className="text-white/50 font-normal">الاختصاص التدريسي:</span>
+                                  <span className="bg-[#00E5FF]/10 border border-[#00E5FF]/20 text-[#00E5FF] px-2.5 py-0.5 rounded-lg font-bold">
+                                    {teacherSpecialization}
+                                  </span>
+                                </div>
+                                <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 mt-2">
+                                  <span className="text-white/40 text-xs font-mono">
+                                    كود المعلم: <span className="text-amber-400 font-bold">{teacherCode}</span>
+                                  </span>
+                                  {effectiveTeacher?.classes && effectiveTeacher.classes.length > 0 && (
+                                    <span className="text-white/40 text-[11px] bg-white/5 border border-white/10 px-2 py-0.5 rounded-md font-sans">
+                                      الصفوف: {effectiveTeacher.classes.join("، ")}
+                                    </span>
+                                  )}
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <h3 className="text-2xl sm:text-3xl font-black text-white leading-tight">
+                                  {userProfile?.name ||
+                                    auth.currentUser?.displayName ||
+                                    "طالب متميز"}
+                                </h3>
+                                <p className="text-white/40 text-xs sm:text-sm mt-1">
+                                  كود الطالب:{" "}
+                                  <span className="text-[#00E5FF] font-mono font-black">
+                                    {activeStudent.studentCode ||
+                                      activeStudent.code ||
+                                      "STU-6TH-ELITE"}
+                                  </span>
+                                </p>
+                                <p className="text-[#00E5FF] text-xs font-bold mt-1 bg-[#00E5FF]/5 border border-[#00E5FF]/10 px-3 py-1 rounded-full inline-block">
+                                  {activeLevelData.label} | {currentPoints} XP
+                                </p>
+                              </>
+                            )}
                           </div>
                         </div>
 
                         {/* Interactive Stats Panel */}
                         <div className="flex gap-4 text-center">
-                          <div className="bg-white/[0.02] border border-white/5 rounded-2xl px-5 py-3 min-w-[100px]">
-                            <span className="block text-[#00E5FF] font-black text-2xl">
-                              {currentPoints}
-                            </span>
-                            <span className="text-[10px] text-white/40 font-bold">
-                              نقاط التميز
-                            </span>
-                          </div>
-                          <div className="bg-white/[0.02] border border-white/5 rounded-2xl px-5 py-3 min-w-[100px]">
-                            <span className="block text-amber-400 font-black text-2xl">
-                              {
-                                posts.filter(
-                                  (p) => p.userId === getCurrentUserId(),
-                                ).length
-                              }
-                            </span>
-                            <span className="text-[10px] text-white/40 font-bold">
-                              منشوراتي
-                            </span>
-                          </div>
+                          {isTeacher ? (
+                            <>
+                              <div className="bg-white/[0.02] border border-white/5 rounded-2xl px-5 py-3 min-w-[100px]">
+                                <span className="block text-[#00E5FF] font-black text-2xl">
+                                  {effectiveTeacher?.classes?.length || 1}
+                                </span>
+                                <span className="text-[10px] text-white/40 font-bold">
+                                  الصفوف الموكلة
+                                </span>
+                              </div>
+                              <div className="bg-white/[0.02] border border-white/5 rounded-2xl px-5 py-3 min-w-[100px]">
+                                <span className="block text-amber-400 font-black text-2xl">
+                                  {
+                                    posts.filter(
+                                      (p) => p.userId === getCurrentUserId(),
+                                    ).length
+                                  }
+                                </span>
+                                <span className="text-[10px] text-white/40 font-bold">
+                                  منشوراتي
+                                </span>
+                              </div>
+                            </>
+                          ) : (
+                            <>
+                              <div className="bg-white/[0.02] border border-white/5 rounded-2xl px-5 py-3 min-w-[100px]">
+                                <span className="block text-[#00E5FF] font-black text-2xl">
+                                  {currentPoints}
+                                </span>
+                                <span className="text-[10px] text-white/40 font-bold">
+                                  نقاط التميز
+                                </span>
+                              </div>
+                              <div className="bg-white/[0.02] border border-white/5 rounded-2xl px-5 py-3 min-w-[100px]">
+                                <span className="block text-amber-400 font-black text-2xl">
+                                  {
+                                    posts.filter(
+                                      (p) => p.userId === getCurrentUserId(),
+                                    ).length
+                                  }
+                                </span>
+                                <span className="text-[10px] text-white/40 font-bold">
+                                  منشوراتي
+                                </span>
+                              </div>
+                            </>
+                          )}
                         </div>
                       </div>
 
                       {/* Inspiring phrase with editor */}
                       <div className="bg-white/[0.02] border border-white/5 rounded-2xl p-4 text-center space-y-3">
                         <span className="text-[10px] text-[#00E5FF] font-black uppercase tracking-wider block">
-                          العبارة الملهمة الخاصة بي 🌟
+                          {isTeacher ? "رسالتي الأكاديمية والتربوية 🌟" : "العبارة الملهمة الخاصة بي 🌟"}
                         </span>
                         {isEditingPhrase ? (
                           <div className="space-y-3 max-w-lg mx-auto">
@@ -973,13 +1190,13 @@ export const StudentExcellenceTab: React.FC = () => {
                               onChange={(e) =>
                                 setEditingPhraseText(e.target.value)
                               }
-                              placeholder="..."
+                              placeholder={isTeacher ? "اكتب رسالتك التربوية والملهمة لطلابك..." : "..."}
                               className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2 text-white text-xs sm:text-sm focus:outline-none focus:border-[#00E5FF]"
                             />
                             <div className="flex justify-center gap-2">
                               <button
                                 onClick={() =>
-                                  handleSaveInspiringPhrase(activeStudent.id)
+                                  handleSaveInspiringPhrase(isTeacher ? (effectiveTeacher?.id || 'teacher') : activeStudent.id)
                                 }
                                 className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[10px] sm:text-xs font-black transition-all cursor-pointer rounded-lg"
                               >
@@ -997,21 +1214,24 @@ export const StudentExcellenceTab: React.FC = () => {
                           <div className="flex flex-col items-center gap-2">
                             <p className="text-white/80 italic text-xs sm:text-sm font-medium">
                               "
-                              {activeStudent.inspiringPhrase ||
-                                "طالب متميز يسعى بكل شغف للريادة الأكاديمية والمعدلات الكاملة وبصمة تميز لا تنطفئ."}
+                              {isTeacher
+                                ? (effectiveTeacher?.bio || effectiveTeacher?.inspiringPhrase || "التعليم رسالة سامية نبني بها عقول فرسان المستقبل ونوقد بها شعلة المعرفة.")
+                                : (activeStudent.inspiringPhrase || "طالب متميز يسعى بكل شغف للريادة الأكاديمية والمعدلات الكاملة وبصمة تميز لا تنطفئ.")}
                               "
                             </p>
                             <button
                               onClick={() => {
                                 setEditingPhraseText(
-                                  activeStudent.inspiringPhrase || "",
+                                  isTeacher
+                                    ? (effectiveTeacher?.bio || effectiveTeacher?.inspiringPhrase || "التعليم رسالة سامية نبني بها عقول فرسان المستقبل ونوقد بها شعلة المعرفة.")
+                                    : (activeStudent.inspiringPhrase || "")
                                 );
                                 setIsEditingPhrase(true);
                               }}
                               className="text-[10px] text-[#00E5FF]/80 hover:text-[#00E5FF] flex items-center gap-1 cursor-pointer font-bold underline transition-colors"
                             >
                               <Edit2 size={10} />
-                              تعديل العبارة الملهمة
+                              {isTeacher ? "تعديل رسالتي التربوية" : "تعديل العبارة الملهمة"}
                             </button>
                           </div>
                         )}
@@ -1033,14 +1253,14 @@ export const StudentExcellenceTab: React.FC = () => {
                           ملصقات وردوداً تشجيعية، ما يزيد من نفوذك وهيبتك
                           الأكاديمية!
                         </p>
-                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3 pt-1">
+                        <div className={`grid ${isTeacher ? 'grid-cols-2' : 'grid-cols-2 md:grid-cols-3'} gap-3 pt-1`}>
                           <div className="bg-black/20 rounded-xl p-3 border border-white/5 text-right">
                             <span className="block text-rose-400 font-black text-base">
                               ❤️{" "}
                               {(activeStudent as any).storyReactionsCount || 0}
                             </span>
                             <span className="text-[9px] text-white/40 font-bold">
-                              تفاعلات الرموز التعبيرية
+                              {isTeacher ? "تفاعلات الطلبة والمتابعين" : "تفاعلات الرموز التعبيرية"}
                             </span>
                           </div>
                           <div className="bg-black/20 rounded-xl p-3 border border-white/5 text-right">
@@ -1048,17 +1268,19 @@ export const StudentExcellenceTab: React.FC = () => {
                               💬 {(activeStudent as any).storyRepliesCount || 0}
                             </span>
                             <span className="text-[9px] text-white/40 font-bold font-sans">
-                              الردود والتشجيع المباشر
+                              {isTeacher ? "الردود والتوجيهات المنشورة" : "الردود والتشجيع المباشر"}
                             </span>
                           </div>
-                          <div className="bg-black/20 rounded-xl p-3 border border-white/5 text-right col-span-2 md:col-span-1">
-                            <span className="block text-amber-400 font-black text-base">
-                              ✨ +{(activeStudent as any).pointsBonus || 0} XP
-                            </span>
-                            <span className="text-[9px] text-white/40 font-bold">
-                              مكافآت التميز اليومي
-                            </span>
-                          </div>
+                          {!isTeacher && (
+                            <div className="bg-black/20 rounded-xl p-3 border border-white/5 text-right col-span-2 md:col-span-1">
+                              <span className="block text-amber-400 font-black text-base">
+                                ✨ +{(activeStudent as any).pointsBonus || 0} XP
+                              </span>
+                              <span className="text-[9px] text-white/40 font-bold">
+                                مكافآت التميز اليومي
+                              </span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </div>
@@ -1343,6 +1565,100 @@ export const StudentExcellenceTab: React.FC = () => {
                           ))}
                       </div>
                     )}
+                  </div>
+                </motion.div>
+              )}
+
+              {excellenceSubTab === "grades" && !isTeacher && (
+                <motion.div
+                  key="my_grades_dashboard"
+                  initial={{ opacity: 0, y: 15 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -15 }}
+                  transition={{ duration: 0.4 }}
+                  className="space-y-8"
+                >
+                  <div className="bg-gradient-to-br from-black/80 to-[#0B1021] border border-white/5 rounded-3xl p-6 sm:p-10 shadow-2xl relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-64 h-64 bg-amber-500/5 blur-[100px] rounded-full pointer-events-none" />
+                    <div className="relative z-10 space-y-6">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h2 className="text-white text-xl sm:text-2xl font-black mb-2 flex items-center gap-2">
+                            <BarChart3 className="text-amber-400" />
+                            سجل التقييم الأكاديمي
+                          </h2>
+                          <p className="text-white/40 text-xs sm:text-sm max-w-lg">
+                            يتيح لك هذا السجل متابعة تقييمك الذاتي في جميع الاختبارات والامتحانات بصورة مباشرة ودقيقة كما يتم رصدها مركزياً.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Period Selector */}
+                      <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2 pt-4">
+                        {examPeriods.map((p) => (
+                          <button
+                            key={p.id}
+                            onClick={() => setSelectedGradePeriod(p.id)}
+                            className={`px-5 py-2.5 rounded-xl text-[10px] font-black whitespace-nowrap transition-all ${
+                              selectedGradePeriod === p.id 
+                                ? 'bg-gradient-to-r from-amber-500 to-yellow-500 text-black shadow-lg shadow-amber-500/20' 
+                                : 'bg-white/5 text-white/30 border border-white/5 hover:bg-white/10 hover:text-white'
+                            }`}
+                          >
+                            {p.name}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Grades Table */}
+                      <div className="space-y-3">
+                        {(() => {
+                          const subjects = getSubjectsForGrade(activeStudent?.grade || '', [], subjectMapping);
+                          const grades = activeStudent?.grades?.[selectedGradePeriod] || {};
+                          
+                          if (Object.keys(grades).length === 0) {
+                            return (
+                              <div className="text-center py-16 px-6 border-2 border-dashed border-white/5 rounded-[2.5rem] space-y-4">
+                                <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mx-auto">
+                                  <BarChart3 size={32} className="text-white/10" />
+                                </div>
+                                <div className="space-y-1">
+                                  <p className="text-white font-bold text-sm">لا يوجد نتائج مرصودة</p>
+                                  <p className="text-white/20 text-[10px]">لم يتم رفع درجات {examPeriods.find(p => p.id === selectedGradePeriod)?.name} حتى الآن</p>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          return subjects.map((sub, idx) => {
+                            const grade = Number(grades[sub.id]) || 0;
+                            const isExcellent = grade >= 90;
+                            const isGood = grade >= 70 && grade < 90;
+                            const isFailed = grade < 50;
+                            return (
+                              <motion.div
+                                key={`${sub.id}_${idx}_grade`}
+                                initial={{ opacity: 0, x: -20 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                transition={{ delay: idx * 0.05 }}
+                                className="bg-[#101935] p-5 rounded-2xl flex items-center justify-between border border-white/5 group hover:border-amber-500/30 transition-all"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <div className={`w-2 h-2 rounded-full ${isFailed ? 'bg-rose-500' : isExcellent ? 'bg-emerald-500' : 'bg-blue-500'}`} />
+                                  <span className="text-white font-medium group-hover:text-amber-400 transition-colors">{sub.name}</span>
+                                </div>
+                                <div className="flex items-center gap-4">
+                                  <span className={`text-xl font-black ${isFailed ? 'text-rose-500' : isExcellent ? 'text-emerald-400' : 'text-blue-400'}`}>
+                                    {grade}
+                                  </span>
+                                  {isExcellent && <Star size={16} className="text-[#FFD600] fill-[#FFD600] animate-pulse" />}
+                                </div>
+                              </motion.div>
+                            );
+                          });
+                        })()}
+                      </div>
+                    </div>
                   </div>
                 </motion.div>
               )}

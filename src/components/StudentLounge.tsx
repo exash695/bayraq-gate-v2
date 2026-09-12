@@ -4,6 +4,7 @@ import { X, Send, Image as ImageIcon, Smile, MoreVertical, Coffee, Search, Check
 import { db, auth } from '../lib/firebase';
 import { collection, query, where, orderBy, getDocs, addDoc, updateDoc, doc, serverTimestamp, onSnapshot, limit } from '@/src/lib/firebase';
 import { realtimeManager } from '../lib/realtimeManager';
+import { staffService } from '../services/staffService';
 
 interface StudentLoungeProps {
   onClose: () => void;
@@ -43,15 +44,17 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
   const [newMessage, setNewMessage] = useState('');
   const [knights, setKnights] = useState<any[]>([]); 
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
-  const [activeTab, setActiveTab] = useState<'chat' | 'knights'>(initialSelectedUser ? 'chat' : 'knights');
+  const [teachersList, setTeachersList] = useState<any[]>([]);
+  const [isGeneralChat, setIsGeneralChat] = useState(false);
+  const [activeTab, setActiveTab] = useState<'chat' | 'knights' | 'teachers'>(initialSelectedUser ? 'chat' : 'knights');
   const [selectedChatUser, setSelectedChatUser] = useState<any>(initialSelectedUser || null);
   const [searchQuery, setSearchQuery] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const currentUserUid = auth.currentUser?.uid;
   
-  const currentChatRoomId = selectedChatUser && currentUserUid 
-    ? [currentUserUid, selectedChatUser.id].sort().join('_') 
-    : null;
+  const currentChatRoomId = isGeneralChat 
+    ? schoolId 
+    : (selectedChatUser && currentUserUid ? [currentUserUid, selectedChatUser.id].sort().join('_') : null);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -60,67 +63,48 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
     }
   }, [messages]);
 
-  // Load knights
+  // Load teachers
   useEffect(() => {
     if (!schoolId) return;
-    const fetchKnights = () => {
-       try {
-          // Query users active in the last 5 minutes
-          const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
-          
-          const q = query(
-             collection(db, 'users'), 
-             where('schoolId', '==', schoolId),
-             where('lastActive', '>=', fiveMinutesAgo),
-             orderBy('lastActive', 'desc'),
-             limit(100)
-          );
-          
-          const unsubscribe = onSnapshot(q, (snapshot) => {
-            let users = snapshot.docs.map(doc => ({
-               id: doc.id, 
-               name: doc.data().name || doc.data().fullName || 'مستخدم',
-               photo: doc.data().photo || doc.data().photoURL || null,
-               role: doc.data().role || 'student',
-               grade: doc.data().grade || 'غير محدد',
-               schoolId: doc.data().schoolId || 'unassigned',
-               lastActive: doc.data().lastActive
-            }));
-            
-            // Filter out current user
-            users = users.filter(u => u.id !== currentUserUid);
-            setKnights(users);
-          }, (err) => {
-            console.error("Error subscribing to active knights", err);
-            // Fallback for missing index or other errors
-            const simpleQ = query(
-              collection(db, 'users'),
-              where('schoolId', '==', schoolId),
-              limit(100)
-            );
-            getDocs(simpleQ).then(snap => {
-               const users = snap.docs
-                .map(doc => ({
-                  id: doc.id,
-                  name: doc.data().name || doc.data().fullName || 'مستخدم',
-                  photo: doc.data().photo || doc.data().photoURL || null,
-                  role: doc.data().role || 'student',
-                  grade: doc.data().grade || 'غير محدد',
-                  schoolId: doc.data().schoolId || 'unassigned',
-                  lastActive: doc.data().lastActive
-                }))
-                .filter(u => u.id !== currentUserUid);
-               setKnights(users);
-            });
-          });
+    const unsub = staffService.subscribeToTeachers(schoolId, (teachers) => {
+      setTeachersList(teachers || []);
+    });
+    return () => unsub();
+  }, [schoolId]);
 
-          return unsubscribe;
-       } catch (err) {
-          console.error("Error setting up knights subscription", err);
-       }
+  // Load knights (PostgreSQL)
+  useEffect(() => {
+    if (!schoolId) return;
+    
+    const fetchKnights = async () => {
+      try {
+        const res = await fetch(`/api/users?schoolId=${schoolId}`);
+        const data = await res.json();
+        if (data.success && Array.isArray(data.users)) {
+          let users = data.users.map((u: any) => ({
+            id: u.id,
+            name: u.name || u.fullName || 'مستخدم',
+            photo: u.photo || u.photoURL || u.avatar || null,
+            role: u.role || 'student',
+            grade: u.grade || 'غير محدد',
+            schoolId: u.schoolId || 'unassigned',
+            lastActive: u.lastActive || u.lastLogin
+          }));
+          
+          // Filter out current user
+          users = users.filter((u: any) => u.id !== currentUserUid);
+          setKnights(users);
+        }
+      } catch (err) {
+        console.error("Error fetching knights", err);
+      }
     };
-    const unsub = fetchKnights();
-    return () => { if (unsub) unsub(); };
+
+    fetchKnights();
+    const unsub = realtimeManager.subscribe('users', () => {
+      fetchKnights();
+    });
+    return () => unsub();
   }, [schoolId, currentUserUid]);
 
 
@@ -168,6 +152,11 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
              timestamp: { seconds: new Date(m.timestamp).getTime() / 1000 }
            }));
            setMessages(msgs.slice(-100));
+
+           // Mark as read if it's a private chat
+           if (!isGeneralChat && selectedChatUser && currentUserUid) {
+             await fetch(`/api/lounge-messages/read/${currentChatRoomId}/${currentUserUid}`, { method: 'PATCH' });
+           }
         }
       } catch (e) {
         console.error("Error loading lounge messages", e);
@@ -179,7 +168,7 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
       fetchMessages();
     });
     return () => unsubMessages();
-  }, [currentChatRoomId]);
+  }, [currentChatRoomId, isGeneralChat, selectedChatUser, currentUserUid]);
 
   const handleSendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -206,10 +195,9 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
         userRole: currentRole,
         schoolId: currentChatRoomId,
         realSchoolId: schoolId,
-        recipientId: selectedChatUser.id,
+        recipientId: isGeneralChat ? 'all' : selectedChatUser?.id,
         read: false,
         grade: grade || 'all',
-        
       })});
     } catch (err) {
       console.error("Error sending message", err);
@@ -228,9 +216,13 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
       {/* Header */}
       <div className="h-16 px-4 flex justify-between items-center bg-[#0D142A]/80 backdrop-blur-xl shrink-0 z-20">
         <div className="flex items-center gap-3">
-          {activeTab === 'chat' && selectedChatUser ? (
+          {activeTab === 'chat' ? (
             <button 
-              onClick={() => setActiveTab('knights')}
+              onClick={() => {
+                setActiveTab('knights');
+                setSelectedChatUser(null);
+                setIsGeneralChat(false);
+              }}
               className="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center transition-colors text-white/70"
             >
                <ArrowRight size={20} />
@@ -243,10 +235,14 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
           )}
           
           <div>
-             {activeTab === 'chat' && selectedChatUser ? (
+             {activeTab === 'chat' ? (
                  <>
-                   <h2 className="text-sm font-black text-white leading-tight">{selectedChatUser.name}</h2>
-                   <p className="text-[#00E5FF] text-[10px] font-bold">متصل الآن</p>
+                   <h2 className="text-sm font-black text-white leading-tight">
+                     {isGeneralChat ? 'دردشة المجلس العامة' : selectedChatUser?.name}
+                   </h2>
+                   <p className="text-[#00E5FF] text-[10px] font-bold">
+                     {isGeneralChat ? 'غرفة تجمع كل الفرسان' : 'متصل الآن'}
+                   </p>
                  </>
              ) : (
                  <>
@@ -272,8 +268,16 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
           onClick={() => setActiveTab('knights')}
           className={`flex-1 py-3 text-sm font-bold text-center border-b-2 transition-colors ${activeTab === 'knights' ? 'border-amber-400 text-amber-400' : 'border-transparent text-white/50 hover:text-white/80'}`}
         >
-          الفرسان النشطين
+          الفرسان
         </button>
+        {!isTeacher && (
+          <button 
+            onClick={() => setActiveTab('teachers')}
+            className={`flex-1 py-3 text-sm font-bold text-center border-b-2 transition-colors ${activeTab === 'teachers' ? 'border-emerald-400 text-emerald-400' : 'border-transparent text-white/50 hover:text-white/80'}`}
+          >
+            أساتذتي
+          </button>
+        )}
         <button 
           onClick={() => setActiveTab('chat')}
           className={`flex-1 py-3 text-sm font-bold text-center border-b-2 transition-colors ${activeTab === 'chat' ? 'border-[#00E5FF] text-[#00E5FF]' : 'border-transparent text-white/50 hover:text-white/80'}`}
@@ -295,6 +299,29 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                  />
                  <Search size={18} className="absolute right-3 top-3.5 text-white/40" />
               </div>
+
+              {/* General Chat Room Item */}
+              <div 
+                onClick={() => {
+                  setIsGeneralChat(true);
+                  setSelectedChatUser(null);
+                  setActiveTab('chat');
+                }}
+                className="flex items-center justify-between p-4 bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 rounded-2xl cursor-pointer transition-all group mb-2"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-full bg-amber-500 flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.3)]">
+                    <Coffee size={20} className="text-white" />
+                  </div>
+                  <div className="flex flex-col text-right">
+                    <span className="text-sm text-white font-black">غرفة المجلس العامة</span>
+                    <span className="text-[10px] text-amber-400/80 font-bold">دردشة جماعية لكل المدرسة</span>
+                  </div>
+                </div>
+                <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-400 group-hover:scale-110 transition-transform">
+                  <MessageCircle size={16} />
+                </div>
+              </div>
               
               {(() => {
                 const currentGrade = grade || 'غير محدد';
@@ -305,7 +332,12 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                    return kg === currentGrade || kg.includes(currentGrade) || currentGrade.includes(kg);
                 };
                 
-                const filteredKnights = knights.filter(k => k.name.includes(searchQuery) && gradeMatch(k));
+                // Merge knights with users who have unread messages but might be offline
+                const allInterestedUsers = [...knights];
+                // We ensure all users in unreadCounts are visible if they are students
+                // (Teachers are in the other tab)
+                
+                const filteredKnights = allInterestedUsers.filter(k => k.name.includes(searchQuery) && gradeMatch(k));
 
                 return filteredKnights.length === 0 ? (
                     <div className="flex-1 flex flex-col items-center justify-center opacity-50 grayscale mt-10">
@@ -344,6 +376,74 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                                   <span className="text-[13px] text-white/90 font-bold">{user.name}</span>
                                   <span className={`text-[9px] font-bold ${user.role === 'teacher' ? 'text-amber-400' : (user.role === 'admin' ? 'text-blue-400' : 'text-white/40')}`}>
                                       {user.role === 'teacher' ? 'إشراف' : (user.role === 'admin' ? 'إدارة' : 'طالب')}
+                                  </span>
+                              </div>
+                          </div>
+                          <button 
+                            className="w-10 h-10 rounded-full bg-[#00E5FF]/10 text-[#00E5FF] flex items-center justify-center opacity-50 group-hover:opacity-100 transition-all shrink-0 ml-1"
+                          >
+                            <MessageCircle size={18} />
+                          </button>
+                      </div>
+                  ))
+              );
+              })()}
+          </div>
+      )}
+
+      {activeTab === 'teachers' && !isTeacher && (
+          <div className="flex-1 overflow-y-auto px-4 py-6 bg-[#050A18] flex flex-col gap-2">
+              <div className="mb-4 relative">
+                 <input 
+                    type="text" 
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="ابحث عن أستاذ..." 
+                    className="w-full bg-[#1A233A] text-white text-sm rounded-xl px-4 py-3 pr-10 border border-white/10 outline-none focus:border-emerald-400 focus:bg-[#0D142A] transition-all"
+                 />
+                 <Search size={18} className="absolute right-3 top-3.5 text-white/40" />
+              </div>
+              
+              {(() => {
+                const filteredTeachers = teachersList.filter(t => t.name?.includes(searchQuery) && t.role === 'TEACHER');
+
+                return filteredTeachers.length === 0 ? (
+                    <div className="flex-1 flex flex-col items-center justify-center opacity-50 grayscale mt-10">
+                        <User size={48} className="text-white/20 mb-4" />
+                        <p className="text-white/40 text-sm font-bold">لا يوجد أساتذة حالياً</p>
+                    </div>
+                ) : (
+                    filteredTeachers.map((teacher) => (
+                        <div 
+                          key={teacher.id} 
+                        onClick={() => {
+                          setSelectedChatUser({...teacher, role: 'teacher'});
+                          setActiveTab('chat');
+                        }}
+                        className="flex items-center justify-between p-3 bg-white/[0.02] hover:bg-white/5 border border-white/5 rounded-2xl cursor-pointer transition-colors group"
+                      >
+                          <div className="flex items-center gap-3">
+                              <div className="relative">
+                                  <div className="w-11 h-11 rounded-full border border-white/10 overflow-hidden ring-1 ring-emerald-400/50">
+                                      {teacher.photo || teacher.photoURL ? (
+                                         <img src={teacher.photo || teacher.photoURL} alt={teacher.name} className="w-full h-full object-cover" />
+                                      ) : (
+                                         <div className="w-full h-full bg-white/5 flex items-center justify-center">
+                                             <User size={18} className="text-white/30" />
+                                         </div>
+                                      )}
+                                  </div>
+                                  <div className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-[#050A18] rounded-full"></div>
+                                  {unreadCounts[teacher.id] > 0 && (
+                                     <div className="absolute -top-1 -left-1 bg-red-600 rounded-full min-w-[16px] h-[16px] px-1 flex items-center justify-center shadow-lg border-2 border-[#050A18]">
+                                        <span className="text-[9px] font-black text-white">{unreadCounts[teacher.id]}</span>
+                                     </div>
+                                  )}
+                              </div>
+                              <div className="flex flex-col text-right">
+                                  <span className="text-[13px] text-white/90 font-bold">{teacher.name}</span>
+                                  <span className="text-[9px] font-bold text-emerald-400">
+                                      {teacher.subject || 'مدرس'}
                                   </span>
                               </div>
                           </div>

@@ -492,7 +492,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
   };
 
   const getUserPhoto = () => {
-    if (isTeacher) return teacherData?.photoURL || null;
+    if (isTeacher) return currentTeacherData?.photoURL || teacherData?.photoURL || userProfile?.photoURL || null;
     if (
       userProfile?.role === "admin" ||
       userProfile?.isAdmin ||
@@ -2050,7 +2050,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
         } else if (url.includes("youtube.com/shorts/")) {
           videoId = url.split("youtube.com/shorts/")[1].split("?")[0];
         }
-        if (videoId) return `https://www.youtube.com/embed/${videoId}`;
+        if (videoId) return `https://www.youtube-nocookie.com/embed/${videoId}`;
       }
       if (url.includes("vimeo.com")) {
         if (url.includes("player.vimeo.com/video/")) return url;
@@ -2293,11 +2293,14 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     const q2 = query(collection(db, "question_bank"), where("schoolId", "==", resolvedSchoolId));
     const unsub2 = onSnapshot(q2, (snap) => {
       const questions = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setSchoolQuestions(questions.sort((a, b) => {
-        const timeA = (a as any).createdAt?.toMillis ? (a as any).createdAt.toMillis() : 0;
-        const timeB = (b as any).createdAt?.toMillis ? (b as any).createdAt.toMillis() : 0;
-        return timeB - timeA;
-      }));
+      const getTs = (item: any) => {
+        if (!item?.createdAt) return 0;
+        if (typeof item.createdAt.toMillis === 'function') return item.createdAt.toMillis();
+        if (typeof item.createdAt.toDate === 'function') return item.createdAt.toDate().getTime();
+        const ms = new Date(item.createdAt).getTime();
+        return isNaN(ms) ? (Number(item.createdAt) || 0) : ms;
+      };
+      setSchoolQuestions(questions.sort((a, b) => getTs(b) - getTs(a)));
     }, (error) => {
       console.error("Error loading question bank:", error);
     });
@@ -2305,11 +2308,14 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     const q3 = query(collection(db, "exam_papers"), where("schoolId", "==", resolvedSchoolId));
     const unsub3 = onSnapshot(q3, (snap) => {
       const papers = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      setSchoolExamPapers(papers.sort((a, b) => {
-        const timeA = (a as any).createdAt?.toMillis ? (a as any).createdAt.toMillis() : 0;
-        const timeB = (b as any).createdAt?.toMillis ? (b as any).createdAt.toMillis() : 0;
-        return timeB - timeA;
-      }));
+      const getTs = (item: any) => {
+        if (!item?.createdAt) return 0;
+        if (typeof item.createdAt.toMillis === 'function') return item.createdAt.toMillis();
+        if (typeof item.createdAt.toDate === 'function') return item.createdAt.toDate().getTime();
+        const ms = new Date(item.createdAt).getTime();
+        return isNaN(ms) ? (Number(item.createdAt) || 0) : ms;
+      };
+      setSchoolExamPapers(papers.sort((a, b) => getTs(b) - getTs(a)));
     }, (error) => {
       console.error("Error loading exam papers:", error);
     });
@@ -3339,23 +3345,27 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
 
   // Track unread lounge messages global count
   useEffect(() => {
-    if (!auth.currentUser || !schoolId) return;
-    const q = query(
-      collection(db, "lounge_messages"),
-      where("recipientId", "==", auth.currentUser.uid),
-    );
-    const unsub = onSnapshot(
-      q,
-      (snap) => {
-        const unreadDocs = snap.docs.filter((d) => d.data().read === false);
-        setUnreadLoungeCount(unreadDocs.length);
-      },
-      (err) => {
-        console.error("Error loading global unread count:", err);
-      },
-    );
+    if (!auth.currentUser || !resolvedSchoolId) return;
+    
+    const fetchCount = async () => {
+      try {
+        const res = await fetch(`/api/lounge-messages/unread/${auth.currentUser?.uid}`);
+        const data = await res.json();
+        if (data.success) {
+          const total = Object.values(data.counts as Record<string, number>).reduce((a, b) => a + b, 0);
+          setUnreadLoungeCount(total);
+        }
+      } catch (e) {
+        console.error("Error fetching unread lounge count", e);
+      }
+    };
+
+    fetchCount();
+    const unsub = realtimeManager.subscribe('lounge_messages', () => {
+      fetchCount();
+    });
     return () => unsub();
-  }, [schoolId]);
+  }, [resolvedSchoolId]);
 
   useEffect(() => {
     if (!schoolId) return;
@@ -3990,11 +4000,59 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
 
   const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !auth.currentUser) return;
+    if (!file) return;
 
     try {
       showToast("جاري معالجة الصورة الشخصية...", "info");
       const compressedBase64 = await compressImage(file, 400, 0.75);
+
+      if (isTeacher) {
+        const teacherId = currentTeacherData?.id || teacherData?.id;
+        const teacherCode = currentTeacherData?.code || teacherData?.code;
+
+        if (teacherId) {
+          try {
+            await fetch(`/api/teachers/${teacherId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ photoURL: compressedBase64 })
+            });
+          } catch (tErr) {
+            console.warn("Error updating teacher via API:", tErr);
+          }
+
+          try {
+            await updateDoc(doc(db, "teachers", teacherId), {
+              photoURL: compressedBase64,
+            });
+          } catch (tDocErr) {}
+        }
+
+        if (teacherCode) {
+          try {
+            const q = query(collection(db, "activation_codes"), where("code", "==", teacherCode));
+            const snap = await getDocs(q);
+            if (!snap.empty) {
+              await updateDoc(doc(db, "activation_codes", snap.docs[0].id), {
+                photoURL: compressedBase64,
+              });
+            }
+          } catch (cErr) {}
+        }
+
+        if (auth.currentUser?.uid) {
+          try {
+            await updateDoc(doc(db, "users", auth.currentUser.uid), {
+              photoURL: compressedBase64,
+            });
+          } catch (uErr) {}
+        }
+
+        setCurrentTeacherData((prev: any) => ({ ...(prev || teacherData), photoURL: compressedBase64 }));
+        onUpdateProfile?.({ photoURL: compressedBase64 });
+        showToast("تم تحديث صورة الأستاذ بنجاح! 📸", "success");
+        return;
+      }
 
       const currentStudentCode = userProfile?.studentCode || userProfile?.code;
       if (userProfile?.role === "student" && currentStudentCode) {
@@ -4023,7 +4081,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
         } catch (innerErr) {
           console.error("error updating student collections", innerErr);
         }
-      } else {
+      } else if (auth.currentUser) {
         await updateDoc(doc(db, "users", auth.currentUser!.uid), {
           photoURL: compressedBase64,
         });
@@ -4524,6 +4582,41 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
   const handleSaveInspiringPhrase = async (studentId: string) => {
     if (!editingPhraseText.trim()) return;
     try {
+      if (isTeacher) {
+        const teacherId = currentTeacherData?.id || teacherData?.id;
+        if (teacherId) {
+          try {
+            await fetch(`/api/teachers/${teacherId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ bio: editingPhraseText.trim() })
+            });
+          } catch (tErr) {}
+          try {
+            await updateDoc(doc(db, "teachers", teacherId), {
+              bio: editingPhraseText.trim(),
+              inspiringPhrase: editingPhraseText.trim(),
+            });
+          } catch (tDocErr) {}
+        }
+        if (auth.currentUser?.uid) {
+          try {
+            await updateDoc(doc(db, "users", auth.currentUser.uid), {
+              bio: editingPhraseText.trim(),
+              inspiringPhrase: editingPhraseText.trim(),
+            });
+          } catch (uErr) {}
+        }
+        setCurrentTeacherData((prev: any) => ({
+          ...(prev || teacherData),
+          bio: editingPhraseText.trim(),
+          inspiringPhrase: editingPhraseText.trim(),
+        }));
+        showToast("تم تحديث عبارتك الملهمة بنجاح! 🌟", "success");
+        setIsEditingPhrase(false);
+        return;
+      }
+
       if (studentId) {
         await updateDoc(doc(db, "school_students", studentId), {
           inspiringPhrase: editingPhraseText.trim(),
@@ -5244,7 +5337,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
   const [loadingExcellence, setLoadingExcellence] = useState(false);
   const [selectedBadge, setSelectedBadge] = useState<any>(null);
   const [excellenceSubTab, setExcellenceSubTab] = useState<
-    "knights" | "badges" | "profile"
+    "knights" | "badges" | "profile" | "grades"
   >("knights");
 
   const userCode = (userProfile?.studentCode || userProfile?.code || "")
@@ -5616,10 +5709,15 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
           };
         });
 
-        // Sort classmates by totalPoints descending for live sync leaderboard
+        // Sort classmates by totalPoints, then by average percent descending for live sync leaderboard
         computedStudents.sort((a, b) => {
           if (b.totalPoints !== a.totalPoints) {
             return b.totalPoints - a.totalPoints;
+          }
+          const aAvg = Number(a.averagePercent) || 0;
+          const bAvg = Number(b.averagePercent) || 0;
+          if (bAvg !== aAvg) {
+            return bAvg - aAvg;
           }
           return (a.name || "").localeCompare(b.name || "", "ar");
         });
@@ -7388,6 +7486,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
                   <BroadcastTicker
                     schoolId={resolvedSchoolId}
                     grade={grade}
+                    section={userProfile?.section || userProfile?.class || (userProfile as any)?.studentSection}
                     isVisible={true}
                     isTeacher={isTeacher}
                   />

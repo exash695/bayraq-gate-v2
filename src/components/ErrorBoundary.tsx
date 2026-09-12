@@ -24,6 +24,19 @@ export default class ErrorBoundary extends Component<Props, State> {
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error("Internal recovery initiated:", error, errorInfo);
     
+    // Log to server
+    try {
+      fetch('/api/log-client-error', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          error: error.toString(),
+          stack: error.stack,
+          info: errorInfo.componentStack
+        })
+      }).catch(() => {});
+    } catch (e) {}
+    
     // Check if we've already tried to reload recently to avoid infinite loops
     const lastReload = sessionStorage.getItem('last_error_reload');
     const now = Date.now();

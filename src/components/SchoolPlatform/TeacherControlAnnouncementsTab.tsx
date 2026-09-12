@@ -97,16 +97,68 @@ import type { Teacher, MaterialField, Post, SchoolPlatformProps, PlatformTab, Ha
 import { useSchoolPlatform } from "./SchoolPlatformContext";
 
 export const TeacherControlAnnouncementsTab: React.FC = () => {
-  const { announcementDays, announcementHours, announcementText, handlePost, resolvedSchoolId, schoolId, setAnnouncementDays, setAnnouncementHours, setAnnouncementText, showToast, targetBroadcastGrade, teacherBroadcasts, teacherData } = useSchoolPlatform();
+  const { 
+    announcementDays, 
+    announcementHours, 
+    announcementText, 
+    resolvedSchoolId, 
+    schoolId, 
+    selectedTeacherClass,
+    setAnnouncementDays, 
+    setAnnouncementHours, 
+    setAnnouncementText, 
+    showToast, 
+    targetBroadcastGrade, 
+    teacherAssignedSections,
+    teacherBroadcasts, 
+    teacherData 
+  } = useSchoolPlatform();
+
+  const isAllSections = !selectedTeacherClass || selectedTeacherClass === 'ALL' || selectedTeacherClass === 'كافة الشُعب';
+  const targetLabel = isAllSections ? "كافة الشُعب الموكلة" : selectedTeacherClass;
+
+  const displayedBroadcasts = (teacherBroadcasts || []).filter((item: any) => {
+    if (isAllSections) return true;
+    if (item.targetSection && item.targetSection !== 'ALL') {
+      return item.targetSection === selectedTeacherClass;
+    }
+    if (item.targetSections && Array.isArray(item.targetSections)) {
+      return item.targetSections.includes(selectedTeacherClass) || item.targetSections.includes('ALL');
+    }
+    return true;
+  });
 
   return (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   {/* Left Col: Broadcast Message */}
                   <div className="lg:col-span-2 space-y-4">
                     <div className="bg-[#0E152D]/60 border border-white/5 p-6 rounded-2xl space-y-4">
-                      <h3 className="text-xs font-bold text-white/50 uppercase tracking-widest">
-                        بث إعلان عاجل في شريط التنبيهات للطلاب
-                      </h3>
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-xs font-bold text-white/50 uppercase tracking-widest">
+                          بث إعلان عاجل في شريط التنبيهات للطلاب
+                        </h3>
+                        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-purple-500/10 border border-purple-500/20 text-purple-300 text-[10px] font-black">
+                          <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse" />
+                          <span>الوجهة: {targetLabel}</span>
+                        </div>
+                      </div>
+
+                      {/* Active target banner */}
+                      <div className="bg-purple-950/30 border border-purple-500/20 rounded-xl p-3 flex items-center justify-between text-right" dir="rtl">
+                        <div className="space-y-0.5">
+                          <span className="text-[11px] font-black text-purple-300 block">
+                            📡 نطاق الإرسال المتزامن: {targetLabel}
+                          </span>
+                          <span className="text-[9px] text-white/50 font-bold block">
+                            {isAllSections 
+                              ? `سيظهر هذا الإعلان في أشرطة شاشات جميع الطلاب في كل شُعبك الموكلة (${teacherAssignedSections?.length || 0} شُعب)` 
+                              : `سيظهر هذا الإعلان فقط لطلاب (${selectedTeacherClass}) في شريطهم اللحظي`}
+                          </span>
+                        </div>
+                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/5 text-purple-300 border border-white/5">
+                          {isAllSections ? 'بث جماعي' : 'بث شعبة'}
+                        </span>
+                      </div>
 
                       <div className="space-y-1.5">
                         <label className="text-[10px] text-white/40 font-bold block">
@@ -186,6 +238,13 @@ export const TeacherControlAnnouncementsTab: React.FC = () => {
 
                             const durationHours = (announcementDays * 24) + announcementHours || 1;
 
+                            const targetSectionsList = isAllSections
+                              ? (teacherAssignedSections || []).map((s: any) => s.name).filter(Boolean)
+                              : [selectedTeacherClass];
+                            const targetGradesList = isAllSections
+                              ? Array.from(new Set((teacherAssignedSections || []).map((s: any) => s.grade || s.name).filter(Boolean)))
+                              : [targetBroadcastGrade || selectedTeacherClass];
+
                             const handlePost = async () => {
                               try {
                                 await addDoc(collection(db, "broadcasts"), {
@@ -193,7 +252,10 @@ export const TeacherControlAnnouncementsTab: React.FC = () => {
                                   rawText: announcementText,
                                   author: tName,
                                   subject: tSubject,
-                                  targetGrades: [targetBroadcastGrade || "الجميع"],
+                                  targetSection: isAllSections ? "ALL" : selectedTeacherClass,
+                                  targetSections: targetSectionsList,
+                                  targetSectionLabel: targetLabel,
+                                  targetGrades: targetGradesList.length > 0 ? targetGradesList : [targetBroadcastGrade || "الجميع"],
                                   schoolId: resolvedSchoolId,
                                   type: 'school_broadcast',
                                   isSchoolBroadcast: true,
@@ -204,7 +266,7 @@ export const TeacherControlAnnouncementsTab: React.FC = () => {
                                   timestampMs: Date.now()
                                 });
                                 showToast(
-                                  "تم بث ونشر الإعلان فوراً لجميع شاشات الطلاب! 📡",
+                                  `تم بث ونشر الإعلان فوراً إلى (${targetLabel})! 📡`,
                                   "success",
                                 );
                                 setAnnouncementText("");
@@ -224,16 +286,21 @@ export const TeacherControlAnnouncementsTab: React.FC = () => {
 
                     {/* Previews */}
                     <div className="bg-[#0E152D]/30 border border-white/5 rounded-2xl p-4">
-                      <h4 className="text-[11px] text-white/50 font-black mb-3 pb-2 border-b border-white/5">
-                        أشرطة عواجل البوابة النشطة حالياً لبوابتك
-                      </h4>
+                      <div className="flex items-center justify-between mb-3 pb-2 border-b border-white/5">
+                        <h4 className="text-[11px] text-white/50 font-black">
+                          أشرطة عواجل البوابة النشطة حالياً لبوابتك
+                        </h4>
+                        <span className="text-[10px] text-purple-300 font-bold">
+                          المعروض: {targetLabel} ({displayedBroadcasts.length})
+                        </span>
+                      </div>
                       <div className="space-y-2">
-                        {teacherBroadcasts.length === 0 ? (
+                        {displayedBroadcasts.length === 0 ? (
                           <div className="text-center p-6 text-white/30 text-xs">
-                            لا توجد إعلانات عاجلة نشطة حالياً لبوابتك.
+                            لا توجد إعلانات عاجلة نشطة حالياً لـ ({targetLabel}).
                           </div>
                         ) : (
-                          teacherBroadcasts.map((item) => {
+                          displayedBroadcasts.map((item) => {
                             // Calculate remaining time
                             const diffMs = (item.expiryDate || 0) - Date.now();
                             let remainingText = "منتهي";
@@ -260,6 +327,11 @@ export const TeacherControlAnnouncementsTab: React.FC = () => {
                                 className="p-3 bg-[#0B0F21]/80 border border-white/5 rounded-xl flex items-center justify-between gap-4"
                               >
                                 <div className="flex-1 text-right" dir="rtl">
+                                  <div className="flex items-center gap-2 mb-1">
+                                    <span className="text-[9px] px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 font-bold border border-purple-500/30">
+                                      🎯 {item.targetSectionLabel || (item.targetSection === 'ALL' ? 'كافة الشُعب' : item.targetSection) || 'عام'}
+                                    </span>
+                                  </div>
                                   <span className="text-[11px] font-black text-rose-300 block leading-relaxed">
                                     {item.message}
                                   </span>

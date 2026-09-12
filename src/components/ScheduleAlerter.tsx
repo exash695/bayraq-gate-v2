@@ -17,6 +17,7 @@ interface ScheduleEntry {
 }
 
 const DAYS_AR = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+const normalizeDay = (d: string) => (d || '').replace(/[إأآٱ]/g, 'ا').trim();
 
 interface Props {
   grade: string;
@@ -64,7 +65,7 @@ export const ScheduleAlerter: React.FC<Props> = ({ grade, isTeacher, teacherId, 
       const currentHour = now.getHours();
       const currentMinute = now.getMinutes();
 
-      const todaySchedules = schedules.filter(s => s.day === currentDayAr && !dismissedIds.has(s.id));
+      const todaySchedules = schedules.filter(s => normalizeDay(s.day) === normalizeDay(currentDayAr) && !dismissedIds.has(s.id));
 
       for (const entry of todaySchedules) {
         const timeParts = entry.time.split(' ');

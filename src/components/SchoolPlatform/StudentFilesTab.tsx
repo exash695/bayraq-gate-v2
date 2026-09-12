@@ -61,7 +61,7 @@ import {
   ChevronRight, ChevronDown, ChevronUp, Mic, MicOff, VideoOff, ThumbsUp, Send, Clock,
   HelpCircle, Hand as HandIcon, PenTool, Search, Filter, MailQuestion, ShieldAlert,
   Database, Bot, ClipboardCheck, Play, Target, Terminal, Bug, Info, Unlock, Download,
-  Minimize2, Scan, XCircle, MessageSquare
+  Minimize2, Scan, XCircle, MessageSquare, Copy, Check, ExternalLink
 } from "lucide-react";
 import { SchoolContent } from "../SchoolContent";
 import { BroadcastTicker } from "../BroadcastTicker";
@@ -94,6 +94,7 @@ import {
   generateQuestionsForDocument,
   getSanitizedVideoUrl,
   formatLectureDescription,
+  downloadDocumentFile,
 } from "./utils";
 import type { Teacher, MaterialField, Post, SchoolPlatformProps, PlatformTab, HandRaiseRequest, LiveQuestion } from "./types";
 import { useSchoolPlatform } from "./SchoolPlatformContext";
@@ -101,48 +102,81 @@ import { useSchoolPlatform } from "./SchoolPlatformContext";
 export const StudentFilesTab: React.FC = () => {
   const { academicLists, grade, gradeName, highlightTasksSection, isFilesSidebarCollapsed, isTeacher, mapGradeForDocument, onClearHighlightTasks, recordedLessons, resolvedSchoolId, schoolExamPapers, schoolFiles, schoolId, schoolName, schoolQuestions, setActiveRadarFile, setCompetitionAnswers, setCompetitionScore, setCompetitionTimer, setHomeworkAnswer, setIsFilesSidebarCollapsed, setPdfLoadError, setPreviewingFile, setSelectedAIQuestion, setSelectedPaperForExtraction, setStudentExamPaperRole, setStudentExamPaperYear, setStudentLibrarySearch, setStudentLibrarySubject, setStudentLibraryTab, setStudentQuestionBankTab, setUserRatings, setViewingCompetition, setViewingHomework, setViewingRecordedLesson, setViewingSubmissionFeedback, showToast, studentExamPaperRole, studentExamPaperYear, studentLibrarySearch, studentLibrarySubject, studentLibraryTab, studentQuestionBankTab, studentSubmissions, subjectMapping, teacherAiResults, userProfile, userRatings } = useSchoolPlatform();
 
-        const isGradeMatch = (docGrade?: string, targetStudentGrade?: string): boolean => {
-          if (!docGrade || !targetStudentGrade) return true;
-          const dClean = String(docGrade).trim();
-          const sClean = String(targetStudentGrade).trim();
-          if (!dClean || dClean === "الكل" || dClean === "عام" || dClean === "جميع المراحل") return true;
-          if (!sClean || sClean === "الكل" || sClean === "عام" || sClean === "جميع المراحل") return true;
-          if (dClean === sClean) return true;
+  const [selectedQuestionCategory, setSelectedQuestionCategory] = useState<string | null>(null);
+  const [expandedQuestionId, setExpandedQuestionId] = useState<string | null>(null);
+  const [copiedQuestionId, setCopiedQuestionId] = useState<string | null>(null);
+  const [viewingPaperImage, setViewingPaperImage] = useState<string | null>(null);
+  const [downloadingFileId, setDownloadingFileId] = useState<string | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<number>(0);
 
-          const dMapped = mapGradeForDocument(dClean);
-          const sMapped = mapGradeForDocument(sClean);
-          if (dMapped && sMapped && (dMapped === sMapped || dMapped === "الكل" || sMapped === "الكل")) return true;
+  const isGradeMatch = (docGrade?: string, targetStudentGrade?: string, targetSections?: string[]): boolean => {
+    if (!targetStudentGrade) return true;
+    const sClean = String(targetStudentGrade).trim();
+    const sLower = sClean.toLowerCase();
+    if (!sClean || sClean === "الكل" || sClean === "عام" || sClean === "جميع المراحل" || sLower === "all" || sClean === "*") return true;
 
-          const dNorm = normalizeArabicText(dClean);
-          const sNorm = normalizeArabicText(sClean);
-          if (dNorm === sNorm || dNorm.includes(sNorm) || sNorm.includes(dNorm)) return true;
+    const grades = [
+      { keys: ['اولابتدائي', 'اولابتداي'], label: 'أول ابتدائي' },
+      { keys: ['ثانيابتدائي', 'ثانيابتداي'], label: 'ثاني ابتدائي' },
+      { keys: ['ثالثابتدائي', 'ثالثابتداي'], label: 'ثالث ابتدائي' },
+      { keys: ['رابعابتدائي', 'رابعابتداي'], label: 'رابع ابتدائي' },
+      { keys: ['خامسابتدائي', 'خامسابتداي'], label: 'خامس ابتدائي' },
+      { keys: ['سادسابتدائي', 'سادسابتداي'], label: 'سادس ابتدائي' },
+      { keys: ['اولمتوسط'], label: 'أول متوسط' },
+      { keys: ['ثانيمتوسط'], label: 'ثاني متوسط' },
+      { keys: ['ثالثمتوسط'], label: 'ثالث متوسط' },
+      { keys: ['رابععلمي', 'رابعالعلمي'], label: 'رابع علمي' },
+      { keys: ['رابعادبي', 'رابعالادبي'], label: 'رابع أدبي' },
+      { keys: ['خامسعلمي', 'خامسالعلمي'], label: 'خامس علمي' },
+      { keys: ['خامسادبي', 'خامسالادبي'], label: 'خامس أدبي' },
+      { keys: ['سادسعلمي', 'سادسالعلمي', 'سادستطبيقي', 'سادسأحيائي', 'سادساحيائي'], label: 'سادس علمي' },
+      { keys: ['سادسادبي', 'سادسالادبي'], label: 'سادس أدبي' },
+    ];
 
-          const grades = [
-            { keys: ['اولابتدائي', 'اولابتداي'], label: 'أول ابتدائي' },
-            { keys: ['ثانيابتدائي', 'ثانيابتداي'], label: 'ثاني ابتدائي' },
-            { keys: ['ثالثابتدائي', 'ثالثابتداي'], label: 'ثالث ابتدائي' },
-            { keys: ['رابعابتدائي', 'رابعابتداي'], label: 'رابع ابتدائي' },
-            { keys: ['خامسابتدائي', 'خامسابتداي'], label: 'خامس ابتدائي' },
-            { keys: ['سادسابتدائي', 'سادسابتداي'], label: 'سادس ابتدائي' },
-            { keys: ['اولمتوسط'], label: 'أول متوسط' },
-            { keys: ['ثانيمتوسط'], label: 'ثاني متوسط' },
-            { keys: ['ثالثمتوسط'], label: 'ثالث متوسط' },
-            { keys: ['رابععلمي', 'رابعالعلمي'], label: 'رابع علمي' },
-            { keys: ['رابعادبي', 'رابعالادبي'], label: 'رابع أدبي' },
-            { keys: ['خامسعلمي', 'خامسالعلمي'], label: 'خامس علمي' },
-            { keys: ['خامسادبي', 'خامسالادبي'], label: 'خامس أدبي' },
-            { keys: ['سادسعلمي', 'سادسالعلمي', 'سادستطبيقي', 'سادسأحيائي', 'سادساحيائي'], label: 'سادس علمي' },
-            { keys: ['سادسادبي', 'سادسالادبي'], label: 'سادس أدبي' },
-          ];
+    const sNorm = normalizeArabicText(sClean);
 
-          for (const g of grades) {
-            const dMatches = g.keys.some(k => dNorm.includes(k));
-            const sMatches = g.keys.some(k => sNorm.includes(k));
-            if (dMatches && sMatches) return true;
-          }
+    // 1. Check targetSections if provided (array of classes/sections assigned by teacher)
+    if (Array.isArray(targetSections) && targetSections.length > 0) {
+      const sectionMatched = targetSections.some(sec => {
+        if (!sec) return false;
+        const secStr = String(sec).trim();
+        const secLower = secStr.toLowerCase();
+        if (secStr === "الكل" || secStr === "عام" || secStr === "جميع المراحل" || secStr === "كافة الشُعب" || secLower === "all" || secStr === "*") return true;
+        if (secStr === sClean) return true;
+        const secNorm = normalizeArabicText(secStr);
+        if (secNorm === sNorm || secNorm.includes(sNorm) || sNorm.includes(secNorm)) return true;
+        for (const g of grades) {
+          const secMatches = g.keys.some(k => secNorm.includes(k));
+          const sMatches = g.keys.some(k => sNorm.includes(k));
+          if (secMatches && sMatches) return true;
+        }
+        return false;
+      });
+      if (sectionMatched) return true;
+    }
 
-          return false;
-        };
+    // 2. Check docGrade
+    if (!docGrade) return true;
+    const dClean = String(docGrade).trim();
+    const dLower = dClean.toLowerCase();
+    if (!dClean || dClean === "الكل" || dClean === "عام" || dClean === "جميع المراحل" || dClean === "كافة الشُعب" || dLower === "all" || dClean === "*") return true;
+    if (dClean === sClean) return true;
+
+    const dMapped = mapGradeForDocument(dClean);
+    const sMapped = mapGradeForDocument(sClean);
+    if (dMapped && sMapped && (dMapped === sMapped || dMapped === "الكل" || sMapped === "الكل")) return true;
+
+    const dNorm = normalizeArabicText(dClean);
+    if (dNorm === sNorm || dNorm.includes(sNorm) || sNorm.includes(dNorm)) return true;
+
+    for (const g of grades) {
+      const dMatches = g.keys.some(k => dNorm.includes(k));
+      const sMatches = g.keys.some(k => sNorm.includes(k));
+      if (dMatches && sMatches) return true;
+    }
+
+    return false;
+  };
 
         const normalizeSubject = (s: string) => {
           if (!s) return "";
@@ -216,12 +250,14 @@ export const StudentFilesTab: React.FC = () => {
         };
 
         const uncompletedHwCount = teacherAiResults.filter(r => {
-          const matchesGrade = isGradeMatch(r.targetGrade, activeStudentGrade);
+          const rSections = Array.isArray(r.targetSections) ? r.targetSections : (r.section ? [r.section] : undefined);
+          const matchesGrade = isGradeMatch(r.targetGrade, activeStudentGrade, rSections);
           return r.tool === 'صناعة واجبات' && matchesGrade && !studentSubmissions.some(sub => sub.taskId === r.id && sub.type === 'homework');
         }).length;
 
         const uncompletedCompCount = teacherAiResults.filter(r => {
-          const matchesGrade = isGradeMatch(r.targetGrade, activeStudentGrade);
+          const rSections = Array.isArray(r.targetSections) ? r.targetSections : (r.section ? [r.section] : undefined);
+          const matchesGrade = isGradeMatch(r.targetGrade, activeStudentGrade, rSections);
           return r.tool === 'مسابقات صفية' && matchesGrade && !studentSubmissions.some(sub => sub.taskId === r.id && sub.type === 'competition');
         }).length;
 
@@ -245,21 +281,30 @@ export const StudentFilesTab: React.FC = () => {
         });
 
         const filteredQuestions = schoolQuestions.filter((q) => {
+          const qText = String(q.text || q.question || '').trim();
           const searchLower = String(studentLibrarySearch || '').toLowerCase();
-          const matchesSearch = !searchLower || (String(q.text || '').toLowerCase().includes(searchLower) || false);
-          const matchesSubject = isSubjectMatch(q.subject, q.text);
-          const matchesGrade = isGradeMatch((q as any).grade, activeStudentGrade);
+          const matchesSearch = !searchLower || qText.toLowerCase().includes(searchLower);
+          const matchesSubject = isSubjectMatch(q.subject, qText);
+          const qGrade = (q as any).grade || (q as any).targetGrade;
+          const qSections = Array.isArray((q as any).targetSections)
+            ? (q as any).targetSections
+            : (q as any).section ? [(q as any).section] : undefined;
+          const matchesGrade = isGradeMatch(qGrade, activeStudentGrade, qSections);
           return matchesSearch && matchesSubject && matchesGrade;
         });
 
         const filteredPapers = schoolExamPapers.filter((p) => {
-          const paperTitle = p.title || "ورقة امتحانية";
+          const paperTitle = p.title || `${p.subject || ''} ${p.role || ''} ${p.year || ''}`.trim() || "ورقة امتحانية";
           const searchLower = String(studentLibrarySearch || '').toLowerCase();
           const matchesSearch = !searchLower || String(paperTitle || '').toLowerCase().includes(searchLower);
           const matchesSubject = isSubjectMatch(p.subject, paperTitle);
-          const matchesYear = studentExamPaperYear === "الكل" || p.year === studentExamPaperYear;
-          const matchesRole = studentExamPaperRole === "الكل" || p.role === studentExamPaperRole;
-          const matchesGrade = isGradeMatch((p as any).grade, activeStudentGrade);
+          const matchesYear = !studentExamPaperYear || studentExamPaperYear === "الكل" || String(p.year).trim() === String(studentExamPaperYear).trim();
+          const matchesRole = !studentExamPaperRole || studentExamPaperRole === "الكل" || normalizeArabicText(String(p.role || '')) === normalizeArabicText(String(studentExamPaperRole));
+          const pGrade = (p as any).grade || (p as any).targetGrade;
+          const pSections = Array.isArray((p as any).targetSections)
+            ? (p as any).targetSections
+            : (p as any).section ? [(p as any).section] : undefined;
+          const matchesGrade = isGradeMatch(pGrade, activeStudentGrade, pSections);
           return matchesSearch && matchesSubject && matchesYear && matchesRole && matchesGrade;
         });
 
@@ -675,6 +720,52 @@ export const StudentFilesTab: React.FC = () => {
                             فتح الملف والقراءة
                           </button>
                           
+                          {(docItem.allowDownload === true || isTeacher || userProfile?.role === 'admin' || userProfile?.isAdmin) && (
+                            <div className="relative">
+                              <button
+                                onClick={() => {
+                                  sounds.playClick();
+                                  if (docItem?.fileUrl) {
+                                    setDownloadingFileId(docItem.id);
+                                    setDownloadProgress(0);
+                                    downloadDocumentFile(
+                                      docItem.fileUrl,
+                                      (docItem.title || docItem.name || "ملزمة دراسية") + ".pdf",
+                                      docItem.id,
+                                      (msg, type) => showToast(msg, type),
+                                      (progress) => {
+                                        setDownloadProgress(progress);
+                                        if (progress >= 100) setTimeout(() => setDownloadingFileId(null), 1500);
+                                      }
+                                    );
+                                  } else {
+                                    showToast("رابط الملف غير متاح للتحميل", "error");
+                                  }
+                                }}
+                                disabled={downloadingFileId === docItem.id}
+                                className={`px-2.5 py-1.5 ${downloadingFileId === docItem.id ? 'bg-slate-500/15 text-slate-400 border-slate-500/25' : 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border-emerald-500/25 active:scale-95 cursor-pointer'} text-[10px] font-black rounded-lg transition-all flex items-center justify-center gap-1.5 border shadow-[0_2px_8px_rgba(16,185,129,0.1)]`}
+                                title="تحميل الملزمة مباشرة بصيغة PDF"
+                              >
+                                {downloadingFileId === docItem.id ? (
+                                  <>
+                                    <div className="w-3 h-3 border-2 border-slate-400 border-t-transparent rounded-full animate-spin" />
+                                    <span>{downloadProgress}%</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Download size={13} className={downloadingFileId === docItem.id ? "text-slate-400" : "text-emerald-400"} />
+                                    <span>تحميل</span>
+                                  </>
+                                )}
+                              </button>
+                              {downloadingFileId === docItem.id && downloadProgress > 0 && downloadProgress < 100 && (
+                                <div className="absolute -bottom-2 left-0 right-0 h-1 bg-slate-700/50 rounded-full overflow-hidden">
+                                  <div className="h-full bg-emerald-500 transition-all duration-300" style={{ width: `${downloadProgress}%` }} />
+                                </div>
+                              )}
+                            </div>
+                          )}
+
                           <button
                             onClick={() => {
                               setActiveRadarFile(docItem);
@@ -744,8 +835,9 @@ export const StudentFilesTab: React.FC = () => {
                           <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent z-10" />
                           <Play size={24} className="text-white/60 group-hover:text-[#00E5FF] group-hover:scale-110 transition-all z-20" fill="currentColor" />
                           
-                          <span className="absolute bottom-2 left-2 text-[8px] font-bold font-mono text-white/80 bg-black/70 px-1.5 py-0.5 rounded z-20">
-                            {vidItem.duration}
+                          <span className="absolute bottom-2 left-2 text-[8px] font-bold font-mono text-white/90 bg-black/75 px-2 py-0.5 rounded z-20 flex items-center gap-1 backdrop-blur-sm border border-white/10">
+                            <Clock size={9} className="text-[#00E5FF]" />
+                            {(!vidItem.duration || vidItem.duration === "0:00" || vidItem.duration === "00:00") ? "محاضرة مرئية" : vidItem.duration}
                           </span>
                           <div className="absolute top-2 right-2 flex items-center gap-1.5 z-20">
                             <span className="text-[8px] font-black text-[#00E5FF] bg-black/70 px-2 py-0.5 rounded-md border border-[#00E5FF]/30 backdrop-blur-md">
@@ -861,86 +953,332 @@ export const StudentFilesTab: React.FC = () => {
                   </div>
                 )}
 
-                {studentQuestionBankTab === 'questions' ? (
-                  filteredQuestions.length === 0 ? (
-                    <motion.div
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      className="flex flex-col items-center justify-center py-12 text-center"
-                    >
-                      <div className="w-32 h-32 sm:w-40 sm:h-40 mx-auto relative mb-3">
-                        <BerqCharacter 
-                          pose="pose_questions_bank" 
-                          glowColor="cyan" 
-                          className="w-full h-full" 
-                        />
-                      </div>
-                      <h3 className="text-xl font-black text-white/70 mb-3">لا توجد أسئلة متوفرة</h3>
-                      <p className="text-sm font-bold text-white/30 max-w-sm leading-relaxed">
-                        لم يقم الأساتذة بإضافة أسئلة لهذه المادة بعد.
-                      </p>
-                    </motion.div>
-                  ) : (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {filteredQuestions.map((q, idx) => (
-                        <motion.div
-                          key={`q_${q.id || 'idx'}_${idx}`}
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          className="group relative rounded-xl border border-white/5 bg-[#0E152D]/40 hover:bg-[#0E152D]/70 p-4 transition-all flex flex-col justify-between hover:border-indigo-500/20 shadow-[0_4px_20px_rgba(0,0,0,0.15)]"
-                        >
-                          <div className="mb-4">
-                            <div className="flex justify-between items-start mb-3">
-                              <span className="px-2 py-1 bg-white/5 border border-white/10 rounded-lg text-[10px] font-bold text-white/60 truncate max-w-[120px]">
-                                {q.subject || "مادة عامة"}
-                              </span>
-                              <span className={`px-2 py-1 rounded-lg text-[10px] font-bold border ${
-                                q.difficulty === 'hard' ? 'bg-red-500/10 border-red-500/30 text-red-400' :
-                                q.difficulty === 'medium' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' :
-                                'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                              }`}>
-                                {q.difficulty === 'hard' ? 'صعب' : q.difficulty === 'medium' ? 'متوسط' : 'سهل'}
-                              </span>
-                            </div>
-                            
-                            <div className="flex flex-wrap gap-2 mb-3">
-                              {q.tags?.map((tag: string, i: number) => (
-                                <span key={i} className="px-2 py-0.5 rounded-md text-[10px] font-black bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                                  {tag}
-                                </span>
-                              ))}
-                            </div>
+                {studentQuestionBankTab === 'questions' ? (() => {
+                  const QUESTION_CATEGORIES = [
+                    {
+                      id: 'ministerial',
+                      title: 'أسئلة وزارية',
+                      desc: 'نماذج وأسئلة الامتحانات الوزارية للسنوات السابقة مع الحلول',
+                      icon: BookOpen,
+                      badgeText: 'وزاري',
+                      borderClass: 'border-amber-500/20 hover:border-amber-500/50',
+                      bgBadge: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
+                      iconBg: 'bg-amber-500/20 text-amber-400 border border-amber-500/30',
+                      gradientBg: 'from-amber-500/10 via-[#0d1633] to-[#0A1024]',
+                    },
+                    {
+                      id: 'chapter',
+                      title: 'أسئلة فصلية',
+                      desc: 'أسئلة ومراجعات مركزة لنهاية كل فصل ووحدة منهجية',
+                      icon: Layers,
+                      badgeText: 'فصلي',
+                      borderClass: 'border-blue-500/20 hover:border-blue-500/50',
+                      bgBadge: 'bg-blue-500/15 text-blue-300 border-blue-500/30',
+                      iconBg: 'bg-blue-500/20 text-blue-400 border border-blue-500/30',
+                      gradientBg: 'from-blue-500/10 via-[#0d1633] to-[#0A1024]',
+                    },
+                    {
+                      id: 'monthly',
+                      title: 'أسئلة شهرية',
+                      desc: 'نماذج اختبارات الأشهر المدرسية لتعزيز الفهم والتدريب',
+                      icon: Calendar,
+                      badgeText: 'شهري',
+                      borderClass: 'border-pink-500/20 hover:border-pink-500/50',
+                      bgBadge: 'bg-pink-500/15 text-pink-300 border-pink-500/30',
+                      iconBg: 'bg-pink-500/20 text-pink-400 border border-pink-500/30',
+                      gradientBg: 'from-pink-500/10 via-[#0d1633] to-[#0A1024]',
+                    },
+                    {
+                      id: 'lesson',
+                      title: 'أسئلة حسب الدرس',
+                      desc: 'أسئلة وتمارين تفصيلية مقسمة بدقة لكل درس وموضوع',
+                      icon: BookOpenText,
+                      badgeText: 'حسب الدرس',
+                      borderClass: 'border-emerald-500/20 hover:border-emerald-500/50',
+                      bgBadge: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+                      iconBg: 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30',
+                      gradientBg: 'from-emerald-500/10 via-[#0d1633] to-[#0A1024]',
+                    },
+                  ];
 
-                            <h4 className="text-white font-bold text-sm leading-relaxed line-clamp-3 group-hover:text-indigo-300 transition-colors">
-                              {q.text}
-                            </h4>
-                          </div>
-                          
-                          {q.options && q.options.length > 0 && (
-                            <div className="mt-3 space-y-2 mb-4">
-                              <p className="text-[10px] text-white/40 mb-1">الخيارات:</p>
-                              <div className="grid grid-cols-2 gap-2">
-                                {q.options.map((opt: string, i: number) => (
-                                  <div key={i} className="text-[10px] font-bold text-white/60 bg-black/20 p-2 rounded border border-white/5 line-clamp-1">
-                                    {opt}
-                                  </div>
-                                ))}
+                  const questionCounts: Record<string, number> = {
+                    ministerial: filteredQuestions.filter(q => (q.category || 'ministerial') === 'ministerial').length,
+                    chapter: filteredQuestions.filter(q => q.category === 'chapter').length,
+                    monthly: filteredQuestions.filter(q => q.category === 'monthly').length,
+                    lesson: filteredQuestions.filter(q => q.category === 'lesson').length,
+                  };
+
+                  const displayedQuestions = (!selectedQuestionCategory || selectedQuestionCategory === 'all')
+                    ? filteredQuestions
+                    : filteredQuestions.filter(q => (q.category || 'ministerial') === selectedQuestionCategory);
+
+                  return (
+                    <div className="flex flex-col gap-6">
+                      {/* Top Category Navigation & Cards */}
+                      {selectedQuestionCategory === null ? (
+                        <div>
+                          {/* Header banner */}
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 bg-gradient-to-r from-indigo-950/40 via-purple-950/20 to-transparent p-4 rounded-2xl border border-white/10">
+                            <div className="flex items-center gap-3">
+                              <div className="w-10 h-10 rounded-xl bg-indigo-500/20 border border-indigo-500/30 flex items-center justify-center text-indigo-400 shadow-inner">
+                                <Database size={20} />
+                              </div>
+                              <div>
+                                <h3 className="text-base font-black text-white">بنك الأسئلة والمراجعة المنهجية</h3>
+                                <p className="text-xs font-bold text-white/50">تصفح الأسئلة بحسب التصنيفات المعتمدة أو استعرض كافة الأسئلة</p>
                               </div>
                             </div>
-                          )}
-                          
+                            <button
+                              onClick={() => setSelectedQuestionCategory('all')}
+                              className="px-4 py-2 rounded-xl text-xs font-black bg-white/10 hover:bg-white/15 text-white border border-white/15 transition-all flex items-center justify-center gap-2 self-start sm:self-auto cursor-pointer"
+                            >
+                              <span>عرض كافة الأسئلة ({filteredQuestions.length})</span>
+                              <ChevronLeft size={16} />
+                            </button>
+                          </div>
+
+                          {/* 4 Interactive Category Cards */}
+                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+                            {QUESTION_CATEGORIES.map((cat) => {
+                              const count = questionCounts[cat.id] || 0;
+                              const CatIcon = cat.icon;
+                              return (
+                                <motion.div
+                                  key={cat.id}
+                                  whileHover={{ y: -4, transition: { duration: 0.2 } }}
+                                  whileTap={{ scale: 0.98 }}
+                                  onClick={() => setSelectedQuestionCategory(cat.id)}
+                                  className={`cursor-pointer rounded-2xl border bg-gradient-to-b ${cat.gradientBg} p-5 transition-all duration-300 flex flex-col justify-between shadow-lg relative overflow-hidden group ${cat.borderClass}`}
+                                >
+                                  <div className="flex items-start justify-between mb-4">
+                                    <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${cat.iconBg} transition-transform group-hover:scale-110`}>
+                                      <CatIcon size={24} />
+                                    </div>
+                                    <span className={`px-2.5 py-1 rounded-lg text-xs font-black border ${cat.bgBadge}`}>
+                                      {count} {count === 1 ? 'سؤال' : count === 2 ? 'سؤالان' : 'أسئلة'}
+                                    </span>
+                                  </div>
+                                  
+                                  <div>
+                                    <h4 className="text-base font-black text-white mb-1.5 flex items-center justify-between">
+                                      <span>{cat.title}</span>
+                                      <span className="text-xs font-bold text-white/40 group-hover:text-white transition-all">←</span>
+                                    </h4>
+                                    <p className="text-xs font-medium text-white/50 leading-relaxed line-clamp-2">
+                                      {cat.desc}
+                                    </p>
+                                  </div>
+                                </motion.div>
+                              );
+                            })}
+                          </div>
+
+                          {/* Header above questions preview */}
+                          <div className="flex items-center justify-between mb-4 border-b border-white/5 pb-2">
+                            <h4 className="text-sm font-black text-white/80 flex items-center gap-2">
+                              <Sparkles size={16} className="text-amber-400" />
+                              <span>أحدث الأسئلة المتاحة</span>
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-white/10 text-white/60 font-bold">{filteredQuestions.length}</span>
+                            </h4>
+                          </div>
+                        </div>
+                      ) : (
+                        /* Filtered Category Header with Back button and Quick Tabs */
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white/5 p-3 sm:p-4 rounded-2xl border border-white/10">
                           <button
-                            onClick={() => setSelectedAIQuestion(q)}
-                            className="relative z-10 w-full mt-auto py-2.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 hover:text-indigo-200 text-xs font-black rounded-xl border border-indigo-500/20 hover:border-indigo-500/40 transition-all flex items-center justify-center gap-2"
+                            onClick={() => setSelectedQuestionCategory(null)}
+                            className="px-3.5 py-2 rounded-xl text-xs font-black bg-white/10 hover:bg-white/20 text-white transition-all flex items-center gap-2 border border-white/10 self-start cursor-pointer"
                           >
-                            <Sparkles size={14} className="text-amber-400" />
-                            المساعد الذكي
+                            <ArrowRight size={14} />
+                            <span>العودة للأقسام الرئيسية</span>
                           </button>
+
+                          {/* Category quick switcher tabs */}
+                          <div className="flex items-center gap-1.5 overflow-x-auto pb-1 max-w-full">
+                            <button
+                              onClick={() => setSelectedQuestionCategory('all')}
+                              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border shrink-0 cursor-pointer ${
+                                selectedQuestionCategory === 'all'
+                                  ? 'bg-indigo-600 text-white border-indigo-400 shadow-md'
+                                  : 'bg-black/30 text-white/60 border-white/5 hover:text-white'
+                              }`}
+                            >
+                              الكل ({filteredQuestions.length})
+                            </button>
+                            {QUESTION_CATEGORIES.map(cat => {
+                              const count = questionCounts[cat.id] || 0;
+                              const isCurrent = selectedQuestionCategory === cat.id;
+                              return (
+                                <button
+                                  key={cat.id}
+                                  onClick={() => setSelectedQuestionCategory(cat.id)}
+                                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border shrink-0 flex items-center gap-1.5 cursor-pointer ${
+                                    isCurrent
+                                      ? `${cat.bgBadge} font-black shadow-md`
+                                      : 'bg-black/30 text-white/60 border-white/5 hover:text-white'
+                                  }`}
+                                >
+                                  <span>{cat.title}</span>
+                                  <span className="opacity-70 text-[10px]">({count})</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Questions Grid or Empty State */}
+                      {displayedQuestions.length === 0 ? (
+                        <motion.div
+                          initial={{ opacity: 0, scale: 0.95 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          className="flex flex-col items-center justify-center py-12 text-center bg-white/5 rounded-3xl border border-white/5 p-6"
+                        >
+                          <div className="w-32 h-32 sm:w-40 sm:h-40 mx-auto relative mb-3">
+                            <BerqCharacter 
+                              pose="pose_questions_bank" 
+                              glowColor="cyan" 
+                              className="w-full h-full" 
+                            />
+                          </div>
+                          <h3 className="text-lg font-black text-white/80 mb-2">لا توجد أسئلة متوفرة في هذا القسم</h3>
+                          <p className="text-xs font-bold text-white/40 max-w-sm leading-relaxed mb-4">
+                            لم يقم الأساتذة بنشر أسئلة تطابق هذا التصنيف أو المادة حتى الآن.
+                          </p>
+                          {selectedQuestionCategory !== null && (
+                            <button
+                              onClick={() => setSelectedQuestionCategory(null)}
+                              className="px-4 py-2 rounded-xl text-xs font-black bg-indigo-600 hover:bg-indigo-500 text-white transition-all cursor-pointer"
+                            >
+                              تصفح باقي الأقسام
+                            </button>
+                          )}
                         </motion.div>
-                      ))}
+                      ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          {displayedQuestions.map((q: any, idx: number) => {
+                            const qText = q.text || q.question || "نص السؤال غير متوفر";
+                            const qId = q.id || `q_${idx}`;
+                            const isExpanded = expandedQuestionId === qId;
+                            const isCopied = copiedQuestionId === qId;
+                            const catMeta = QUESTION_CATEGORIES.find(c => c.id === q.category) || QUESTION_CATEGORIES[0];
+                            
+                            return (
+                              <motion.div
+                                key={`q_${qId}_${idx}`}
+                                initial={{ opacity: 0, y: 10 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className={`group relative rounded-2xl border transition-all duration-300 flex flex-col justify-between bg-[#0A1024]/80 p-5 shadow-[0_4px_20px_rgba(0,0,0,0.2)] hover:border-indigo-500/40 hover:shadow-[0_8px_30px_rgba(99,102,241,0.15)] ${
+                                  isExpanded ? 'border-indigo-500/40 bg-[#0E1532]/90 md:col-span-2' : 'border-white/10'
+                                }`}
+                              >
+                                <div>
+                                  {/* Top badges */}
+                                  <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+                                    <div className="flex items-center gap-2">
+                                      <span className="px-2.5 py-1 bg-white/5 border border-white/10 rounded-lg text-[11px] font-black text-white/70">
+                                        {q.subject || "مادة عامة"}
+                                      </span>
+                                      <span className={`px-2.5 py-1 rounded-lg text-[11px] font-black border ${catMeta.bgBadge}`}>
+                                        {catMeta.badgeText}
+                                      </span>
+                                    </div>
+                                    
+                                    <span className={`px-2.5 py-1 rounded-lg text-[11px] font-black border ${
+                                      q.difficulty === 'hard' ? 'bg-red-500/10 border-red-500/30 text-red-400' :
+                                      q.difficulty === 'medium' ? 'bg-amber-500/10 border-amber-500/30 text-amber-400' :
+                                      'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
+                                    }`}>
+                                      {q.difficulty === 'hard' ? 'صعب ⚠️' : q.difficulty === 'medium' ? 'متوسط ⚡' : 'سهل ✨'}
+                                    </span>
+                                  </div>
+
+                                  {/* Tags */}
+                                  {q.tags && q.tags.length > 0 && (
+                                    <div className="flex flex-wrap gap-1.5 mb-3">
+                                      {q.tags.map((tag: string, i: number) => (
+                                        <span key={i} className="px-2 py-0.5 rounded-md text-[10px] font-black bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                                          #{tag}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
+
+                                  {/* Question Text (Expandable Accordion) */}
+                                  <div 
+                                    onClick={() => setExpandedQuestionId(isExpanded ? null : qId)}
+                                    className="cursor-pointer mb-3"
+                                  >
+                                    <h4 className={`text-white font-bold text-sm sm:text-base leading-relaxed group-hover:text-indigo-200 transition-colors ${
+                                      isExpanded ? '' : 'line-clamp-3'
+                                    }`}>
+                                      {qText}
+                                    </h4>
+                                    {qText.length > 120 && (
+                                      <button 
+                                        type="button"
+                                        className="text-xs text-indigo-400 hover:text-indigo-300 font-bold mt-1.5 flex items-center gap-1 cursor-pointer"
+                                      >
+                                        <span>{isExpanded ? 'طي السؤال ▲' : 'عرض السؤال كاملاً ▼'}</span>
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  {/* Options (if multiple choice) */}
+                                  {q.options && q.options.length > 0 && (
+                                    <div className="mt-3 space-y-2 mb-4 bg-black/20 p-3 rounded-xl border border-white/5">
+                                      <p className="text-[11px] font-bold text-white/50 mb-1.5">الخيارات المتاحة:</p>
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                        {q.options.map((opt: string, i: number) => (
+                                          <div key={i} className="text-xs font-bold text-white/80 bg-white/5 px-3 py-2 rounded-lg border border-white/5 flex items-center gap-2">
+                                            <span className="w-5 h-5 rounded-md bg-white/10 flex items-center justify-center text-[10px] text-white/60 font-black">
+                                              {['أ', 'ب', 'ج', 'د', 'هـ'][i] || (i + 1)}
+                                            </span>
+                                            <span className="truncate">{opt}</span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Actions Footer */}
+                                <div className="pt-3 border-t border-white/5 mt-3 flex items-center gap-2">
+                                  <button
+                                    onClick={() => setSelectedAIQuestion(q)}
+                                    className="flex-1 py-2.5 bg-indigo-500/15 hover:bg-indigo-500/25 text-indigo-300 hover:text-indigo-200 text-xs font-black rounded-xl border border-indigo-500/30 hover:border-indigo-500/50 transition-all flex items-center justify-center gap-2 shadow-sm cursor-pointer"
+                                  >
+                                    <Sparkles size={15} className="text-amber-400" />
+                                    <span>المساعد الذكي 🤖</span>
+                                  </button>
+
+                                  <button
+                                    onClick={async (e) => {
+                                      e.stopPropagation();
+                                      await copyToClipboard(qText);
+                                      setCopiedQuestionId(qId);
+                                      setTimeout(() => setCopiedQuestionId(null), 2000);
+                                      showToast("تم نسخ نص السؤال إلى الحافظة بنجاح", "success");
+                                    }}
+                                    title="نسخ نص السؤال"
+                                    className={`p-2.5 rounded-xl border text-xs font-bold transition-all flex items-center gap-1.5 shrink-0 cursor-pointer ${
+                                      isCopied
+                                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                                        : 'bg-white/5 hover:bg-white/10 text-white/60 hover:text-white border-white/10'
+                                    }`}
+                                  >
+                                    {isCopied ? <Check size={16} className="text-emerald-400" /> : <Copy size={16} />}
+                                    <span className="hidden sm:inline text-xs">{isCopied ? 'تم النسخ' : 'نسخ'}</span>
+                                  </button>
+                                </div>
+                              </motion.div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                  )
-                ) : (
+                  );
+                })() : (
                   filteredPapers.length === 0 ? (
                     <motion.div
                       initial={{ opacity: 0, scale: 0.95 }}
@@ -1053,10 +1391,10 @@ export const StudentFilesTab: React.FC = () => {
                   </div>
                 )}
                 {(() => {
-                  const isSubjectMatch = (dbSubject: string, filterSubject: string) => {
+                  const isSubjectMatch = (dbSubject: any, filterSubject: string) => {
                     if (filterSubject === "الكل") return true;
-                    const s1 = (dbSubject || "").replace(/أ|إ|آ/g, 'ا').replace(/ة/g, 'ه').toLowerCase().trim();
-                    const s2 = (filterSubject || '').replace(/أ|إ|آ/g, 'ا').replace(/ة/g, 'ه').toLowerCase().trim();
+                    const s1 = String(dbSubject || "").replace(/أ|إ|آ/g, 'ا').replace(/ة/g, 'ه').toLowerCase().trim();
+                    const s2 = String(filterSubject || '').replace(/أ|إ|آ/g, 'ا').replace(/ة/g, 'ه').toLowerCase().trim();
                     if (!s1 || !s2) return false;
                     if (s1.includes(s2) || s2.includes(s1)) return true;
                     if (s2 === "اللغه الانجليزيه" && (s1.includes("انكليزي") || s1.includes("انجليزي") || s1.includes("english"))) return true;
@@ -1064,15 +1402,15 @@ export const StudentFilesTab: React.FC = () => {
                     if (s2 === "التربيه الاسلاميه" && (s1.includes("اسلامي") || s1.includes("قران") || s1.includes("دين"))) return true;
                     return false;
                   };
-
                   const homeworks = teacherAiResults.filter(r => {
-                    const rGradeNorm = mapGradeForDocument(r.targetGrade || "");
-                    const studentGradeNorm = mapGradeForDocument(grade || gradeName || "");
-                    const matchesGrade = !r.targetGrade || r.targetGrade === "الكل" || rGradeNorm === studentGradeNorm;
+                    const rSections = Array.isArray(r.targetSections) ? r.targetSections : (r.section ? [r.section] : undefined);
+                    const matchesGrade = isGradeMatch(r.targetGrade, activeStudentGrade, rSections);
+                    const rNameStr = String(r.name || "");
+                    const rContentStr = String(r.content || "");
                     return r.tool === 'صناعة واجبات' && 
                       matchesGrade &&
-                      (isSubjectMatch(r.subject, studentLibrarySubject) || (r.name && r.name.includes(studentLibrarySubject)) || (r.content && r.content.includes(studentLibrarySubject))) && 
-                      (studentLibrarySearch.trim() === "" || (r.name && r.name.includes(studentLibrarySearch)) || (r.content && r.content.includes(studentLibrarySearch)));
+                      (isSubjectMatch(r.subject, studentLibrarySubject) || rNameStr.includes(studentLibrarySubject) || rContentStr.includes(studentLibrarySubject)) && 
+                      (studentLibrarySearch.trim() === "" || rNameStr.includes(studentLibrarySearch) || rContentStr.includes(studentLibrarySearch));
                   });
                   return homeworks.length === 0 ? (
                     <motion.div
@@ -1160,13 +1498,14 @@ export const StudentFilesTab: React.FC = () => {
                 )}
                 {(() => {
                   const competitions = teacherAiResults.filter(r => {
-                    const rGradeNorm = mapGradeForDocument(r.targetGrade || "");
-                    const studentGradeNorm = mapGradeForDocument(grade || gradeName || "");
-                    const matchesGrade = !r.targetGrade || r.targetGrade === "الكل" || rGradeNorm === studentGradeNorm;
+                    const rSections = Array.isArray(r.targetSections) ? r.targetSections : (r.section ? [r.section] : undefined);
+                    const matchesGrade = isGradeMatch(r.targetGrade, activeStudentGrade, rSections);
+                    const rNameStr = String(r.name || "");
+                    const rContentStr = String(r.content || "");
                     return r.tool === 'مسابقات صفية' && 
                       matchesGrade &&
-                      (isSubjectMatch(r.subject || "") || (r.name && r.name.includes(studentLibrarySubject)) || (r.content && r.content.includes(studentLibrarySubject))) && 
-                      (studentLibrarySearch.trim() === "" || (r.name && r.name.includes(studentLibrarySearch)) || (r.content && r.content.includes(studentLibrarySearch)));
+                      (isSubjectMatch(r.subject || "", studentLibrarySubject) || rNameStr.includes(studentLibrarySubject) || rContentStr.includes(studentLibrarySubject)) && 
+                      (studentLibrarySearch.trim() === "" || rNameStr.includes(studentLibrarySearch) || rContentStr.includes(studentLibrarySearch));
                   });
                   return competitions.length === 0 ? (
                     <motion.div

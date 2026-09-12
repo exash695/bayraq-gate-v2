@@ -473,3 +473,184 @@ export const formatLectureDescription = (description?: string | null, grade?: st
 
   return text;
 };
+
+export const getStageHeaderForGrade = (gradeStr?: string | null): string => {
+  const rawGrade = (gradeStr || "").trim();
+  const g = rawGrade.toLowerCase();
+
+  if (
+    g.includes("ابتدائ") ||
+    g.includes("ابتدائي") ||
+    g.includes("اول ابتدائي") ||
+    g.includes("أول ابتدائي") ||
+    g.includes("ثاني ابتدائي") ||
+    g.includes("ثالث ابتدائي") ||
+    g.includes("رابع ابتدائي") ||
+    g.includes("خامس ابتدائي") ||
+    g.includes("سادس ابتدائي")
+  ) {
+    return rawGrade ? `الدراسة الابتدائية (${rawGrade})` : "الدراسة الابتدائية";
+  }
+
+  if (
+    g.includes("متوسط") ||
+    g.includes("متوسطة") ||
+    g.includes("اول متوسط") ||
+    g.includes("أول متوسط") ||
+    g.includes("ثاني متوسط") ||
+    g.includes("ثالث متوسط")
+  ) {
+    return rawGrade ? `الدراسة المتوسطة (${rawGrade})` : "الدراسة المتوسطة";
+  }
+
+  if (
+    g.includes("اعداد") ||
+    g.includes("إعداد") ||
+    g.includes("علمي") ||
+    g.includes("ادبي") ||
+    g.includes("أدبي") ||
+    g.includes("احيائي") ||
+    g.includes("تطبيقي") ||
+    g.includes("سادس") ||
+    g.includes("خامس") ||
+    g.includes("رابع")
+  ) {
+    let branch = "";
+    if (g.includes("علمي") || g.includes("احيائي") || g.includes("تطبيقي")) {
+      branch = " (العلمي)";
+    } else if (g.includes("ادبي") || g.includes("أدبي")) {
+      branch = " (الأدبي)";
+    } else if (rawGrade) {
+      branch = ` (${rawGrade})`;
+    }
+    return `الدراسة الإعدادية${branch}`;
+  }
+
+  if (rawGrade && rawGrade !== "عام" && rawGrade !== "الكل") {
+    return `الدراسة الأكاديمية (${rawGrade})`;
+  }
+
+  return "الدراسة الإعدادية";
+};
+
+export const downloadDocumentFile = async (
+  url: string,
+  filename: string,
+  fileId?: string,
+  onNotify?: (msg: string, type: "info" | "success" | "error") => void,
+  onProgress?: (progress: number) => void
+) => {
+  try {
+    if (onNotify) onNotify("جاري تجهيز وتنزيل الملف... 📥", "info");
+
+    const cleanFilename = filename.toLowerCase().endsWith(".pdf")
+      ? filename
+      : `${filename}.pdf`;
+
+    if (fileId) {
+      try {
+        fetch(`/api/school-files/${fileId}/download`, { method: "POST" }).catch(() => {});
+      } catch (e) {}
+    }
+
+    // Handle Data URL (Base64)
+    if (url.startsWith("data:")) {
+      const parts = url.split(",");
+      const mime = parts[0]?.split(";")[0]?.split(":")[1] || "application/pdf";
+      const byteCharacters = atob(parts[1] || "");
+      const byteNumbers = new Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const byteArray = new Uint8Array(byteNumbers);
+      const blob = new Blob([byteArray], { type: mime });
+      const blobUrl = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = cleanFilename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+      if (onProgress) onProgress(100);
+      if (onNotify) onNotify("تم تنزيل وحفظ الملف بنجاح! ✅", "success");
+      return;
+    }
+
+    // Handle Blob URL
+    if (url.startsWith("blob:")) {
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = cleanFilename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      if (onProgress) onProgress(100);
+      if (onNotify) onNotify("تم تنزيل وحفظ الملف بنجاح! ✅", "success");
+      return;
+    }
+
+    // Attempt direct blob download first with stream for progress
+    try {
+      const resp = await fetch(url, { mode: "cors" });
+      if (resp.ok && resp.body) {
+        const contentLength = resp.headers.get("content-length");
+        const total = parseInt(contentLength || "0", 10);
+        let loaded = 0;
+
+        const reader = resp.body.getReader();
+        const stream = new ReadableStream({
+          start(controller) {
+            function push() {
+              reader.read().then(({ done, value }) => {
+                if (done) {
+                  controller.close();
+                  return;
+                }
+                loaded += value.byteLength;
+                if (total && onProgress) {
+                  onProgress(Math.round((loaded / total) * 100));
+                }
+                controller.enqueue(value);
+                push();
+              });
+            }
+            push();
+          }
+        });
+        const newResponse = new Response(stream);
+        const blob = await newResponse.blob();
+        
+        const blobUrl = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = blobUrl;
+        link.download = cleanFilename;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
+        if (onProgress) onProgress(100);
+        if (onNotify) onNotify("تم تنزيل وحفظ الملف بنجاح! ✅", "success");
+        return;
+      }
+    } catch (directErr) {
+      // CORS blocked or failed, fallback to server proxy
+    }
+
+    // Fallback: use server download proxy
+    if (onProgress) onProgress(100);
+    const proxyUrl = `/api/download-proxy?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(cleanFilename)}`;
+    const link = document.createElement("a");
+    link.href = proxyUrl;
+    link.download = cleanFilename;
+    link.target = "_blank";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    if (onNotify) onNotify("تم بدء تنزيل الملف! ✅", "success");
+  } catch (error) {
+    console.error("Document download failed, fallback to window.open", error);
+    window.open(url, "_blank");
+    if (onNotify) onNotify("تم فتح الملف في نافذة جديدة للتنزيل", "info");
+  }
+};

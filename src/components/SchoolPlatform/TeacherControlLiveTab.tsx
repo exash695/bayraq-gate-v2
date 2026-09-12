@@ -114,7 +114,13 @@ export const TeacherControlLiveTab: React.FC<TeacherControlLiveTabProps> = ({
   toggleStudentCam,
   toggleStudentBoard,
 }) => {
-  const { activeLiveQuiz, activeWorkingClass, activeYoutubeVideoId, boardColor, boardImageScale, boardTextContent, boardTextSize, boardTool, brushThickness, camEnabled, cameraFacingMode, cameraLayout, cameraStream, captureAndSyncPdf, currentShape, draw, extractYouTubeId, formatLiveDuration, grade, handRaises, handleDraw, handleSetWhiteboardImage, handleStartDrawing, handleToggleCamera, handleToggleMic, isLiveActive, isTeacher, isWhiteboardActive, laserPosition, liveQuestions, liveSeconds, liveStreamType, liveTitle, micEnabled, notifications, onPipDragStart, pdfFile, pdfNumPages, pdfPageNumber, pdfScale, pinnedQuestion, pipPosition, pipShape, quizCorrectIndex, quizResponses, reactionCounts, realLiveAttendees, recordingStartTime, remoteStream, renderStroke, renderWhiteboardBackground, resolvedSchoolId, schoolId, selectedMaterialIndex, selectedQuality, setActiveLiveQuiz, setBoardColor, setBoardImageScale, setBoardTextContent, setBoardTextSize, setBoardTool, setBrushThickness, setCameraFacingMode, setCameraLayout, setHandRaises, setIsLiveActive, setIsWhiteboardActive, setLiveStreamType, setLiveTitle, setPdfFile, setPdfNumPages, setPdfPageNumber, setPdfScale, setPinnedQuestion, setPipShape, setQuizCorrectIndex, setQuizResponses, setQuizTimerActive, setRecordingStartTime, setSelectedQuality, setSharedPdfPageBase64, setShowDetailedQuizResults, setStudentCanDraw, setStudentQuizAnswered, setStudentQuizCorrect, setTeacherLiveSubTab, setWhiteboardStrokes, setYoutubeLiveUrl, sharedPdfPageBase64, showDetailedQuizResults, showToast, startDrawing, stopDrawing, studentCanDraw, studentLiveControls, targetBroadcastGrade, teacherCameraEnabled, teacherData, teacherLiveSubTab, teacherVideoRef, whiteboardImage, whiteboardStrokes, youtubeLiveUrl } = useSchoolPlatform();
+  const { activeLiveQuiz, activeWorkingClass, activeYoutubeVideoId, boardColor, boardImageScale, boardTextContent, boardTextSize, boardTool, brushThickness, camEnabled, cameraFacingMode, cameraLayout, cameraStream, captureAndSyncPdf, currentShape, draw, extractYouTubeId, formatLiveDuration, grade, handRaises, handleDraw, handleSetWhiteboardImage, handleStartDrawing, handleToggleCamera, handleToggleMic, isLiveActive, isTeacher, isWhiteboardActive, laserPosition, liveQuestions, liveSeconds, liveStreamType, liveTitle, micEnabled, notifications, onPipDragStart, pdfFile, pdfNumPages, pdfPageNumber, pdfScale, pinnedQuestion, pipPosition, pipShape, quizCorrectIndex, quizResponses, reactionCounts, realLiveAttendees, recordingStartTime, remoteStream, renderStroke, renderWhiteboardBackground, resolvedSchoolId, schoolId, selectedMaterialIndex, selectedQuality, selectedTeacherClass, setActiveLiveQuiz, setBoardColor, setBoardImageScale, setBoardTextContent, setBoardTextSize, setBoardTool, setBrushThickness, setCameraFacingMode, setCameraLayout, setHandRaises, setIsLiveActive, setIsWhiteboardActive, setLiveStreamType, setLiveTitle, setPdfFile, setPdfNumPages, setPdfPageNumber, setPdfScale, setPinnedQuestion, setPipShape, setQuizCorrectIndex, setQuizResponses, setQuizTimerActive, setRecordingStartTime, setSelectedQuality, setSharedPdfPageBase64, setShowDetailedQuizResults, setStudentCanDraw, setStudentQuizAnswered, setStudentQuizCorrect, setTeacherLiveSubTab, setWhiteboardStrokes, setYoutubeLiveUrl, sharedPdfPageBase64, showDetailedQuizResults, showToast, startDrawing, stopDrawing, studentCanDraw, studentLiveControls, targetBroadcastGrade, teacherAssignedSections, teacherCameraEnabled, teacherData, teacherLiveSubTab, teacherVideoRef, whiteboardImage, whiteboardStrokes, youtubeLiveUrl } = useSchoolPlatform();
+
+  const isAllSections = !selectedTeacherClass || selectedTeacherClass === 'ALL' || selectedTeacherClass === 'كافة الشُعب';
+  const targetSectionLabel = isAllSections ? "كافة الشُعب الموكلة" : selectedTeacherClass;
+  const targetSectionsList = isAllSections
+    ? (teacherAssignedSections || []).map((s: any) => s.name).filter(Boolean)
+    : [selectedTeacherClass];
 
   return (
                 <div className="w-full flex flex-col">
@@ -127,13 +133,18 @@ export const TeacherControlLiveTab: React.FC<TeacherControlLiveTabProps> = ({
                       <div className="aspect-video sm:aspect-[16/9] min-h-[420px] sm:min-h-[540px] md:min-h-[620px] lg:min-h-[660px] w-full bg-[#04060C] relative overflow-hidden flex flex-col items-center justify-center p-4">
                         {/* Header row in stream window */}
                         <div className="absolute top-3 left-4 right-4 flex items-center justify-between z-10 w-auto">
-                          <div className="flex items-center gap-1.5 bg-black/75 backdrop-blur-md px-2 py-1 rounded-lg border border-white/10 shadow-sm">
-                            <span
-                              className={`w-2 h-2 rounded-full ${isLiveActive ? "bg-red-500 animate-pulse" : "bg-white/20"}`}
-                            />
-                            <span className="text-[9px] font-bold text-white/95 leading-none">
-                              {isLiveActive ? "البث مفعّل" : "الغرفة جاهزة"}
-                            </span>
+                          <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1.5 bg-black/75 backdrop-blur-md px-2.5 py-1 rounded-lg border border-white/10 shadow-sm">
+                              <span
+                                className={`w-2 h-2 rounded-full ${isLiveActive ? "bg-red-500 animate-pulse" : "bg-white/20"}`}
+                              />
+                              <span className="text-[9px] font-bold text-white/95 leading-none">
+                                {isLiveActive ? "البث مفعّل" : "الغرفة جاهزة"}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5 bg-purple-950/80 backdrop-blur-md px-2.5 py-1 rounded-lg border border-purple-500/30 text-purple-200 shadow-sm text-[9px] font-black">
+                              <span>🎯 الوجهة: {targetSectionLabel}</span>
+                            </div>
                           </div>
                           <div className="flex items-center gap-1.5 bg-black/75 backdrop-blur-md px-2 py-1 rounded-lg border border-white/10 shadow-sm">
                             {camEnabled && (
@@ -219,7 +230,7 @@ export const TeacherControlLiveTab: React.FC<TeacherControlLiveTabProps> = ({
                                 src={`https://www.youtube-nocookie.com/embed/${activeYoutubeVideoId || extractYouTubeId(youtubeLiveUrl)}?autoplay=1&enablejsapi=1&rel=0&modestbranding=1`}
                                 title={liveTitle || "بث مباشر تفاعلي للفرسان"}
                                 className="w-full h-full object-cover absolute inset-0 z-0 border-0"
-                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                                 allowFullScreen
                               />
                             ) : (
@@ -700,17 +711,20 @@ export const TeacherControlLiveTab: React.FC<TeacherControlLiveTabProps> = ({
                                       schoolId: resolvedSchoolId,
                                       title: liveTitle || 'تسجيل بث مباشر أكاديمي (جديد)',
                                       subject: teacherData?.subject || 'مادة عامة',
-                                      grade: activeWorkingClass,
+                                      grade: targetBroadcastGrade || activeWorkingClass,
+                                      section: isAllSections ? null : selectedTeacherClass,
+                                      targetSections: targetSectionsList,
+                                      targetSectionLabel: targetSectionLabel,
                                       duration: `${mins} دقيقة و ${secs} ثانية`,
                                       date: new Date().toLocaleDateString('ar-IQ', { weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' }),
                                       timestamp: serverTimestamp()
                                     }).catch(console.error);
 
                                     setRecordingStartTime(null);
-                                    showToast("تم إيقاف التسجيل وحفظ الدرس في ميادين المادة 📥", "success");
+                                    showToast(`تم إيقاف التسجيل وحفظ الدرس في ميادين (${targetSectionLabel}) 📥`, "success");
                                   } else {
                                     setRecordingStartTime(Date.now());
-                                    showToast("بدأ التوثيق والتسجيل السحابي للبث 🔴", "info");
+                                    showToast(`بدأ التوثيق والتسجيل السحابي للبث لـ (${targetSectionLabel}) 🔴`, "info");
                                   }
                                 }}
                                 className={`p-2 md:p-3 rounded-lg md:rounded-xl text-[10px] md:text-xs font-black transition-all flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 cursor-pointer border ${recordingStartTime ? 'bg-red-600/20 border-red-500/50 text-red-400 bubble-animation' : 'bg-purple-600/20 border-purple-500/30 hover:bg-purple-600/30 text-purple-300'}`}
@@ -776,6 +790,10 @@ export const TeacherControlLiveTab: React.FC<TeacherControlLiveTabProps> = ({
                                       subjectId: subjectStr,
                                       subjectName: subjectStr,
                                       classId: classId,
+                                      targetSection: isAllSections ? "ALL" : selectedTeacherClass,
+                                      targetSections: targetSectionsList,
+                                      targetSectionLabel: targetSectionLabel,
+                                      targetGrade: targetBroadcastGrade,
                                       materialIndex: selectedMaterialIndex,
                                       isWhiteboardActive: isWhiteboardActive,
                                       cameraEnabled: nextState ? camEnabled : false,
@@ -807,9 +825,11 @@ export const TeacherControlLiveTab: React.FC<TeacherControlLiveTabProps> = ({
                                       await fetch('/api/notifications', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
                                         userId: `class_${resolvedSchoolId}_${targetBroadcastGrade}`,
                                         type: "general",
-                                        title: "بث تفاعلي جديد! 📡",
-                                        message: `تم إطلاق بث لمادة ${subjectStr} بعنوان "${liveTitle}" من قبل الأستاذ ${teacherData?.name?.replace(/^(أ\.|أستاذ\s+)/, '').trim() || 'القدير'}. انضم الآن!`,
-                                                                                recipientRole: 'student',
+                                        title: `بث تفاعلي جديد لـ (${targetSectionLabel})! 📡`,
+                                        message: `تم إطلاق بث لمادة ${subjectStr} بعنوان "${liveTitle}" موجه إلى (${targetSectionLabel}) من قبل الأستاذ ${teacherData?.name?.replace(/^(أ\.|أستاذ\s+)/, '').trim() || 'القدير'}. انضم الآن!`,
+                                        recipientRole: 'student',
+                                        targetSection: isAllSections ? "ALL" : selectedTeacherClass,
+                                        targetSections: targetSectionsList,
                                         read: false
                                       }) });
                                       console.log("[Broadcast DEBUG] Notification sent successfully.");
@@ -820,7 +840,7 @@ export const TeacherControlLiveTab: React.FC<TeacherControlLiveTabProps> = ({
 
                                     showToast(
                                       nextState
-                                        ? "تم إطلاق البث المباشر للفرسان فوراً! 🚀"
+                                        ? `تم إطلاق البث المباشر لـ (${targetSectionLabel}) فوراً! 🚀`
                                         : "تم إنهاء البث التفاعلي بنجاح",
                                       nextState ? "success" : "info",
                                     );
@@ -1892,7 +1912,7 @@ export const TeacherControlLiveTab: React.FC<TeacherControlLiveTabProps> = ({
                     <div className="space-y-4">
                       <div className="bg-[#0C1229]/95 border border-white/5 rounded-2xl p-5 backdrop-blur-md shadow-xl">
                         <h4 className="text-[11px] text-white/50 font-black mb-4 pb-2 border-b border-white/5 flex items-center justify-between">
-                          <span>فرسان الصف المتواجدون بالبث الحقيقي</span>
+                          <span>فرسان ({targetSectionLabel}) المتواجدون بالبث</span>
                           <span className="text-[10px] text-emerald-400 font-mono tracking-wider">
                             ● متصلون ({realActiveKnights || 5})
                           </span>

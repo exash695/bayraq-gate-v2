@@ -68,7 +68,7 @@ import {
   ChevronRight, ChevronDown, ChevronUp, Mic, MicOff, VideoOff, ThumbsUp, Send, Clock,
   HelpCircle, Hand as HandIcon, PenTool, Search, Filter, MailQuestion, ShieldAlert,
   Database, Bot, ClipboardCheck, Play, Target, Terminal, Bug, Info, Unlock, Download,
-  Minimize2, Scan, XCircle, MessageSquare
+  Minimize2, Maximize2, Scan, XCircle, MessageSquare
 } from "lucide-react";
 import { SchoolContent } from "../SchoolContent";
 import { BroadcastTicker } from "../BroadcastTicker";
@@ -101,9 +101,55 @@ import {
   generateQuestionsForDocument,
   getSanitizedVideoUrl,
   formatLectureDescription,
+  downloadDocumentFile,
 } from "./utils";
 import type { Teacher, MaterialField, Post, SchoolPlatformProps, PlatformTab, HandRaiseRequest, LiveQuestion } from "./types";
 import { useSchoolPlatform } from "./SchoolPlatformContext";
+
+export const cleanHomeworkForStudent = (content?: string): string => {
+  if (!content) return "";
+  // 1. Remove json / markdown code blocks
+  let text = content.replace(/```(?:json)?\s*([\s\S]*?)\s*```/g, '');
+
+  const lines = text.split('\n');
+  const cleanedLines: string[] = [];
+  let inAnswerSection = false;
+
+  for (let line of lines) {
+    const trimmed = line.trim();
+
+    // Check if we reached an answers/solutions/explanations heading
+    if (/^#+\s*(?:الإجابات|الاجابات|الحلول|نموذج الإجابة|مفتاح الحل|الشرح والتوضيح|Answers|Solutions|Explanations|Answer Key)\b/i.test(trimmed)) {
+      inAnswerSection = true;
+      continue;
+    }
+
+    // If in answer section, skip lines unless a new exercise or section starts
+    if (inAnswerSection) {
+      if (/^#+\s*(?:Part|Section|القسم|الجزء|السؤال|التمرين|Activity|Exercise)\b/i.test(trimmed)) {
+        inAnswerSection = false;
+      } else {
+        continue;
+      }
+    }
+
+    // Check for inline explanation/hint/answer lines:
+    // e.g. "(faster) الشرح: ...", "الشرح: ...", "تلميح: ...", "الحل: ...", "Explanation: ...", "Hint: ..."
+    const isHintOrExplanation = 
+      /(?:\*{0,2}(?:الشرح|شرح|تلميح|التلميح|تلميحات|الحل|حل|الإجابة|الاجابة|الجواب|إجابة|اجابة|النموذجية)\*{0,2}\s*[:：])/i.test(trimmed) ||
+      /(?:\*{0,2}(?:explanation|hint|model answer|solution|correct answer)\*{0,2}\s*[:：])/i.test(trimmed) ||
+      /^\s*\(.*?\)\s*(?:الشرح|الحل|تلميح|التلميح)/i.test(trimmed) ||
+      /^\s*(?:نضع|اختر|الإجابة هي|الحل هو)\b.*?(?:الشرح|تلميح)/i.test(trimmed);
+
+    if (isHintOrExplanation) {
+      continue;
+    }
+
+    cleanedLines.push(line);
+  }
+
+  return cleanedLines.join('\n');
+};
 
 export const PlatformOverlays: React.FC = () => {
   const { activeCommentPostId, activeFileChallengeQuestions, activeGroupIndex, activeGroupStories, activeStory, aiEvaluationResult, avatarInputRef, classmates, clickingReactionKey, competitionAnswers, competitionScore, competitionTimer, creatorActiveTab, deletingAcademyPageId, deletingPostId, executeDeletePost, getCurrentUserId, getEmbedUrl, getUserName, grade, handleAvatarUpload, handleDeleteStory, handlePointerDown, handlePointerDownSticker, handlePointerMove, handlePointerMoveSticker, handlePointerUp, handlePointerUpSticker, handlePublishStory, handleReactToStory, handleSendStoryReply, handleShareStory, handleStickerTouchEnd, handleStickerTouchMove, handleStickerTouchStart, handleStoryGroupMediaUpload, handleStoryMediaUpload, handleStoryPointerDown, handleStoryPointerLeave, handleStoryPointerMove, handleStoryPointerUp, handleTextTouchEnd, handleTextTouchMove, handleTextTouchStart, handleTextareaChange, hasStartedPlaying, homeworkAnswer, insertTag, isAdminNoteModalOpen, isChallengeActive, isCinemaMode, isCreateStoryMenuOpen, isLoungeOpen, isStoryMenuOpen, isStoryModalOpen, isStoryTypingOpen, isStoryUIHidden, isStoryViewersOpen, isSubmittingTask, isTeacher, isZoomControlsOpen, newAdminNote, newStoryBgGradient, newStoryContent, newStoryFont, newStoryMedia, newStoryMediaFiles, newStoryMediaType, newStorySticker, newStoryStickerScale, newStoryStickerX, newStoryStickerY, newStoryTextBg, newStoryTextColor, newStoryTextScale, newStoryTextX, newStoryTextY, onUpdateProfile, pdfLoadError, platformLocks, posts, previewPdfNumPages, previewingFile, progress, reactionFloatingIcons, resolvedSchoolId, schoolId, selectedAIQuestion, selectedPaperForExtraction, setActiveCommentPostId, setActiveFileChallengeQuestions, setActiveStory, setAiEvaluationResult, setCompetitionAnswers, setCompetitionScore, setCreatorActiveTab, setDeletingAcademyPageId, setDeletingPostId, setHasStartedPlaying, setHomeworkAnswer, setIsAdminNoteModalOpen, setIsChallengeActive, setIsCinemaMode, setIsCreateStoryMenuOpen, setIsLoungeOpen, setIsStoryMenuOpen, setIsStoryModalOpen, setIsStoryPaused, setIsStoryTypingOpen, setIsStoryViewersOpen, setIsSubmittingTask, setNewAdminNote, setNewStoryBgGradient, setNewStoryContent, setNewStoryFont, setNewStoryMedia, setNewStoryMediaFiles, setNewStoryMediaType, setNewStorySticker, setNewStoryTextBg, setNewStoryTextColor, setNewStoryTextScale, setPdfLoadError, setPreviewPdfNumPages, setPreviewingFile, setSelectedAIQuestion, setSelectedPaperForExtraction, setStoryCommentText, setStoryPanX, setStoryPanY, setStoryZoom, setVideoDebugInfo, setViewingCompetition, setViewingHomework, setViewingRecordedLesson, setViewingSubmissionFeedback, showTagMenuTarget, showToast, stories, storyCommentText, storyGroupIndex, storyGroupMediaInputRef, storyMediaInputRef, storyPanX, storyPanY, storyProgress, storyZoom, submitAdminNote, tagSearch, teacherData, userProfile, videoDebugInfo, videoRef, viewingCompetition, viewingHomework, viewingRecordedLesson, viewingSubmissionFeedback, setRecordedLessons } = useSchoolPlatform();
@@ -118,21 +164,25 @@ export const PlatformOverlays: React.FC = () => {
     cMapPacked: true,
   }), []);
 
-  const handleForceDownload = async (url: string, filename: string) => {
-    try {
-      showToast("جاري تجهيز الملف للتنزيل...", "info");
-      // Use proxy to ensure Content-Disposition: attachment is respected and CORS issues are avoided
-      const proxyUrl = `/api/download-proxy?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(filename)}`;
-      const link = document.createElement('a');
-      link.href = proxyUrl;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } catch (error) {
-      console.error("Force download failed, falling back to window.open", error);
-      window.open(url, '_blank');
+  const [downloadProgress, setDownloadProgress] = useState<number>(0);
+  const [downloadingFileId, setDownloadingFileId] = useState<string | null>(null);
+
+  const handleForceDownload = async (url: string, filename: string, fileId?: string) => {
+    sounds.playClick();
+    if (fileId) {
+      setDownloadingFileId(fileId);
+      setDownloadProgress(0);
     }
+    downloadDocumentFile(
+      url, 
+      filename, 
+      fileId, 
+      (msg, type) => showToast(msg, type),
+      (progress) => {
+        setDownloadProgress(progress);
+        if (progress >= 100) setTimeout(() => setDownloadingFileId(null), 1500);
+      }
+    );
   };
 
   useEffect(() => {
@@ -214,6 +264,160 @@ export const PlatformOverlays: React.FC = () => {
     };
     markViewed();
   }, [viewingRecordedLesson?.id, userProfile?.id, userProfile?.uid, isTeacher]);
+
+  // ⏱️ استخراج مدة المحاضرة وحفظها تلقائياً عند تشغيل الفيديو إذا لم تكن مسجلة
+  useEffect(() => {
+    if (!viewingRecordedLesson?.id) return;
+
+    const handleWindowMessage = async (e: MessageEvent) => {
+      try {
+        let data = e.data;
+        if (typeof data === 'string') {
+          try {
+            data = JSON.parse(data);
+          } catch (err) {
+            return;
+          }
+        }
+
+        let durationSeconds = 0;
+        if (data?.event === 'infoDelivery' && data?.info?.duration) {
+          durationSeconds = Math.round(data.info.duration);
+        } else if (data?.info && typeof data.info.duration === 'number') {
+          durationSeconds = Math.round(data.info.duration);
+        }
+
+        if (durationSeconds > 0) {
+          const h = Math.floor(durationSeconds / 3600);
+          const m = Math.floor((durationSeconds % 3600) / 60);
+          const s = durationSeconds % 60;
+          const formattedDuration = h > 0 
+            ? `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`
+            : `${m}:${s.toString().padStart(2, '0')}`;
+
+          const curDur = viewingRecordedLesson.duration;
+          if (!curDur || curDur === '0:00' || curDur === '00:00' || curDur === '0') {
+            setViewingRecordedLesson((prev: any) => prev ? { ...prev, duration: formattedDuration } : prev);
+            if (setRecordedLessons) {
+              setRecordedLessons((prev: any[]) => 
+                (prev || []).map((l: any) => l.id === viewingRecordedLesson.id ? { ...l, duration: formattedDuration } : l)
+              );
+            }
+            await fetch(`/api/recorded-lessons/${viewingRecordedLesson.id}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ duration: formattedDuration })
+            }).catch(() => {});
+          }
+        }
+      } catch (err) {}
+    };
+
+    window.addEventListener('message', handleWindowMessage);
+    return () => window.removeEventListener('message', handleWindowMessage);
+  }, [viewingRecordedLesson?.id, viewingRecordedLesson?.duration, setViewingRecordedLesson, setRecordedLessons]);
+
+  // 🛡️ تحديد اسم الأستاذ للعلامة المائية حصرياً (بدون كود وبدون بيانات الطالب)
+  const [watermarkTeacherName, setWatermarkTeacherName] = useState<string>("الأستاذ حسين هاشم");
+
+  useEffect(() => {
+    if (!viewingRecordedLesson) return;
+
+    // 1. إذا كان الدرس نفسه يحتوي على اسم الأستاذ
+    const directName = 
+      (viewingRecordedLesson as any).teacherName || 
+      (viewingRecordedLesson as any).teacher || 
+      (viewingRecordedLesson as any).teacher_name;
+
+    if (directName && typeof directName === 'string' && directName.trim()) {
+      let tName = directName.trim();
+      if (!tName.startsWith("الأستاذ") && !tName.startsWith("الاستاذ") && !tName.startsWith("أ.")) {
+        tName = `الأستاذ ${tName}`;
+      }
+      setWatermarkTeacherName(tName);
+      return;
+    }
+
+    // 2. إذا كان المستخدم الحالي أستاذاً أو توفرت بيانات الأستاذ في السياق
+    if (teacherData?.fullName || teacherData?.name) {
+      let tName = (teacherData.fullName || teacherData.name).trim();
+      if (!tName.startsWith("الأستاذ") && !tName.startsWith("الاستاذ") && !tName.startsWith("أ.")) {
+        tName = `الأستاذ ${tName}`;
+      }
+      setWatermarkTeacherName(tName);
+      return;
+    }
+
+    // 3. جلب بيانات الأستاذ عبر معرّف الأستاذ أو قائمة المعلمين
+    let isCancelled = false;
+    const resolveTeacher = async () => {
+      try {
+        const teacherId = (viewingRecordedLesson as any).teacherId || (viewingRecordedLesson as any).teacher_id;
+        if (teacherId) {
+          try {
+            const res = await fetch(`/api/teachers/${teacherId}`);
+            if (res.ok) {
+              const data = await res.json();
+              const tObj = data.teacher || data.user || data.data;
+              if (tObj?.name && !isCancelled) {
+                let tName = String(tObj.name).trim();
+                if (!tName.startsWith("الأستاذ") && !tName.startsWith("الاستاذ") && !tName.startsWith("أ.")) {
+                  tName = `الأستاذ ${tName}`;
+                }
+                setWatermarkTeacherName(tName);
+                return;
+              }
+            }
+          } catch (e) {
+            // ignore
+          }
+        }
+
+        // البحث في قائمة الأساتذة الشاملة
+        const listRes = await fetch(`/api/teachers`);
+        if (listRes.ok) {
+          const listData = await listRes.json();
+          const list: any[] = listData.teachers || listData.items || listData.data || [];
+          if (teacherId) {
+            const match = list.find((t: any) => t.id === teacherId || t.code === teacherId);
+            if (match?.name && !isCancelled) {
+              let tName = String(match.name).trim();
+              if (!tName.startsWith("الأستاذ") && !tName.startsWith("الاستاذ") && !tName.startsWith("أ.")) {
+                tName = `الأستاذ ${tName}`;
+              }
+              setWatermarkTeacherName(tName);
+              return;
+            }
+          }
+
+          if (viewingRecordedLesson.subject) {
+            const cleanSub = viewingRecordedLesson.subject.replace(/أ|إ|آ/g, 'ا').trim();
+            const matchSub = list.find((t: any) => t.subject && t.subject.replace(/أ|إ|آ/g, 'ا').includes(cleanSub));
+            if (matchSub?.name && !isCancelled) {
+              let tName = String(matchSub.name).trim();
+              if (!tName.startsWith("الأستاذ") && !tName.startsWith("الاستاذ") && !tName.startsWith("أ.")) {
+                tName = `الأستاذ ${tName}`;
+              }
+              setWatermarkTeacherName(tName);
+              return;
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("Could not resolve teacher name for watermark:", err);
+      }
+
+      if (!isCancelled) {
+        setWatermarkTeacherName("الأستاذ حسين هاشم");
+      }
+    };
+
+    resolveTeacher();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [viewingRecordedLesson?.id, (viewingRecordedLesson as any)?.teacherId, (viewingRecordedLesson as any)?.teacherName, teacherData?.name]);
 
   useEffect(() => {
     if (previewingFile?.fileUrl) {
@@ -1641,7 +1845,7 @@ export const PlatformOverlays: React.FC = () => {
               </div>
               <div className="flex-1 overflow-y-auto p-6">
                 <div className="prose prose-invert max-w-none text-white/80" dir="auto">
-                  <ReactMarkdown>{viewingHomework.content.replace(/```(?:json)?\s*([\s\S]*?)\s*```/g, '')}</ReactMarkdown>
+                  <ReactMarkdown>{cleanHomeworkForStudent(viewingHomework.content)}</ReactMarkdown>
                 </div>
                 <div className="mt-12 border-t border-white/10 pt-8">
                   <h4 className="text-lg font-bold text-white mb-4">إرسال الحل للأستاذ</h4>
@@ -2125,38 +2329,103 @@ export const PlatformOverlays: React.FC = () => {
                   )}
                  {viewingRecordedLesson.videoUrl && (viewingRecordedLesson.videoUrl.includes("youtube.com") || viewingRecordedLesson.videoUrl.includes("youtu.be")) ? (
                    hasStartedPlaying ? (
-                     <iframe
-                       src={`${getEmbedUrl(viewingRecordedLesson.videoUrl)}${getEmbedUrl(viewingRecordedLesson.videoUrl).includes('?') ? '&' : '?'}autoplay=1&rel=0&playsinline=1`}
-                       className="w-full h-full border-0"
-                       allowFullScreen
-                       allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen"
-                     />
+                     <div 
+                       className="relative w-full h-full bg-black overflow-hidden select-none"
+                       onContextMenu={(e) => e.preventDefault()}
+                     >
+                       <iframe
+                         src={`${getEmbedUrl(viewingRecordedLesson.videoUrl)}${getEmbedUrl(viewingRecordedLesson.videoUrl).includes('?') ? '&' : '?'}autoplay=1&rel=0&playsinline=1&modestbranding=1&controls=1&iv_load_policy=3&fs=1&disablekb=0&enablejsapi=1`}
+                         className="w-full h-full border-0 pointer-events-auto"
+                         allowFullScreen
+                         allow="accelerometer; autoplay; encrypted-media; gyroscope; picture-in-picture; fullscreen"
+                       />
+
+                       {/* 🛡️ 1. حاجز حماية الشريط العلوي: يحجب النقر على العنوان وسهم المشاركة وحساب القناة دون التأثير على وضوح الفيديو */}
+                       <div 
+                         onClick={(e) => { e.stopPropagation(); e.preventDefault(); }}
+                         onTouchStart={(e) => { e.stopPropagation(); }}
+                         className="absolute top-0 inset-x-0 h-14 z-20 pointer-events-auto bg-gradient-to-b from-black/75 via-black/25 to-transparent flex items-center justify-between px-3 select-none"
+                       >
+                         <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-black/60 border border-white/10 backdrop-blur-md text-[10px] text-emerald-400 font-bold shadow-sm">
+                           <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                           <span>بث حصري ومحمي • منصة بيرق التعليمية</span>
+                         </div>
+                         {!isCinemaMode && (
+                           <button
+                             onClick={(e) => {
+                               e.stopPropagation();
+                               setIsCinemaMode(true);
+                             }}
+                             className="px-2.5 py-1 bg-[#00E5FF]/20 hover:bg-[#00E5FF]/30 border border-[#00E5FF]/40 text-[#00E5FF] text-[10px] font-black rounded-full transition-all flex items-center gap-1 shadow-md cursor-pointer"
+                           >
+                             <Maximize2 size={11} />
+                             <span>وضع السينما</span>
+                           </button>
+                         )}
+                       </div>
+
+                       {/* 🛡️ 2. حاجز حماية شعار يوتيوب (أسفل اليسار): يمنع فتح الفيديو خارج المنصة في تطبيق يوتيوب أو متصفح خارجي */}
+                       <div 
+                         onClick={(e) => { e.stopPropagation(); e.preventDefault(); }}
+                         onTouchStart={(e) => { e.stopPropagation(); }}
+                         title="محمية داخل المنصة"
+                         className="absolute bottom-0 left-0 w-28 sm:w-36 h-12 z-20 pointer-events-auto bg-transparent cursor-default"
+                       />
+
+                       {/* 🛡️ 3. حاجز حماية سهم المشاركة والساعة (أسفل اليمين): يحجب النقر على سهم المشاركة والمشاهدة لاحقاً مع إبقاء زر التكبير متاحاً */}
+                       <div 
+                         onClick={(e) => { e.stopPropagation(); e.preventDefault(); }}
+                         onTouchStart={(e) => { e.stopPropagation(); }}
+                         className="absolute bottom-0 right-11 w-24 sm:w-28 h-12 z-20 pointer-events-auto bg-transparent cursor-default"
+                       />
+
+                       {/* 🛡️ 4. العلامة المائية الأمنية الذكية: تظهر اسم الطالب وبياناته بخط شفاف لردع تصوير الشاشة وتحديد مصدر أي تسريب */}
+                       <div className="absolute bottom-14 right-4 sm:right-6 z-10 pointer-events-none select-none opacity-25">
+                         <div className="text-[9px] sm:text-[10px] font-mono font-bold text-white/80 bg-black/40 px-2 py-0.5 rounded backdrop-blur-xs border border-white/5">
+                           🔒 {watermarkTeacherName || 'الأستاذ حسين هاشم'}
+                         </div>
+                       </div>
+                     </div>
                    ) : (
                      <div className="w-full h-full bg-black" />
                    )
                  ) : viewingRecordedLesson.videoUrl && viewingRecordedLesson.videoUrl.includes("vimeo.com") ? (
                    hasStartedPlaying ? (
-                     <iframe
-                       src={`${getEmbedUrl(viewingRecordedLesson.videoUrl)}${getEmbedUrl(viewingRecordedLesson.videoUrl).includes('?') ? '&' : '?'}autoplay=1`}
-                       className="w-full h-full border-0"
-                       allowFullScreen
-                       allow="fullscreen; picture-in-picture"
-                     />
+                     <div 
+                       className="relative w-full h-full bg-black overflow-hidden select-none"
+                       onContextMenu={(e) => e.preventDefault()}
+                     >
+                       <iframe
+                         src={`${getEmbedUrl(viewingRecordedLesson.videoUrl)}${getEmbedUrl(viewingRecordedLesson.videoUrl).includes('?') ? '&' : '?'}autoplay=1`}
+                         className="w-full h-full border-0"
+                         allowFullScreen
+                         allow="fullscreen; picture-in-picture"
+                       />
+                       <div className="absolute bottom-14 right-4 sm:right-6 z-10 pointer-events-none select-none opacity-25">
+                         <div className="text-[9px] sm:text-[10px] font-mono font-bold text-white/80 bg-black/40 px-2 py-0.5 rounded backdrop-blur-xs border border-white/5">
+                           🔒 {watermarkTeacherName || 'الأستاذ حسين هاشم'}
+                         </div>
+                       </div>
+                     </div>
                    ) : (
                      <div className="w-full h-full bg-black" />
                    )
                  ) : viewingRecordedLesson.videoUrl ? (
-                   <video
-                      key={viewingRecordedLesson.id}
-                      preload="auto"
-                      crossOrigin="anonymous"
-                      ref={videoRef}
-                      src={getSanitizedVideoUrl(viewingRecordedLesson.videoUrl)}
-                     controlsList={viewingRecordedLesson.allowDownload === false ? "nodownload" : undefined}
-                     disablePictureInPicture={viewingRecordedLesson.allowDownload === false}
-                     controls
-                     className="w-full h-full outline-none"
-                     onLoadStart={(e) => {
+                   <div 
+                     className="relative w-full h-full bg-black overflow-hidden select-none"
+                     onContextMenu={(e) => e.preventDefault()}
+                   >
+                     <video
+                        key={viewingRecordedLesson.id}
+                        preload="auto"
+                        crossOrigin="anonymous"
+                        ref={videoRef}
+                        src={getSanitizedVideoUrl(viewingRecordedLesson.videoUrl)}
+                       controlsList={viewingRecordedLesson.allowDownload === false ? "nodownload" : undefined}
+                       disablePictureInPicture={viewingRecordedLesson.allowDownload === false}
+                       controls
+                       className="w-full h-full outline-none"
+                       onLoadStart={(e) => {
                        console.log("🎥 [حالة التحميل]: بدأ عنصر الفيديو في جلب البيانات (LoadStart).");
                        setVideoDebugInfo(prev => ({
                          ...prev,
@@ -2238,6 +2507,12 @@ export const PlatformOverlays: React.FC = () => {
                        }));
                      }}
                    />
+                   <div className="absolute bottom-14 right-4 sm:right-6 z-10 pointer-events-none select-none opacity-25">
+                     <div className="text-[9px] sm:text-[10px] font-mono font-bold text-white/80 bg-black/40 px-2 py-0.5 rounded backdrop-blur-xs border border-white/5">
+                       🔒 {watermarkTeacherName || 'الأستاذ حسين هاشم'}
+                     </div>
+                   </div>
+                 </div>
                  ) : (
                    <div className="text-center">
                       <Play size={48} className="text-white/20 mx-auto mb-4" />
@@ -2275,7 +2550,11 @@ export const PlatformOverlays: React.FC = () => {
                     <div className="w-px h-6 bg-white/10" />
                     <div className="text-right">
                       <span className="text-[8px] text-white/30 block font-bold">مدة الشرح</span>
-                      <span className="text-[10px] text-white/70 font-mono font-bold">{viewingRecordedLesson.duration || "0:00"}</span>
+                      <span className="text-[10px] text-white/70 font-mono font-bold">
+                        {(!viewingRecordedLesson.duration || viewingRecordedLesson.duration === "0:00" || viewingRecordedLesson.duration === "00:00") 
+                          ? "جاري احتساب المدة ⏱️" 
+                          : viewingRecordedLesson.duration}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -2618,28 +2897,34 @@ export const PlatformOverlays: React.FC = () => {
                 )}
 
                 <div className="flex items-center gap-1.5 sm:gap-2">
-                  {(previewingFile.allowDownload !== false || isTeacher || userProfile?.role === 'admin' || userProfile?.isAdmin) && (
-                    <button
-                      onClick={() => handleForceDownload(previewingFile.fileUrl!, (previewingFile.title || previewingFile.name || 'document') + '.pdf')}
-                      className="p-1.5 sm:p-2 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 hover:text-emerald-300 transition-colors cursor-pointer border border-emerald-500/20 text-xs flex items-center gap-1 font-bold"
-                      title="تحميل نسخة من الملف للجهاز"
-                    >
-                      <span className="hidden sm:inline">📥 تحميل</span>
-                      <span className="sm:hidden">📥</span>
-                    </button>
+                  {(previewingFile.allowDownload === true || isTeacher || userProfile?.role === 'admin' || userProfile?.isAdmin) && (
+                    <div className="relative">
+                      <button
+                        onClick={() => handleForceDownload(previewingFile.fileUrl!, (previewingFile.title || previewingFile.name || 'document') + '.pdf', previewingFile.id)}
+                        disabled={downloadingFileId === previewingFile.id}
+                        className={`p-1.5 sm:p-2 rounded-lg ${downloadingFileId === previewingFile.id ? 'bg-slate-500/20 text-slate-400 border-slate-500/30' : 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 hover:text-emerald-200 cursor-pointer border-emerald-500/30 active:scale-95 shadow-[0_0_15px_rgba(16,185,129,0.15)]'} transition-colors border text-xs flex items-center gap-1.5 font-black`}
+                        title="تحميل نسخة من الملف للجهاز بصيغة PDF"
+                      >
+                        {downloadingFileId === previewingFile.id ? (
+                          <>
+                            <div className="w-3.5 h-3.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin shrink-0" />
+                            <span className="hidden sm:inline text-slate-300">{downloadProgress}%</span>
+                          </>
+                        ) : (
+                          <>
+                            <Download size={14} className="text-emerald-400 shrink-0" />
+                            <span className="hidden sm:inline">تحميل الملف</span>
+                            <span className="sm:hidden">تحميل</span>
+                          </>
+                        )}
+                      </button>
+                      {downloadingFileId === previewingFile.id && downloadProgress > 0 && downloadProgress < 100 && (
+                        <div className="absolute -bottom-1.5 left-0 right-0 h-1 bg-slate-700/50 rounded-full overflow-hidden">
+                          <div className="h-full bg-emerald-500 transition-all duration-300" style={{ width: `${downloadProgress}%` }} />
+                        </div>
+                      )}
+                    </div>
                   )}
-
-                  <button
-                    onClick={() => {
-                      sounds.playClick();
-                      window.print();
-                    }}
-                    className="p-1.5 sm:p-2 rounded-lg bg-white/5 hover:bg-white/10 text-white/70 hover:text-white transition-colors cursor-pointer border border-white/5 text-xs flex items-center gap-1 font-bold"
-                    title="طباعة المستند"
-                  >
-                    <span className="hidden sm:inline">🖨️ طباعة</span>
-                    <span className="sm:hidden">🖨️</span>
-                  </button>
 
                   <button
                     onClick={() => {
@@ -2739,10 +3024,11 @@ export const PlatformOverlays: React.FC = () => {
                         <div className="flex flex-wrap items-center gap-2 pt-2">
                           {(previewingFile.allowDownload !== false || isTeacher || userProfile?.role === 'admin' || userProfile?.isAdmin) && (
                             <button
-                              onClick={() => handleForceDownload(previewingFile.fileUrl!, (previewingFile.title || previewingFile.name || 'document') + '.pdf')}
-                              className="px-4 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1.5 border border-emerald-500/30"
+                              onClick={() => handleForceDownload(previewingFile.fileUrl!, (previewingFile.title || previewingFile.name || 'document') + '.pdf', previewingFile.id)}
+                              className="px-4 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-black rounded-xl transition-all cursor-pointer flex items-center gap-2 border border-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.15)] active:scale-95"
                             >
-                              <span>📥 تنزيل الملف للجهاز</span>
+                              <Download size={15} className="text-emerald-400 shrink-0" />
+                              <span>تنزيل الملف للجهاز</span>
                             </button>
                           )}
                         </div>

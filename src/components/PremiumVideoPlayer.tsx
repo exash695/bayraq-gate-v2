@@ -109,7 +109,7 @@ export const PremiumVideoPlayer: React.FC<PremiumVideoPlayerProps> = ({
               src={`https://www.youtube-nocookie.com/embed/${youtubeId}?autoplay=1&enablejsapi=1&rel=0&modestbranding=1&origin=${window.location.origin}`}
               title={title || "محاضرة مرئية"}
               className="w-full h-full rounded-[20px] border-0"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
               allowFullScreen
             />
           </div>

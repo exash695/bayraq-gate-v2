@@ -3,6 +3,36 @@ import { customAuth } from '../services/customAuthService';
 import { realtimeManager } from './realtimeManager';
 import { cacheService } from '../services/cacheService';
 
+// Ensure toMillis compatibility for dates and strings coming from SQL API
+if (typeof (String.prototype as any).toMillis !== 'function') {
+  Object.defineProperty(String.prototype, 'toMillis', {
+    value: function () {
+      const ms = new Date(this as string).getTime();
+      return isNaN(ms) ? (Number(this) || 0) : ms;
+    },
+    writable: true,
+    configurable: true
+  });
+}
+if (typeof (Date.prototype as any).toMillis !== 'function') {
+  Object.defineProperty(Date.prototype, 'toMillis', {
+    value: function () {
+      return this.getTime();
+    },
+    writable: true,
+    configurable: true
+  });
+}
+if (typeof (Number.prototype as any).toMillis !== 'function') {
+  Object.defineProperty(Number.prototype, 'toMillis', {
+    value: function () {
+      return Number(this);
+    },
+    writable: true,
+    configurable: true
+  });
+}
+
 // Compatibility layer mimicking Firestore SDK on top of our PostgreSQL / REST backend
 export const db: any = {
   type: 'firestore'
@@ -211,6 +241,15 @@ function applyConstraints(items: any[], constraints: any[] = []): any[] {
         if (c.op === '==') {
           if ((c.field === 'schoolId' || c.field === 'school_id') && (val === 'all' || val === 'global' || c.value === 'all' || c.value === 'global' || (!val && c.value === 'school1') || (val === 'school1' && !c.value))) {
             return true;
+          }
+          if (c.field === 'className' || c.field === 'class_name' || c.field === 'grade') {
+            if (val == c.value) return true;
+            if (val && c.value) {
+              const cleanA = String(val).replace(/[\u064B-\u065F\u0670]/g, '').replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/(?:^|\s)ال/g, ' ').replace(/\s+/g, '');
+              const cleanB = String(c.value).replace(/[\u064B-\u065F\u0670]/g, '').replace(/[أإآٱ]/g, 'ا').replace(/ة/g, 'ه').replace(/[ىي]/g, 'ي').replace(/(?:^|\s)ال/g, ' ').replace(/\s+/g, '');
+              if (cleanA && cleanB && (cleanA === cleanB || cleanA.includes(cleanB) || cleanB.includes(cleanA))) return true;
+            }
+            return false;
           }
           return val == c.value;
         }

@@ -3,13 +3,14 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Timer, Trophy, Sparkles, Clock, ArrowLeft, FileText, 
   ChevronLeft, ChevronRight, ShieldCheck, Crown, BookOpen, 
-  Award, Activity, FileCheck, RefreshCw, Play, Check, HelpCircle 
+  Award, Activity, FileCheck, RefreshCw, Play, Check, HelpCircle, Download 
 } from 'lucide-react';
 import { collection, getDocs, doc, setDoc, increment } from '@/src/lib/firebase';
 import { db } from '../lib/firebase';
 import { UserProgress } from '../types';
 import { sounds } from '../lib/sounds';
 import { ConfettiReward } from './ConfettiReward';
+import { getStageHeaderForGrade, downloadDocumentFile } from './SchoolPlatform/utils';
 
 // Pre-programmed high-quality ministerial exams for core subjects
 const DEFAULT_EXAMS = [
@@ -287,6 +288,8 @@ export const AIEnhancedRadar: React.FC<AIEnhancedRadarProps> = ({
   const isAr = true; // The interface is in Arabic as requested by user
   
   // App States
+  const [downloadingFileId, setDownloadingFileId] = useState<string | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState<number>(0);
   const [activeTab, setActiveTab] = useState<'selection' | 'scanning' | 'arena' | 'results'>('selection');
   
   // Custom Firestore loading fallback
@@ -413,9 +416,11 @@ export const AIEnhancedRadar: React.FC<AIEnhancedRadarProps> = ({
   const handleScanUploadedFile = async (fileDoc: any) => {
     sounds.playClick();
     setSelectedDoc({
+      ...fileDoc,
       id: fileDoc.id,
       title: fileDoc.title,
       subject: fileDoc.subject || fileDoc.tag || 'العامة',
+      grade: fileDoc.grade || userProfile?.grade || '',
       isDefault: false
     });
     setIsLoadingExam(true);
@@ -476,6 +481,7 @@ export const AIEnhancedRadar: React.FC<AIEnhancedRadarProps> = ({
           id: `custom_${fileDoc.id}`,
           title: `اختبار ذكاء: ${fileDoc.title}`,
           subject: sub,
+          grade: fileDoc.grade || userProfile?.grade || '',
           badgeId,
           badgeTitle,
           badgeIcon,
@@ -513,7 +519,9 @@ export const AIEnhancedRadar: React.FC<AIEnhancedRadarProps> = ({
       const mockedExam = {
         ...fallbackExam,
         id: `mocked_${fileDoc.id}`,
-        title: `اختبار ذكاء مستنتج: ${fileDoc.title}`
+        title: `اختبار ذكاء مستنتج: ${fileDoc.title}`,
+        subject: sub || fallbackExam.subject,
+        grade: fileDoc.grade || userProfile?.grade || ''
       };
       
       setCurrentExam(mockedExam);
@@ -691,13 +699,53 @@ export const AIEnhancedRadar: React.FC<AIEnhancedRadarProps> = ({
                         <p className="text-xs text-white/40">عدد تحميلات الطلاب: {file.downloads || 0} تحميل</p>
                       </div>
 
-                      <button
-                        onClick={() => handleScanUploadedFile(file)}
-                        className="mt-4 w-full bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-bold text-sm py-2 px-4 rounded-xl flex items-center justify-center gap-2 shadow-lg transition duration-200"
-                      >
-                        <Play size={14} />
-                        <span>مسح الرادار والامتحان الشامل</span>
-                      </button>
+                      <div className="mt-4 flex items-center gap-2">
+                        <button
+                          onClick={() => handleScanUploadedFile(file)}
+                          className="flex-1 bg-gradient-to-r from-indigo-600 to-indigo-700 hover:from-indigo-500 hover:to-indigo-600 text-white font-bold text-sm py-2 px-3 rounded-xl flex items-center justify-center gap-2 shadow-lg transition duration-200"
+                        >
+                          <Play size={14} />
+                          <span>مسح الرادار والامتحان</span>
+                        </button>
+                        {(file.allowDownload === true || userProfile?.role === 'teacher' || userProfile?.role === 'admin' || userProfile?.isAdmin) && file.fileUrl && (
+                          <div className="relative">
+                            <button
+                              onClick={() => {
+                                sounds.playClick();
+                                setDownloadingFileId(file.id);
+                                setDownloadProgress(0);
+                                downloadDocumentFile(
+                                  file.fileUrl, 
+                                  (file.title || 'ملزمة دراسية') + '.pdf', 
+                                  file.id,
+                                  undefined,
+                                  (progress) => {
+                                    setDownloadProgress(progress);
+                                    if (progress >= 100) setTimeout(() => setDownloadingFileId(null), 1500);
+                                  }
+                                );
+                              }}
+                              disabled={downloadingFileId === file.id}
+                              className={`p-2 ${downloadingFileId === file.id ? 'bg-slate-500/15 text-slate-400 border-slate-500/25' : 'bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-400 border-emerald-500/25 cursor-pointer'} rounded-xl transition flex items-center justify-center border`}
+                              title="تحميل الملزمة مباشرة"
+                            >
+                              {downloadingFileId === file.id ? (
+                                <div className="flex flex-col items-center justify-center w-4 h-4 relative">
+                                   <div className="w-full h-full border-2 border-slate-400 border-t-transparent rounded-full animate-spin absolute" />
+                                   <span className="text-[7px] font-bold absolute">{downloadProgress}</span>
+                                </div>
+                              ) : (
+                                <Download size={16} />
+                              )}
+                            </button>
+                            {downloadingFileId === file.id && downloadProgress > 0 && downloadProgress < 100 && (
+                              <div className="absolute -bottom-1.5 left-0 right-0 h-1 bg-slate-700/50 rounded-full overflow-hidden">
+                                <div className="h-full bg-emerald-500 transition-all duration-300" style={{ width: `${downloadProgress}%` }} />
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -785,7 +833,7 @@ export const AIEnhancedRadar: React.FC<AIEnhancedRadarProps> = ({
               {/* Official ministry header decoration */}
               <div className="grid grid-cols-3 items-center text-center pb-4 border-b border-white/5 gap-2">
                 <div className="text-right space-y-0.5 text-xs text-white/50 font-bold">
-                  <div>الدراسة الإعدادية (العلمي)</div>
+                  <div>{getStageHeaderForGrade(selectedDoc?.grade || currentExam?.grade || (files.length > 0 ? files[0]?.grade : null) || userProfile?.grade)}</div>
                   <div>الامتحان التجريبي لعام ٢٠٢٦</div>
                   <div className="text-[#D4AF37]">المادة: {currentExam?.subject}</div>
                 </div>

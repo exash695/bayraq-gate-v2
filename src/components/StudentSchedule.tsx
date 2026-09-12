@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, getDocs, doc, onSnapshot } from '@/src/lib/firebase';
+import { collection, query, where, getDocs, onSnapshot } from '@/src/lib/firebase';
 import { db } from '../lib/firebase';
 import { Calendar, MonitorPlay, Users, Shirt, Info, Sparkles, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { academicService } from '../services/academicService';
 import { BerqCharacter } from './BerqCharacterManager';
 import { ScheduleSkeleton } from './shared/ShimmerSkeleton';
+import { normalizeArabicText, getPrefixForGrade, normalizeGradeName } from '../utils/studentUtils';
 
 interface ScheduleEntry {
   id: string;
@@ -25,6 +26,67 @@ const TIMES = [
   '07:00 مساءً', '08:00 مساءً'
 ];
 
+const normalizeDay = (d: string) => (d || '').replace(/[إأآٱ]/g, 'ا').trim();
+
+function matchStudentGrade(itemClassName: string, studentGrade: string): boolean {
+  if (!itemClassName) return false;
+  if (!studentGrade) return true; // If no specific student grade provided, match
+  const rawItem = itemClassName.trim();
+  const rawTarget = studentGrade.trim();
+  if (rawItem === rawTarget) return true;
+
+  const normItem = normalizeArabicText(rawItem);
+  const normTarget = normalizeArabicText(rawTarget);
+  if (normItem && normTarget && (normItem === normTarget || normItem.includes(normTarget) || normTarget.includes(normItem))) {
+    return true;
+  }
+
+  const p1 = getPrefixForGrade(rawItem);
+  const p2 = getPrefixForGrade(rawTarget);
+  if (p1 && p2 && p1 !== 'STU' && p1 === p2) {
+    return true;
+  }
+
+  const clean1 = normalizeGradeName(rawItem);
+  const clean2 = normalizeGradeName(rawTarget);
+  if (clean1 && clean2 && clean1 === clean2) {
+    return true;
+  }
+
+  return false;
+}
+
+function getStageFromGrade(grade: string): string {
+  if (!grade) return 'المرحلة الاعدادية';
+  const prefix = getPrefixForGrade(grade);
+  if (prefix.startsWith('P')) return 'المرحلة الابتدائية';
+  if (prefix.startsWith('M')) return 'المرحلة المتوسطة';
+  if (prefix.startsWith('S')) return 'المرحلة الاعدادية';
+
+  const norm = normalizeArabicText(grade);
+  if (norm.includes('ابتدائي')) return 'المرحلة الابتدائية';
+  if (norm.includes('متوسط')) return 'المرحلة المتوسطة';
+  return 'المرحلة الاعدادية';
+}
+
+function getInitialDay(): string {
+  const daysMap: Record<number, string> = {
+    0: 'الأحد',
+    1: 'الإثنين',
+    2: 'الثلاثاء',
+    3: 'الأربعاء',
+    4: 'الخميس',
+    5: 'الجمعة',
+    6: 'السبت'
+  };
+  const today = daysMap[new Date().getDay()];
+  if (today && today !== 'الجمعة') {
+    const found = DAYS.find(d => normalizeDay(d) === normalizeDay(today));
+    if (found) return found;
+  }
+  return DAYS[0];
+}
+
 interface Props {
   grade: string;
   isTeacher?: boolean;
@@ -33,20 +95,9 @@ interface Props {
   schoolName?: string;
 }
 
-function getStageFromGrade(grade: string): string {
-  if (!grade) return 'المرحلة الاعدادية';
-  if (['الأول الابتدائي', 'الثاني الابتدائي', 'الثالث الابتدائي', 'الرابع الابتدائي', 'الخامس الابتدائي', 'السادس الابتدائي'].includes(grade)) {
-    return 'المرحلة الابتدائية';
-  }
-  if (['الأول المتوسط', 'الثاني المتوسط', 'الثالث المتوسط'].includes(grade)) {
-    return 'المرحلة المتوسطة';
-  }
-  return 'المرحلة الاعدادية';
-}
-
 export const StudentSchedule: React.FC<Props> = ({ grade, isTeacher, teacherId, schoolId, schoolName }) => {
   const [schedules, setSchedules] = useState<ScheduleEntry[]>([]);
-  const [selectedDay, setSelectedDay] = useState(DAYS[0]);
+  const [selectedDay, setSelectedDay] = useState(getInitialDay);
   const [loading, setLoading] = useState(true);
   const [uniformConfig, setUniformConfig] = useState<any>(null);
 
@@ -66,34 +117,78 @@ export const StudentSchedule: React.FC<Props> = ({ grade, isTeacher, teacherId, 
   }, [schoolId, grade, isTeacher]);
 
   useEffect(() => {
-    let q;
-    if (isTeacher && teacherId) {
-       q = query(collection(db, 'class_schedules'), where('teacherId', '==', teacherId || 'unassigned'));
-    } else {
-       q = query(collection(db, 'class_schedules'), where('className', '==', grade || 'unassigned'));
-    }
-    
     let isMounted = true;
-    
-    getDocs(q).then((snapshot) => {
+
+    const processEntries = (rawDocs: any[]) => {
+      const parsed: ScheduleEntry[] = rawDocs
+        .map(entry => {
+          const item = (typeof entry.data === 'function' ? { id: entry.id, ...entry.data() } : entry) as any;
+          return {
+            id: item.id || `entry_${Math.random()}`,
+            day: item.day || item.dayOfWeek || '',
+            className: item.className || item.class_name || '',
+            time: item.time || item.startTime || item.start_time || '',
+            teacherId: item.teacherId || item.teacher_id || '',
+            teacherName: item.teacherName || item.teacher_name || '',
+            subject: item.subject || '',
+            type: item.type || item.classType || item.class_type || 'physical'
+          };
+        })
+        .filter(entry => {
+          if (!entry.subject || !entry.time) return false;
+          if (isTeacher && teacherId) {
+            return entry.teacherId === teacherId;
+          }
+          return matchStudentGrade(entry.className, grade);
+        });
+
+      if (isMounted) {
+        setSchedules(parsed);
+        setLoading(false);
+      }
+    };
+
+    // 1. Immediate fetch via REST API to ensure reliable fast loading across new server paths
+    const fetchFromApi = async () => {
+      try {
+        const queryParams = new URLSearchParams();
+        if (schoolId && schoolId !== 'all') queryParams.append('schoolId', schoolId);
+        if (isTeacher && teacherId) queryParams.append('teacherId', teacherId);
+        
+        const res = await fetch(`/api/class-schedules?${queryParams.toString()}`);
+        if (res.ok) {
+          const json = await res.json();
+          const list = json.schedules || json.data || [];
+          if (Array.isArray(list) && isMounted) {
+            processEntries(list);
+          }
+        }
+      } catch (err) {
+        console.warn("StudentSchedule API fallback fetch error:", err);
+      }
+    };
+
+    fetchFromApi();
+
+    // 2. Realtime subscription via Firestore / SQL adapter
+    const colRef = collection(db, 'class_schedules');
+    const unsub = onSnapshot(colRef, (snapshot: any) => {
       if (!isMounted) return;
-      const data = snapshot.docs
-        .map(doc => ({ id: doc.id, ...(doc.data() as object) }) as ScheduleEntry)
-        .filter(entry => entry.subject && entry.time);
-      setSchedules(data);
-      setLoading(false);
-    }).catch((error) => {
-      console.warn("StudentSchedule error:", error);
-      if (!isMounted) return;
-      setLoading(false);
+      if (snapshot && snapshot.docs) {
+        processEntries(snapshot.docs);
+      }
+    }, (error: any) => {
+      console.warn("StudentSchedule onSnapshot error:", error);
+      if (isMounted) setLoading(false);
     });
 
     return () => {
-        isMounted = false;
+      isMounted = false;
+      if (typeof unsub === 'function') unsub();
     };
-  }, [grade, isTeacher, teacherId]);
+  }, [grade, isTeacher, teacherId, schoolId]);
 
-  const filteredView = schedules.filter(s => s.day === selectedDay);
+  const filteredView = schedules.filter(s => normalizeDay(s.day) === normalizeDay(selectedDay));
   filteredView.sort((a, b) => TIMES.indexOf(a.time) - TIMES.indexOf(b.time));
 
   const resolvedStage = getStageFromGrade(grade);
@@ -143,8 +238,8 @@ export const StudentSchedule: React.FC<Props> = ({ grade, isTeacher, teacherId, 
             <span className="text-[10px] text-white/60 font-black tracking-widest uppercase">الجدول</span>
           </div>
           {DAYS.map((day) => {
-            const isSelected = selectedDay === day;
-            const count = schedules.filter((s) => s.day === day).length;
+            const isSelected = normalizeDay(selectedDay) === normalizeDay(day);
+            const count = schedules.filter((s) => normalizeDay(s.day) === normalizeDay(day)).length;
             return (
               <button
                 key={day}
@@ -209,7 +304,9 @@ export const StudentSchedule: React.FC<Props> = ({ grade, isTeacher, teacherId, 
                                   {entry.type === 'live' ? '📡 بث مباشر' : '🏫 حضور فعلي'}
                                </div>
                             </div>
-                            <p className="text-white/50 text-[11px] font-bold mt-1">أ. {entry.teacherName}</p>
+                            {entry.teacherName ? (
+                              <p className="text-white/50 text-[11px] font-bold mt-1">أ. {entry.teacherName}</p>
+                            ) : null}
                           </div>
                        </div>
 
@@ -325,8 +422,10 @@ export const StudentSchedule: React.FC<Props> = ({ grade, isTeacher, teacherId, 
                       <span>الأيام المقررة للبس الزي المدرسي الرسمي:</span>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      {['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس'].map((day) => {
-                        const isReq = uniformConfig.days?.includes(day);
+                      {['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس'].map((day) => {
+                        const isReq = uniformConfig.days?.some((d: string) => 
+                          normalizeArabicText(d) === normalizeArabicText(day) || d === day
+                        );
                         return (
                           <div
                             key={day}
