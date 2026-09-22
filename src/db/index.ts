@@ -19,22 +19,25 @@ function createMockDb(): any {
   };
 
   const createChainable = (resolvedValue: any = []): any => {
-    const fn: any = (..._args: any[]) => fn;
+    let proxy: any;
+    const fn: any = (..._args: any[]) => proxy;
     fn.then = (resolve: any, reject?: any) => Promise.resolve(resolvedValue).then(resolve, reject);
     fn.catch = (reject: any) => Promise.resolve(resolvedValue).catch(reject);
     fn.finally = (cb: any) => Promise.resolve(resolvedValue).finally(cb);
-    return new Proxy(fn, {
+    
+    proxy = new Proxy(fn, {
       get(target, prop) {
         if (prop === 'then') return target.then;
         if (prop === 'catch') return target.catch;
         if (prop === 'finally') return target.finally;
         if (prop === Symbol.iterator || prop === Symbol.asyncIterator) return undefined;
-        return (..._args: any[]) => fn;
+        return (..._args: any[]) => proxy;
       },
       apply(target, thisArg, args) {
-        return fn;
+        return proxy;
       }
     });
+    return proxy;
   };
 
   const rootProxy: any = new Proxy({}, {
