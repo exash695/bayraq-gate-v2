@@ -59,12 +59,49 @@ export const auth: any = {
   }
 };
 
-export const GoogleAuthProvider: any = class {
+export class GoogleAuthProvider {
+  public providerId = 'google.com';
+  public customParameters: Record<string, any> = {};
+  public scopes: string[] = [];
+
   constructor() {}
-  setCustomParameters(params: any) { return this; }
-  static setCustomParameters(params: any) { return new GoogleAuthProvider(); }
+
+  public setCustomParameters(params: any) {
+    this.customParameters = { ...this.customParameters, ...params };
+    return this;
+  }
+
+  public addScope(scope: string) {
+    this.scopes.push(scope);
+    return this;
+  }
+
+  public static setCustomParameters(params: any) {
+    const inst = new GoogleAuthProvider();
+    inst.setCustomParameters(params);
+    return inst;
+  }
+}
+
+export const signInWithPopup: any = async (...args: any[]) => {
+  try {
+    const user = await customAuth.loginWithGoogle();
+    return {
+      user: {
+        uid: user.uid,
+        id: user.uid,
+        email: user.email,
+        displayName: user.displayName || user.name,
+        name: user.name || user.displayName,
+        role: user.role,
+        schoolId: user.schoolId
+      }
+    };
+  } catch (e) {
+    console.error('signInWithPopup error:', e);
+    return { user: auth.currentUser };
+  }
 };
-export const signInWithPopup: any = async (...args: any[]) => ({ user: auth.currentUser });
 export const signOut: any = async (authInstance?: any) => { 
   customAuth.logout();
 };

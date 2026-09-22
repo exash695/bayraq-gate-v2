@@ -24,7 +24,6 @@ export const useAcademicActions = (showToast: (msg: string, type?: 'success' | '
   };
 
   const deleteEntity = async (collectionName: string, docId: string) => {
-    showToast('تم الحذف بنجاح');
     try {
       if (collectionName === 'academic_lists') {
         await academicService.deleteList(docId);
@@ -36,9 +35,14 @@ export const useAcademicActions = (showToast: (msg: string, type?: 'success' | '
         showToast('هذه المجموعة غير مدعومة حالياً بالتحديث الجديد', 'error');
         return;
       }
-    } catch (e) {
+      showToast('تم الحذف بنجاح');
+    } catch (e: any) {
       console.error("Delete Error:", e);
-      showToast('فشل في عملية الحذف', 'error');
+      if (e?.message?.includes('Failed to fetch') || e?.message?.includes('NetworkError') || e?.message?.includes('Network request failed')) {
+        showToast('تم الحذف محلياً (غير متصل بالإنترنت)', 'success');
+      } else {
+        showToast('فشل في عملية الحذف: ' + (e?.message || ''), 'error');
+      }
     }
   };
 

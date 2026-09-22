@@ -356,10 +356,11 @@
     }
   },
   "remote_control": {
-    "id": "remote_control",
     "maintenanceMode": false,
     "aiFeaturesEnabled": true,
-    "tickerEnabled": true
+    "tickerEnabled": true,
+    "id": "remote_control",
+    "updatedAt": "2026-09-15T08:37:45.857Z"
   },
   "seasonal_theme": {
     "id": "seasonal_theme",
@@ -375,5 +376,121 @@
       ]
     },
     "updatedAt": "2026-08-27T08:28:17.827Z"
+  },
+  "bairaq_poses": {
+    "id": "bairaq_poses",
+    "captain_bairaq_guardian": "/uploads/1789358464564_1000101441.mp4",
+    "mayadeen_tab_bairaq": "/uploads/1789358464564_1000101441.mp4",
+    "pose_dual_arena": "/uploads/1789358464564_1000101441.mp4",
+    "updatedAt": "2026-09-14T06:19:46.868Z",
+    "pulse": "/uploads/1789359295285_1000101439.mp4",
+    "pose_portal_pulse": "/uploads/1789359295285_1000101439.mp4",
+    "finance": "/uploads/1789359327591_1000101434.mp4",
+    "pose_finance_officer": "/uploads/1789359327591_1000101434.mp4",
+    "codes": "/uploads/1789366658091_1000101440.mp4",
+    "pose_key_master": "/uploads/1789366658091_1000101440.mp4",
+    "students": "/uploads/1789366760401_1000101438.mp4",
+    "pose_student_manager": "/uploads/1789366760401_1000101438.mp4",
+    "attendance": {
+      "type": "deleteField"
+    },
+    "pose_discipline_shield": {
+      "type": "deleteField"
+    }
+  },
+  "history_captain_bairaq_guardian": {
+    "id": "history_captain_bairaq_guardian",
+    "records": {
+      "type": "arrayUnion",
+      "value": [
+        {
+          "id": "captain_bairaq_guardian_1789358464782_tzfze",
+          "assetId": "captain_bairaq_guardian",
+          "fileName": "1000101441.mp4",
+          "downloadUrl": "/uploads/1789358464564_1000101441.mp4",
+          "assetType": "video/mp4",
+          "fileSize": 1232619,
+          "uploadedAt": "2026-09-14T04:01:04.782Z",
+          "status": "active"
+        }
+      ]
+    },
+    "updatedAt": "2026-09-14T04:01:05.312Z"
+  },
+  "history_pulse": {
+    "id": "history_pulse",
+    "records": {
+      "type": "arrayUnion",
+      "value": [
+        {
+          "id": "pulse_1789359295605_spjsj",
+          "assetId": "pulse",
+          "fileName": "1000101439.mp4",
+          "downloadUrl": "/uploads/1789359295285_1000101439.mp4",
+          "assetType": "video/mp4",
+          "fileSize": 1131949,
+          "uploadedAt": "2026-09-14T04:14:55.605Z",
+          "status": "active"
+        }
+      ]
+    },
+    "updatedAt": "2026-09-14T04:14:56.102Z"
+  },
+  "history_finance": {
+    "id": "history_finance",
+    "records": {
+      "type": "arrayUnion",
+      "value": [
+        {
+          "id": "finance_1789359327907_8i0xz",
+          "assetId": "finance",
+          "fileName": "1000101434.mp4",
+          "downloadUrl": "/uploads/1789359327591_1000101434.mp4",
+          "assetType": "video/mp4",
+          "fileSize": 1466219,
+          "uploadedAt": "2026-09-14T04:15:27.907Z",
+          "status": "active"
+        }
+      ]
+    },
+    "updatedAt": "2026-09-14T04:15:28.353Z"
+  },
+  "history_codes": {
+    "id": "history_codes",
+    "records": {
+      "type": "arrayUnion",
+      "value": [
+        {
+          "id": "codes_1789366658657_a983y",
+          "assetId": "codes",
+          "fileName": "1000101440.mp4",
+          "downloadUrl": "/uploads/1789366658091_1000101440.mp4",
+          "assetType": "video/mp4",
+          "fileSize": 2323496,
+          "uploadedAt": "2026-09-14T06:17:38.657Z",
+          "status": "active"
+        }
+      ]
+    },
+    "updatedAt": "2026-09-14T06:17:40.289Z"
+  },
+  "history_students": {
+    "id": "history_students",
+    "records": {
+      "type": "arrayUnion",
+      "value": [
+        {
+          "id": "students_1789366760956_yk8aa",
+          "assetId": "students",
+          "fileName": "1000101438.mp4",
+          "downloadUrl": "/uploads/1789366760401_1000101438.mp4",
+          "assetType": "video/mp4",
+          "fileSize": 1110307,
+          "uploadedAt": "2026-09-14T06:19:20.956Z",
+          "status": "active"
+        }
+      ]
+    },
+    "updatedAt": "2026-09-14T06:19:21.956Z"
   }
 }

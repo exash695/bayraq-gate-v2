@@ -126,12 +126,23 @@ export const HallOfFame: React.FC<HallOfFameProps> = ({ language, progress }) =>
           />
         </motion.div>
         
-        <h1 className="text-5xl font-black text-white tracking-tighter bg-clip-text text-transparent bg-gradient-to-b from-white to-white/40">
+        <h1 className="text-4xl md:text-5xl font-black text-white tracking-tighter bg-clip-text text-transparent bg-gradient-to-b from-white to-white/40">
           {isAr ? 'قاعة الأساطير' : 'Hall of Legends'}
         </h1>
-        <p className="text-white/40 max-w-lg mx-auto font-bold text-lg leading-relaxed">
+
+        {/* وسم قريباً بين أيديكم */}
+        <div className="flex justify-center items-center gap-2 pt-1 pb-1">
+          <div className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full bg-gradient-to-r from-amber-500/20 via-amber-400/15 to-amber-500/20 border border-amber-500/40 text-amber-300 shadow-[0_0_15px_rgba(245,158,11,0.2)]">
+            <Sparkles size={13} className="text-amber-400 animate-pulse shrink-0" />
+            <span className="text-xs md:text-sm font-black tracking-wide">
+              {isAr ? 'قريباً بين أيديكم • إطلاق مرتقب ⚔️' : 'Coming Soon • Anticipated Launch ⚔️'}
+            </span>
+          </div>
+        </div>
+
+        <p className="text-white/40 max-w-lg mx-auto font-bold text-base md:text-lg leading-relaxed">
           {isAr 
-            ? 'مرحباً بك في ساحة الشرف الملكية. هنا تُخلد إنجازاتك الدراسية وتحتفل بانتصاراتك.' 
+            ? 'مرحباً بك في ساحة الشرف الملكية. هنا تُخلد إنجازاتك الدراسية وتحتفل بانتصاراتك مع نخبة الفرسان.' 
             : 'Welcome to the royal arena of honor. Here your academic achievements are immortalized and your victories celebrated.'}
         </p>
       </div>

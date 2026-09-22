@@ -14,34 +14,44 @@ export interface AuditLogEntry {
  */
 export async function logActivity(entry: AuditLogEntry) {
   try {
-    const user = auth.currentUser;
-    if (!user) return;
+    let user: any = null;
+    try {
+      user = auth?.currentUser;
+    } catch {}
 
-    // استخراج الإيميل الفعلي للمسؤول
-    let email = user.email || '';
-    if (!email) {
-      try {
+    let uid = user?.uid || 'dev_admin';
+    let email = user?.email || '';
+    let displayName = user?.displayName || 'المسؤول الإداري';
+
+    try {
+      if (!email) {
         email = localStorage.getItem('bairaq_admin_email') || 
                 localStorage.getItem('admin_email') || 
                 localStorage.getItem('user_email') || 
                 '';
-      } catch (e) {
-        // ignore localStorage errors
       }
+      const cachedProfile = localStorage.getItem('bairaq_admin_profile') || localStorage.getItem('user');
+      if (cachedProfile) {
+        const parsed = JSON.parse(cachedProfile);
+        if (parsed.email && !email) email = parsed.email;
+        if (parsed.id || parsed.uid) uid = parsed.id || parsed.uid;
+        if (parsed.name || parsed.displayName) displayName = parsed.name || parsed.displayName;
+      }
+    } catch (e) {
+      // ignore localStorage errors
     }
 
-    // إذا لم يتوفر الإيميل وكان المستخدم بحساب إداري
-    if (!email && (user.uid === 'ACT_MASTER_G' || user.uid === 'admin_main' || user.displayName === 'الإدارة العامة')) {
-      email = 'abdulradhaalmayali@gmail.com';
+    if (!email) {
+      email = 'mntzralghanm527@gmail.com';
     }
 
-    const effectiveName = email ? email : (user.displayName && user.displayName !== 'الإدارة العامة' ? user.displayName : (user.email || 'abdulradhaalmayali@gmail.com'));
+    const effectiveName = displayName && displayName !== 'الإدارة العامة' ? displayName : email;
 
     await auditService.logAction({
       ...entry,
-      userId: user.uid,
+      userId: uid,
       userName: effectiveName,
-      userEmail: email || 'abdulradhaalmayali@gmail.com',
+      userEmail: email,
     });
   } catch (error) {
     console.error('Failed to log activity:', error);

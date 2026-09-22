@@ -27,12 +27,25 @@ import {
   Sparkles,
   Share2,
   Download,
-  Bus
+  Bus,
+  Edit2,
+  Search,
+  Image as ImageIcon,
+  ZoomIn,
+  ExternalLink,
+  Upload,
+  Paperclip,
+  CheckCircle,
+  Loader2,
+  Trash2,
+  Send
 } from 'lucide-react';
-import { doc, onSnapshot, collection, query, where, orderBy, limit, updateDoc } from '@/src/lib/firebase';
+import ReactMarkdown from 'react-markdown';
+import { doc, onSnapshot, collection, query, where, orderBy, limit, updateDoc, addDoc, serverTimestamp } from '@/src/lib/firebase';
 import { academicService } from '../services/academicService';
 import { supportService } from '../services/supportService';
 import { ideaService } from '../services/ideaService';
+import { uploadFileToR2 } from '../services/uploadService';
 import { db, auth } from '../lib/firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { safeStorage } from '../lib/storage';
@@ -43,6 +56,7 @@ import { ExcellenceShareModal } from './ExcellenceShareModal';
 import { IdeaBank } from './IdeaBank';
 import { ParentTransportView } from './Transport/ParentTransportView';
 import { ComingSoonPlaceholder } from './ComingSoonPlaceholder';
+import { useSecuritySettings, securityService } from '../services/securityService';
 import { BerqCharacter } from './BerqCharacterManager';
 import { ParentPortalSkeleton } from './shared/ShimmerSkeleton';
 import { getSubjectsForGrade, calculateStudentFinancials, computeAcademicIdentity, computeExcellencePoints, normalizeGradeCanonical } from '../utils/studentUtils';
@@ -100,6 +114,289 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   const [unreadSupportCount, setUnreadSupportCount] = useState(0);
   const [unreadIdeasCount, setUnreadIdeasCount] = useState(0);
   const [parentBroadcasts, setParentBroadcasts] = useState<any[]>([]);
+  const [parentHomeworks, setParentHomeworks] = useState<any[]>([]);
+  const [parentSubmissions, setParentSubmissions] = useState<any[]>([]);
+  const [hwSearch, setHwSearch] = useState('');
+  const [hwSubject, setHwSubject] = useState('الكل');
+  const [viewingHwModal, setViewingHwModal] = useState<any | null>(null);
+  
+  // Solution submission state
+  const [solutionText, setSolutionText] = useState('');
+  const [solutionImages, setSolutionImages] = useState<File[]>([]);
+  const [solutionImagePreviews, setSolutionImagePreviews] = useState<string[]>([]);
+  const [isSubmittingSolution, setIsSubmittingSolution] = useState(false);
+  const [solutionSubmitSuccess, setSolutionSubmitSuccess] = useState(false);
+  const [solutionSubmitError, setSolutionSubmitError] = useState<string | null>(null);
+  const solutionFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  const [viewedHwIds, setViewedHwIds] = useState<Set<string>>(() => {
+    try {
+      const studentKey = studentData?.id || studentCode || 'default';
+      const saved = localStorage.getItem(`s6_parent_viewed_hw_${studentKey}`);
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch {
+      return new Set();
+    }
+  });
+
+  useEffect(() => {
+    try {
+      const studentKey = studentData?.id || studentCode || 'default';
+      const saved = localStorage.getItem(`s6_parent_viewed_hw_${studentKey}`);
+      if (saved) {
+        setViewedHwIds(new Set(JSON.parse(saved)));
+      }
+    } catch (e) {
+      console.warn("Failed to load viewed homeworks", e);
+    }
+  }, [studentData?.id, studentCode]);
+
+  useEffect(() => {
+    if (activeSubPage === 'homework' && parentHomeworks.length > 0) {
+      markAllHomeworksAsViewed();
+    }
+  }, [activeSubPage, parentHomeworks]);
+
+  const markHwAsViewed = (hwId: string) => {
+    if (!hwId) return;
+    setViewedHwIds(prev => {
+      if (prev.has(hwId)) return prev;
+      const next = new Set(prev);
+      next.add(hwId);
+      try {
+        const studentKey = studentData?.id || studentCode || 'default';
+        localStorage.setItem(`s6_parent_viewed_hw_${studentKey}`, JSON.stringify(Array.from(next)));
+      } catch (e) {
+        console.warn("Failed to save viewed homeworks", e);
+      }
+      return next;
+    });
+  };
+
+  const markAllHomeworksAsViewed = () => {
+    const allIds = parentHomeworks.map(h => h.id).filter(Boolean);
+    if (allIds.length === 0) return;
+    setViewedHwIds(prev => {
+      const next = new Set(prev);
+      allIds.forEach(id => next.add(id));
+      try {
+        const studentKey = studentData?.id || studentCode || 'default';
+        localStorage.setItem(`s6_parent_viewed_hw_${studentKey}`, JSON.stringify(Array.from(next)));
+      } catch (e) {
+        console.warn("Failed to save viewed homeworks", e);
+      }
+      return next;
+    });
+  };
+
+  const handleSolutionImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
+    const combined = [...solutionImages, ...files].slice(0, 5);
+    setSolutionImages(combined);
+    const newPreviews = combined.map(f => URL.createObjectURL(f));
+    setSolutionImagePreviews(newPreviews);
+  };
+
+  const handleRemoveSolutionImage = (index: number) => {
+    const nextImages = solutionImages.filter((_, i) => i !== index);
+    setSolutionImages(nextImages);
+    const nextPreviews = nextImages.map(f => URL.createObjectURL(f));
+    setSolutionImagePreviews(nextPreviews);
+  };
+
+  const handleParentSubmitSolution = async (hw: any) => {
+    if (!hw || (!solutionText.trim() && solutionImages.length === 0)) {
+      setSolutionSubmitError('يرجى كتابة الحل أو إرفاق صورة الحل على الأقل');
+      return;
+    }
+    const effectiveSchoolId = schoolId || studentData?.schoolId || 'school1';
+    setIsSubmittingSolution(true);
+    setSolutionSubmitError(null);
+    try {
+      let uploadedUrls: string[] = [];
+      if (solutionImages.length > 0) {
+        for (const file of solutionImages) {
+          try {
+            const url = await uploadFileToR2(file);
+            uploadedUrls.push(url);
+          } catch (uploadErr) {
+            console.warn("Upload direct failed, fallback to data url", uploadErr);
+            const dataUrl = await new Promise<string>((resolve) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result as string);
+              reader.readAsDataURL(file);
+            });
+            uploadedUrls.push(dataUrl);
+          }
+        }
+      }
+
+      let fullContent = solutionText.trim();
+      if (uploadedUrls.length > 0) {
+        const imagesMd = uploadedUrls.map((u, i) => `![صورة الحل ${i + 1}](${u})`).join('\n\n');
+        fullContent = fullContent ? `${fullContent}\n\n${imagesMd}` : imagesMd;
+      }
+
+      const cleanStudentName = (studentData?.name || studentName || 'الطالب').replace(/^ولي أمر\s*/, '');
+      const studentClass = studentData?.grade || grade || 'عام';
+
+      const submissionPayload = {
+        taskId: hw.id,
+        taskTitle: hw.name || hw.title || 'واجب مدرسي',
+        type: 'homework',
+        studentId: studentData?.id || studentCode || 'std_unknown',
+        studentName: cleanStudentName,
+        studentCode: studentCode || studentData?.code || '',
+        class: studentClass,
+        grade: studentClass,
+        subject: hw.subject || 'عام',
+        teacherId: hw.teacherId || '',
+        teacherName: hw.teacherName || '',
+        content: fullContent,
+        solutionImages: uploadedUrls,
+        imageUrl: uploadedUrls[0] || null,
+        status: 'pending',
+        submittedBy: 'parent',
+        parentName: studentName || 'ولي الأمر',
+        submittedAt: new Date().toISOString(),
+        createdAt: serverTimestamp()
+      };
+
+      await addDoc(collection(db, "schools", effectiveSchoolId, "activities_submissions"), submissionPayload);
+      setSolutionSubmitSuccess(true);
+      setSolutionText('');
+      setSolutionImages([]);
+      setSolutionImagePreviews([]);
+      
+      // Update viewing modal with newly created submission representation
+      setViewingHwModal((prev: any) => prev ? {
+        ...prev,
+        submission: {
+          ...submissionPayload,
+          id: 'temp_sub_' + Date.now(),
+          createdAt: { toDate: () => new Date() }
+        }
+      } : null);
+
+      setTimeout(() => {
+        setSolutionSubmitSuccess(false);
+      }, 4000);
+    } catch (err: any) {
+      console.error("Failed to submit solution by parent:", err);
+      setSolutionSubmitError(err?.message || 'فشل في إرسال الحل، يرجى المحاولة لاحقاً');
+    } finally {
+      setIsSubmittingSolution(false);
+    }
+  };
+
+  useEffect(() => {
+    const effectiveSchoolId = schoolId || studentData?.schoolId || 'school1';
+    if (!effectiveSchoolId) return;
+
+    const q = query(
+      collection(db, "schools", effectiveSchoolId, "ai_materials"),
+      orderBy("timestamp", "desc")
+    );
+    const unsub = onSnapshot(q, (snapshot) => {
+      const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setParentHomeworks(items);
+    }, (err) => {
+      console.warn("Failed to fetch homework materials in ParentPortal", err);
+    });
+
+    const studentId = studentData?.id || studentCode || 'unknown';
+    const qSub = query(
+      collection(db, "schools", effectiveSchoolId, "activities_submissions"),
+      where("studentId", "==", studentId)
+    );
+    const unsubSub = onSnapshot(qSub, (snapshot) => {
+      const subs = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      setParentSubmissions(subs);
+    }, (err) => {
+      console.warn("Failed to fetch student submissions in ParentPortal", err);
+    });
+
+    return () => {
+      unsub();
+      unsubSub();
+    };
+  }, [schoolId, studentData?.schoolId, studentData?.id, studentCode]);
+
+  const isGradeMatch = (docGrade?: string, targetStudentGrade?: string, targetSections?: string[]): boolean => {
+    if (!targetStudentGrade) return true;
+    const sClean = String(targetStudentGrade).trim();
+    const sLower = sClean.toLowerCase();
+    if (!sClean || sClean === "الكل" || sClean === "عام" || sClean === "جميع المراحل" || sLower === "all" || sClean === "*") return true;
+
+    const grades = [
+      { keys: ['اولابتدائي', 'اولابتداي'], label: 'أول ابتدائي' },
+      { keys: ['ثانيابتدائي', 'ثانيابتداي'], label: 'ثاني ابتدائي' },
+      { keys: ['ثالثابتدائي', 'ثالثابتداي'], label: 'ثالث ابتدائي' },
+      { keys: ['رابعابتدائي', 'رابعابتداي'], label: 'رابع ابتدائي' },
+      { keys: ['خامسابتدائي', 'خامسابتداي'], label: 'خامس ابتدائي' },
+      { keys: ['سادسابتدائي', 'سادسابتداي'], label: 'سادس ابتدائي' },
+      { keys: ['اولمتوسط'], label: 'أول متوسط' },
+      { keys: ['ثانيمتوسط'], label: 'ثاني متوسط' },
+      { keys: ['ثالثمتوسط'], label: 'ثالث متوسط' },
+      { keys: ['رابععلمي', 'رابعالعلمي'], label: 'رابع علمي' },
+      { keys: ['رابعادبي', 'رابعالادبي'], label: 'رابع أدبي' },
+      { keys: ['خامسعلمي', 'خامسالعلمي'], label: 'خامس علمي' },
+      { keys: ['خامسادبي', 'خامسالادبي'], label: 'خامس أدبي' },
+      { keys: ['سادسعلمي', 'سادسالعلمي', 'سادستطبيقي', 'سادسأحيائي', 'سادساحيائي'], label: 'سادس علمي' },
+      { keys: ['سادسادبي', 'سادسالادبي'], label: 'سادس أدبي' },
+    ];
+
+    const normalizeArabicText = (txt: string) => {
+      return (txt || '').replace(/أ|إ|آ/g, 'ا').replace(/ة/g, 'ه').toLowerCase().trim();
+    };
+
+    const sNorm = normalizeArabicText(sClean);
+
+    if (Array.isArray(targetSections) && targetSections.length > 0) {
+      const sectionMatched = targetSections.some(sec => {
+        if (!sec) return false;
+        const secStr = String(sec).trim();
+        const secLower = secStr.toLowerCase();
+        if (secStr === "الكل" || secStr === "عام" || secStr === "جميع المراحل" || secStr === "كافة الشُعب" || secLower === "all" || secStr === "*") return true;
+        if (secStr === sClean) return true;
+        const secNorm = normalizeArabicText(secStr);
+        if (secNorm === sNorm || secNorm.includes(sNorm) || sNorm.includes(secNorm)) return true;
+        for (const g of grades) {
+          const secMatches = g.keys.some(k => secNorm.includes(k));
+          const sMatches = g.keys.some(k => sNorm.includes(k));
+          if (secMatches && sMatches) return true;
+        }
+        return false;
+      });
+      if (sectionMatched) return true;
+    }
+
+    if (!docGrade) return true;
+    const dClean = String(docGrade).trim();
+    const dNorm = normalizeArabicText(dClean);
+    if (dClean === "الكل" || dClean === "عام" || dClean === "جميع المراحل" || dNorm === "all" || dClean === "*") return true;
+    if (dNorm === sNorm || dNorm.includes(sNorm) || sNorm.includes(dNorm)) return true;
+
+    for (const g of grades) {
+      const dMatches = g.keys.some(k => dNorm.includes(k));
+      const sMatches = g.keys.some(k => sNorm.includes(k));
+      if (dMatches && sMatches) return true;
+    }
+    return false;
+  };
+
+  const isSubjectMatch = (dbSubject: any, filterSubject: string) => {
+    if (filterSubject === "الكل") return true;
+    const s1 = String(dbSubject || "").replace(/أ|إ|آ/g, 'ا').replace(/ة/g, 'ه').toLowerCase().trim();
+    const s2 = String(filterSubject || '').replace(/أ|إ|آ/g, 'ا').replace(/ة/g, 'ه').toLowerCase().trim();
+    if (!s1 || !s2) return false;
+    if (s1.includes(s2) || s2.includes(s1)) return true;
+    if (s2 === "اللغه الانجليزيه" && (s1.includes("انكليزي") || s1.includes("انجليزي") || s1.includes("english"))) return true;
+    if (s2 === "اللغه العربيه" && (s1.includes("عربي"))) return true;
+    if (s2 === "التربيه الاسلاميه" && (s1.includes("اسلامي") || s1.includes("قران") || s1.includes("دين"))) return true;
+    return false;
+  };
 
   // Sync with prop notifications
   useEffect(() => {
@@ -126,6 +423,8 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
           setActiveSubPage('ideas');
         } else if (target === 'messages' || target === 'support' || target === 'meeting') {
           setIsSupportFormOpen(true);
+        } else if (target === 'homework') {
+          setActiveSubPage('homework');
         } else if (target === 'transport') {
           setShowTransportView(true);
         }
@@ -395,6 +694,23 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
       unsubMap();
       unsubConfigs();
     };
+  }, [schoolId, studentData?.schoolId]);
+
+  // Sync disabled modules locally in same tab
+  useEffect(() => {
+    const handleSchoolConfigEvent = (e: any) => {
+      const detail = e.detail;
+      if (!detail) return;
+      const effectiveSchoolId = schoolId || studentData?.schoolId || 'school1';
+      if (detail.schoolId === effectiveSchoolId || !detail.schoolId) {
+        setSchoolConfigs((prev: any) => ({
+          ...(prev || {}),
+          disabledModules: detail.disabledModules || []
+        }));
+      }
+    };
+    window.addEventListener("school_configs_updated", handleSchoolConfigEvent);
+    return () => window.removeEventListener("school_configs_updated", handleSchoolConfigEvent);
   }, [schoolId, studentData?.schoolId]);
 
   useEffect(() => {
@@ -800,14 +1116,29 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
 
   const isSixthGrade = studentData?.grade ? (studentData.grade.includes('سادس') && (studentData.grade.includes('علمي') || studentData.grade.includes('أدبي') || studentData.grade.includes('ادبي'))) : false;
 
-  const sections = [
+  const unreadHomeworksCount = useMemo(() => {
+    return parentHomeworks.filter(hw => hw?.id && !viewedHwIds.has(hw.id)).length;
+  }, [parentHomeworks, viewedHwIds]);
+
+  const { settings: secSettings } = useSecuritySettings();
+
+  const rawSections = [
     {
       title: "المتابعة اللحظية",
       items: [
-        { id: "grades", icon: BarChart3, name: "سجل الدرجات", color: "text-emerald-400", bg: "bg-emerald-400/10", border: "border-emerald-400/20" },
+        { id: "grades", icon: BarChart3, name: "سجل الدرجات", color: "text-emerald-400", bg: "bg-emerald-400/10", border: "border-emerald-400/20", cap: 'view_grades' },
         { id: "attendance", icon: Timer, name: "سجل الحضور الذكي", color: "text-orange-400", bg: "bg-orange-400/10", border: "border-orange-400/20" },
+        { 
+          id: "homework", 
+          icon: Edit2, 
+          name: "الواجبات والأنشطة اليومية", 
+          color: "text-amber-400", 
+          bg: "bg-amber-400/10", 
+          border: "border-amber-400/20",
+          badge: unreadHomeworksCount > 0 ? unreadHomeworksCount : null
+        },
         { id: "uniform", icon: Shirt, name: "الزي المدرسي الرسمي", color: "text-indigo-400", bg: "bg-indigo-400/10", border: "border-indigo-400/20" },
-        { id: "transport", icon: Bus, name: "تتبع خطوط النقل الذكي", color: "text-blue-400", bg: "bg-blue-400/10", border: "border-blue-400/20" },
+        { id: "transport", icon: Bus, name: "تتبع خطوط النقل الذكي", color: "text-blue-400", bg: "bg-blue-400/10", border: "border-blue-400/20", cap: 'track_bus' },
       ]
     },
     {
@@ -822,7 +1153,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
           border: "border-blue-400/20",
           badge: totalUnreadSupport > 0 ? totalUnreadSupport : null
         },
-        { id: "finance", icon: Wallet, name: "المحفظة المالية والأقساط", color: "text-amber-400", bg: "bg-amber-400/10", border: "border-amber-400/20" },
+        { id: "finance", icon: Wallet, name: "المحفظة المالية والأقساط", color: "text-amber-400", bg: "bg-amber-400/10", border: "border-amber-400/20", cap: 'financial_view' },
         { id: "conduct", icon: AlertTriangle, name: "تقارير الانضباط والسلوك", color: "text-rose-400", bg: "bg-rose-400/10", border: "border-rose-400/20" },
       ]
     },
@@ -843,6 +1174,41 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
       ]
     }
   ];
+
+  const sections = useMemo(() => {
+    const disabledModules = Array.isArray(schoolConfigs?.disabledModules) ? schoolConfigs.disabledModules : [];
+
+    const checkIsDisabled = (id: string): boolean => {
+      // 1. Check specific parent prefix (Priority)
+      if (disabledModules.includes(`parent:${id}`)) return true;
+      
+      // 3. Handle aliases - ONLY check parent-prefixed versions for portal isolation
+      if (id === "grades") return disabledModules.includes("parent:grades") || disabledModules.includes("parent:attendance") || disabledModules.includes("parent:discipline");
+      if (id === "attendance") return disabledModules.includes("parent:grades") || disabledModules.includes("parent:attendance") || disabledModules.includes("parent:discipline");
+      if (id === "homework") return disabledModules.includes("parent:assignments");
+      if (id === "conduct") return disabledModules.includes("parent:discipline_reports");
+      if (id === "excellence") return disabledModules.includes("parent:excellence") || disabledModules.includes("parent:competitions");
+      if (id === "ideas") return disabledModules.includes("parent:ideas");
+      if (id === "meeting") return disabledModules.includes("parent:support");
+      if (id === "finance") return disabledModules.includes("parent:financial");
+      if (id === "uniform") return disabledModules.includes("parent:uniform");
+      if (id === "transport") return disabledModules.includes("parent:transport");
+
+      return false;
+    };
+
+    return rawSections.map(sec => ({
+      ...sec,
+      items: sec.items.filter(item => {
+        // First check security capability
+        const hasCap = !item.cap || securityService.canRoleAccess('parent', item.cap);
+        if (!hasCap) return false;
+
+        // Then check if disabled in dev dashboard
+        return !checkIsDisabled(item.id);
+      })
+    })).filter(sec => sec.items.length > 0);
+  }, [rawSections, schoolConfigs?.disabledModules]);
 
   const getFormattedWhatsapp = (phone?: string) => {
     if (!phone) return '9647700000000';
@@ -883,6 +1249,14 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
     const activeSchool = schoolName || schoolInfo?.schoolName || schoolInfo?.name || "ثانوية أوائل غماس الأهلية";
 
     switch (subPageId) {
+      case 'homework':
+        return {
+          pose: 'pose_homework_master' as const,
+          title: 'غرفة المتابعة - الواجبات والتمارين المدرسية 📝',
+          subtitle: `متابعة الواجبات المنشورة وحالة تسليم الطالب • الطالب ${cleanStudentName}`,
+          school: activeSchool,
+          glowColor: 'gold' as const
+        };
       case 'grades':
         return {
           pose: 'pose_student_manager' as const,
@@ -1027,18 +1401,519 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
           </div>
         </header>
 
-        <div className={`flex-1 overflow-y-auto w-full no-scrollbar ${['future', 'ideas'].includes(activeSubPage || '') ? 'py-6 px-0 md:px-0' : 'px-6 py-10'}`}>
+        <div className={`flex-1 overflow-y-auto w-full no-scrollbar ${activeSubPage === 'homework' ? 'p-0' : ['future', 'ideas'].includes(activeSubPage || '') ? 'py-6 px-0 md:px-0' : 'px-6 py-10'}`}>
           {error && (
             <motion.div 
               initial={{ opacity: 0, y: -10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="mb-4 p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl flex items-center gap-2 text-rose-400 text-xs font-bold"
+              className="m-4 p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl flex items-center gap-2 text-rose-400 text-xs font-bold"
             >
               <AlertTriangle size={14} />
               <span>{error}</span>
             </motion.div>
           )}
-          {activeSubPage === "grades" ? (
+          {activeSubPage === "homework" ? (
+            <div className="w-full flex flex-col min-h-full animate-in fade-in slide-in-from-bottom-2 pb-16">
+              {/* Edge-to-Edge Sticky Horizontal Subject Bar */}
+              <div className="sticky top-0 z-20 bg-[#070D1E]/95 backdrop-blur-xl border-b border-white/10 px-3 sm:px-5 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
+                <div className="flex items-center gap-2 overflow-x-auto no-scrollbar scroll-smooth py-0.5">
+                  {/* All Subjects Pill */}
+                  {(() => {
+                    const activeStudentGrade = studentData?.grade || '';
+                    const totalUnviewedAll = parentHomeworks.filter(r => {
+                      const rSections = Array.isArray(r.targetSections) ? r.targetSections : (r.section ? [r.section] : undefined);
+                      const matchesGrade = isGradeMatch(r.targetGrade, activeStudentGrade, rSections);
+                      return r.tool === 'صناعة واجبات' && matchesGrade && !viewedHwIds.has(r.id);
+                    }).length;
+                    const isSelected = hwSubject === 'الكل';
+
+                    return (
+                      <button
+                        key="all-subjects-btn"
+                        type="button"
+                        onClick={() => setHwSubject('الكل')}
+                        className={`shrink-0 px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 select-none cursor-pointer ${
+                          isSelected
+                            ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-black shadow-lg shadow-amber-500/25 ring-1 ring-amber-400'
+                            : 'bg-white/5 hover:bg-white/10 text-white/70 hover:text-white border border-white/5'
+                        }`}
+                      >
+                        <span>جميع المواد</span>
+                        {totalUnviewedAll > 0 && (
+                          <span className={`px-1.5 min-w-[18px] h-[18px] rounded-full text-[10px] font-black flex items-center justify-center leading-none ${
+                            isSelected ? 'bg-black text-amber-400' : 'bg-rose-500 text-white shadow-md shadow-rose-500/50 animate-pulse'
+                          }`}>
+                            {totalUnviewedAll}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })()}
+
+                  {/* Student Subjects Pills */}
+                  {getSubjectsForGrade(studentData?.grade || '', studentData?.removedSubjects || [], subjectMapping).map((sub: any) => {
+                    const isSelected = hwSubject === sub.name;
+                    const activeStudentGrade = studentData?.grade || '';
+                    const subjectUnviewedCount = parentHomeworks.filter(r => {
+                      const rSections = Array.isArray(r.targetSections) ? r.targetSections : (r.section ? [r.section] : undefined);
+                      const matchesGrade = isGradeMatch(r.targetGrade, activeStudentGrade, rSections);
+                      const rNameStr = String(r.name || "");
+                      const rContentStr = String(r.content || "");
+                      return r.tool === 'صناعة واجبات' && 
+                        matchesGrade && 
+                        (isSubjectMatch(r.subject, sub.name) || rNameStr.includes(sub.name) || rContentStr.includes(sub.name)) && 
+                        !viewedHwIds.has(r.id);
+                    }).length;
+
+                    return (
+                      <button
+                        key={sub.id || sub.name}
+                        type="button"
+                        onClick={() => setHwSubject(sub.name)}
+                        className={`shrink-0 px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 select-none cursor-pointer ${
+                          isSelected
+                            ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-black font-black shadow-lg shadow-amber-500/25 ring-1 ring-amber-400'
+                            : 'bg-white/5 hover:bg-white/10 text-white/70 hover:text-white border border-white/5'
+                        }`}
+                      >
+                        <span>{sub.name}</span>
+                        {subjectUnviewedCount > 0 && (
+                          <span className={`px-1.5 min-w-[18px] h-[18px] rounded-full text-[10px] font-black flex items-center justify-center leading-none ${
+                            isSelected ? 'bg-black text-amber-400' : 'bg-rose-500 text-white shadow-md shadow-rose-500/50 animate-pulse'
+                          }`}>
+                            {subjectUnviewedCount}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Search Bar */}
+              <div className="px-4 sm:px-6 pt-4 pb-2">
+                <div className="relative w-full">
+                  <Search size={16} className="absolute right-3.5 top-1/2 -translate-y-1/2 text-white/40 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={hwSearch}
+                    onChange={(e) => setHwSearch(e.target.value)}
+                    placeholder={`ابحث في واجبات ${hwSubject === 'الكل' ? 'كافة المواد' : hwSubject}...`}
+                    className="w-full h-11 bg-black/40 border border-white/10 rounded-xl pr-10 pl-9 text-xs text-white placeholder:text-white/40 focus:outline-none focus:border-amber-400 transition-all shadow-inner"
+                  />
+                  {hwSearch && (
+                    <button 
+                      onClick={() => setHwSearch('')} 
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-white/40 hover:text-white text-xs p-1"
+                      title="مسح البحث"
+                    >
+                      <XCircle size={15} />
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Homework Cards Grid */}
+              <div className="px-4 sm:px-6 pt-2">
+                {(() => {
+                  const activeStudentGrade = studentData?.grade || '';
+                  const homeworks = parentHomeworks.filter(r => {
+                    const rSections = Array.isArray(r.targetSections) ? r.targetSections : (r.section ? [r.section] : undefined);
+                    const matchesGrade = isGradeMatch(r.targetGrade, activeStudentGrade, rSections);
+                    const rNameStr = String(r.name || "");
+                    const rContentStr = String(r.content || "");
+                    return r.tool === 'صناعة واجبات' && 
+                      matchesGrade &&
+                      (isSubjectMatch(r.subject, hwSubject) || rNameStr.includes(hwSubject) || rContentStr.includes(hwSubject)) && 
+                      (hwSearch.trim() === "" || rNameStr.includes(hwSearch) || rContentStr.includes(hwSearch));
+                  });
+
+                  return homeworks.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-20 px-6 border-2 border-dashed border-white/10 rounded-3xl space-y-4 my-4 bg-white/[0.01]">
+                      <div className="w-16 h-16 rounded-full bg-amber-500/10 flex items-center justify-center mx-auto text-amber-400 border border-amber-500/20 shadow-inner">
+                        <Edit2 size={28} />
+                      </div>
+                      <div className="space-y-1 text-center">
+                        <p className="text-white font-black text-base">لا توجد واجبات منشورة في هذه المادة حالياً</p>
+                        <p className="text-amber-300/70 text-xs max-w-sm mx-auto">بيرق خبير الواجبات أتم المراجعة، ترقب الواجبات والأنشطة القادمة من المعلمين.</p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                      {homeworks.map((hw, idx) => {
+                        const submission = parentSubmissions.find(sub => sub.taskId === hw.id && sub.type === 'homework');
+                        const isUnviewed = !viewedHwIds.has(hw.id);
+                        
+                        // Extract image URL if exists in markdown or props
+                        const imgMatch = hw.imageUrl || hw.fileUrl || (hw.content ? hw.content.match(/!\[.*?\]\((https?:\/\/[^\)]+)\)/)?.[1] : null);
+
+                        return (
+                          <div 
+                            key={`parent_hw_${hw.id || idx}`} 
+                            onClick={() => {
+                              markHwAsViewed(hw.id);
+                              setViewingHwModal({ hw, submission });
+                            }}
+                            className="bg-[#0A1026]/90 border border-white/10 hover:border-amber-500/50 rounded-2xl p-4 sm:p-5 flex flex-col justify-between transition-all duration-200 group cursor-pointer shadow-lg hover:shadow-amber-500/10 hover:-translate-y-0.5 relative overflow-hidden"
+                          >
+                            {isUnviewed && (
+                              <div className="absolute top-0 right-0 w-24 h-24 overflow-hidden pointer-events-none z-10">
+                                <span className="absolute top-3 -right-6 bg-rose-500 text-white text-[9px] font-black py-0.5 w-24 text-center rotate-45 shadow-sm">
+                                  جديد
+                                </span>
+                              </div>
+                            )}
+
+                            <div>
+                              <div className="flex items-start gap-3 mb-3">
+                                <div className="p-2.5 bg-amber-500/10 rounded-xl border border-amber-500/25 text-amber-400 shrink-0 group-hover:scale-105 transition-transform">
+                                  {imgMatch ? <ImageIcon size={20} className="text-amber-300" /> : <Edit2 size={20} />}
+                                </div>
+                                <div className="flex-1 min-w-0 pr-1">
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <h4 className="text-sm font-black text-white group-hover:text-amber-300 transition-colors line-clamp-1">{hw.name || "واجب دراسي"}</h4>
+                                  </div>
+                                  <div className="flex items-center gap-2 mt-1 flex-wrap">
+                                    <span className="text-[10px] text-white/40">{new Date(hw.date || Date.now()).toLocaleDateString('ar-SA')}</span>
+                                    {hw.subject && hw.subject !== "عام" && (
+                                      <span className="text-[9px] bg-amber-500/15 text-amber-300 px-2 py-0.5 rounded-md font-bold border border-amber-500/20">
+                                        {hw.subject}
+                                      </span>
+                                    )}
+                                    {imgMatch && (
+                                      <span className="text-[9px] bg-purple-500/15 text-purple-300 px-2 py-0.5 rounded-md font-bold border border-purple-500/20 flex items-center gap-1">
+                                        <ImageIcon size={10} />
+                                        واجب مصور
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Thumbnail preview if image exists */}
+                              {imgMatch ? (
+                                <div className="mb-3 rounded-xl overflow-hidden bg-black/40 border border-white/5 h-32 relative group/img">
+                                  <img 
+                                    src={imgMatch} 
+                                    alt="معاينة الواجب" 
+                                    className="w-full h-full object-cover group-hover/img:scale-105 transition-transform duration-300" 
+                                    loading="lazy"
+                                  />
+                                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent flex items-end p-2">
+                                    <span className="text-[10px] text-white/80 font-bold flex items-center gap-1">
+                                      <ZoomIn size={12} /> اضغط لتكبير الصورة وقراءة التفاصيل
+                                    </span>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="text-xs text-white/70 line-clamp-3 leading-relaxed whitespace-pre-wrap mb-3 bg-black/30 p-3 rounded-xl border border-white/5 font-medium">
+                                  {hw.content?.replace(/!\[.*?\]\(.*?\)/g, '')?.trim() || hw.content}
+                                </div>
+                              )}
+                            </div>
+                            
+                            <div className="flex items-center justify-between pt-3 border-t border-white/5 mt-auto">
+                              <div className="flex items-center gap-1.5">
+                                {submission ? (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-black text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20">
+                                    <CheckCircle2 size={12} />
+                                    تم التسليم {submission.score !== undefined ? `(${submission.score} د)` : ''}
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-black text-amber-400/80 bg-amber-500/10 px-2.5 py-1 rounded-full border border-amber-500/20">
+                                    <Clock size={12} />
+                                    بانتظار الحل
+                                  </span>
+                                )}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  markHwAsViewed(hw.id);
+                                  setViewingHwModal({ hw, submission });
+                                }}
+                                className="px-3.5 py-1.5 bg-white/10 hover:bg-amber-500 hover:text-black text-white font-bold rounded-xl text-xs transition-all flex items-center gap-1"
+                              >
+                                <span>عرض الواجب</span>
+                                <ChevronLeft size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Homework Details Modal */}
+              <AnimatePresence>
+                {viewingHwModal && (
+                  <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                    className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-md flex items-center justify-center p-3 sm:p-4 overflow-y-auto"
+                    onClick={() => setViewingHwModal(null)}
+                  >
+                    <motion.div
+                      initial={{ scale: 0.95, y: 15 }}
+                      animate={{ scale: 1, y: 0 }}
+                      exit={{ scale: 0.95, y: 15 }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="bg-[#0C132B] border border-amber-500/30 rounded-3xl p-5 sm:p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto relative shadow-2xl space-y-4 custom-scrollbar"
+                    >
+                      <div className="flex items-center justify-between pb-3 border-b border-white/10">
+                        <div className="flex items-center gap-2.5 min-w-0 flex-1 pr-1">
+                          <span className="w-3 h-3 rounded-full bg-amber-400 animate-pulse shrink-0"></span>
+                          <span className="text-white font-black text-sm sm:text-base truncate">{viewingHwModal.hw.name || "تفاصيل الواجب"}</span>
+                        </div>
+                        <button
+                          onClick={() => setViewingHwModal(null)}
+                          className="w-8 h-8 rounded-xl bg-white/10 hover:bg-rose-500/20 text-white/70 hover:text-rose-400 flex items-center justify-center transition-all shrink-0 cursor-pointer"
+                        >
+                          <XCircle size={18} />
+                        </button>
+                      </div>
+
+                      <div className="space-y-4">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs bg-amber-500/15 text-amber-300 px-3 py-1 rounded-full border border-amber-500/25 font-black">
+                            المادة: {viewingHwModal.hw.subject || 'عام'}
+                          </span>
+                          <span className="text-xs text-white/50 bg-white/5 px-3 py-1 rounded-full border border-white/5">
+                            تاريخ النشر: {new Date(viewingHwModal.hw.date || Date.now()).toLocaleDateString('ar-SA')}
+                          </span>
+                          {viewingHwModal.hw.teacherName && (
+                            <span className="text-xs text-indigo-300 bg-indigo-500/10 px-3 py-1 rounded-full border border-indigo-500/20 font-bold">
+                              الأستاذ: {viewingHwModal.hw.teacherName}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* If homework has direct image, display it nicely */}
+                        {(() => {
+                          const directImg = viewingHwModal.hw.imageUrl || viewingHwModal.hw.fileUrl;
+                          if (!directImg) return null;
+                          return (
+                            <div className="space-y-2">
+                              <h5 className="text-xs font-black text-amber-400 flex items-center gap-1.5">
+                                <ImageIcon size={14} /> صورة الواجب والتمارين:
+                              </h5>
+                              <div className="rounded-2xl overflow-hidden border border-white/10 bg-black/60 shadow-xl relative group">
+                                <img 
+                                  src={directImg} 
+                                  alt="صورة الواجب" 
+                                  className="w-full max-h-[500px] object-contain mx-auto"
+                                />
+                                <div className="p-3 bg-black/40 border-t border-white/5 flex items-center justify-between text-xs">
+                                  <span className="text-white/60">انقر لفتح الصورة بالحجم الكامل</span>
+                                  <a 
+                                    href={directImg} 
+                                    target="_blank" 
+                                    rel="noreferrer"
+                                    className="px-3 py-1 bg-white/10 hover:bg-amber-500 hover:text-black text-white font-bold rounded-lg transition-all flex items-center gap-1 text-xs"
+                                  >
+                                    <ExternalLink size={13} /> فتح الصورة
+                                  </a>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        {/* Only show text block if there is actual meaningful text */}
+                        {(() => {
+                          const rawContent = viewingHwModal.hw.content || '';
+                          const textWithoutImages = rawContent.replace(/!\[.*?\]\(.*?\)/g, '').trim();
+                          if (!textWithoutImages) return null;
+                          return (
+                            <div className="space-y-2">
+                              <h5 className="text-xs font-black text-white/60">نص الواجب والمطلوب:</h5>
+                              <div className="p-4 bg-black/40 rounded-2xl border border-white/10 text-white text-xs sm:text-sm leading-relaxed whitespace-pre-wrap font-medium">
+                                <ReactMarkdown
+                                  components={{
+                                    img: ({node, src, alt, ...props}: any) => (
+                                      <span className="block my-3 rounded-2xl overflow-hidden border border-white/10 bg-black/40 shadow-xl max-w-full">
+                                        <img 
+                                          src={src} 
+                                          alt={alt || "صورة الواجب"} 
+                                          className="w-full max-h-[450px] object-contain rounded-xl block" 
+                                          {...props} 
+                                        />
+                                        {alt && <span className="block p-2 text-center text-xs text-white/50 font-bold bg-black/20 border-t border-white/5">{alt}</span>}
+                                      </span>
+                                    )
+                                  }}
+                                >
+                                  {textWithoutImages}
+                                </ReactMarkdown>
+                              </div>
+                            </div>
+                          );
+                        })()}
+
+                        <div className="space-y-3 pt-2 border-t border-white/10">
+                          <h5 className="text-xs font-black text-amber-400">حالة تسليم الطالب (متابعة ولي الأمر):</h5>
+                          {viewingHwModal.submission ? (
+                            <div className="p-4 bg-emerald-500/10 rounded-2xl border border-emerald-500/20 space-y-3">
+                              <div className="flex items-center justify-between">
+                                <span className="text-emerald-300 font-bold text-xs flex items-center gap-1.5">
+                                  <CheckCircle2 size={16} />
+                                  تم حل وتسليم الواجب {viewingHwModal.submission.submittedBy === 'parent' ? 'بواسطة ولي الأمر' : 'بواسطة الطالب'}
+                                </span>
+                                {viewingHwModal.submission.score !== undefined && (
+                                  <span className="px-2.5 py-1 bg-emerald-500/20 text-emerald-200 rounded-lg text-xs font-black">
+                                    الدرجة: {viewingHwModal.submission.score} / 100
+                                  </span>
+                                )}
+                              </div>
+                              <div className="space-y-1">
+                                <span className="text-[10px] text-white/50 font-bold">إجابة / حل الطالب:</span>
+                                <div className="p-3 bg-black/30 rounded-xl text-white text-xs whitespace-pre-wrap border border-white/5">
+                                  <ReactMarkdown
+                                    components={{
+                                      img: ({node, src, alt, ...props}: any) => (
+                                        <span className="block my-2 rounded-xl overflow-hidden border border-white/10 bg-black/40 shadow max-w-full">
+                                          <img 
+                                            src={src} 
+                                            alt={alt || "صورة الحل"} 
+                                            className="w-full max-h-[350px] object-contain rounded-lg block" 
+                                            {...props} 
+                                          />
+                                        </span>
+                                      )
+                                    }}
+                                  >
+                                    {viewingHwModal.submission.content || viewingHwModal.submission.answer || 'لا توجد تفاصيل نصية للإجابة'}
+                                  </ReactMarkdown>
+                                </div>
+                              </div>
+                              {viewingHwModal.submission.aiFeedback && (
+                                <div className="space-y-1">
+                                  <span className="text-[10px] text-cyan-300 font-bold">تقييم المساعد الذكي / المعلم:</span>
+                                  <div className="p-3 bg-cyan-500/10 rounded-xl text-cyan-200 text-xs whitespace-pre-wrap border border-cyan-500/20">
+                                    {viewingHwModal.submission.aiFeedback}
+                                  </div>
+                                </div>
+                              )}
+                              {viewingHwModal.submission.feedback && (
+                                <div className="space-y-1">
+                                  <span className="text-[10px] text-amber-300 font-bold">ملاحظات وتقييم الأستاذ:</span>
+                                  <div className="p-3 bg-amber-500/10 rounded-xl text-amber-200 text-xs whitespace-pre-wrap border border-amber-500/20">
+                                    {viewingHwModal.submission.feedback}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="space-y-3">
+                              <div className="p-3 bg-amber-500/10 rounded-2xl border border-amber-500/20 text-amber-300 text-xs flex items-center gap-2">
+                                <Clock size={16} />
+                                <span>لم يقم الطالب بتسليم هذا الواجب حتى الآن. يمكنك رفع الحل نيابة عن الطالب أدناه:</span>
+                              </div>
+
+                              {/* Form to submit answer / solution */}
+                              <div className="bg-[#101935] p-4 rounded-2xl border border-amber-500/30 space-y-3">
+                                <h6 className="text-xs font-black text-white flex items-center gap-2">
+                                  <Upload size={14} className="text-amber-400" />
+                                  <span>رفع وإرسال حل الواجب للأستاذ:</span>
+                                </h6>
+                                
+                                <textarea
+                                  value={solutionText}
+                                  onChange={(e) => setSolutionText(e.target.value)}
+                                  placeholder="اكتب إجابة أو حل الواجب أو أي ملاحظات توضيحية للأستاذ هنا..."
+                                  className="w-full h-24 bg-black/40 border border-white/10 focus:border-amber-500/60 rounded-xl p-3 text-xs sm:text-sm text-white outline-none resize-none placeholder:text-white/30 transition-all font-medium"
+                                  dir="rtl"
+                                />
+
+                                {/* Image previews if uploaded */}
+                                {solutionImagePreviews.length > 0 && (
+                                  <div className="space-y-1.5">
+                                    <span className="text-[10px] font-bold text-white/60">صور الحل المرفقة ({solutionImagePreviews.length}/5):</span>
+                                    <div className="flex flex-wrap gap-2">
+                                      {solutionImagePreviews.map((preview, idx) => (
+                                        <div key={idx} className="relative w-20 h-20 rounded-xl overflow-hidden border border-amber-500/40 group">
+                                          <img src={preview} alt={`preview_${idx}`} className="w-full h-full object-cover" />
+                                          <button
+                                            type="button"
+                                            onClick={() => handleRemoveSolutionImage(idx)}
+                                            className="absolute top-1 right-1 w-5 h-5 bg-rose-600 hover:bg-rose-500 text-white rounded-full flex items-center justify-center text-xs shadow-md transition-all"
+                                            title="حذف الصورة"
+                                          >
+                                            ✕
+                                          </button>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {solutionSubmitError && (
+                                  <div className="p-2.5 bg-rose-500/10 border border-rose-500/30 rounded-xl text-rose-300 text-xs flex items-center gap-2">
+                                    <AlertTriangle size={14} />
+                                    <span>{solutionSubmitError}</span>
+                                  </div>
+                                )}
+
+                                {solutionSubmitSuccess && (
+                                  <div className="p-2.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-300 text-xs flex items-center gap-2">
+                                    <CheckCircle size={14} />
+                                    <span>تم رفع وإرسال الحل بنجاح إلى الأستاذ!</span>
+                                  </div>
+                                )}
+
+                                <div className="flex items-center justify-between pt-1 gap-2 flex-wrap">
+                                  <input 
+                                    type="file" 
+                                    ref={solutionFileInputRef} 
+                                    accept="image/*" 
+                                    multiple 
+                                    className="hidden" 
+                                    onChange={handleSolutionImageSelect}
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => solutionFileInputRef.current?.click()}
+                                    disabled={isSubmittingSolution || solutionImages.length >= 5}
+                                    className="px-3.5 py-2 bg-white/5 hover:bg-white/10 disabled:opacity-50 text-amber-300 border border-amber-500/20 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer"
+                                  >
+                                    <ImageIcon size={14} />
+                                    <span>إرفاق صور الحل / الدفتر</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() => handleParentSubmitSolution(viewingHwModal.hw)}
+                                    disabled={isSubmittingSolution || (!solutionText.trim() && solutionImages.length === 0)}
+                                    className="px-5 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 disabled:opacity-40 disabled:pointer-events-none text-black font-black rounded-xl text-xs transition-all flex items-center gap-1.5 shadow-lg shadow-amber-500/20 active:scale-95 cursor-pointer"
+                                  >
+                                    {isSubmittingSolution ? (
+                                      <>
+                                        <Loader2 size={14} className="animate-spin" />
+                                        <span>جاري إرسال الحل...</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Send size={14} />
+                                        <span>إرسال الحل للأستاذ</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </motion.div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          ) : activeSubPage === "grades" ? (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
               <div className="flex items-center justify-between bg-white/5 p-4 rounded-2xl border border-white/10">
                  <div className="flex flex-col">

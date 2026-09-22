@@ -693,15 +693,19 @@ export const TeacherControlContentTab: React.FC = () => {
                               ? pendingExtractedAi.pages[activePageIndex]
                               : pendingExtractedAi;
 
-                            const activePageBlocks = (activePendingPage?.structuredContent || []) as any[];
-                            const activePageQuiz = (activePendingPage?.quiz || []) as any[];
-                            const activePageMinisterial = (activePendingPage?.ministerialQuestions || []) as any[];
+                            const rawBlocks = (activePendingPage?.structuredContent || []) as any[];
                             const activePageRaw = activePendingPage?.extractedText || activePendingPage?.rawText || (
-                              activePageBlocks
+                              rawBlocks
                                 .map((b: any) => b.content || (b.vocabItems ? b.vocabItems.map((v: any) => `${v.en}: ${v.ar}`).join(", ") : ""))
                                 .filter(Boolean)
                                 .join("\n\n")
                             ) || "";
+                            // If structuredContent is empty but rawText exists, synthesize blocks automatically
+                            const activePageBlocks = rawBlocks.length > 0 
+                              ? rawBlocks 
+                              : (activePageRaw.trim().length > 0 ? parseLiteralTextToBlocks(activePageRaw) : []);
+                            const activePageQuiz = (activePendingPage?.quiz || []) as any[];
+                            const activePageMinisterial = (activePendingPage?.ministerialQuestions || []) as any[];
 
                             const totalBlocksCount = (pendingExtractedAi?.pages && Array.isArray(pendingExtractedAi.pages) && pendingExtractedAi.pages.length > 0)
                               ? pendingExtractedAi.pages.reduce((acc: number, p: any) => acc + (p.structuredContent?.length || 0), 0)

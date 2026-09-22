@@ -48,9 +48,7 @@ class ErrorMonitoringService {
   private unsubscribeFirestore: (() => void) | null = null;
   private localRingBuffer: SystemErrorItem[] = [];
 
-  constructor() {
-    this.loadFromLocalStorage();
-  }
+  constructor() { }
 
   public init() {
     if (this.isInitialized) return;
@@ -181,6 +179,7 @@ class ErrorMonitoringService {
     this.saveToLocalStorage();
   }
 
+  
   public async captureError(params: {
     service: ErrorService;
     module?: string;
@@ -192,113 +191,76 @@ class ErrorMonitoringService {
     severity?: ErrorSeverity;
     userId?: string | null;
     schoolId?: string | null;
-  }): Promise<SystemErrorItem> {
-    const sanitizedMsg = this.sanitizeString(params.errorMessage);
-    const sanitizedStack = this.sanitizeString(params.stackTrace);
-    const service = params.service || 'ui';
-    const severity = params.severity || 'critical';
-    const moduleName = params.module || 'app';
-    const signature = `${service}::${moduleName}::${sanitizedMsg.slice(0, 100)}`;
-    const now = new Date().toISOString();
-
-    const existing = this.errorsMap.get(signature);
-    let item: SystemErrorItem;
-
-    if (existing) {
-      item = {
-        ...existing,
-        occurrences: existing.occurrences + 1,
-        lastSeen: now,
-        stackTrace: sanitizedStack || existing.stackTrace,
-        severity: severity === 'critical' ? 'critical' : existing.severity,
-        status: existing.status === 'resolved' ? 'new' : existing.status
-      };
-    } else {
-      const errorId = `ERR_${Date.now().toString(36).toUpperCase()}_${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
-      item = {
-        id: errorId,
-        errorId,
-        signature,
-        timestamp: now,
-        severity,
-        service,
-        module: moduleName,
-        screen: params.screen || (typeof window !== 'undefined' ? window.location.pathname : 'unknown'),
-        action: params.action || 'system_event',
-        errorCode: params.errorCode || undefined,
-        errorMessage: sanitizedMsg,
-        stackTrace: sanitizedStack,
-        occurrences: 1,
-        firstSeen: now,
-        lastSeen: now,
-        status: 'new',
-        userId: params.userId || auth?.currentUser?.uid || null,
-        userEmail: auth?.currentUser?.email || null,
-        schoolId: params.schoolId || null
-      };
-    }
-
-    this.errorsMap.set(signature, item);
-    this.notify();
-
-    // Broadcast to backend & Firestore asynchronously
-    this.persistErrorToBackend(item).catch(() => {});
-    this.persistErrorToFirestore(item).catch(() => {});
-
-    return item;
-  }
-
-  private async persistErrorToBackend(item: SystemErrorItem) {
+    contextData?: any;
+  }) {
     try {
-      await fetch('/api/log-error', {
+      const signature = `${params.service}-${params.module || 'unknown'}-${params.errorCode || 'none'}`.replace(/[^a-zA-Z0-9-]/g, '_');
+      const docId = `err_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+
+      const errObj: SystemErrorItem = {
+        errorId: docId,
+        signature,
+        service: params.service,
+        module: params.module || 'unknown',
+        screen: params.screen,
+        action: params.action,
+        errorCode: params.errorCode,
+        errorMessage: params.errorMessage,
+        stackTrace: params.stackTrace,
+        severity: params.severity || 'warning',
+        status: 'new',
+        occurrences: 1,
+        firstSeen: new Date().toISOString(),
+        lastSeen: new Date().toISOString(),
+        userId: params.userId || auth.currentUser?.uid,
+        schoolId: params.schoolId,
+        contextData: params.contextData
+      };
+
+      await fetch('/api/system_errors', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(item),
-        signal: AbortSignal.timeout(3000)
+        body: JSON.stringify({ id: docId, ...errObj })
       });
+      // no need to store in local memory as we fetch it
     } catch (e) {
-      // Non-blocking
+      // failed to log
     }
   }
 
-  private async persistErrorToFirestore(item: SystemErrorItem) {
-    try {
-      const docRef = doc(db, 'system_errors', item.signature.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 100));
-      await setDoc(docRef, {
-        ...item,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-    } catch (e) {
-      // Ignore if offline
-    }
-  }
+
+  private async persistErrorToFirestore(item: SystemErrorItem) { /* disabled */ }
 
   public async updateStatus(errorIdOrSignature: string, status: ErrorStatus) {
     let target = this.errorsMap.get(errorIdOrSignature);
     if (!target) {
       target = Array.from(this.errorsMap.values()).find(e => e.id === errorIdOrSignature || e.errorId === errorIdOrSignature);
     }
-    if (!target) return;
-
-    const updated: SystemErrorItem = {
-      ...target,
-      status,
-      resolvedAt: status === 'resolved' ? new Date().toISOString() : null,
-      resolvedBy: status === 'resolved' ? (auth.currentUser?.email || 'admin') : null
-    };
-
-    this.errorsMap.set(target.signature, updated);
-    this.notify();
+    
+    if (target) {
+      const updated: SystemErrorItem = {
+        ...target,
+        status,
+        resolvedAt: status === 'resolved' ? new Date().toISOString() : null,
+        resolvedBy: status === 'resolved' ? (auth.currentUser?.email || 'المطور') : null
+      };
+      this.errorsMap.set(target.signature, updated);
+      if (target.id) this.errorsMap.set(target.id, updated);
+      this.notify();
+    }
 
     try {
-      const docRef = doc(db, 'system_errors', target.signature.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 100));
-      await updateDoc(docRef, {
-        status,
-        resolvedAt: updated.resolvedAt,
-        resolvedBy: updated.resolvedBy
+      await fetch(`/api/system_errors/${encodeURIComponent(errorIdOrSignature)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status,
+          resolvedAt: status === 'resolved' ? new Date().toISOString() : null,
+          resolvedBy: status === 'resolved' ? (auth.currentUser?.email || 'المطور') : null
+        })
       });
     } catch (e) {
-      // Ignore
+      console.warn('Failed to patch system error on backend:', e);
     }
   }
 
@@ -307,15 +269,19 @@ class ErrorMonitoringService {
     if (!target) {
       target = Array.from(this.errorsMap.values()).find(e => e.id === errorIdOrSignature || e.errorId === errorIdOrSignature);
     }
-    if (!target) return;
-
-    this.errorsMap.delete(target.signature);
-    this.notify();
+    if (target) {
+      this.errorsMap.delete(target.signature);
+      if (target.id) this.errorsMap.delete(target.id);
+      this.notify();
+    }
 
     try {
-      const docRef = doc(db, 'system_errors', target.signature.replace(/[^a-zA-Z0-9_-]/g, '_').substring(0, 100));
-      await deleteDoc(docRef);
-    } catch (e) {}
+      await fetch(`/api/system_errors/${encodeURIComponent(errorIdOrSignature)}`, {
+        method: 'DELETE'
+      });
+    } catch (e) {
+      console.warn('Failed to delete system error on backend:', e);
+    }
   }
 
   public async clearAllResolved() {
@@ -328,6 +294,14 @@ class ErrorMonitoringService {
 
     toDelete.forEach(key => this.errorsMap.delete(key));
     this.notify();
+
+    try {
+      await fetch('/api/system_errors/clear-resolved', {
+        method: 'POST'
+      });
+    } catch (e) {
+      console.warn('Failed to clear resolved errors on backend:', e);
+    }
   }
 
   // --- Smart Issue Resolution Methods ---
@@ -335,7 +309,7 @@ class ErrorMonitoringService {
   public async resolvePermissionError(signature: string): Promise<{ success: boolean; message: string }> {
     try {
       if (auth.currentUser) {
-        await auth.currentUser.getIdToken(true);
+        await auth.currentUser.getIdToken(true).catch(() => null);
       }
       await this.updateStatus(signature, 'resolved');
       return {
@@ -387,6 +361,20 @@ class ErrorMonitoringService {
   }
 
   public async resolveBatchByService(service: ErrorService): Promise<{ count: number }> {
+    try {
+      const res = await fetch('/api/system_errors/resolve-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ service, resolvedBy: auth.currentUser?.email || 'المطور' })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return { count: data.count || 0 };
+      }
+    } catch (e) {
+      console.warn('Backend resolveBatchByService failed:', e);
+    }
+
     let count = 0;
     const promises: Promise<void>[] = [];
     this.errorsMap.forEach((err) => {
@@ -400,6 +388,20 @@ class ErrorMonitoringService {
   }
 
   public async resolveBatchBySeverity(severity: ErrorSeverity): Promise<{ count: number }> {
+    try {
+      const res = await fetch('/api/system_errors/resolve-batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ severity, resolvedBy: auth.currentUser?.email || 'المطور' })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return { count: data.count || 0 };
+      }
+    } catch (e) {
+      console.warn('Backend resolveBatchBySeverity failed:', e);
+    }
+
     let count = 0;
     const promises: Promise<void>[] = [];
     this.errorsMap.forEach((err) => {
@@ -412,30 +414,7 @@ class ErrorMonitoringService {
     return { count };
   }
 
-  private subscribeToFirestore() {
-    try {
-      const q = query(collection(db, 'system_errors'), orderBy('updatedAt', 'desc'), limit(100));
-      this.unsubscribeFirestore = onSnapshot(q, (snap) => {
-        snap.forEach(docSnap => {
-          const data = docSnap.data() as SystemErrorItem;
-          if (data && data.signature) {
-            const existing = this.errorsMap.get(data.signature);
-            if (!existing || new Date(data.lastSeen).getTime() >= new Date(existing.lastSeen).getTime()) {
-              this.errorsMap.set(data.signature, {
-                ...data,
-                id: docSnap.id
-              });
-            }
-          }
-        });
-        this.notify();
-      }, (err) => {
-        console.warn('System errors realtime sync warning:', err);
-      });
-    } catch (e) {
-      console.warn('Could not attach system_errors listener:', e);
-    }
-  }
+  private subscribeToFirestore() { /* disabled */ }
 }
 
 export const errorMonitoringService = new ErrorMonitoringService();

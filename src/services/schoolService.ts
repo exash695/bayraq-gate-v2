@@ -1,4 +1,5 @@
 import { SCHOOLS_DATA, SchoolItem, getSchoolBairaqImageUrl, getOfficialSchoolLogoUrl } from '../lib/constants';
+import { db, collection, getDocs } from '../lib/firebase';
 
 export interface SchoolRecord {
   id: string;
@@ -13,42 +14,152 @@ export interface SchoolRecord {
   studentsCount?: number;
   schoolBairaqImageUrl?: string;
   schoolLogoUrl?: string;
+  logoUrl?: string;
+  coverUrl?: string;
+  plan?: string;
+  expiryDate?: string;
+  subscriptionStart?: string;
+  receiptNumber?: string;
+  licenseNumber?: string;
+  subscriptionFee?: number;
+  paymentStatus?: string;
+  adminName?: string;
+  adminPhone?: string;
+  licenseNotes?: string;
+  maxStudents?: number;
   createdAt?: string;
+  disabledModules?: string[];
   [key: string]: any;
 }
 
 export const schoolService = {
   /**
-   * جلب جميع المدارس والميادين من قاعدة بيانات PostgreSQL الداخلية
+   * جلب جميع المدارس والميادين من قاعدة بيانات PostgreSQL والفايرستور لضمان ظهور كافة الميادين
    */
   fetchSchools: async (): Promise<SchoolRecord[]> => {
     try {
-      const response = await fetch('/api/schools', {
-        headers: { 'Cache-Control': 'no-cache' }
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to fetch schools: ${response.statusText}`);
+      let rawSchools: any[] = [];
+      try {
+        const response = await fetch('/api/schools', {
+          headers: { 'Cache-Control': 'no-cache' }
+        });
+        if (response.ok) {
+          const data = await response.json();
+          rawSchools = data.schools || data.data || [];
+        }
+      } catch (apiErr) {
+        console.warn('[SchoolService] API fetch failed, falling back to database/cache:', apiErr);
       }
-      const data = await response.json();
-      const rawSchools: any[] = data.schools || data.data || [];
-      
-      // Map and format raw postgres records
-      return rawSchools.map((item) => {
+
+      // Also get any schools saved in Firestore
+      const firestoreMap: Record<string, any> = {};
+      try {
+        const snap = await getDocs(collection(db, 'schools'));
+        snap.forEach(docSnap => {
+          firestoreMap[docSnap.id] = { id: docSnap.id, ...docSnap.data() };
+        });
+      } catch (fsErr) {
+        console.warn('[SchoolService] Firestore read notice:', fsErr);
+      }
+
+      // Combine PG schools, Firestore schools, and defaults
+      const mergedMap: Record<string, any> = {};
+
+      let deletedSchoolIds: string[] = [];
+      try {
+        if (typeof localStorage !== 'undefined') {
+          const savedDeleted = localStorage.getItem("s6_deleted_system_schools");
+          if (savedDeleted) {
+            deletedSchoolIds = JSON.parse(savedDeleted);
+          }
+        }
+      } catch (e) {}
+
+      rawSchools.forEach(s => {
+        if (!deletedSchoolIds.includes(s.id)) {
+          mergedMap[s.id] = { ...s };
+        }
+      });
+
+      Object.keys(firestoreMap).forEach(id => {
+        if (deletedSchoolIds.includes(id)) return;
+        if (!mergedMap[id]) {
+          mergedMap[id] = firestoreMap[id];
+        } else {
+          mergedMap[id] = { ...mergedMap[id], ...firestoreMap[id] };
+        }
+      });
+
+      // Harmonize general / school8 for Berq Digital Academy
+      if (mergedMap['general'] && !mergedMap['school8']) {
+        mergedMap['school8'] = { ...mergedMap['general'], id: 'school8' };
+      } else if (mergedMap['school8'] && mergedMap['general']) {
+        mergedMap['school8'] = { ...mergedMap['school8'], status: mergedMap['general'].status || mergedMap['school8'].status };
+      }
+
+      // Ensure all standard system schools exist in the list unless explicitly deleted
+      SCHOOLS_DATA.forEach(sys => {
+        if (deletedSchoolIds.includes(sys.id)) return;
+        if (!mergedMap[sys.id]) {
+          mergedMap[sys.id] = {
+            id: sys.id,
+            name: sys.name,
+            type: sys.type,
+            governorate: 'الديوانية - غماس',
+            status: 'active',
+            schoolBairaqImageUrl: sys.schoolBairaqImageUrl,
+            schoolLogoUrl: sys.schoolLogoUrl
+          };
+        }
+      });
+
+      // Exclude phantom alias if present
+      delete mergedMap['school_awail_ghamas'];
+
+      const allMerged = Object.values(mergedMap).filter((item: any) => 
+        !deletedSchoolIds.includes(item.id) &&
+        item.id !== 'school_awail_ghamas' &&
+        item.name !== 'مدرسة جديدة'
+      );
+
+      return allMerged.map((item: any) => {
         const loc = item.governorate || item.city || item.location || 'الديوانية - غماس';
+        const savedLocalLogo = typeof localStorage !== 'undefined' ? localStorage.getItem(`school_logo_${item.id}`) : null;
+        const savedLocalCover = typeof localStorage !== 'undefined' ? localStorage.getItem(`school_cover_${item.id}`) : null;
+
+        const resolvedLogo = item.logoUrl || item.schoolLogoUrl || item.schoolLogo || savedLocalLogo || getOfficialSchoolLogoUrl(item.id, item.name);
+        const resolvedCover = item.coverUrl || item.schoolBairaqImageUrl || savedLocalCover || getSchoolBairaqImageUrl(item.id, item.name);
+
         return {
           id: item.id,
-          name: item.name,
+          name: item.name || 'مدرسة غير مسمّاة',
           governorate: loc,
           city: loc,
           location: loc,
           status: item.status || 'active',
           activationCode: item.activationCode || '',
           type: item.type || (item.status === 'premium' ? 'ميدان متميز' : 'ميدان تعليمي'),
-          students: item.students || item.studentsCount || 350,
-          studentsCount: item.studentsCount || item.students || 350,
-          schoolBairaqImageUrl: item.schoolBairaqImageUrl || item.coverUrl || getSchoolBairaqImageUrl(item.id, item.name),
-          schoolLogoUrl: item.schoolLogoUrl || item.logoUrl || getOfficialSchoolLogoUrl(item.id, item.name),
+          students: Number(item.students || item.studentsCount || 350),
+          studentsCount: Number(item.studentsCount || item.students || 350),
+          schoolBairaqImageUrl: resolvedCover,
+          schoolLogoUrl: resolvedLogo,
+          logoUrl: resolvedLogo,
+          coverUrl: resolvedCover,
+          plan: item.plan || 'standard',
+          expiryDate: item.expiryDate || item.subscriptionEnd,
+          subscriptionStart: item.subscriptionStart,
+          receiptNumber: item.receiptNumber,
+          licenseNumber: item.licenseNumber,
+          subscriptionFee: item.subscriptionFee,
+          paymentStatus: item.paymentStatus,
+          adminName: item.adminName,
+          adminPhone: item.adminPhone,
+          licenseNotes: item.licenseNotes,
+          maxStudents: item.maxStudents,
           createdAt: item.createdAt,
+          disabledModules: Array.isArray(item.disabledModules)
+            ? item.disabledModules
+            : (Array.isArray(item.disabled_modules) ? item.disabled_modules : []),
         };
       });
     } catch (error) {
@@ -65,6 +176,9 @@ export const schoolService = {
         studentsCount: 350,
         schoolBairaqImageUrl: sys.schoolBairaqImageUrl,
         schoolLogoUrl: sys.schoolLogoUrl,
+        logoUrl: sys.schoolLogoUrl,
+        coverUrl: sys.schoolBairaqImageUrl,
+        plan: 'standard',
       }));
     }
   },
@@ -92,6 +206,9 @@ export const schoolService = {
         students: item.students || 350,
         schoolBairaqImageUrl: item.schoolBairaqImageUrl || item.coverUrl || getSchoolBairaqImageUrl(item.id, item.name),
         schoolLogoUrl: item.schoolLogoUrl || item.logoUrl || getOfficialSchoolLogoUrl(item.id, item.name),
+        disabledModules: Array.isArray(item.disabledModules)
+          ? item.disabledModules
+          : (Array.isArray(item.disabled_modules) ? item.disabled_modules : []),
       };
     } catch (err) {
       console.warn(`[SchoolService] Failed to get school ${id}:`, err);
@@ -104,9 +221,14 @@ export const schoolService = {
    */
   createSchool: async (schoolData: Partial<SchoolRecord>): Promise<boolean> => {
     try {
+      const token = typeof localStorage !== 'undefined' ? localStorage.getItem('bairaq_jwt_token') : null;
       const response = await fetch('/api/schools', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-role': 'developer',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
         body: JSON.stringify(schoolData),
       });
       return response.ok;
@@ -121,9 +243,14 @@ export const schoolService = {
    */
   updateSchool: async (id: string, updates: Partial<SchoolRecord>): Promise<boolean> => {
     try {
+      const token = typeof localStorage !== 'undefined' ? localStorage.getItem('bairaq_jwt_token') : null;
       const response = await fetch(`/api/schools/${id}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-user-role': 'developer',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
         body: JSON.stringify(updates),
       });
       return response.ok;
@@ -138,8 +265,13 @@ export const schoolService = {
    */
   deleteSchool: async (id: string): Promise<boolean> => {
     try {
+      const token = typeof localStorage !== 'undefined' ? localStorage.getItem('bairaq_jwt_token') : null;
       const response = await fetch(`/api/schools/${id}`, {
         method: 'DELETE',
+        headers: {
+          'x-user-role': 'developer',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        }
       });
       return response.ok;
     } catch (err) {

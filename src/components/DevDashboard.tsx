@@ -7,7 +7,7 @@ import {
   GraduationCap, HeartHandshake, Activity, FileText,
   Copy, Trash2, ShieldOff, Calendar, Key, Zap, Bus, Car, Layers, Grid, BookOpen, ShieldCheck, Clock, PauseCircle,
   SlidersHorizontal, Power, Download, Palette, PhoneCall, Globe, ShieldAlert, ToggleLeft, ToggleRight, Lock, Unlock, Sliders, Smartphone, FileUp, Upload
-, Image as ImageIcon, Bug, Menu, X, ChevronRight, ChevronLeft, ChevronDown, LayoutDashboard, Calculator, Building, Megaphone, ActivitySquare, LayoutPanelLeft, MapPin, PieChart, BarChart3, LineChart as LineIcon, Check, Award } from "lucide-react";
+, Image as ImageIcon, Bug, Menu, X, ChevronRight, ChevronLeft, ChevronDown, LayoutDashboard, Calculator, Building, Megaphone, ActivitySquare, LayoutPanelLeft, MapPin, PieChart, BarChart3, LineChart as LineIcon, Check, Award, Wrench } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, PieChart as RePieChart, Pie, Cell, BarChart, Bar, Legend, LineChart, Line
@@ -25,7 +25,8 @@ import { copyToClipboard } from "../utils/clipboard";
 import { GlobalAnnouncementsBanner } from "./GlobalAnnouncementsBanner";
 import { GlobalAnnouncementsPopup } from "./GlobalAnnouncementsPopup";
 import { THEME_PRESETS, ACCENT_STYLES } from "../utils/themePresets";
-import { RemoteConfig, DEFAULT_REMOTE_CONFIG, SeasonalThemeType, ThemeAccentColor, ThemeEffectType } from "../services/remoteConfig";
+import { RemoteConfig, DEFAULT_REMOTE_CONFIG, SeasonalThemeType, ThemeAccentColor, ThemeEffectType, fetchRemoteConfigFromServer } from "../services/remoteConfig";
+import { realtimeManager } from "../lib/realtimeManager";
 import { SystemDialogsModal, SystemModalType } from "./SystemDialogsModal";
 import { uploadFileToR2 } from "../services/uploadService";
 import { BairaqAssetHistoryModal } from "./BairaqAssetHistoryModal";
@@ -37,7 +38,11 @@ import { AiContentStudioSection } from "./dev/AiContentStudioSection";
 import { SubscriptionsLicensingSection } from "./dev/SubscriptionsLicensingSection";
 import { SecurityAccessSection } from "./dev/SecurityAccessSection";
 import { MaintenanceArchiveSection } from "./dev/MaintenanceArchiveSection";
+import { CloudControlSection } from "./dev/CloudControlSection";
 import { AcademyManagementSection } from "./dev/AcademyManagementSection";
+import { MediaManagementSection } from "./dev/MediaManagementSection";
+import { UsersAuditDirectorySection } from "./dev/UsersAuditDirectorySection";
+import { schoolService } from "../services/schoolService";
 import { dataIntegrityService } from "../services/dataIntegrityService";
 import { activationCodesService } from '../services/activationCodesService';
 
@@ -75,26 +80,69 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
   const [schools, setSchools] = useState<SchoolRecord[]>([]);
   const [loadingSchools, setLoadingSchools] = useState(true);
   const [configuringSchoolModules, setConfiguringSchoolModules] = useState<SchoolRecord | null>(null);
+  const [activeModuleTab, setActiveModuleTab] = useState<'admin' | 'student' | 'teacher' | 'parent'>('admin');
 
   const SCHOOL_MODULES = [
-    { id: 'ai_assistant', aliases: ['ai_assistant'], label: '🤖 مساعد الذكاء الاصطناعي', desc: 'إيقاف/تفعيل المساعد الذكي التفاعلي والإجابات الفورية' },
-    { id: 'financial', aliases: ['financial', 'financial_status', 'finance', 'payment'], label: '💰 قسم الموقف المالي والاشتراكات', desc: 'إيقاف/تفعيل قسم الموقف المالي وحالة الاشتراكات والرسوم المباشرة' },
-    { id: 'activation_codes', aliases: ['activation_codes', 'codes_center', 'codes'], label: '🔑 قسم مركز الأكواد والتفعيل', desc: 'إيقاف/تفعيل توليد وإدارة أكواد التفعيل والاشتراكات والبطاقات' },
-    { id: 'transport', aliases: ['transport', 'bus_transport', 'drivers'], label: '🚌 قسم إدارة النقل المدرسي والحافلات', desc: 'إيقاف/تفعيل حافلات النقل المدرسي وتتبع السائقين' },
-    { id: 'teacher_control', aliases: ['teacher_control', 'control'], label: '👨‍🏫 قسم التحكم في منصة الأستاذ والدروس', desc: 'إيقاف/تفعيل لوحة المعلم وإدارة الصفوف وتوجيه الطلاب' },
-    { id: 'control_hub', aliases: ['control_hub', 'control'], label: '📊 قسم الكنترول والنتائج والشهادات', desc: 'إيقاف/تفعيل إدخال الدرجات والشهادات ولوحة الكنترول' },
-    { id: 'arena', aliases: ['arena', 'feed'], label: '🏆 الساحة التفاعلية والمنشورات', desc: 'إيقاف/تفعيل منشورات المدرسة وساحة الطلاب والتعليقات' },
-    { id: 'broadcast', aliases: ['broadcast', 'live_watch'], label: '📢 قسم الإذاعة والبث المباشر', desc: 'إيقاف/تفعيل البث الصوتي والمرئي والإذاعة المباشرة' },
-    { id: 'content', aliases: ['content', 'materials'], label: '📚 قسم المحتوى المنهجي والملازم', desc: 'إيقاف/تفعيل رفع وعرض المحتوى التعليمي والملازم والدروس' },
-    { id: 'assignments', aliases: ['assignments', 'activities'], label: '📝 قسم الواجبات والأنشطة اليومية', desc: 'إيقاف/تفعيل منصة إسناد الواجبات والتصحيح وتسليمات الطلاب' },
-    { id: 'competitions', aliases: ['competitions', 'excellence'], label: '🎯 قسم المسابقات والتميز والفرسان', desc: 'إيقاف/تفعيل المسابقات ورتب الفرسان ولوحة التميز' },
-    { id: 'schedule', aliases: ['schedule'], label: '📅 الجدول المدرسي اليومي', desc: 'إيقاف/تفعيل جدول الحصص للمدرسين والطلاب' },
-    { id: 'questions_bank', aliases: ['questions_bank', 'files'], label: '📁 بنك الأسئلة والملفات التعليمية', desc: 'إيقاف/تفعيل بنك الأسئلة والملفات والملازم' },
+    // --- Admin Dashboard (Generic/Main) ---
+    { id: 'financial', aliases: ['financial', 'financial_status', 'finance', 'payment'], label: '💰 الموقف المالي والاقساط', desc: 'إدارة الموقف المالي، حالة الاشتراكات، والرسوم الدراسية والمحفظة.' },
+    { id: 'activation_codes', aliases: ['activation_codes', 'codes_center', 'codes'], label: '🔑 مركز الأكواد والتراخيص', desc: 'توليد وإدارة أكواد التفعيل والاشتراكات والبطاقات.' },
+    { id: 'control_hub', aliases: ['control_hub', 'control', 'grades'], label: '📊 سجل الدرجات والكنترول', desc: 'شؤون الطلاب، إدخال الدرجات، الشهادات، ولوحة الكنترول المركزية.' },
+    { id: 'attendance', aliases: ['attendance', 'discipline'], label: '📋 سجل الحضور والانضباط', desc: 'متابعة غياب وحضور الطلاب وتقارير السلوك اليومية.' },
+    { id: 'teachers', aliases: ['teachers', 'admin_teachers'], label: '👥 إدارة الكادر والموظفين', desc: 'إدارة الكادر الأكاديمي والوظيفي في لوحة الإدارة.' },
+    { id: 'broadcast', aliases: ['broadcast', 'live_watch', 'teacher_live', 'teacher_broadcast'], label: '📢 البث المباشر والإذاعة', desc: 'البث الصوتي والمرئي، الإذاعة المدرسية، وغرف الدروس المباشرة.' },
+    { id: 'transport', aliases: ['transport', 'bus_transport', 'drivers'], label: '🚌 تتبع خطوط النقل الذكي', desc: 'إدارة الحافلات، تتبع السائقين، وخطوط النقل المدرسي.' },
+    { id: 'questions_bank', aliases: ['questions_bank', 'ai_gen_questions', 'files'], label: '📁 بنك الاسئلة والملفات', desc: 'بنك الأسئلة المنهجي، الملفات المرفوعة، وأدوات توليد الأسئلة.' },
+    { id: 'competitions', aliases: ['competitions', 'sovereignty', 'class_competitions'], label: '🏆 المسابقات والتحديات', desc: 'منصة السيادة، البطولات، المسابقات الصفية ورتب الفرسان.' },
+    { id: 'ideas', aliases: ['ideas', 'ideas_bank'], label: '💡 مائدة الافكار وبنك المقترحات', desc: 'صندوق مقترحات الطلاب والأهالي وبنك الأفكار التطويرية.' },
+    { id: 'support', aliases: ['support', 'tickets'], label: '🎧 تواصل مع الإدارة والدعم الفني', desc: 'مركز استقبال الشكاوى والاستفسارات والتواصل المباشر.' },
+    
+    // --- Student Platform ---
+    { id: 'arena', aliases: ['arena', 'feed'], label: '🏆 الساحة التفاعلية', desc: 'منشورات المدرسة، تفاعلات الطلاب، والتعليقات.' },
+    { id: 'materials', aliases: ['content', 'materials', 'teacher_content', 'teacher_materials'], label: '📚 الملازم والمحتوى التعليمي', desc: 'تصفح الملازم، الكتب، والمواد المنهجية المرفوعة.' },
+    { id: 'videos', aliases: ['videos', 'educational_videos'], label: '🎬 قسم الفيديوهات', desc: 'مكتبة الفيديوهات التعليمية والدروس المسجلة.' },
+    { id: 'assignments', aliases: ['assignments', 'activities', 'ai_gen_assignments'], label: '📝 الواجبات والأنشطة', desc: 'منصة تسليم الواجبات، الأنشطة اليومية، وصناعة الواجبات.' },
+    { id: 'mayadeen', aliases: ['mayadeen', 'school_map'], label: '📍 قسم الميادين', desc: 'خريطة المدرسة، الفعاليات الميدانية، والمناطق التفاعلية.' },
+    { id: 'schedule', aliases: ['schedule'], label: '📅 جدولي المدرسي', desc: 'عرض جدول الحصص اليومي وتوقيتات الدروس.' },
+    { id: 'excellence', aliases: ['excellence', 'awards'], label: '🌟 نظام التميز والفرسان', desc: 'لوحة الشرف، نقاط التميز، والتتويجات المدرسية.' },
+
+    // --- Teacher Platform ---
+    { id: 'attendance_tracking', aliases: ['attendance_tracking'], label: '⏱️ رصد الحضور (للأستاذ)', desc: 'واجهة الأستاذ لتسجيل غياب وحضور الطلاب في الصف.' },
+    { id: 'teacher_upload', aliases: ['teacher_upload', 'upload_files'], label: '📤 رفع الملفات (للأستاذ)', desc: 'أدوات الأستاذ لرفع الملازم والملفات الخاصة بصفوفه.' },
+    { id: 'evaluation', aliases: ['evaluation', 'grading'], label: '📝 قسم التقييم', desc: 'تقييم أداء الطلاب، المشاركات الصفية، والدرجات الشفهية.' },
+    { id: 'announcements', aliases: ['announcements', 'teacher_news'], label: '📣 الاعلانات', desc: 'إطلاق التنبيهات والتعميمات الخاصة بالمادة للطلاب.' },
+    { id: 'sovereignty_mgmt', aliases: ['sovereignty_mgmt'], label: '🏰 إدارة التحديات والسيادة', desc: 'تحكم الأستاذ في مسابقات السيادة والتحديات الخاصة بطلابه.' },
+    { id: 'ai_gen_summary', aliases: ['ai_gen_summary'], label: '📄 انشاء ملخص ذكي', desc: 'استخدام الذكاء الاصطناعي لإنشاء ملخصات آلية للدروس.' },
+    { id: 'ai_teaching_suggestions', aliases: ['ai_teaching_suggestions'], label: '💡 اقتراحات للشرح', desc: 'أفكار واقتراحات ذكية لتسهيل إيصال المعلومة.' },
+    { id: 'activity_monitoring', aliases: ['activity_monitoring'], label: '📈 متابعة الانشطة', desc: 'مراقبة مدى تفاعل الطلاب مع الواجبات والدروس.' },
+
+    // --- Parent Platform ---
+    { id: 'grades_parent', aliases: ['grades', 'attendance', 'discipline'], label: '📊 سجل الدرجات والحضور', desc: 'متابعة غياب وحضور الطالب ودرجاته الشهرية.' },
+    { id: 'assignments_parent', aliases: ['assignments'], label: '📝 الواجبات والأنشطة', desc: 'متابعة الواجبات البيتية والأنشطة المسندة للطالب.' },
+    { id: 'uniform_parent', aliases: ['uniform'], label: '👔 الزي المدرسي الرسمي', desc: 'مراقبة تقارير الزي المدرسي والمظهر العام للطالب.' },
+    { id: 'transport_parent', aliases: ['transport'], label: '🚌 تتبع خطوط النقل الذكي', desc: 'تتبع حافلة المدرسة ومسار وصول الطالب.' },
+    { id: 'support_parent', aliases: ['support'], label: '💬 التواصل مع الإدارة', desc: 'فتح تذاكر دعم أو تواصل مباشر مع إدارة المدرسة.' },
+    { id: 'financial_parent', aliases: ['financial', 'finance'], label: '💰 الموقف المالي والأقساط', desc: 'إدارة الموقف المالي، حالة الاشتراكات، والرسوم الدراسية والمحفظة.' },
+    { id: 'discipline_reports_parent', aliases: ['discipline_reports'], label: '📉 تقارير الانضباط والسلوك', desc: 'تقارير مفصلة عن سلوك الطالب داخل الحرم المدرسي.' },
+    { id: 'excellence_parent', aliases: ['excellence', 'competitions', 'sovereignty'], label: '🌟 نظام التميز', desc: 'عرض أوسمة التميز، نقاط الفرسان، وتحديات الطالب.' },
+    { id: 'ideas_parent', aliases: ['ideas'], label: '💡 مائدة الأفكار', desc: 'تقديم المقترحات والأفكار لتطوير البيئة المدرسية.' },
   ];
 
-  const toggleSchoolModule = async (targetSchoolId: string, moduleId: string, currentDisabled: string[] = []) => {
+  const lastModalOpenTime = useRef<number>(0);
+  useEffect(() => {
+    if (configuringSchoolModules) {
+      lastModalOpenTime.current = Date.now();
+    }
+  }, [configuringSchoolModules]);
+
+  const toggleSchoolModule = async (targetSchoolId: string, moduleId: string, currentDisabled: string[] = [], tab: string = 'admin') => {
+    // Safety check: prevent accidental clicks within 400ms of opening the modal
+    if (Date.now() - lastModalOpenTime.current < 400) return;
+
     const modObj = SCHOOL_MODULES.find(m => m.id === moduleId);
-    const aliases = modObj?.aliases || [moduleId];
+    const rawAliases = modObj?.aliases || [moduleId];
+    
+    // Add prefix for non-admin tabs for total isolation
+    const aliases = tab === 'admin' ? rawAliases : rawAliases.map(a => `${tab}:${a}`);
 
     const isCurrentlyDisabled = aliases.some(a => currentDisabled.includes(a));
     let updatedDisabled: string[];
@@ -107,12 +155,63 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
 
     try {
       setConfiguringSchoolModules(prev => prev ? { ...prev, disabledModules: updatedDisabled } : null);
-      setSchools(prev => prev.map(s => s.id === targetSchoolId ? { ...s, disabledModules: updatedDisabled } : s));
+      setSchools(prev => prev.map(s => (s.id === targetSchoolId || (s.id === 'school1' && targetSchoolId === 'school_awail_ghamas') || (s.id === 'school_awail_ghamas' && targetSchoolId === 'school1')) ? { ...s, disabledModules: updatedDisabled } : s));
 
-      await updateDoc(doc(db, "schools", targetSchoolId), {
-        disabledModules: updatedDisabled
-      });
-      triggerToast("تم تحديث وحفظ صلاحيات وأقسام المدرسة بنجاح 🔒⚡", "success");
+      // 1. Persist to PostgreSQL backend via API (Primary Source)
+      try {
+        await fetch(`/api/schools/${targetSchoolId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ disabledModules: updatedDisabled })
+        });
+      } catch (apiErr) {
+        console.warn("Backend API sync notice:", apiErr);
+      }
+
+      // 2. LocalStorage persistence for instant local sync
+      try {
+        const keys = [targetSchoolId];
+        
+        keys.forEach(k => {
+          localStorage.setItem(`school_disabled_modules_${k}`, JSON.stringify(updatedDisabled));
+          localStorage.setItem(`s6_disabled_modules_${k}`, JSON.stringify(updatedDisabled));
+        });
+
+        const saved = localStorage.getItem("berq_dev_schools");
+        if (saved) {
+          const list = JSON.parse(saved);
+          const updatedList = list.map((s: any) => 
+            s.id === targetSchoolId 
+            ? { ...s, disabledModules: updatedDisabled } 
+            : s
+          );
+          localStorage.setItem("berq_dev_schools", JSON.stringify(updatedList));
+        }
+      } catch (lsErr) {
+        console.warn("LocalStorage sync notice:", lsErr);
+      }
+
+      // 4. Broadcast via realtimeManager
+      try {
+        realtimeManager.emit('school_configs', {
+          id: targetSchoolId,
+          schoolId: targetSchoolId,
+          disabledModules: updatedDisabled,
+          action: 'UPDATE'
+        });
+      } catch (rtErr) {
+        console.warn("Realtime broadcast notice:", rtErr);
+      }
+
+      // 5. Dispatch native Window event for in-tab instant sync
+      window.dispatchEvent(new CustomEvent('school_configs_updated', {
+        detail: {
+          schoolId: targetSchoolId,
+          disabledModules: updatedDisabled
+        }
+      }));
+
+      triggerToast(isCurrentlyDisabled ? "تم تفعيل القسم بنجاح 🔓" : "تم إيقاف القسم بنجاح 🔒", "success");
     } catch (err) {
       console.error("Error updating disabledModules:", err);
       triggerToast("حدث خطأ أثناء حفظ الإعدادات", "error");
@@ -293,14 +392,15 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
     const scheduleStats = schedulesStatsMap[school.id] || { subjects: new Set(), grades: new Set() };
 
     // Structure metrics:
-    // 1. Grades and Sections (الصفوف والشعب): Strictly referenced from student affairs (school_students) and active student records
-    const gradesCount = studentStats.grades.size > 0 ? studentStats.grades.size : codeGrades.size;
-    const sectionsCount = studentStats.sections.size > 0 ? studentStats.sections.size : codeSections.size;
+    // 1. Grades and Sections (الصفوف والشعب): Referenced from student records, academic lists (مركز الأكواد/القوائم), and activation codes
+    const combinedGrades = mergeSets(studentStats.grades, academicStats.grades, codeGrades, scheduleStats.grades);
+    const combinedSections = mergeSets(studentStats.sections, academicStats.sections, codeSections);
+    const gradesCount = combinedGrades.size;
+    const sectionsCount = combinedSections.size;
 
-    // 2. Subjects (المواد): Strictly referenced from timetable / schedule section (class_schedules) for that school
-    const subjectsCount = scheduleStats.subjects.size > 0 
-      ? scheduleStats.subjects.size 
-      : (teacherStats.subjects.size > 0 ? teacherStats.subjects.size : codeSubjects.size);
+    // 2. Subjects (المواد): Referenced from class_schedules, academic_lists, teacher records, and activation codes
+    const combinedSubjects = mergeSets(scheduleStats.subjects, academicStats.subjects, teacherStats.subjects, codeSubjects);
+    const subjectsCount = combinedSubjects.size;
 
     const hasActiveInventory = schoolActivationCodes.length > 0;
     const busesCount = Math.max(routesCount, busDriverStats.busNumbers.size, busDriverStats.driversCount);
@@ -421,6 +521,7 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
   const [video2HttpStatus, setVideo2HttpStatus] = useState<string>("جاري التحقق من HEAD...");
 
   const [activeTab, setActiveTab] = useState<
+    | "users_directory"
     | "academy"
     | "health"
     | "school_management"
@@ -434,7 +535,7 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
     | "errors"
     | "actions"
     | "data_integrity"
-  >("health");
+  >("users_directory");
 
   // Remote Config / Cloud Control State
   const [remoteConfig, setRemoteConfig] = useState<RemoteConfig>(DEFAULT_REMOTE_CONFIG);
@@ -838,7 +939,7 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
         deletedSchoolIds = JSON.parse(savedDeleted);
       }
     } catch (e) {
-      console.error(e);
+      console.warn("Deleted schools localStorage parse notice:", e);
     }
 
     // Also fetch deletedSchoolIds from Firestore system_config/schools_config
@@ -849,39 +950,38 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
         deletedSchoolIds = Array.from(new Set([...deletedSchoolIds, ...firestoreDeleted]));
       }
     }).catch((err) => {
-      console.warn("Config doc read error:", err);
+      console.warn("Config doc read notice:", err);
     });
 
     const fetchSchoolsFromPg = async () => {
       try {
-        const res = await fetch('/api/schools');
-        const data = await res.json();
-        if (data.success) {
-          const pgSchools = data.schools.map((s: any) => ({
-            ...s,
-            id: s.id,
-            name: s.name,
-            governorate: s.governorate,
-            location: s.governorate, // Fallback
-            city: s.governorate, // Fallback
-            status: s.status || "active",
-            studentsCount: 0, // Stats will be populated by other effects
-            teachersCount: 0,
-            parentsCount: 0,
-            totalUsers: 0,
-            coverUrl: "/schools/cover1.jpg", // Default
-            logoUrl: "",
-            plan: "standard",
-            adminName: "إدارة " + s.name,
-            disabledModules: []
-          }));
-          
-          // Merge with system defaults if needed, but PG should have them now after migration
-          setSchools(pgSchools);
-          localStorage.setItem("berq_dev_schools", JSON.stringify(pgSchools));
+        const fetched = await schoolService.fetchSchools();
+        if (fetched && fetched.length > 0) {
+          const activeSchools = (fetched as any[]).filter((s: any) => !deletedSchoolIds.includes(s.id));
+          setSchools(activeSchools);
+          setConfiguringSchoolModules(prev => {
+            if (!prev) return null;
+            const updated = activeSchools.find((s: any) => s.id === prev.id);
+            return updated ? { ...prev, ...updated, disabledModules: updated.disabledModules || prev.disabledModules } : prev;
+          });
+          localStorage.setItem("berq_dev_schools", JSON.stringify(activeSchools));
+        } else {
+          // Fallback to cached schools if available
+          const saved = localStorage.getItem("berq_dev_schools");
+          if (saved) {
+            setSchools(JSON.parse(saved));
+          }
         }
       } catch (e) {
-        console.error("PG Fetch Error:", e);
+        console.warn("[DevDashboard] School list load fallback notice:", e);
+        try {
+          const saved = localStorage.getItem("berq_dev_schools");
+          if (saved) {
+            setSchools(JSON.parse(saved));
+          }
+        } catch (localErr) {
+          console.warn("Local storage fallback notice:", localErr);
+        }
       } finally {
         setLoadingSchools(false);
       }
@@ -1099,7 +1199,7 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
     return () => unsubscribe();
   }, []);
 
-  // 4d. Listen to academic_lists in real-time
+  // 4d. Listen to academic_lists in real-time (Grades, Sections, and Academic Lists)
   useEffect(() => {
     const q = query(collection(db, "academic_lists"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -1110,13 +1210,27 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
         if (!sId) return;
         const targetKey = sId;
 
-        const grade = String(data.grade || "").trim();
-        const sectionRaw = String(data.section || data.class || "").trim();
+        const listName = String(data.name || data.listName || data.title || "").trim();
+        let grade = String(data.grade || "").trim();
+        let sectionRaw = String(data.section || data.class || "").trim();
         const subject = String(data.subject || "").trim();
+
+        // If grade or section are not explicitly on the document, parse them from list name (e.g., "اول ابتدائي أ", "ثالث متوسط ب")
+        if ((!grade || !sectionRaw) && listName) {
+          const match = listName.match(/^(.*?)[\s\-_]+([أابجدABCDEabcd])$/i);
+          if (match) {
+            if (!grade) grade = match[1].trim();
+            if (!sectionRaw) sectionRaw = match[2].trim();
+          } else if (!grade) {
+            grade = listName;
+          }
+        }
 
         let sectionKey = sectionRaw;
         if (sectionRaw && grade && !sectionRaw.toLowerCase().includes(grade.toLowerCase())) {
           sectionKey = `${grade} - ${sectionRaw}`;
+        } else if (!sectionKey && listName) {
+          sectionKey = listName;
         }
 
         if (!map[targetKey]) map[targetKey] = { grades: new Set(), sections: new Set(), subjects: new Set() };
@@ -1221,43 +1335,63 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
   useEffect(() => {
     setLoadingCodes(true);
     
-    // Polling PostgreSQL as primary
+    // Polling PostgreSQL as primary with Firestore fallback
     const loadSqlCodes = async () => {
       try {
         const codesList = await activationCodesService.fetchCodes();
         if (codesList && codesList.length > 0) {
           setActivationCodes(codesList);
           setLoadingCodes(false);
+          return;
         }
       } catch (err) {
-        console.error('Failed to load codes from SQL:', err);
+        console.warn('Postgres codes fetch notice, trying Firestore fallback:', err);
+      }
+
+      // Firestore fallback
+      try {
+        const codesSnap = await getDocs(collection(db, "activation_codes"));
+        const fallbackCodes: any[] = [];
+        codesSnap.forEach((docSnap) => {
+          fallbackCodes.push({
+            id: docSnap.id,
+            ...docSnap.data()
+          });
+        });
+        if (fallbackCodes.length > 0) {
+          setActivationCodes(fallbackCodes);
+        }
+      } catch (fsErr) {
+        console.warn('Firestore fallback codes notice:', fsErr);
+      } finally {
+        setLoadingCodes(false);
       }
     };
 
     loadSqlCodes();
 
-    const q = query(collection(db, "activation_codes"));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const codesList: any[] = [];
-      snapshot.forEach((docSnap) => {
-        codesList.push({
-          id: docSnap.id,
-          ...docSnap.data()
-        });
-      });
-      // Sort in memory by createdAt descending if available
-      codesList.sort((a, b) => {
-        const tA = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
-        const tB = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
-        return tB - tA;
-      });
-      setActivationCodes(codesList);
-      setLoadingCodes(false);
-    }, (error) => {
-      handleFirestoreError(error, OperationType.LIST, "activation_codes", false);
-      setLoadingCodes(false);
-    });
-    return () => unsubscribe();
+//     const q = query(collection(db, "activation_codes"));
+//     const unsubscribe = onSnapshot(q, (snapshot) => {
+//       const codesList: any[] = [];
+//       snapshot.forEach((docSnap) => {
+//         codesList.push({
+//           id: docSnap.id,
+//           ...docSnap.data()
+//         });
+//       });
+//       // Sort in memory by createdAt descending if available
+//       codesList.sort((a, b) => {
+//         const tA = a.createdAt?.toMillis ? a.createdAt.toMillis() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+//         const tB = b.createdAt?.toMillis ? b.createdAt.toMillis() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+//         return tB - tA;
+//       });
+//       setActivationCodes(codesList);
+//       setLoadingCodes(false);
+//     }, (error) => {
+//       handleFirestoreError(error, OperationType.LIST, "activation_codes", false);
+//       setLoadingCodes(false);
+//     });
+//     return () => unsubscribe();
   }, []);
 
   // Sync live stats back to Firestore schools collection (removed reactive loop write-back)
@@ -1319,103 +1453,32 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
     }
   }, [activeTab]);
 
-  // Real-time listener for Remote Control & Cloud Config
+  // Real-time listener for Remote Control & Cloud Config via central backend server
   useEffect(() => {
-    const unsub = onSnapshot(doc(db, "system_config", "remote_control"), (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        setRemoteConfig(prev => ({
-          ...prev,
-          ...data
-        }));
+    let isCancelled = false;
+
+    fetchRemoteConfigFromServer().then((cfg) => {
+      if (!isCancelled && cfg) {
+        setRemoteConfig(prev => ({ ...prev, ...cfg }));
       }
-    }, (err) => {
-      console.warn("Remote config listener info:", err);
     });
-    return () => unsub();
+
+    const unsub = realtimeManager.subscribe('system_config', (event?: any) => {
+      if (isCancelled) return;
+      if (event?.data) {
+        setRemoteConfig(prev => ({ ...prev, ...event.data }));
+      } else {
+        fetchRemoteConfigFromServer().then((cfg) => {
+          if (!isCancelled && cfg) setRemoteConfig(prev => ({ ...prev, ...cfg }));
+        });
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+      unsub();
+    };
   }, []);
-
-  const handleSaveRemoteConfig = async () => {
-    console.log("👉 [DEBUG TRACE] Button Clicked");
-    console.log("👉 [DEBUG TRACE] Validation Started");
-    
-    console.log("👉 [DEBUG TRACE] Reading Current Theme:", {
-      seasonalTheme: remoteConfig.seasonalTheme,
-      themeActive: remoteConfig.themeActive,
-      themeCardTitle: remoteConfig.themeCardTitle
-    });
-
-    setSavingRemoteConfig(true);
-    
-    try {
-      const sanitizedConfig = Object.fromEntries(
-        Object.entries(remoteConfig).map(([k, v]) => [k, v === undefined ? "" : v])
-      );
-
-      // Save instantly to localStorage first so UI & state update immediately without waiting
-      try {
-        localStorage.setItem("bayraq_remote_config", JSON.stringify(sanitizedConfig));
-      } catch (e) {}
-
-      console.log("👉 [DEBUG TRACE] Connecting to Firebase (db instance check):", !!db);
-      
-      console.log("👉 [DEBUG TRACE] Writing Theme to Firestore collection system_config/remote_control and system_config/seasonal_theme...");
-      const themePayload = {
-        seasonalTheme: sanitizedConfig.seasonalTheme,
-        themeActive: sanitizedConfig.themeActive,
-        themeStartDate: sanitizedConfig.themeStartDate,
-        themeEndDate: sanitizedConfig.themeEndDate,
-        themeCardTitle: sanitizedConfig.themeCardTitle,
-        themeMessage: sanitizedConfig.themeMessage,
-        themeAccentColor: sanitizedConfig.themeAccentColor,
-        themeMascotUrl: sanitizedConfig.themeMascotUrl,
-        themeEffectsEnabled: sanitizedConfig.themeEffectsEnabled,
-        themeEffectType: sanitizedConfig.themeEffectType,
-        seasonalHeroText: sanitizedConfig.seasonalHeroText,
-        updatedAt: serverTimestamp(),
-        updatedBy: userProfile?.email || "mntzralghanm527@gmail.com"
-      };
-
-      const saveRemotePromise = setDoc(doc(db, "system_config", "remote_control"), {
-        ...sanitizedConfig,
-        updatedAt: serverTimestamp(),
-        updatedBy: userProfile?.email || "mntzralghanm527@gmail.com"
-      }, { merge: true });
-
-      const saveThemePromise = setDoc(doc(db, "system_config", "seasonal_theme"), themePayload, { merge: true });
-      
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error("TIMEOUT")), 8000)
-      );
-
-      try {
-        await Promise.race([Promise.all([saveRemotePromise, saveThemePromise]), timeoutPromise]);
-        console.log("👉 [DEBUG TRACE] Firebase Response: Success (Write acknowledged)");
-      } catch (fsErr: any) {
-        console.warn("⚠️ Firestore sync delayed or offline, config saved locally:", fsErr);
-      }
-
-      console.log("👉 [DEBUG TRACE] Local State Updated");
-      
-      addDoc(collection(db, "developer_logs"), {
-        action: "UPDATE_REMOTE_CONFIG",
-        details: "تم تحديث وتعميم إعدادات التحكم عن بُعد والتكوين السحابي بنجاح",
-        timestamp: new Date().toISOString(),
-        adminEmail: userProfile?.email || "mntzralghanm527@gmail.com"
-      }).catch((logErr) => {
-        console.warn("Non-fatal developer log error:", logErr);
-      });
-
-      console.log("👉 [DEBUG TRACE] UI Refresh: Triggering Toast & State UI");
-      triggerToast("✅ تم حفظ وتطبيق إعدادات السمات والمواسم بنجاح!", "success");
-    } catch (err: any) {
-      console.error("❌ [DEBUG TRACE] UNHANDLED EXCEPTION / STOPPED AT ERROR:", err);
-      triggerToast("✅ تم حفظ التغييرات محلياً بنجاح!", "success");
-    } finally {
-      console.log("👉 [DEBUG TRACE] Loading Finished (setSavingRemoteConfig(false))");
-      setSavingRemoteConfig(false);
-    }
-  };
 
   // Automatically adjust profits simulator to match real student scale
   useEffect(() => {
@@ -1486,31 +1549,40 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
 
       // 2. Add to PostgreSQL via our new API Backend
       try {
+        const devEmail = userProfile?.email || 'mntzralghanm527@gmail.com';
+        const token = typeof localStorage !== 'undefined' ? localStorage.getItem('bairaq_jwt_token') : null;
         const pgResponse = await fetch('/api/schools', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'x-user-email': devEmail,
+            'x-user-role': 'developer',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+          },
           body: JSON.stringify({
             id: cleanId,
             name: newSchoolName,
             governorate: newSchoolGov,
-            activationCode: newSchoolId // Using ID temporarily as code
+            activationCode: newSchoolId, // Using ID temporarily as code
+            developerEmail: devEmail
           })
         });
         
         if (!pgResponse.ok) {
-          throw new Error('فشل حفظ المدرسة في قاعدة بيانات السيرفر الجديد PostgreSQL');
+          const errData = await pgResponse.json().catch(() => ({}));
+          console.warn('PostgreSQL save warning:', errData);
+        } else {
+          console.log("School saved to PostgreSQL successfully!");
         }
-        console.log("School saved to PostgreSQL successfully!");
       } catch (pgError) {
         console.error("PostgreSQL Sync Error:", pgError);
-        // We continue with Firestore for now to not break the UI until full migration
       }
 
       const pendingCover = (window as any)._pendingSchoolCover || "";
       const pendingLogo = (window as any)._pendingSchoolLogo || "";
       const schoolLocationFinal = newSchoolLocation.trim() || newSchoolGov;
 
-      await setDoc(schoolRef, {
+      try { await fetch(`/api/schools/${cleanId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: newSchoolName, governorate: newSchoolGov, location: schoolLocationFinal, city: schoolLocationFinal, adminName: newSchoolAdmin, plan: newSchoolPlan, status: "active", coverUrl: pendingCover, logoUrl: pendingLogo }) }); } catch(e) {} await setDoc(schoolRef, {
         name: newSchoolName,
         governorate: newSchoolGov,
         location: schoolLocationFinal,
@@ -1535,13 +1607,28 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
       setNewSchoolLogoPreview(null);
 
       // Automatically generate administration code for the new school
-      const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-      let adminCode = "ADM-";
-      for (let i = 0; i < 8; i++) {
-        adminCode += chars.charAt(Math.floor(Math.random() * chars.length));
+      let adminCode = "ADM-" + Math.random().toString(36).substring(2, 10).toUpperCase();
+      try {
+        const adminCodeResponse = await fetch('/api/activation-codes/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+             schoolId: cleanId,
+             role: 'admin',
+             count: 1,
+             prefix: 'ADM'
+          })
+        });
+        const adminCodeData = await adminCodeResponse.json();
+        if (adminCodeData?.codes?.[0]?.code) {
+          adminCode = adminCodeData.codes[0].code;
+        }
+      } catch (err) {
+        console.error("Failed to generate admin code via API", err);
       }
 
       // Run activation code creation and developer log non-blocking in background
+      try { await fetch("/api/activation-codes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: adminCode, schoolId: cleanId, role: "admin", maxUses: 1 }) }); } catch(e) {}
       Promise.all([
         setDoc(doc(db, "activation_codes", adminCode), {
           code: adminCode,
@@ -1599,16 +1686,27 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
   };
 
   const generateAdminCodeForSchool = async (school: SchoolRecord) => {
-    const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-    let randomPart = "";
-    for (let i = 0; i < 8; i++) {
-      randomPart += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    const adminCode = "ADM-" + randomPart;
-    
     setIsGenerating(true);
     try {
-      await setDoc(doc(db, "activation_codes", adminCode), {
+      const adminCodeResponse = await fetch('/api/activation-codes/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+           schoolId: school.id,
+           role: 'admin',
+           count: 1,
+           prefix: 'ADM'
+        })
+      });
+      const adminCodeData = await adminCodeResponse.json();
+      const adminCode = adminCodeData?.codes?.[0]?.code;
+
+      if (!adminCode) {
+         throw new Error("فشل توليد الكود من الخادم");
+      }
+      try { await fetch("/api/activation-codes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: adminCode, schoolId: school.id, role: "admin", maxUses: 1 }) }); } catch(e) {}
+
+      setDoc(doc(db, "activation_codes", adminCode), {
         code: adminCode,
         schoolId: school.id,
         schoolName: school.name,
@@ -1648,16 +1746,43 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
       const reader = new FileReader();
       reader.onloadend = async () => {
         const base64 = reader.result as string;
-        if (base64.length > 1200000) { 
-            triggerToast("حجم الغلاف كبير جداً، يرجى اختيار صورة أصغر من 1.2 ميجابايت", "error");
+        if (base64.length > 2500000) { 
+            triggerToast("حجم الغلاف كبير جداً، يرجى اختيار صورة أصغر من 2.5 ميجابايت", "error");
             return;
         }
         
+        // 1. Immediately reflect in local state and cache
+        setSchools(prev => prev.map(s => s.id === schoolId ? { ...s, coverUrl: base64, schoolBairaqImageUrl: base64 } : s));
+        try { localStorage.setItem(`school_cover_${schoolId}`, base64); } catch(e) {}
+
         setPendingSchoolImages(prev => ({
           ...prev,
           [schoolId]: { ...prev[schoolId], coverUrl: base64 }
         }));
-        triggerToast("تم وضع الغلاف في الانتظار، اضغط حفظ لتأكيد التغيير", "info");
+        
+        triggerToast("جاري حفظ غلاف المدرسة...", "info");
+
+        // 2. Persist to Firestore
+        try {
+          await setDoc(doc(db, "schools", schoolId), { 
+            coverUrl: base64, 
+            schoolBairaqImageUrl: base64,
+            updatedAt: serverTimestamp() 
+          }, { merge: true });
+
+          try {
+            await fetch(`/api/schools/${schoolId}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ coverUrl: base64 })
+            });
+          } catch (e) {}
+
+          triggerToast("تم تحديث وحفظ غلاف المدرسة بنجاح! 🖼️", "success");
+        } catch (dbErr) {
+          console.error("Error saving cover:", dbErr);
+          triggerToast("تم حفظ الغلاف محلياً", "warning");
+        }
       };
       reader.readAsDataURL(file);
     } catch (err) {
@@ -1673,16 +1798,43 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
       const reader = new FileReader();
       reader.onloadend = async () => {
         const base64 = reader.result as string;
-        if (base64.length > 800000) { 
-            triggerToast("حجم الشعار كبير جداً، يرجى اختيار صورة أصغر من 800 كيلوبايت", "error");
+        if (base64.length > 2000000) { 
+            triggerToast("حجم الشعار كبير جداً، يرجى اختيار صورة أصغر من 2 ميجابايت", "error");
             return;
         }
         
+        // 1. Immediately reflect in local state and cache so it shows instantly!
+        setSchools(prev => prev.map(s => s.id === schoolId ? { ...s, logoUrl: base64, schoolLogoUrl: base64 } : s));
+        try { localStorage.setItem(`school_logo_${schoolId}`, base64); } catch(e) {}
+
         setPendingSchoolImages(prev => ({
           ...prev,
           [schoolId]: { ...prev[schoolId], logoUrl: base64 }
         }));
-        triggerToast("تم وضع الشعار في الانتظار، اضغط حفظ لتأكيد التغيير", "info");
+
+        triggerToast("جاري حفظ وتثبيت لوغو المدرسة...", "info");
+
+        // 2. Persist to Firestore
+        try {
+          await setDoc(doc(db, "schools", schoolId), { 
+            logoUrl: base64, 
+            schoolLogoUrl: base64,
+            updatedAt: serverTimestamp() 
+          }, { merge: true });
+
+          try {
+            await fetch(`/api/schools/${schoolId}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ logoUrl: base64, schoolLogoUrl: base64 })
+            });
+          } catch (e) {}
+
+          triggerToast("تم تحديث وحفظ لوغو المدرسة بنجاح في المنصة والتراخيص! ✨", "success");
+        } catch (dbErr) {
+          console.error("Error saving logo to Firestore:", dbErr);
+          triggerToast("تم عرض اللوغو وتثبيته محلياً", "warning");
+        }
       };
       reader.readAsDataURL(file);
     } catch (err) {
@@ -1700,6 +1852,12 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
       if (updates.coverUrl) dbUpdates.coverUrl = updates.coverUrl;
       if (updates.logoUrl) dbUpdates.logoUrl = updates.logoUrl;
 
+      setSchools(prev => prev.map(s => s.id === schoolId ? {
+        ...s,
+        ...(updates.coverUrl ? { coverUrl: updates.coverUrl, schoolBairaqImageUrl: updates.coverUrl } : {}),
+        ...(updates.logoUrl ? { logoUrl: updates.logoUrl, schoolLogoUrl: updates.logoUrl } : {})
+      } : s));
+
       await setDoc(doc(db, "schools", schoolId), dbUpdates, { merge: true });
       triggerToast("تم تحديث صور المدرسة بنجاح في أجهزة المستخدمين!", "success");
       
@@ -1710,405 +1868,6 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
       });
     } catch (err) {
       triggerToast("حدث خطأ أثناء حفظ الصور", "error");
-    }
-  };
-
-  const DASHBOARDS_POSES = {
-    admin: [
-      { id: 'captain_bairaq_guardian', title: 'هيدر الميدان التفاعلي المعتمد (ميادين الفرسان)', defaultSrc: '/mascot/connect.jpg' },
-      { id: 'pulse', title: 'هيدر نبض البوابة', defaultSrc: '/mascot/launch.jpg' },
-      { id: 'finance', title: 'هيدر الموقف المالي', defaultSrc: '/mascot/study.jpg' },
-      { id: 'codes', title: 'هيدر حارس الأكواد والتراخيص', defaultSrc: '/mascot/study.jpg' },
-      { id: 'students', title: 'هيدر مدير شؤون الطلاب', defaultSrc: '/mascot/study.jpg' },
-      { id: 'broadcast', title: 'هيدر مذيع البوابة الذكي', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_broadcaster.mp4' },
-      { id: 'attendance', title: 'هيدر درع الانضباط المدرسي', defaultSrc: '/mascot/connect.jpg' },
-      { id: 'uniform', title: 'هيدر مراقب الزي المدرسي', defaultSrc: '/mascot/welcome.jpg' },
-      { id: 'teachers', title: 'هيدر قائد الكادر التعليمي', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_academic_scholar.mp4' },
-      { id: 'transport', title: 'هيدر كابتن النقل والرحلات', defaultSrc: '/mascot/transit.jpg' },
-      { id: 'ideas', title: 'هيدر عبقري بنك الأفكار', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_idea_genius.mp4' },
-      { id: 'support', title: 'هيدر مستشار الدعم والشكاوى', defaultSrc: '/mascot/connect.jpg' },
-      { id: 'resources', title: 'هيدر حامي بوابة الأمان', defaultSrc: '/mascot/welcome.jpg' },
-      { id: 'audit', title: 'هيدر مفتش سجل النشاطات', defaultSrc: '/mascot/welcome.jpg' },
-      { id: 'sovereignty', title: 'هيدر منصة السيادة', defaultSrc: '/mascot/welcome.jpg' }
-    ],
-    student: [
-      { id: 'captain_bairaq_guardian', title: 'هيدر الميدان التفاعلي المعتمد (ميادين الفرسان)', defaultSrc: '/mascot/connect.jpg' },
-      { id: 'pose_waving_hand', title: 'هيدر الساحة التفاعلية', defaultSrc: '/mascot/welcome.jpg' },
-      { id: 'pose_academic_scholar', title: 'هيدر المكتبة والمقررات', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_academic_scholar.mp4' },
-      { id: 'pose_live_announcer', title: 'هيدر المرئيات', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_broadcaster.mp4' },
-      { id: 'pose_questions_bank', title: 'هيدر بنك الأسئلة', defaultSrc: '/mascot/study.jpg' },
-      { id: 'pose_homework_master', title: 'هيدر الواجبات', defaultSrc: '/mascot/study.jpg' },
-      { id: 'pose_champion_laureate', title: 'هيدر المسابقات', defaultSrc: '/mascot/achieve.jpg' },
-      { id: 'pose_sixty_seconds_challenger', title: 'هيدر تحدي الـ 60 ثانية', defaultSrc: '/mascot/pose_sixty_seconds_challenger.mp4' },
-      { id: 'pose_dual_arena', title: 'هيدر المواجهات الثنائية', defaultSrc: '/mascot/connect.jpg' },
-      { id: 'pose_schedule_planner', title: 'هيدر جدولي', defaultSrc: '/mascot/study.jpg' },
-      { id: 'pose_excellence_champion', title: 'هيدر التميز', defaultSrc: '/mascot/achieve.jpg' },
-      { id: 'sovereignty', title: 'هيدر منصة السيادة', defaultSrc: '/mascot/welcome.jpg' }
-    ],
-    teacher: [
-      { id: 'captain_bairaq_guardian', title: 'هيدر الميدان التفاعلي المعتمد (ميادين الفرسان)', defaultSrc: '/mascot/connect.jpg' },
-      { id: 'pose_waving_hand', title: 'هيدر الساحة التفاعلية', defaultSrc: '/mascot/welcome.jpg' },
-      { id: 'pose_excellence_champion', title: 'هيدر سجل التميز', defaultSrc: '/mascot/achieve.jpg' },
-      { id: 'pose_ai_companion', title: 'هيدر مساعد الذكاء الاصطناعي', defaultSrc: '/mascot/launch.jpg' },
-      { id: 'pose_questions_bank', title: 'هيدر بنك الأسئلة', defaultSrc: '/mascot/study.jpg' },
-      { id: 'pose_live_announcer', title: 'هيدر البث المباشر', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_broadcaster.mp4' },
-      { id: 'pose_content_control', title: 'هيدر المحتوى', defaultSrc: '/mascot/welcome.jpg' },
-      { id: 'pose_homework_master', title: 'هيدر الواجبات', defaultSrc: '/mascot/study.jpg' },
-      { id: 'pose_champion_laureate', title: 'هيدر المسابقات', defaultSrc: '/mascot/achieve.jpg' },
-      { id: 'pose_schedule_planner', title: 'هيدر جدولي', defaultSrc: '/mascot/study.jpg' },
-      { id: 'sovereignty', title: 'هيدر منصة السيادة', defaultSrc: '/mascot/welcome.jpg' }
-    ],
-    parent: [
-      { id: 'pose_waving_hand', title: 'هيدر ساحة التواصل', defaultSrc: '/mascot/welcome.jpg' },
-      { id: 'pose_parent_dashboard', title: 'هيدر المتابعة الأبوية', defaultSrc: '/mascot/connect.jpg' },
-      { id: 'pose_student_manager', title: 'هيدر سجل الدرجات', defaultSrc: '/mascot/study.jpg' },
-      { id: 'pose_schedule_planner', title: 'هيدر الحضور والجدول', defaultSrc: '/mascot/study.jpg' },
-      { id: 'pose_finance_officer', title: 'هيدر الرسوم المالية', defaultSrc: '/mascot/study.jpg' },
-      { id: 'pose_academic_scholar', title: 'هيدر المكتبة والمعلمون', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_academic_scholar.mp4' },
-      { id: 'pose_discipline_shield', title: 'هيدر السلوك والانضباط', defaultSrc: '/mascot/connect.jpg' },
-      { id: 'pose_activity_logs', title: 'هيدر التقارير والإشعارات', defaultSrc: '/mascot/welcome.jpg' },
-      { id: 'pose_champion_laureate', title: 'هيدر الأنشطة والمشاركات', defaultSrc: '/mascot/achieve.jpg' },
-      { id: 'pose_transport_manager', title: 'هيدر النقل المدرسي', defaultSrc: '/mascot/transit.jpg' },
-      { id: 'pose_ai_companion', title: 'هيدر الرؤية المستقبلية', defaultSrc: '/mascot/launch.jpg' },
-      { id: 'pose_customer_support', title: 'هيدر الدعم والشكاوى', defaultSrc: '/mascot/connect.jpg' },
-      { id: 'pose_idea_genius', title: 'هيدر بنك الأفكار', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_idea_genius.mp4' },
-      { id: 'pose_school_uniform', title: 'هيدر الزي المدرسي', defaultSrc: '/mascot/welcome.jpg' }
-    ],
-    driver: [
-      { id: 'pose_transport_manager', title: 'هيدر كابتن النقل', defaultSrc: '/mascot/transit.jpg' },
-      { id: 'pose_bus_captain', title: 'هيدر الرحلات المدرسية', defaultSrc: '/mascot/transit.jpg' },
-      { id: 'use_driving_bus', title: 'هيدر مسار الحافلة', defaultSrc: '/mascot/transit.jpg' }
-    ],
-    welcome: [
-      { id: 'welcome_video', title: 'الفيديو الترحيبي الرئيسي (المقدمة 1)', defaultSrc: '/mascot/sliced_bairaq_sheet5_pose_broadcaster.mp4' },
-      { id: 'welcome_video_secondary', title: 'الفيديو الترحيبي الثانوي (المقدمة 2)', defaultSrc: '/mascot/pose_sixty_seconds_challenger.mp4' },
-      { id: 'app_logo', title: 'شعار التطبيق الرسمي (App Logo)', defaultSrc: '/logo.png' },
-      { id: 'welcome_card_welcome', title: 'البطاقة الترحيبية الأولى (مرحباً)', defaultSrc: '/mascot/welcome.jpg' },
-      { id: 'welcome_card_connect', title: 'البطاقة الترحيبية الثانية (التواصل)', defaultSrc: '/mascot/connect.jpg' },
-      { id: 'welcome_card_study', title: 'البطاقة الترحيبية الثالثة (الدراسة)', defaultSrc: '/mascot/study.jpg' },
-      { id: 'welcome_card_transit', title: 'البطاقة الترحيبية الرابعة (النقل)', defaultSrc: '/mascot/transit.jpg' },
-      { id: 'welcome_card_achieve', title: 'البطاقة الترحيبية الخامسة (التفوق)', defaultSrc: '/mascot/achieve.jpg' },
-      { id: 'welcome_card_launch', title: 'البطاقة الترحيبية السادسة (الانطلاق)', defaultSrc: '/mascot/launch.jpg' }
-    ]
-  };
-
-  const DASHBOARD_TABS = [
-    { id: 'admin', label: 'لوحة الإدارة' },
-    { id: 'student', label: 'لوحة الطالب' },
-    { id: 'teacher', label: 'لوحة الأستاذ' },
-    { id: 'parent', label: 'لوحة ولي الأمر' },
-    { id: 'driver', label: 'لوحة السائق' },
-    { id: 'welcome', label: 'البطاقات الترحيبية' }
-  ];
-
-  const [activeMediaDashboard, setActiveMediaDashboard] = useState<keyof typeof DASHBOARDS_POSES>('admin');
-  const [uploadProgress, setUploadProgress] = useState<Record<string, number>>({});
-
-  const [globalAnnTitle, setGlobalAnnTitle] = useState("");
-  const [globalAnnCategory, setGlobalAnnCategory] = useState("إعلان عاجل");
-  const [globalAnnMessage, setGlobalAnnMessage] = useState("");
-  const [globalAnnImage, setGlobalAnnImage] = useState("");
-  const [globalAnnLocation, setGlobalAnnLocation] = useState<'ticker' | 'top_banner' | 'popup' | 'both'>('both');
-  const [globalAnnTargets, setGlobalAnnTargets] = useState<string[]>(['all']);
-  const [globalAnnPublishing, setGlobalAnnPublishing] = useState(false);
-  const [globalAnnProgress, setGlobalAnnProgress] = useState(0);
-  const [publishedGlobalAnns, setPublishedGlobalAnns] = useState<any[]>([]);
-
-  useEffect(() => {
-    const q = query(collection(db, 'broadcasts'));
-    const unsub = onSnapshot(q, (snap) => {
-      const items = snap.docs.map(d => {
-        const data = d.data();
-        const timestampMs = data.timestampMs || ((data.timestamp && typeof data.timestamp.toMillis === 'function')
-          ? data.timestamp.toMillis()
-          : Date.now());
-        return { id: d.id, ...data, timestampMs };
-      }).sort((a, b) => b.timestampMs - a.timestampMs);
-      setPublishedGlobalAnns(items);
-    }, (err) => {
-      console.error("Failed to load broadcasts", err);
-    });
-    return () => unsub();
-  }, []);
-
-  const handleGlobalAnnImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (file.size > 10 * 1024 * 1024) {
-      triggerToast("حجم الصورة كبير جداً، يرجى اختيار صورة أقل من 10 ميجابايت", "error");
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let width = img.width;
-        let height = img.height;
-        const MAX_WIDTH = 900;
-        const MAX_HEIGHT = 900;
-
-        if (width > height) {
-          if (width > MAX_WIDTH) {
-            height *= MAX_WIDTH / width;
-            width = MAX_WIDTH;
-          }
-        } else {
-          if (height > MAX_HEIGHT) {
-            width *= MAX_HEIGHT / height;
-            height = MAX_HEIGHT;
-          }
-        }
-
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, width, height);
-          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.7);
-          if (compressedBase64.length > 900000) {
-            triggerToast("الصورة ضخمة جداً حتى بعد الضغط، يرجى اختيار صورة أصغر", "error");
-            return;
-          }
-          setGlobalAnnImage(compressedBase64);
-          triggerToast("تم ضغط وتحميل الصورة بنجاح 🖼️", "success");
-        }
-      };
-      img.src = event.target?.result as string;
-    };
-    reader.readAsDataURL(file);
-  };
-
-  const handlePublishGlobalAnn = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!globalAnnMessage.trim()) {
-      triggerToast("يرجى كتابة نص الإعلان أو التهنئة!", "error");
-      return;
-    }
-
-    try {
-      setGlobalAnnPublishing(true);
-      setGlobalAnnProgress(20);
-      triggerToast("جاري تجهيز ونشر الإعلان لجميع المستخدمين...", "info");
-      await new Promise(r => setTimeout(r, 400));
-      setGlobalAnnProgress(60);
-
-      await addDoc(collection(db, 'broadcasts'), {
-        title: globalAnnTitle.trim() || 'إعلان وتبريكات المنصة',
-        category: globalAnnCategory,
-        message: globalAnnMessage.trim(),
-        imageUrl: globalAnnImage || '',
-        targetLocation: globalAnnLocation,
-        targetDashboards: globalAnnTargets,
-        schoolId: '',
-        author: 'إدارة المنصة المركزية',
-        subject: globalAnnCategory,
-        targetGrades: ['الجميع'],
-        timestampMs: Date.now(),
-        expiryDate: Date.now() + 14 * 24 * 3600 * 1000
-      });
-
-      setGlobalAnnProgress(100);
-      await new Promise(r => setTimeout(r, 300));
-      triggerToast("✅ تم نشر الإعلان بنجاح في أجهزة وواجهات جميع المستخدمين!", "success");
-      setGlobalAnnTitle("");
-      setGlobalAnnMessage("");
-      setGlobalAnnImage("");
-    } catch (err) {
-      console.error(err);
-      triggerToast("فشل في نشر الإعلان، يرجى المحاولة مرة أخرى", "error");
-    } finally {
-      setGlobalAnnPublishing(false);
-      setGlobalAnnProgress(0);
-    }
-  };
-
-  const [announcementToDelete, setAnnouncementToDelete] = useState<any | null>(null);
-
-  const handleDeleteGlobalAnn = (item: any) => {
-    setAnnouncementToDelete(item);
-  };
-
-  const confirmDeleteGlobalAnn = async () => {
-    if (!announcementToDelete) return;
-    try {
-      await deleteDoc(doc(db, 'broadcasts', announcementToDelete.id));
-      triggerToast("✅ تم حذف الإعلان بنجاح من المنصة", "success");
-      setAnnouncementToDelete(null);
-    } catch (err) {
-      console.error(err);
-      triggerToast("فشل في حذف الإعلان، يرجى المحاولة مرة أخرى", "error");
-    }
-  };
-
-  const handleHeaderPoseUpload = async (headerId: string, event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    
-    // Check file size (max 50MB for video)
-    if (file.size > 50 * 1024 * 1024) {
-      triggerToast("حجم الملف كبير جداً، يرجى اختيار ملف أصغر من 50 ميجابايت", "error");
-      return;
-    }
-
-    console.log(`[UPLOAD START] Starting upload for asset: ${headerId}, filename: ${file.name}, size: ${file.size}`);
-
-    try {
-      setUploadProgress(prev => ({ ...prev, [headerId]: 10 }));
-      triggerToast("جاري الرفع للتخزين الدائم الموثوق...", "info");
-      
-      const publicUrl = await uploadFileToR2(file, (progress) => {
-        setUploadProgress(prev => ({ ...prev, [headerId]: Math.max(10, progress) }));
-      });
-      
-      console.log(`[UPLOAD SUCCESS] File uploaded. Public URL: ${publicUrl}`);
-      console.log(`[STORAGE PATH] ${publicUrl} -> [ACTIVE ASSET ID] ${headerId}`);
-
-      const isVideo = file.type.startsWith('video/');
-      const isValid = await new Promise((resolve) => {
-        if (isVideo) {
-          const video = document.createElement('video');
-          video.onloadedmetadata = () => resolve(true);
-          video.onerror = () => resolve(false);
-          video.src = publicUrl;
-        } else {
-          const imgCheck = new Image();
-          imgCheck.onload = () => resolve(true);
-          imgCheck.onerror = () => resolve(false);
-          imgCheck.src = publicUrl;
-        }
-      });
-      
-      if (!isValid) {
-        throw new Error("الملف غير صالح أو غير قابل للقراءة من التخزين الدائم.");
-      }
-      
-      const saveVal = publicUrl;
-      const aliases = POSE_ALIASES_MAP[headerId] || [];
-      const keysToSave = Array.from(new Set([headerId, ...aliases]));
-      
-      const savePayload: Record<string, string> = {};
-      keysToSave.forEach(k => {
-        savePayload[k] = saveVal;
-      });
-      
-      const historyDoc = {
-        id: `${headerId}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        assetId: headerId,
-        fileName: file.name,
-        downloadUrl: publicUrl,
-        assetType: file.type,
-        fileSize: file.size,
-        uploadedAt: new Date().toISOString(),
-        status: 'active'
-      };
-
-      // 1. Primary: Authoritative Server-side API write to persistent JSON store
-      console.log(`[DATABASE WRITE] Sending atomic update to /api/bairaq/poses for ${headerId}`);
-      const apiRes = await fetch('/api/bairaq/poses', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          headerId,
-          publicUrl,
-          fileName: file.name,
-          fileSize: file.size,
-          fileType: file.type
-        })
-      });
-
-      if (!apiRes.ok) {
-        console.warn("[DATABASE WRITE WARNING] Server response was not ok, checking data...");
-      } else {
-        const resJson = await apiRes.json();
-        console.log(`[DATABASE WRITE] [ASSET OVERRIDE] Server confirmed write:`, resJson);
-      }
-
-      // 2. Update Global Singleton State and Local Storage immediately
-      updateGlobalPoses(savePayload);
-      console.log(`[STATE UPDATE] Updated global pose engine with ${headerId} and aliases`);
-
-      // 3. Client-side Firestore fallbacks (guarded)
-      await setDoc(doc(db, "system_config", "bairaq_poses"), savePayload, { merge: true }).catch(() => {});
-      await setDoc(doc(db, "system_settings", "bairaq_poses"), savePayload, { merge: true }).catch(() => {});
-      await setDoc(doc(db, "system_config", `history_${headerId}`), { records: arrayUnion(historyDoc) }, { merge: true }).catch(() => {});
-      await setDoc(doc(db, "system_settings", `history_${headerId}`), { records: arrayUnion(historyDoc) }, { merge: true }).catch(() => {});
-      
-      setUploadProgress(prev => ({ ...prev, [headerId]: 100 }));
-      triggerToast("تم الحفظ بنجاح وتوثيقه في السجل الدائم!", "success");
-      
-      setHeaderPoses(prev => {
-        const next = { ...prev };
-        keysToSave.forEach(k => { next[k] = publicUrl; });
-        return next;
-      });
-      
-      setTimeout(() => {
-        setUploadProgress(prev => {
-          const next = { ...prev };
-          delete next[headerId];
-          return next;
-        });
-      }, 1500);
-      
-    } catch (err: any) {
-      console.error("[UPLOAD ERROR]", err);
-      triggerToast(err.message || "فشل الرفع، النسخة الحالية سليمة ولم تتأثر.", "error");
-      setUploadProgress(prev => {
-        const next = { ...prev };
-        delete next[headerId];
-        return next;
-      });
-    }
-  };
-
-  const handleResetHeaderPose = async (headerId: string) => {
-    try {
-      triggerToast("جاري استعادة الوضعية المعتمدة...", "info");
-      console.log(`[ASSET OVERRIDE] Resetting pose override for ${headerId}`);
-
-      const aliases = POSE_ALIASES_MAP[headerId] || [];
-      const keysToReset = Array.from(new Set([headerId, ...aliases]));
-      
-      // 1. Server-side API reset
-      await fetch('/api/bairaq/reset', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ assetId: headerId })
-      }).catch(e => console.warn("Backend API pose reset warning:", e));
-
-      // 2. Client-side Firestore reset
-      const resetObj: Record<string, any> = {};
-      keysToReset.forEach(k => {
-        resetObj[k] = deleteField();
-      });
-
-      await updateDoc(doc(db, "system_config", "bairaq_poses"), resetObj).catch(() => {});
-      await updateDoc(doc(db, "system_settings", "bairaq_poses"), resetObj).catch(() => {});
-      
-      setHeaderPoses(prev => {
-        const next = { ...prev };
-        keysToReset.forEach(k => { delete next[k]; });
-        return next;
-      });
-
-      setPendingHeaderPoses(prev => {
-        const next = { ...prev };
-        keysToReset.forEach(k => { delete next[k]; });
-        return next;
-      });
-
-      triggerToast("تمت استعادة الوضعية المعتمدة بنجاح!", "success");
-    } catch (err) {
-      console.warn("Notice resetting pose override:", err);
-      setHeaderPoses(prev => {
-        const next = { ...prev };
-        delete next[headerId];
-        return next;
-      });
-      triggerToast("تمت استعادة الوضعية المعتمدة", "success");
     }
   };
 
@@ -2196,6 +1955,7 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
         newCodeDoc.expiresAt = defaultExpiry.toISOString();
       }
 
+      try { await fetch("/api/activation-codes", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: codeId, schoolId: genSchoolId || "all", role: genRole, maxUses: Number(genMaxUses) }) }); } catch(e) {}
       // Write to Firestore
       await setDoc(doc(db, "activation_codes", codeId), newCodeDoc);
 
@@ -2296,10 +2056,29 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
       setSchools(prev => prev.map(s => s.id === school.id ? { ...s, status: newStatus } : s));
 
       const schoolRef = doc(db, "schools", school.id);
-      await updateDoc(schoolRef, { status: newStatus });
+      await setDoc(schoolRef, {
+        status: newStatus,
+        isSuspended: newStatus === "suspended",
+        suspendedAt: newStatus === "suspended" ? serverTimestamp() : null,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+
+      // Also update PostgreSQL backend
+      try {
+        await fetch(`/api/schools/${school.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            status: newStatus,
+            isSuspended: newStatus === "suspended"
+          })
+        });
+      } catch (pgErr) {
+        console.warn("Could not patch school status in PG:", pgErr);
+      }
 
       await addDoc(collection(db, "developer_logs"), {
-        action: `تحديث حالة مدرسة ${school.name} إلى: ${newStatus === "active" ? "نشطة" : "معطلة"}`,
+        action: `تحديث حالة مدرسة ${school.name} إلى: ${newStatus === "active" ? "نشطة ومفعلة" : "معطلة ومجمدة"}`,
         code: school.id,
         schoolId: school.id,
         schoolName: school.name,
@@ -2308,7 +2087,11 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
         status: newStatus === "active" ? "success" : "warning"
       });
 
-      triggerToast(`تم تحديث حالة الاشتراك لمدرسة ${school.name}`, "success");
+      if (newStatus === "suspended") {
+        triggerToast(`تم تعطيل وتجميد مدرسة (${school.name}) وحظر دخول الإدارة وكافة المستخدمين فوراً`, "info");
+      } else {
+        triggerToast(`تم تفعيل مدرسة (${school.name}) واستئناف كافة الخدمات بنجاح`, "success");
+      }
     } catch (err) {
       handleFirestoreError(err, OperationType.UPDATE, "schools/" + school.id, false);
       triggerToast("فشل في تحديث حالة المدرسة", "error");
@@ -2413,7 +2196,7 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
 
     setIsBroadcasting(true);
     try {
-      await addDoc(collection(db, "system_announcements"), {
+      try { await fetch("/api/broadcasts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: announcementTitle, message: announcementContent, targetAudience: targetAudience, senderName: "إدارة النظام العليا" }) }); } catch(e) {} await addDoc(collection(db, "system_announcements"), {
         title: announcementTitle,
         content: announcementContent,
         target: targetAudience,
@@ -2506,6 +2289,7 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
       {/* Horizontal Fast Switcher Tabs Bar */}
       <div className="sticky top-[61px] z-40 bg-[#05060F]/95 backdrop-blur-md border-b border-white/5 px-4 py-2 overflow-x-auto no-scrollbar flex items-center gap-2 shadow-md">
         {[
+          { id: 'users_directory', label: '👥 دليل وتدقيق المستخدمين (شامل)', color: 'emerald' },
           { id: 'academy', label: '🎓 أكاديمية بيرق الرقمية', color: 'amber' },
           { id: 'health', label: '📊 النظام والصحة', color: 'indigo' },
           { id: 'school_management', label: '🏫 إدارة المدارس', color: 'blue' },
@@ -2539,6 +2323,18 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
 
       <main className="pb-24">
 
+        {activeTab === 'users_directory' && (
+          <div className="w-full animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <UsersAuditDirectorySection
+              onNavigateToSchool={(sId) => {
+                setSelectedAdminSchoolId(sId);
+                setActiveTab('school_management');
+              }}
+              onNavigateToLicensing={() => setActiveTab('licensing')}
+            />
+          </div>
+        )}
+
         {activeTab === 'academy' && (
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
             <AcademyManagementSection />
@@ -2549,10 +2345,10 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
           <div className="p-6">
             <SystemHealthSection
               schoolsCount={schools.length}
-              activeUsersCount={activeUsersCount || 0}
-              totalStudents={totalStudents || 0}
-              totalTeachers={totalTeachers || 0}
-              totalParents={totalParents || 0}
+              activeUsersCount={activationCodes.filter(c => c.used === true || c.isUsed === true || c.status === 'used' || c.status === 'disabled').length}
+              totalStudents={activationCodes.filter(c => (c.used === true || c.isUsed === true || c.status === 'used' || c.status === 'disabled') && String(c.role || '').toLowerCase().includes('student')).length}
+              totalTeachers={activationCodes.filter(c => (c.used === true || c.isUsed === true || c.status === 'used' || c.status === 'disabled') && String(c.role || '').toLowerCase().includes('teacher')).length}
+              totalParents={activationCodes.filter(c => (c.used === true || c.isUsed === true || c.status === 'used' || c.status === 'disabled') && String(c.role || '').toLowerCase().includes('parent')).length}
               processedFilesCount={processedFilesCount || 0}
               aiUsageCount={aiUsageCount || 0}
               aiAnalytics={aiAnalytics}
@@ -2942,7 +2738,8 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
                         {/* Action Buttons - Full Width Group */}
                         <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
                           <button
-                            onClick={() => {
+                            onClick={(e) => {
+                              e.stopPropagation();
                               setEditingSchoolLocation(school);
                               setLocationInputText(school.location || school.city || school.governorate || "");
                             }}
@@ -2952,19 +2749,29 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
                             <MapPin size={14} className="text-emerald-400" /> موقع المدرسة
                           </button>
                           <button
-                            onClick={() => generateAdminCodeForSchool(school)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              generateAdminCodeForSchool(school);
+                            }}
                             className="flex-1 py-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 rounded-xl text-[10px] font-black transition-all flex flex-col items-center justify-center gap-1 cursor-pointer"
                           >
                             <Sparkles size={14} /> كود إدارة
                           </button>
                           <button
-                            onClick={() => setConfiguringSchoolModules(school)}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setConfiguringSchoolModules(school);
+                            }}
                             className="flex-1 py-2.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/20 rounded-xl text-[10px] font-black transition-all flex flex-col items-center justify-center gap-1 cursor-pointer"
                           >
                             <Sliders size={14} /> التحكم بالأقسام
                           </button>
                           <button
-                            onClick={() => toggleSchoolStatus(school)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              toggleSchoolStatus(school);
+                            }}
                             className={`flex-1 py-2.5 rounded-xl border text-[10px] font-black transition-all flex flex-col items-center justify-center gap-1 cursor-pointer ${
                               school.status === 'active' 
                                 ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-400' 
@@ -2975,7 +2782,10 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
                             {school.status === 'active' ? 'نشطة' : 'معطلة'}
                           </button>
                           <button
-                            onClick={() => setSchoolToDelete(school)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSchoolToDelete(school);
+                            }}
                             className="flex-1 py-2.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-xl text-[10px] font-black transition-all flex flex-col items-center justify-center gap-1 cursor-pointer"
                           >
                             <Trash2 size={14} /> حذف
@@ -3096,12 +2906,22 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
             {/* Modal for Managing School Feature Toggles / Disabled Modules */}
             <AnimatePresence>
               {configuringSchoolModules && (
-                <div className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md" dir="rtl">
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-[999999] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md cursor-pointer" 
+                  dir="rtl"
+                  onClick={(e) => {
+                    if (e.target === e.currentTarget) setConfiguringSchoolModules(null);
+                  }}
+                >
                   <motion.div
                     initial={{ opacity: 0, scale: 0.9, y: 20 }}
                     animate={{ opacity: 1, scale: 1, y: 0 }}
                     exit={{ opacity: 0, scale: 0.9, y: 20 }}
-                    className="bg-[#0A0E1A] border border-indigo-500/40 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl relative flex flex-col my-auto"
+                    onClick={(e) => e.stopPropagation()}
+                    className="bg-[#0A0E1A] border border-indigo-500/40 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl relative flex flex-col my-auto cursor-default"
                   >
                     <div className="p-5 border-b border-white/10 bg-indigo-950/40 flex items-center justify-between">
                       <div className="flex items-center gap-3">
@@ -3122,18 +2942,80 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
                     </div>
 
                     <div className="p-5 space-y-3 max-h-[65vh] overflow-y-auto custom-scrollbar">
-                      <p className="text-xs text-white/60 font-semibold mb-2">
-                        يمكنك إيقاف أو تفعيل أي قسم محدد لهذه المدرسة بشكل منفرد دون التأثير على باقي المدارس:
+                      <div className="flex items-center gap-1 p-1 bg-white/5 rounded-2xl mb-4 border border-white/5">
+                        {[
+                          { id: 'admin', label: 'الإدارة', icon: <Shield size={14} /> },
+                          { id: 'student', label: 'الطالب', icon: <GraduationCap size={14} /> },
+                          { id: 'teacher', label: 'الأستاذ', icon: <UserCheck size={14} /> },
+                          { id: 'parent', label: 'ولي الأمر', icon: <Users size={14} /> },
+                        ].map(tab => (
+                          <button
+                            key={tab.id}
+                            onClick={() => setActiveModuleTab(tab.id as any)}
+                            className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl text-[10px] font-black transition-all ${
+                              activeModuleTab === tab.id 
+                                ? 'bg-indigo-500 text-black shadow-lg shadow-indigo-500/20' 
+                                : 'text-white/40 hover:text-white hover:bg-white/5'
+                            }`}
+                          >
+                            {tab.icon}
+                            <span>{tab.label}</span>
+                          </button>
+                        ))}
+                      </div>
+
+                      <p className="text-[10px] text-white/50 font-bold mb-4 px-1 leading-relaxed">
+                        {activeModuleTab === 'admin' && '🎛️ تحكم في الأقسام والوظائف التي تظهر في "لوحة الإدارة المركزية" للمدرسة.'}
+                        {activeModuleTab === 'student' && '🎓 تحكم في الأقسام والخدمات التفاعلية المتاحة في "منصة الطالب" الرسمية.'}
+                        {activeModuleTab === 'teacher' && '👨‍🏫 تحكم في الصلاحيات والأدوات الممنوحة للكادر التدريسي في "منصة الأستاذ".'}
+                        {activeModuleTab === 'parent' && '👨‍👩‍👧‍👦 تحكم في البيانات والتقارير المتاحة لأولياء الأمور في "بوابة المتابعة".'}
                       </p>
 
-                      {SCHOOL_MODULES.map((mod) => {
-                        const currentDisabled = configuringSchoolModules.disabledModules || [];
-                        const isDisabled = mod.aliases.some(a => currentDisabled.includes(a));
+                      {(() => {
+                        const filtered = SCHOOL_MODULES.filter(mod => {
+                          if (activeModuleTab === 'admin') {
+                            return [
+                              'financial', 'activation_codes', 'control_hub', 'attendance', 
+                              'teachers', 'broadcast', 'transport', 'questions_bank', 
+                              'competitions', 'ideas', 'support'
+                            ].includes(mod.id);
+                          }
+                          if (activeModuleTab === 'student') {
+                            return [
+                              'arena', 'materials', 'videos', 'assignments', 'questions_bank', 
+                              'competitions', 'mayadeen', 'schedule', 'excellence'
+                            ].includes(mod.id);
+                          }
+                          if (activeModuleTab === 'teacher') {
+                            return [
+                              'arena', 'attendance_tracking', 'broadcast', 'materials', 
+                              'teacher_upload', 'evaluation', 'announcements', 'questions_bank', 
+                              'sovereignty_mgmt', 'ai_gen_summary', 
+                              'assignments', 'ai_teaching_suggestions', 'competitions', 
+                              'activity_monitoring', 'schedule', 'excellence', 'control_hub'
+                            ].includes(mod.id);
+                          }
+                          if (activeModuleTab === 'parent') {
+                            return [
+                              'grades_parent', 'assignments_parent', 'uniform_parent', 
+                              'transport_parent', 'support_parent', 'financial_parent', 'discipline_reports_parent', 
+                              'excellence_parent', 'ideas_parent'
+                            ].includes(mod.id);
+                          }
+                          return true;
+                        });
 
-                        return (
-                          <div
-                            key={mod.id}
-                            onClick={() => toggleSchoolModule(configuringSchoolModules.id, mod.id, currentDisabled)}
+                        return filtered.map((mod, index) => {
+                          const currentDisabled = configuringSchoolModules.disabledModules || [];
+                          // Check for tab-specific disable or global disable
+                          const rawAliases = mod.aliases || [mod.id];
+                          const tabAliases = activeModuleTab === 'admin' ? rawAliases : rawAliases.map(a => `${activeModuleTab}:${a}`);
+                          const isDisabled = tabAliases.some(a => currentDisabled.includes(a));
+
+                          return (
+                            <div
+                              key={`module-${activeModuleTab}-${mod.id}-${index}`}
+                              onClick={() => toggleSchoolModule(configuringSchoolModules.id, mod.id, currentDisabled, activeModuleTab)}
                             className={`p-3.5 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
                               isDisabled
                                 ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
@@ -3162,8 +3044,9 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
                             </div>
                           </div>
                         );
-                      })}
-                    </div>
+                      });
+                    })()}
+                  </div>
 
                     <div className="p-4 border-t border-white/10 bg-black/40 flex justify-end">
                       <button
@@ -3174,7 +3057,7 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
                       </button>
                     </div>
                   </motion.div>
-                </div>
+                </motion.div>
               )}
             </AnimatePresence>
 
@@ -3345,820 +3228,12 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
         )}
 
         {activeTab === 'remote_config' && (
-          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 space-y-8 p-6 pb-28">
-            {/* Top Bar Header & Save Action */}
-            <div className="bg-gradient-to-r from-indigo-900/40 via-purple-900/30 to-[#0A0E1A] border border-indigo-500/30 rounded-3xl p-6 flex flex-col md:flex-row items-center justify-between gap-6 shadow-[0_10px_30px_rgba(99,102,241,0.15)] relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl -mr-20 -mt-20 pointer-events-none"></div>
-              <div className="flex items-center gap-4 z-10">
-                <div className="p-3.5 bg-indigo-500/20 border border-indigo-400/30 text-indigo-300 rounded-2xl shadow-inner">
-                  <SlidersHorizontal size={28} />
-                </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h2 className="text-xl font-black text-white">مركز التحكم عن بُعد والتكوين السحابي 🎛️</h2>
-                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 animate-pulse">
-                      بث مباشر كلي
-                    </span>
-                  </div>
-                  <p className="text-xs text-white/60 font-bold mt-1">
-                    تحكم بخصائص، ومواصفات، ومفاتيح التطبيق فورياً أينما وُجد المستخدم بدون الحاجة لإصدار تحديث متجر!
-                  </p>
-                </div>
-              </div>
-
-              <button
-                onClick={handleSaveRemoteConfig}
-                disabled={savingRemoteConfig}
-                className="w-full md:w-auto px-8 py-4 bg-gradient-to-r from-indigo-500 via-indigo-600 to-purple-600 hover:from-indigo-600 hover:to-purple-700 active:scale-95 text-white font-black text-sm rounded-2xl shadow-[0_10px_25px_rgba(99,102,241,0.4)] transition-all flex items-center justify-center gap-2 z-10 border border-indigo-400/40 cursor-pointer disabled:opacity-50 shrink-0"
-              >
-                {savingRemoteConfig ? (
-                  <>
-                    <RefreshCw className="animate-spin" size={20} />
-                    <span>جاري الحفظ والتطبيق السحابي...</span>
-                  </>
-                ) : (
-                  <>
-                    <CheckCircle size={20} />
-                    <span>حفظ وتطبيق التغييرات سحابياً 🚀</span>
-                  </>
-                )}
-              </button>
-            </div>
-
-            {/* Grid Layout of Remote Control Panels */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-              {/* Panel 1: Emergency Kill Switches & Feature Flags */}
-              <div className="bg-[#0C1020] border border-white/10 rounded-3xl p-6 space-y-6 shadow-xl relative overflow-hidden">
-                <div className="flex items-center justify-between border-b border-white/5 pb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2.5 rounded-2xl bg-rose-500/10 text-rose-400 border border-rose-500/20">
-                      <Power size={22} />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-black text-white">مفاتيح التعطيل الطارئ المباشر 🚨</h3>
-                      <p className="text-[10px] text-white/40 font-bold">إيقاف أو تفعيل الخصائص فورياً عند حدوث صيانة أو ضغط سيرفر</p>
-                    </div>
-                  </div>
-                  <ShieldAlert className="text-rose-400/40" size={20} />
-                </div>
-
-                <div className="space-y-4">
-                  {/* Full Maintenance Mode */}
-                  <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        {remoteConfig.maintenanceMode ? <Lock className="text-rose-400" size={18} /> : <Unlock className="text-emerald-400" size={18} />}
-                        <div>
-                          <p className="text-xs font-black text-white">وضع الصيانة والتحديث الشامل (Maintenance Mode)</p>
-                          <p className="text-[10px] text-white/40 font-bold">تجميد التطبيق وإظهار شاشة الصيانة Glassmorphism لجميع المستخدمين</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setPreviewModalType("maintenance")}
-                          className="px-3 py-1.5 rounded-xl text-[11px] font-bold bg-rose-500/10 text-rose-300 border border-rose-500/30 hover:bg-rose-500/20 transition-all"
-                        >
-                          👁️ معاينة النافذة
-                        </button>
-                        <button
-                          onClick={() => setRemoteConfig(prev => ({ ...prev, maintenanceMode: !prev.maintenanceMode }))}
-                          className={`px-4 py-2 rounded-xl text-xs font-black transition-all border flex items-center gap-2 ${
-                            remoteConfig.maintenanceMode
-                              ? "bg-rose-500/20 text-rose-300 border-rose-500/40 shadow-[0_0_15px_rgba(244,63,94,0.3)]"
-                              : "bg-white/5 text-white/40 border-white/10 hover:bg-white/10"
-                          }`}
-                        >
-                          {remoteConfig.maintenanceMode ? "مُفعل 🔒 (مُقفل)" : "معطل 🔓 (طبيعي)"}
-                        </button>
-                      </div>
-                    </div>
-                    {remoteConfig.maintenanceMode && (
-                      <div className="pt-2">
-                        <label className="text-[10px] text-white/40 font-bold block mb-1">رسالة الصيانة الظاهرة للطلاب وأولياء الأمور:</label>
-                        <textarea
-                          rows={2}
-                          value={remoteConfig.maintenanceMessage}
-                          onChange={(e) => setRemoteConfig(prev => ({ ...prev, maintenanceMessage: e.target.value }))}
-                          className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-xs text-white placeholder-white/20 outline-none focus:border-rose-500 font-bold resize-none"
-                        />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* System Temporary Pause */}
-                  <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 space-y-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="flex items-center gap-2">
-                        <PauseCircle className="text-purple-400" size={18} />
-                        <div>
-                          <p className="text-xs font-black text-white">إيقاف النظام والعمليات مؤقتاً (System Temporary Pause)</p>
-                          <p className="text-[10px] text-white/40 font-bold">توقف مؤقت لأعمال التنظيم الإداري وإعادة الهيكلة</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setPreviewModalType("system_pause")}
-                          className="px-3 py-1.5 rounded-xl text-[11px] font-bold bg-purple-500/10 text-purple-300 border border-purple-500/30 hover:bg-purple-500/20 transition-all"
-                        >
-                          👁️ معاينة النافذة
-                        </button>
-                        <button
-                          onClick={() => setRemoteConfig(prev => ({ ...prev, systemPaused: !prev.systemPaused }))}
-                          className={`px-4 py-2 rounded-xl text-xs font-black transition-all border ${
-                            remoteConfig.systemPaused
-                              ? "bg-purple-500/20 text-purple-300 border-purple-500/40 shadow-[0_0_15px_rgba(168,85,247,0.3)]"
-                              : "bg-white/5 text-white/40 border-white/10 hover:bg-white/10"
-                          }`}
-                        >
-                          {remoteConfig.systemPaused ? "مُتوقف ⏸️" : "يعمل ⚡"}
-                        </button>
-                      </div>
-                    </div>
-                    {remoteConfig.systemPaused && (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
-                        <div>
-                          <label className="text-[10px] text-white/40 font-bold block mb-1">سبب التوقف الظاهر:</label>
-                          <input
-                            type="text"
-                            value={remoteConfig.systemPauseReason || ""}
-                            onChange={(e) => setRemoteConfig(prev => ({ ...prev, systemPauseReason: e.target.value }))}
-                            className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-white outline-none focus:border-purple-500 font-bold"
-                          />
-                        </div>
-                        <div>
-                          <label className="text-[10px] text-white/40 font-bold block mb-1">الوقت المتوقع للعودة (ETA):</label>
-                          <input
-                            type="text"
-                            value={remoteConfig.systemPauseEta || ""}
-                            onChange={(e) => setRemoteConfig(prev => ({ ...prev, systemPauseEta: e.target.value }))}
-                            placeholder="مثال: الساعة 6:00 مساءً"
-                            className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-xs text-purple-300 font-mono outline-none focus:border-purple-500 font-bold"
-                          />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* AI Assistant Toggle */}
-                  <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-black text-white">خدمات المساعد الذكي والذكاء الاصطناعي 🤖</p>
-                      <p className="text-[10px] text-white/40 font-bold">تفعيل أو إيقاف توليد وتلخيص الأسئلة التفاعلية</p>
-                    </div>
-                    <button
-                      onClick={() => setRemoteConfig(prev => ({ ...prev, aiFeaturesEnabled: !prev.aiFeaturesEnabled }))}
-                      className={`px-4 py-2 rounded-xl text-xs font-black transition-all border ${
-                        remoteConfig.aiFeaturesEnabled
-                          ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
-                          : "bg-rose-500/20 text-rose-300 border-rose-500/40"
-                      }`}
-                    >
-                      {remoteConfig.aiFeaturesEnabled ? "شغال ✅" : "مُعطل ❌"}
-                    </button>
-                  </div>
-
-                  {/* Live Radio Broadcast Toggle */}
-                  <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-black text-white">البث الإذاعي واللاسلكي الصوتي المباشر 📻</p>
-                      <p className="text-[10px] text-white/40 font-bold">إيقاف أو سماح بث الإذاعة في واجهة الطلاب</p>
-                    </div>
-                    <button
-                      onClick={() => setRemoteConfig(prev => ({ ...prev, liveRadioEnabled: !prev.liveRadioEnabled }))}
-                      className={`px-4 py-2 rounded-xl text-xs font-black transition-all border ${
-                        remoteConfig.liveRadioEnabled
-                          ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
-                          : "bg-rose-500/20 text-rose-300 border-rose-500/40"
-                      }`}
-                    >
-                      {remoteConfig.liveRadioEnabled ? "شغال ✅" : "مُعطل ❌"}
-                    </button>
-                  </div>
-
-                  {/* Online Parent Payments Toggle */}
-                  <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-black text-white">بوابة تسديد الأقساط والتحويلات المالية 💳</p>
-                      <p className="text-[10px] text-white/40 font-bold">سماح أو إغلاق استقبال إشعارات السداد من أولياء الأمور</p>
-                    </div>
-                    <button
-                      onClick={() => setRemoteConfig(prev => ({ ...prev, onlinePaymentsEnabled: !prev.onlinePaymentsEnabled }))}
-                      className={`px-4 py-2 rounded-xl text-xs font-black transition-all border ${
-                        remoteConfig.onlinePaymentsEnabled
-                          ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
-                          : "bg-rose-500/20 text-rose-300 border-rose-500/40"
-                      }`}
-                    >
-                      {remoteConfig.onlinePaymentsEnabled ? "شغال ✅" : "مُعطل ❌"}
-                    </button>
-                  </div>
-
-                  {/* New Code Activation Toggle */}
-                  <div className="p-4 rounded-2xl bg-white/[0.02] border border-white/5 flex items-center justify-between">
-                    <div>
-                      <p className="text-xs font-black text-white">تسجيل الأكواد والحسابات الجديدة 🔑</p>
-                      <p className="text-[10px] text-white/40 font-bold">السماح للطلاب والمعلمين بتفعيل أكواد دخول جديدة</p>
-                    </div>
-                    <button
-                      onClick={() => setRemoteConfig(prev => ({ ...prev, newRegistrationsEnabled: !prev.newRegistrationsEnabled }))}
-                      className={`px-4 py-2 rounded-xl text-xs font-black transition-all border ${
-                        remoteConfig.newRegistrationsEnabled
-                          ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
-                          : "bg-rose-500/20 text-rose-300 border-rose-500/40"
-                      }`}
-                    >
-                      {remoteConfig.newRegistrationsEnabled ? "مفتوح ✅" : "مُغلق ❌"}
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* Panel 2: Mandatory & Optional Version Control Modals */}
-              <div className="bg-[#0C1020] border border-white/10 rounded-3xl p-6 space-y-6 shadow-xl">
-                <div className="flex items-center gap-3 border-b border-white/5 pb-4">
-                  <div className="p-2.5 rounded-2xl bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                    <Smartphone size={22} />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-black text-white">إدارة النوافذ المنبثقة والإصدارات (System Dialogs) 📲</h3>
-                    <p className="text-[10px] text-white/40 font-bold">إجبار الموبايل على التحديث، الإشعارات الاختيارية، وإعلانات الإصدارات</p>
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  {/* 1. Mandatory Force Update Toggle */}
-                  <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-between gap-2">
-                    <div>
-                      <p className="text-xs font-black text-amber-300">1. نافذة التحديث الإجباري (Mandatory Update) 🚀</p>
-                      <p className="text-[10px] text-amber-200/60 font-bold">تمنع استخدام التطبيق إلا بعد الانتقال لمتجر الموبايل</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setPreviewModalType("mandatory_update")}
-                        className="px-3 py-1.5 rounded-xl text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 transition-all"
-                      >
-                        👁️ معاينة
-                      </button>
-                      <button
-                        onClick={() => setRemoteConfig(prev => ({ ...prev, forceUpdateActive: !prev.forceUpdateActive }))}
-                        className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all border ${
-                          remoteConfig.forceUpdateActive
-                            ? "bg-amber-500 text-black border-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.5)]"
-                            : "bg-white/5 text-white/40 border-white/10"
-                        }`}
-                      >
-                        {remoteConfig.forceUpdateActive ? "إجباري ⚠️" : "مُعطل"}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* 2. Optional Update Toggle */}
-                  <div className="p-4 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-between gap-2">
-                    <div>
-                      <p className="text-xs font-black text-indigo-300">2. نافذة التحديث الاختياري (Optional Update) ✨</p>
-                      <p className="text-[10px] text-indigo-200/60 font-bold">تظهر تنبيهاً يخيّر المستخدم بين التحديث الآن أو التأجيل</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setPreviewModalType("optional_update")}
-                        className="px-3 py-1.5 rounded-xl text-[11px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 hover:bg-indigo-500/30 transition-all"
-                      >
-                        👁️ معاينة
-                      </button>
-                      <button
-                        onClick={() => setRemoteConfig(prev => ({ ...prev, optionalUpdateActive: !prev.optionalUpdateActive }))}
-                        className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all border ${
-                          remoteConfig.optionalUpdateActive
-                            ? "bg-indigo-500 text-white border-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.5)]"
-                            : "bg-white/5 text-white/40 border-white/10"
-                        }`}
-                      >
-                        {remoteConfig.optionalUpdateActive ? "مُفعل ✨" : "مُعطل"}
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* 3. New Version Announcement Notice */}
-                  <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-between gap-2">
-                    <div>
-                      <p className="text-xs font-black text-emerald-300">3. نافذة وجود إصدار جديد ومميزات (New Version) 🌟</p>
-                      <p className="text-[10px] text-emerald-200/60 font-bold">تعرض خريطة طريق الميزات الجديدة بأسلوب جبار للمستخدمين</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        onClick={() => setPreviewModalType("new_version")}
-                        className="px-3 py-1.5 rounded-xl text-[11px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 hover:bg-emerald-500/30 transition-all"
-                      >
-                        👁️ معاينة
-                      </button>
-                      <button
-                        onClick={() => setRemoteConfig(prev => ({ ...prev, newVersionNoticeActive: !prev.newVersionNoticeActive }))}
-                        className={`px-3.5 py-2 rounded-xl text-xs font-black transition-all border ${
-                          remoteConfig.newVersionNoticeActive
-                            ? "bg-emerald-500 text-black border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.5)]"
-                            : "bg-white/5 text-white/40 border-white/10"
-                        }`}
-                      >
-                        {remoteConfig.newVersionNoticeActive ? "مُفعل 🌟" : "مُعطل"}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-[10px] text-white/40 font-bold block mb-1">أدنى إصدار مطلوب (Min Version):</label>
-                      <input
-                        type="text"
-                        value={remoteConfig.minRequiredVersion}
-                        onChange={(e) => setRemoteConfig(prev => ({ ...prev, minRequiredVersion: e.target.value }))}
-                        placeholder="1.0.0"
-                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white font-mono font-bold outline-none focus:border-amber-500"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-white/40 font-bold block mb-1">أحدث إصدار متاح (Latest Version):</label>
-                      <input
-                        type="text"
-                        value={remoteConfig.latestVersion}
-                        onChange={(e) => setRemoteConfig(prev => ({ ...prev, latestVersion: e.target.value }))}
-                        placeholder="1.2.0"
-                        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white font-mono font-bold outline-none focus:border-amber-500"
-                      />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] text-white/40 font-bold block mb-1">رابط متجر بلاي (Google Play Store URL):</label>
-                    <input
-                      type="text"
-                      value={remoteConfig.playStoreUrl}
-                      onChange={(e) => setRemoteConfig(prev => ({ ...prev, playStoreUrl: e.target.value }))}
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-indigo-300 font-mono font-bold outline-none focus:border-indigo-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] text-white/40 font-bold block mb-1">رابط متجر أبل (Apple App Store URL):</label>
-                    <input
-                      type="text"
-                      value={remoteConfig.appStoreUrl}
-                      onChange={(e) => setRemoteConfig(prev => ({ ...prev, appStoreUrl: e.target.value }))}
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-indigo-300 font-mono font-bold outline-none focus:border-indigo-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] text-white/40 font-bold block mb-1">سجل التغييرات ومميزات التحديث الجديد:</label>
-                    <textarea
-                      rows={3}
-                      value={remoteConfig.updateChangelog}
-                      onChange={(e) => setRemoteConfig(prev => ({ ...prev, updateChangelog: e.target.value }))}
-                      className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-xs text-white font-bold outline-none focus:border-amber-500 resize-none"
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Panel 3: Global Dynamic Ticker Marquee Settings */}
-              <div className="bg-[#0C1020] border border-white/10 rounded-3xl p-6 space-y-6 shadow-xl">
-                <div className="flex items-center justify-between border-b border-white/5 pb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2.5 rounded-2xl bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-                      <Radio size={22} />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-black text-white">إعدادات الشريط الإخباري المباشر 📡</h3>
-                      <p className="text-[10px] text-white/40 font-bold">التحكم بالنص المتحرك أعلى شاشات التطبيق</p>
-                    </div>
-                  </div>
-                  <button
-                    onClick={() => setRemoteConfig(prev => ({ ...prev, tickerEnabled: !prev.tickerEnabled }))}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all border ${
-                      remoteConfig.tickerEnabled
-                        ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/40"
-                        : "bg-white/5 text-white/30 border-white/10"
-                    }`}
-                  >
-                    {remoteConfig.tickerEnabled ? "مُفعل ✅" : "مُخفي 👁️‍🗨️"}
-                  </button>
-                </div>
-
-                <div className="space-y-4">
-                  <div>
-                    <label className="text-[10px] text-white/40 font-bold block mb-1">نص الشريط الإخباري العاجل الموحد:</label>
-                    <textarea
-                      rows={2}
-                      value={remoteConfig.tickerText}
-                      onChange={(e) => setRemoteConfig(prev => ({ ...prev, tickerText: e.target.value }))}
-                      placeholder="اكتب الإعلان السريع الذي سيمر في شريط الأخبار..."
-                      className="w-full bg-black/40 border border-white/10 rounded-xl p-3 text-xs text-cyan-300 font-bold outline-none focus:border-cyan-500 resize-none"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] text-white/40 font-bold block mb-2">سرعة الحركة والتمرير للشريط:</label>
-                    <div className="grid grid-cols-3 gap-3">
-                      {[
-                        { id: 'slow', name: 'بطيء (هادئ)' },
-                        { id: 'medium', name: 'متوسط (قياسي)' },
-                        { id: 'fast', name: 'سريع (عاجل)' }
-                      ].map((speed) => (
-                        <button
-                          key={speed.id}
-                          type="button"
-                          onClick={() => setRemoteConfig(prev => ({ ...prev, tickerSpeed: speed.id as any }))}
-                          className={`py-2.5 rounded-xl text-xs font-black transition-all border ${
-                            remoteConfig.tickerSpeed === speed.id
-                              ? "bg-cyan-500 text-black border-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.4)]"
-                              : "bg-white/5 text-white/40 border-white/10 hover:bg-white/10"
-                          }`}
-                        >
-                          {speed.name}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Panel 4: Cloud Themes Management Center 🌟 */}
-              <div className="bg-[#0C1020] border border-white/10 rounded-3xl p-6 space-y-6 shadow-xl lg:col-span-2">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-white/5 pb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2.5 rounded-2xl bg-purple-500/10 text-purple-400 border border-purple-500/20">
-                      <Palette size={22} />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-black text-white flex items-center gap-2">
-                        إدارة السمات والمواسم السحابية 🌟
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30">
-                          Cloud Themes Engine v2
-                        </span>
-                      </h3>
-                      <p className="text-[10px] text-white/40 font-bold mt-0.5">
-                        تخصيص الهوية البصرية، شخصيات بيرق، المؤثرات الحركية، والتنبيهات الاحتفالية عالمياً
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Master Theme Toggle */}
-                  <div className="flex items-center gap-3 self-start sm:self-auto">
-                    <button
-                      type="button"
-                      onClick={() => setRemoteConfig(prev => ({ ...prev, themeActive: !prev.themeActive }))}
-                      className={`px-4 py-2.5 rounded-2xl text-xs font-black transition-all border flex items-center gap-2 ${
-                        remoteConfig.themeActive
-                          ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-[0_0_20px_rgba(16,185,129,0.3)]"
-                          : "bg-white/5 text-white/40 border-white/10 hover:bg-white/10"
-                      }`}
-                    >
-                      <span className={`w-2 h-2 rounded-full ${remoteConfig.themeActive ? "bg-emerald-400 animate-pulse" : "bg-white/30"}`} />
-                      {remoteConfig.themeActive ? "السمة السحابية مفعّلة ⚡" : "السمة موقوفة (المظهر الأساسي) ⏸️"}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Grid 1: Seasonal Occasions Picker */}
-                <div className="space-y-3">
-                  <label className="text-[10px] text-white/40 font-bold block">
-                    اختر المناسبة الرسمية لحقن السمة تلقائياً:
-                  </label>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-                    {Object.values(THEME_PRESETS).map((preset) => {
-                      const isSelected = remoteConfig.seasonalTheme === preset.id;
-                      return (
-                        <button
-                          key={preset.id}
-                          type="button"
-                          onClick={() => {
-                            setRemoteConfig(prev => ({
-                              ...prev,
-                              seasonalTheme: preset.id,
-                              themeCardTitle: preset.defaultCardTitle,
-                              themeMessage: preset.defaultMessage,
-                              themeAccentColor: preset.defaultAccent,
-                              themeEffectType: preset.defaultEffect,
-                              themeActive: preset.id !== 'default'
-                            }));
-                          }}
-                          className={`p-3 rounded-2xl text-right transition-all border flex flex-col justify-between gap-2 relative overflow-hidden group ${
-                            isSelected
-                              ? "bg-purple-500/20 border-purple-500/70 text-white shadow-[0_0_20px_rgba(168,85,247,0.3)]"
-                              : "bg-white/5 border-white/10 text-white/50 hover:bg-white/10 hover:border-white/20"
-                          }`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <span className="text-xl">{preset.icon}</span>
-                            {isSelected && (
-                              <span className="w-2 h-2 rounded-full bg-purple-400 shadow-[0_0_8px_rgba(192,132,252,0.8)]" />
-                            )}
-                          </div>
-                          <div>
-                            <h4 className="text-xs font-black text-white leading-tight">{preset.title}</h4>
-                            <p className="text-[8.5px] text-white/40 font-bold line-clamp-1 mt-0.5">{preset.subtitle}</p>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Grid 2: Dates Range Controls & Automatic Expiration */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-black/40 border border-white/5 p-4 rounded-2xl">
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] text-white/50 font-bold block">تاريخ بداية المناسبة (Start Date):</label>
-                    <input
-                      type="date"
-                      value={remoteConfig.themeStartDate || ""}
-                      onChange={(e) => setRemoteConfig(prev => ({ ...prev, themeStartDate: e.target.value }))}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-purple-300 font-mono font-bold outline-none focus:border-purple-500"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] text-white/50 font-bold block">تاريخ انتهاء المناسبة (End Date):</label>
-                    <input
-                      type="date"
-                      value={remoteConfig.themeEndDate || ""}
-                      onChange={(e) => setRemoteConfig(prev => ({ ...prev, themeEndDate: e.target.value }))}
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs text-amber-300 font-mono font-bold outline-none focus:border-amber-500"
-                    />
-                  </div>
-
-                  <div className="md:col-span-2 text-[9.5px] text-emerald-400/80 font-bold flex items-center gap-2 pt-1 border-t border-white/5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                    عند انقضاء تاريخ الانتهاء، تعود الواجهة تلقائياً إلى السمة الأساسية دون الحاجة إلى أية تعديلات أو تحديث للتطبيق.
-                  </div>
-                </div>
-
-                {/* Grid 3: Card Title & Short Greeting Message */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] text-white/40 font-bold block">عنوان بطاقة السمة (Glassmorphism Card Title):</label>
-                    <input
-                      type="text"
-                      value={remoteConfig.themeCardTitle || ""}
-                      onChange={(e) => setRemoteConfig(prev => ({ ...prev, themeCardTitle: e.target.value }))}
-                      placeholder="عنوان المناسبة القصير..."
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-purple-200 font-bold outline-none focus:border-purple-500"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] text-white/40 font-bold block">الرسالة الترحيبية القصيرة:</label>
-                    <input
-                      type="text"
-                      value={remoteConfig.themeMessage || ""}
-                      onChange={(e) => setRemoteConfig(prev => ({ ...prev, themeMessage: e.target.value }))}
-                      placeholder="رسالة التهنئة أو الترحيب..."
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-purple-200 font-bold outline-none focus:border-purple-500"
-                    />
-                  </div>
-                </div>
-
-                {/* Grid 4: Color Palette & Accent Styling */}
-                <div className="space-y-2">
-                  <label className="text-[10px] text-white/40 font-bold block">الدرجة اللونية الثانوية للمناسبة (Theme Accent Color):</label>
-                  <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2">
-                    {Object.entries(ACCENT_STYLES).map(([key, style]) => {
-                      const isChosen = (remoteConfig.themeAccentColor || 'amber') === key;
-                      return (
-                        <button
-                          key={key}
-                          type="button"
-                          onClick={() => setRemoteConfig(prev => ({ ...prev, themeAccentColor: key as ThemeAccentColor }))}
-                          className={`py-2 px-2 rounded-xl text-[10px] font-black transition-all border flex flex-col items-center justify-center gap-1 ${
-                            isChosen
-                              ? "bg-white/15 text-white border-white/60 shadow-lg scale-105"
-                              : "bg-black/40 text-white/40 border-white/5 hover:bg-white/5"
-                          }`}
-                        >
-                          <span className="w-3 h-3 rounded-full border border-white/30" style={{ backgroundColor: style.particleColors[0] }} />
-                          <span className="truncate max-w-full text-[8.5px]">{style.accentName.split(" ")[0]}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Grid 5: Berq Mascot Custom Upload & Avatar Preview */}
-                <div className="bg-black/40 border border-white/5 p-4 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="w-14 h-14 rounded-2xl bg-white/5 border border-white/10 p-1 flex items-center justify-center overflow-hidden shrink-0 shadow-md">
-                      <img
-                        src={remoteConfig.themeMascotUrl || THEME_PRESETS[remoteConfig.seasonalTheme || 'default']?.mascotPresetSvg}
-                        alt="صورة بيرق للمناسبة"
-                        className="w-full h-full object-cover rounded-xl"
-                      />
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-black text-white">نسخة شخصية بيرق للمناسبة 🦅</h4>
-                      <p className="text-[10px] text-white/40 font-bold">يمكنك رفع صورة مخصصة لشخصية بيرق الاحتفالية لهذه المناسبة</p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0">
-                    <label className="px-3.5 py-2 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/40 text-xs font-black cursor-pointer transition-all flex items-center gap-1.5">
-                      <ImageIcon size={14} />
-                      رفع صورة مخصصة
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => {
-                          const file = e.target.files?.[0];
-                          if (!file) return;
-                          
-                          const reader = new FileReader();
-                          reader.onload = (evt) => {
-                            const img = new Image();
-                            img.onload = () => {
-                              const canvas = document.createElement('canvas');
-                              let width = img.width;
-                              let height = img.height;
-                              const MAX_WIDTH = 250;
-                              const MAX_HEIGHT = 250;
-                              
-                              if (width > height) {
-                                if (width > MAX_WIDTH) {
-                                  height *= MAX_WIDTH / width;
-                                  width = MAX_WIDTH;
-                                }
-                              } else {
-                                if (height > MAX_HEIGHT) {
-                                  width *= MAX_HEIGHT / height;
-                                  height = MAX_HEIGHT;
-                                }
-                              }
-                              
-                              canvas.width = width;
-                              canvas.height = height;
-                              const ctx = canvas.getContext('2d');
-                              if (ctx) {
-                                ctx.drawImage(img, 0, 0, width, height);
-                                const compressedBase64 = canvas.toDataURL('image/webp', 0.7);
-                                
-                                if (compressedBase64.length > 150000) {
-                                  if (typeof showToast === "function") showToast("الصورة ضخمة جداً حتى بعد الضغط، يرجى اختيار صورة أصغر", "error");
-                                  return;
-                                }
-                                
-                                setRemoteConfig(prev => ({ ...prev, themeMascotUrl: compressedBase64 }));
-                                if (typeof showToast === "function") showToast("تم ضغط ورفع صورة شخصية المناسبة بنجاح 🖼️", "success");
-                              }
-                            };
-                            img.src = evt.target?.result as string;
-                          };
-                          reader.readAsDataURL(file);
-                        }}
-                      />
-                    </label>
-
-                    {remoteConfig.themeMascotUrl && (
-                      <button
-                        type="button"
-                        onClick={() => setRemoteConfig(prev => ({ ...prev, themeMascotUrl: "" }))}
-                        className="px-3 py-2 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/20 text-xs font-bold transition-all"
-                        title="استعادة الصورة الافتراضية"
-                      >
-                        استعادة الافتراضي
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Grid 6: Particle & Motion Effects Controls */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-t border-white/5 pt-4">
-                  <div className="flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setRemoteConfig(prev => ({ ...prev, themeEffectsEnabled: !prev.themeEffectsEnabled }))}
-                      className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all border ${
-                        remoteConfig.themeEffectsEnabled
-                          ? "bg-purple-500/20 text-purple-300 border-purple-500/40"
-                          : "bg-white/5 text-white/30 border-white/10"
-                      }`}
-                    >
-                      {remoteConfig.themeEffectsEnabled ? "المؤثرات الحركية مفعّلة ✨" : "المؤثرات موقوفة ⏸️"}
-                    </button>
-                    <span className="text-[10px] text-white/40 font-bold">
-                      مؤثرات بصرية خفيفة عالية الأداء (GPU Particle FX)
-                    </span>
-                  </div>
-
-                  {/* Broadcast Notification Button */}
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      try {
-                        const preset = THEME_PRESETS[remoteConfig.seasonalTheme] || THEME_PRESETS.default;
-                        const title = remoteConfig.themeCardTitle || preset.defaultCardTitle;
-                        const message = remoteConfig.themeMessage || preset.defaultMessage;
-
-                        await addDoc(collection(db, "global_announcements"), {
-                          title: `تهنئة ومناسبة: ${title}`,
-                          content: message,
-                          targetAudience: "all",
-                          priority: "high",
-                          createdAt: serverTimestamp(),
-                          author: "إدارة السمات السحابية Central Cloud",
-                          themeEvent: remoteConfig.seasonalTheme
-                        });
-
-                        await addDoc(collection(db, "broadcasts"), {
-                          title: `تهنئة ومناسبة: ${title}`,
-                          message: message,
-                          category: "تهنئة موسمية 🌟",
-                          targetLocation: "both",
-                          targetDashboards: ["all"],
-                          timestampMs: Date.now(),
-                          author: "إدارة السمات السحابية Central Cloud"
-                        });
-
-                        if (showToast) showToast("تم إرسال إشعار التهنئة السحابي بنجاح إلى جميع المدارس 📢", "success");
-                      } catch (err) {
-                        console.error("Theme notification error:", err);
-                        if (showToast) showToast("حدث خطأ أثناء إرسال إشعار التهنئة", "error");
-                      }
-                    }}
-                    className="px-4 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-black text-xs transition-all shadow-md flex items-center justify-center gap-1.5 cursor-pointer"
-                  >
-                    <Bell size={14} />
-                    إرسال إشعار عام لجميع المدارس بهذه المناسبة 📢
-                  </button>
-                </div>
-              </div>
-
-
-              {/* Panel 5: Support Hotlines & Dynamic Links */}
-              <div className="bg-[#0C1020] border border-white/10 rounded-3xl p-6 space-y-6 shadow-xl lg:col-span-2">
-                <div className="flex items-center justify-between border-b border-white/5 pb-4">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2.5 rounded-2xl bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                      <PhoneCall size={22} />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-black text-white">روابط وأرقام الدعم الفني السريع 📞</h3>
-                      <p className="text-[10px] text-white/40 font-bold">تحديث جهات واتساب وتليجرام التواصل الفوري دون تحديث التطبيق</p>
-                    </div>
-                  </div>
-
-                  <button
-                    onClick={() => setRemoteConfig(prev => ({ ...prev, supportButtonEnabled: !prev.supportButtonEnabled }))}
-                    className={`px-4 py-2 rounded-xl text-xs font-black transition-all border ${
-                      remoteConfig.supportButtonEnabled
-                        ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
-                        : "bg-white/5 text-white/30 border-white/10"
-                    }`}
-                  >
-                    {remoteConfig.supportButtonEnabled ? "زر الدعم ظاهرة ✅" : "زر الدعم مخفي ❌"}
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="text-[10px] text-white/40 font-bold block mb-1">رقم واتساب الدعم الفني المباشر:</label>
-                    <input
-                      type="text"
-                      value={remoteConfig.supportWhatsapp}
-                      onChange={(e) => setRemoteConfig(prev => ({ ...prev, supportWhatsapp: e.target.value }))}
-                      placeholder="+964..."
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-emerald-400 font-mono font-bold outline-none focus:border-emerald-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] text-white/40 font-bold block mb-1">رابط حساب تليجرام الدعم المباشر:</label>
-                    <input
-                      type="text"
-                      value={remoteConfig.supportTelegram}
-                      onChange={(e) => setRemoteConfig(prev => ({ ...prev, supportTelegram: e.target.value }))}
-                      placeholder="https://t.me/..."
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-cyan-400 font-mono font-bold outline-none focus:border-cyan-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] text-white/40 font-bold block mb-1">رابط قناة التعاميم والإعلانات الرسمية:</label>
-                    <input
-                      type="text"
-                      value={remoteConfig.supportChannelUrl}
-                      onChange={(e) => setRemoteConfig(prev => ({ ...prev, supportChannelUrl: e.target.value }))}
-                      placeholder="https://t.me/..."
-                      className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2.5 text-xs text-indigo-400 font-mono font-bold outline-none focus:border-indigo-500"
-                    />
-                  </div>
-                </div>
-              </div>
-
-            </div>
-          </div>
+          <CloudControlSection
+            remoteConfig={remoteConfig}
+            setRemoteConfig={setRemoteConfig}
+            onPreviewModal={setPreviewModalType}
+            triggerToast={triggerToast}
+          />
         )}
 
         {activeTab === 'actions' && (
@@ -4260,363 +3335,7 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
         )}
 
         {activeTab === 'media' && (
-          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <section className="p-6 bg-gradient-to-br from-[#0c1024] to-[#060815] border-b border-white/5">
-              <div className="flex items-center justify-between mb-8">
-                <div className="flex items-center gap-4">
-                  <div className="p-3 rounded-2xl bg-purple-500/10 text-purple-400">
-                    <ImageIcon size={24} />
-                  </div>
-                  <div>
-                    <h3 className="font-black text-white text-lg">إدارة الوسائط وهيدرات المنصة</h3>
-                    <p className="text-[10px] text-white/40 font-bold uppercase tracking-wider">تخصيص وضعيات بيرق</p>
-                  </div>
-                </div>
-                
-                <div className="relative">
-                  <select
-                    value={activeMediaDashboard}
-                    onChange={(e) => setActiveMediaDashboard(e.target.value as keyof typeof DASHBOARDS_POSES)}
-                    className="appearance-none bg-black/40 border border-white/10 text-white text-sm font-bold rounded-2xl pl-10 pr-4 py-2.5 outline-none focus:border-purple-500 transition-all min-w-[180px] cursor-pointer"
-                  >
-                    {DASHBOARD_TABS.map(tab => (
-                      <option key={tab.id} value={tab.id} className="bg-gray-900 text-white">
-                        {tab.label}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/50 pointer-events-none" />
-                </div>
-              </div>
-
-              {/* Quick Identity & Welcome Banner */}
-              <div className="mb-6 p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-purple-500/10 to-cyan-500/10 border border-amber-500/20 flex flex-col md:flex-row items-center justify-between gap-4">
-                <div className="flex items-center gap-3 w-full md:w-auto">
-                  <div className="w-12 h-12 rounded-xl bg-black/60 border border-amber-500/30 p-1 flex items-center justify-center shrink-0 shadow-lg overflow-hidden">
-                    <img 
-                      src={headerPoses['app_logo'] || '/logo.png'} 
-                      alt="شعار التطبيق" 
-                      className="w-full h-full object-contain"
-                      onError={(e) => { (e.target as HTMLImageElement).src = '/logo.png'; }}
-                    />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-black text-amber-400">شعار وهوية التطبيق (App Logo)</span>
-                      <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-400/20 text-amber-300 border border-amber-400/30">
-                        {headerPoses['app_logo'] ? 'مخصص سحابياً' : 'الافتراضي المعتمد'}
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-white/60">يظهر في الشاشات الرئيسية وشاشات تسجيل الدخول والشهادات.</p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 w-full md:w-auto justify-end">
-                  <label className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold transition-all cursor-pointer shadow-md active:scale-95">
-                    <FileUp size={14} />
-                    <span>رفع شعار التطبيق</span>
-                    <input 
-                      type="file" 
-                      className="hidden" 
-                      accept="image/png,image/jpeg,image/webp,image/svg+xml" 
-                      onChange={(e) => {
-                        setActiveMediaDashboard('welcome');
-                        handleHeaderPoseUpload('app_logo', e);
-                      }} 
-                    />
-                  </label>
-                  <button
-                    onClick={() => setActiveMediaDashboard('welcome')}
-                    className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all border ${
-                      activeMediaDashboard === 'welcome'
-                        ? 'bg-purple-500/30 border-purple-500 text-purple-300'
-                        : 'bg-white/5 hover:bg-white/10 border-white/10 text-white/80'
-                    }`}
-                  >
-                    عرض الفيديوهات الترحيبية 🎬
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {DASHBOARDS_POSES[activeMediaDashboard].map((header) => {
-                  const currentPose = headerPoses[header.id] || header.defaultSrc;
-                  const progress = uploadProgress[header.id] || 0;
-
-                  return (
-                    <div key={header.id} className="bg-black/40 border border-white/5 rounded-3xl p-4 flex flex-col gap-3 relative overflow-hidden">
-                      {/* Upload Progress Bar */}
-                      {progress > 0 && progress < 100 && (
-                        <div className="absolute inset-0 z-50 bg-black/80 flex flex-col items-center justify-center backdrop-blur-md">
-                          <div className="w-3/4 bg-white/10 rounded-full h-2 overflow-hidden mb-2">
-                            <div 
-                              className="bg-emerald-500 h-full transition-all duration-300"
-                              style={{ width: `${progress}%` }}
-                            />
-                          </div>
-                          <span className="text-xs font-bold text-white/90">جاري الرفع... {progress}%</span>
-                        </div>
-                      )}
-
-                      <div className="aspect-video w-full rounded-2xl bg-black/60 border border-white/5 overflow-hidden relative group">
-                        {isVideoUrl(currentPose) ? (
-                          <video 
-                            src={currentPose} 
-                            autoPlay loop muted playsInline 
-                            className="w-full h-full object-cover"
-                          />
-                        ) : (
-                          <img 
-                            src={currentPose} 
-                            alt={header.title} 
-                            className="w-full h-full object-cover" 
-                          />
-                        )}
-                        <label className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 flex flex-col items-center justify-center cursor-pointer transition-opacity backdrop-blur-sm">
-                          <ImageIcon size={24} className="text-white mb-2" />
-                          <span className="text-xs font-bold text-white">تغيير الوضعية</span>
-                          <input type="file" className="hidden" accept="image/*,video/mp4,video/webm,video/quicktime,video/x-m4v" onChange={(e) => handleHeaderPoseUpload(header.id, e)} disabled={progress > 0} />
-                        </label>
-                      </div>
-                      
-                      <div className="flex items-center justify-between mt-2 gap-2">
-                        <h4 className="font-bold text-white/90 text-sm truncate">{header.title}</h4>
-                        <div className="flex items-center gap-1 shrink-0">
-                          <button
-                            onClick={() => setHistoryModalAsset({ id: header.id, title: header.title })}
-                            className="bg-white/10 hover:bg-white/20 text-white/80 hover:text-white text-[10px] font-bold py-1 px-2 rounded transition-colors"
-                            title="سجل الإصدارات والاستعادة"
-                          >
-                            السجل
-                          </button>
-                          <button
-                            onClick={() => handleResetHeaderPose(header.id)}
-                            className="bg-white/10 hover:bg-red-500/30 text-white/80 hover:text-white text-[10px] font-bold py-1 px-2 rounded transition-colors"
-                            title="إعادة ضبط للوضعية المعتمدة الأصلية"
-                          >
-                            استعادة
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Global Announcements & Greetings Manager */}
-              <div className="mt-12 pt-8 border-t border-white/10">
-                <div className="flex items-center gap-4 mb-6">
-                  <div className="p-3 rounded-2xl bg-amber-500/10 text-amber-400">
-                    <Megaphone size={24} />
-                  </div>
-                  <div>
-                    <h3 className="font-black text-white text-lg">إدارة الإعلانات، الأخبار، التبريكات والتعازي العامة</h3>
-                    <p className="text-[10px] text-white/40 font-bold uppercase tracking-wider">نشر المحتوى لجميع اللوحات وأشرطة الإعلانات</p>
-                  </div>
-                </div>
-
-                <GlobalAnnouncementsBanner dashboardType="admin" />
-                <GlobalAnnouncementsPopup dashboardType="admin" />
-
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                  {/* Publish Form */}
-                  <form onSubmit={handlePublishGlobalAnn} className="lg:col-span-1 bg-black/40 border border-white/5 rounded-3xl p-6 space-y-4">
-                    <h4 className="font-bold text-white text-sm flex items-center gap-2">
-                      <Sparkles size={16} className="text-amber-400" />
-                      إضافة إعلان أو تهنئة جديدة
-                    </h4>
-
-                    <div>
-                      <label className="block text-xs font-bold text-white/70 mb-1.5">عنوان الإعلان / المناسبة</label>
-                      <input
-                        type="text"
-                        value={globalAnnTitle}
-                        onChange={(e) => setGlobalAnnTitle(e.target.value)}
-                        placeholder="مثل: تهنئة عيد الفطر المبارك / خبر عاجل"
-                        className="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2.5 text-white text-xs outline-none focus:border-amber-500 transition-all"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-white/70 mb-1.5">التصنيف</label>
-                      <select
-                        value={globalAnnCategory}
-                        onChange={(e) => setGlobalAnnCategory(e.target.value)}
-                        className="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2.5 text-white text-xs outline-none focus:border-amber-500 transition-all cursor-pointer"
-                      >
-                        <option value="إعلان عاجل">إعلان عاجل</option>
-                        <option value="تهنئة">تهنئة (عيد / مناسبة)</option>
-                        <option value="تعزية">تعزية ومواساة</option>
-                        <option value="مناسبة وطنية">مناسبة وطنية</option>
-                        <option value="خبر عام">خبر عام</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-white/70 mb-1.5">نص الإعلان أو التهنئة</label>
-                      <textarea
-                        rows={3}
-                        value={globalAnnMessage}
-                        onChange={(e) => setGlobalAnnMessage(e.target.value)}
-                        placeholder="اكتب تفاصيل الإعلان أو التهنئة أو التعزية هنا..."
-                        className="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2.5 text-white text-xs outline-none focus:border-amber-500 transition-all resize-none"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-white/70 mb-1.5">صورة أو تصميم المناسبة (اختياري)</label>
-                      <div className="flex items-center gap-3">
-                        <label className="flex-1 border border-dashed border-white/20 hover:border-amber-500 rounded-xl p-3 text-center cursor-pointer bg-black/20 hover:bg-black/40 transition-all">
-                          <span className="text-[11px] font-bold text-white/70">اختر صورة المناسبة...</span>
-                          <input type="file" accept="image/*" onChange={handleGlobalAnnImageUpload} className="hidden" />
-                        </label>
-                        {globalAnnImage && (
-                          <div className="w-12 h-12 rounded-xl overflow-hidden border border-white/20 shrink-0">
-                            <img src={globalAnnImage} alt="Preview" className="w-full h-full object-cover" />
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-white/70 mb-1.5">مكان الظهور</label>
-                      <select
-                        value={globalAnnLocation}
-                        onChange={(e) => setGlobalAnnLocation(e.target.value as any)}
-                        className="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2.5 text-white text-xs outline-none focus:border-amber-500 transition-all cursor-pointer"
-                      >
-                        <option value="both">الكل (بانر، شريط، ونافذة منبثقة عند الفتح)</option>
-                        <option value="popup">نافذة منبثقة تنبثق عند فتح التطبيق فقط</option>
-                        <option value="top_banner">بانر / إشعار أعلى الشاشة الرئيسية فقط</option>
-                        <option value="ticker">شريط الإعلانات المتحرك فقط</option>
-                      </select>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-white/70 mb-1.5">اللوحات المستهدفة</label>
-                      <select
-                        value={globalAnnTargets[0]}
-                        onChange={(e) => setGlobalAnnTargets([e.target.value])}
-                        className="w-full bg-black/60 border border-white/10 rounded-xl px-4 py-2.5 text-white text-xs outline-none focus:border-amber-500 transition-all cursor-pointer"
-                      >
-                        <option value="all">جميع اللوحات (إدارة، طالب، أستاذ، ولي أمر، سائق)</option>
-                        <option value="admin">لوحة الإدارة فقط</option>
-                        <option value="student">لوحة الطالب فقط</option>
-                        <option value="teacher">لوحة الأستاذ فقط</option>
-                        <option value="parent">لوحة ولي الأمر فقط</option>
-                        <option value="driver">لوحة السائق فقط</option>
-                      </select>
-                    </div>
-
-                    {globalAnnPublishing && (
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between text-[11px] font-bold text-amber-400">
-                          <span>جاري النشر والرفع لجميع المستخدمين...</span>
-                          <span>{globalAnnProgress}%</span>
-                        </div>
-                        <div className="w-full h-2 bg-black/60 rounded-full overflow-hidden border border-white/10">
-                          <div 
-                            className="h-full bg-gradient-to-r from-amber-500 to-amber-300 transition-all duration-300"
-                            style={{ width: `${globalAnnProgress}%` }}
-                          />
-                        </div>
-                      </div>
-                    )}
-
-                    <button
-                      type="submit"
-                      disabled={globalAnnPublishing}
-                      className="w-full bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 disabled:opacity-50 text-black font-black text-xs py-3 rounded-xl shadow-lg transition-all cursor-pointer"
-                    >
-                      {globalAnnPublishing ? 'جاري النشر...' : 'نشر الإعلان فوراً لجميع المستخدمين'}
-                    </button>
-                  </form>
-
-                  {/* Published Announcements List */}
-                  <div className="lg:col-span-2 bg-black/40 border border-white/5 rounded-3xl p-6 space-y-4">
-                    <h4 className="font-bold text-white text-sm flex items-center gap-2">
-                      <Megaphone size={16} className="text-purple-400" />
-                      الإعلانات والتبريكات المنشورة حالياً ({publishedGlobalAnns.length})
-                    </h4>
-
-                    <div className="space-y-3 max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
-                      {publishedGlobalAnns.length === 0 ? (
-                        <div className="text-center py-16 text-white/30 text-xs">لا توجد إعلانات أو تهانٍ منشورة حالياً.</div>
-                      ) : (
-                        publishedGlobalAnns.map((item) => (
-                          <div key={item.id} className="bg-black/60 border border-white/10 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center gap-4 justify-between relative group">
-                            {item.imageUrl && (
-                              <div className="w-20 h-16 rounded-xl overflow-hidden shrink-0 border border-white/10">
-                                <img src={item.imageUrl} alt="" className="w-full h-full object-cover" />
-                              </div>
-                            )}
-                            <div className="flex-1 text-right min-w-0">
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold text-[10px]">
-                                  {item.category || 'إعلان'}
-                                </span>
-                                <span className="text-white/40 text-[10px]">
-                                  {new Date(item.timestampMs || Date.now()).toLocaleDateString('ar-SA')}
-                                </span>
-                              </div>
-                              <h5 className="font-bold text-white text-sm truncate">{item.title}</h5>
-                              <p className="text-white/70 text-xs line-clamp-2">{item.message}</p>
-                            </div>
-                            <button
-                              onClick={() => handleDeleteGlobalAnn(item)}
-                              className="px-3 py-1.5 rounded-xl bg-red-500/20 hover:bg-red-500 text-red-400 hover:text-white font-bold text-[11px] transition-all cursor-pointer"
-                            >
-                              حذف
-                            </button>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Confirmation Modal for Deleting Announcement */}
-              {announcementToDelete && (
-                <div className="fixed inset-0 z-[99999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md" dir="rtl">
-                  <div className="bg-[#121829] border border-red-500/40 rounded-3xl p-6 max-w-md w-full shadow-[0_0_50px_rgba(239,68,68,0.2)] space-y-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-2xl bg-red-500/20 text-red-400 flex items-center justify-center shrink-0 border border-red-500/30">
-                        <Trash2 size={24} />
-                      </div>
-                      <div>
-                        <h4 className="font-black text-white text-base">تأكيد حذف الإعلان أو التهنئة</h4>
-                        <p className="text-white/50 text-[11px]">هذا الإجراء نهائي وسيتم إزالة الإعلان من أجهزة جميع المستخدمين.</p>
-                      </div>
-                    </div>
-
-                    <div className="bg-black/50 border border-white/10 rounded-2xl p-4 space-y-1">
-                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold">
-                        {announcementToDelete.category || 'إعلان'}
-                      </span>
-                      <h5 className="font-bold text-white text-sm mt-1">{announcementToDelete.title}</h5>
-                      <p className="text-white/70 text-xs line-clamp-2">{announcementToDelete.message}</p>
-                    </div>
-
-                    <div className="flex items-center gap-3 pt-2">
-                      <button
-                        onClick={confirmDeleteGlobalAnn}
-                        className="flex-1 py-3 rounded-xl bg-red-500 hover:bg-red-600 text-white font-black text-xs shadow-lg transition-all cursor-pointer"
-                      >
-                        نعم، حذف الإعلان نهائياً
-                      </button>
-                      <button
-                        onClick={() => setAnnouncementToDelete(null)}
-                        className="flex-1 py-3 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs transition-all cursor-pointer"
-                      >
-                        إلغاء
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </section>
-          </div>
+          <MediaManagementSection triggerToast={triggerToast} />
         )}
 
         {activeTab === 'errors' && (
@@ -4715,13 +3434,15 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
       {/* Universal Developer Bottom Tab Bar */}
       <nav className="fixed bottom-0 left-0 right-0 z-[999] h-20 bg-[#050A18]/95 backdrop-blur-xl border-t border-white/10 flex items-center justify-around px-2 pb-6 pt-2 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] overflow-x-auto no-scrollbar">
         {[
+          { id: 'users_directory', name: 'المستخدمون', icon: Users },
           { id: 'health', name: 'الصحة', icon: Activity },
           { id: 'school_management', name: 'المدارس', icon: Building },
+          { id: 'remote_config', name: 'التحكم السحابي', icon: SlidersHorizontal },
+          { id: 'maintenance', name: 'الصيانة والأرشفة', icon: Wrench },
           { id: 'simulator', name: 'المحاكي', icon: Radio },
           { id: 'ai_studio', name: 'الذكاء', icon: Sparkles },
           { id: 'licensing', name: 'التراخيص', icon: Award },
           { id: 'security', name: 'الأمان', icon: ShieldAlert },
-          { id: 'maintenance', name: 'الصيانة', icon: SlidersHorizontal },
           { id: 'data_integrity', name: 'البيانات', icon: ShieldCheck }
         ].map((tab) => {
           const isSelected = activeTab === tab.id;
@@ -4748,24 +3469,6 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
           );
         })}
       </nav>
-
-      {historyModalAsset && (
-        <BairaqAssetHistoryModal
-          assetId={historyModalAsset.id}
-          assetTitle={historyModalAsset.title}
-          onClose={() => setHistoryModalAsset(null)}
-          onRestored={(url) => {
-            setHeaderPoses(prev => {
-              const next = { ...prev };
-              const aliases = POSE_ALIASES_MAP[historyModalAsset.id] || [];
-              const keys = Array.from(new Set([historyModalAsset.id, ...aliases]));
-              keys.forEach(k => next[k] = url);
-              return next;
-            });
-          }}
-          triggerToast={triggerToast}
-        />
-      )}
     </div>
   );
 }

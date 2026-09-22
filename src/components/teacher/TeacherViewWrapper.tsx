@@ -18,7 +18,7 @@ export const TeacherViewWrapper: React.FC<TeacherViewWrapperProps> = ({
       fallbackSubtitle="تمت حماية لوحة الأستاذ وعزل الخطأ بنجاح، يمكنك النقر لإعادة المحاولة بأمان."
       onReset={onReset}
     >
-      <div className="w-full relative transition-all duration-300">
+      <div className="w-full h-full flex-1 flex flex-col min-h-0 relative transition-all duration-300">
         {children}
       </div>
     </ModularErrorBoundary>

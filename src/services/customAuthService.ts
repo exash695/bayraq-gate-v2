@@ -13,6 +13,19 @@ export interface CustomUser {
   studentCode?: string | null;
 }
 
+export function getOrCreateDeviceId(): string {
+  try {
+    let deviceId = localStorage.getItem('bairaq_device_uuid');
+    if (!deviceId) {
+      deviceId = 'DEV-' + Math.random().toString(36).substring(2, 9).toUpperCase() + '-' + Date.now().toString(36).toUpperCase();
+      localStorage.setItem('bairaq_device_uuid', deviceId);
+    }
+    return deviceId;
+  } catch (e) {
+    return 'DEV-FALLBACK-BROWSER';
+  }
+}
+
 class CustomAuthService {
   private tokenKey = 'bairaq_jwt_token';
   private currentUser: CustomUser | null = null;
@@ -27,7 +40,10 @@ class CustomAuthService {
     if (token) {
       try {
         const res = await fetch('/api/auth/me', {
-          headers: { 'Authorization': `Bearer ${token}` }
+          headers: { 
+            'Authorization': `Bearer ${token}`,
+            'x-device-id': getOrCreateDeviceId()
+          }
         });
         const data = await res.json();
         if (data.success) {
@@ -57,15 +73,30 @@ class CustomAuthService {
     this.listeners.forEach(cb => cb(this.currentUser));
   }
 
-  public async loginWithEmail(email: string, password: string):Promise<CustomUser> {
+  public async loginWithEmail(email: string, password: string): Promise<CustomUser> {
+    const deviceId = getOrCreateDeviceId();
     const res = await fetch('/api/auth/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password })
+      headers: { 
+        'Content-Type': 'application/json',
+        'x-device-id': deviceId
+      },
+      body: JSON.stringify({ email, password, deviceId })
     });
     const data = await res.json();
     if (!data.success) {
-      throw new Error(data.message || 'Invalid credentials');
+      if (data.message === 'SCHOOL_SUSPENDED' || data.isSchoolSuspended) {
+        const err = new Error(data.error || data.message || 'تم تعطيل وتجميد حساب وخدمات هذه المدرسة من قبل إدارة المنظومة (المطور)');
+        (err as any).isSchoolSuspended = true;
+        (err as any).schoolName = data.schoolName;
+        throw err;
+      }
+      if (data.message === 'ACCOUNT_BANNED' || data.isBanned) {
+        const err = new Error(data.error || 'تم حظر هذا الحساب أو الجهاز من قبل إدارة الأمان');
+        (err as any).isBanned = true;
+        throw err;
+      }
+      throw new Error(data.error || data.message || 'بيانات الدخول غير صحيحة');
     }
     
     localStorage.setItem(this.tokenKey, data.token);
@@ -75,19 +106,29 @@ class CustomAuthService {
   }
 
   public async loginWithCode(code: string, expectedSchoolId?: string): Promise<CustomUser> {
+    const deviceId = getOrCreateDeviceId();
     const res = await fetch('/api/auth/login-code', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: code.trim(), schoolId: expectedSchoolId?.trim() })
+      headers: { 
+        'Content-Type': 'application/json',
+        'x-device-id': deviceId
+      },
+      body: JSON.stringify({ code: code.trim(), schoolId: expectedSchoolId?.trim(), deviceId })
     });
     const data = await res.json();
     if (!data.success) {
+      if (data.message === 'SCHOOL_SUSPENDED' || data.isSchoolSuspended) {
+        const err = new Error(data.error || data.message || 'تم تعطيل وتجميد حساب وخدمات هذه المدرسة من قبل إدارة المنظومة (المطور)');
+        (err as any).isSchoolSuspended = true;
+        (err as any).schoolName = data.schoolName;
+        throw err;
+      }
       if (data.message === 'ACCOUNT_BANNED' || data.isBanned) {
-        const err = new Error('ACCOUNT_BANNED');
+        const err = new Error(data.error || 'تم حظر هذا الحساب أو الجهاز من قبل إدارة المنظومة');
         (err as any).isBanned = true;
         throw err;
       }
-      throw new Error(data.message || 'كود الدخول غير صحيح');
+      throw new Error(data.error || data.message || 'كود الدخول غير صحيح');
     }
     
     localStorage.setItem(this.tokenKey, data.token);
@@ -108,6 +149,22 @@ class CustomAuthService {
     }
     // Auto login after register
     return this.loginWithEmail(email, password);
+  }
+
+  public async loginWithGoogle(email?: string, name?: string): Promise<CustomUser> {
+    const res = await fetch('/api/auth/google-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, name })
+    });
+    const data = await res.json();
+    if (!data.success) {
+      throw new Error(data.message || 'فشل تسجيل الدخول عبر Google');
+    }
+    localStorage.setItem(this.tokenKey, data.token);
+    this.currentUser = data.user;
+    this.notifyListeners();
+    return data.user;
   }
 
   public async logout() {

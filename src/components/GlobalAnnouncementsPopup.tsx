@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, orderBy, limit, onSnapshot } from '@/src/lib/firebase';
-import { db } from '../lib/firebase';
 import { Sparkles, X, Bell, Maximize2, Megaphone } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { realtimeManager } from '../lib/realtimeManager';
 
 interface GlobalAnnouncementsPopupProps {
   dashboardType: 'admin' | 'student' | 'teacher' | 'parent' | 'driver';
@@ -16,18 +15,17 @@ export const GlobalAnnouncementsPopup: React.FC<GlobalAnnouncementsPopupProps> =
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
 
   useEffect(() => {
-    const q = query(collection(db, 'broadcasts'));
+    let isCancelled = false;
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
+    const processAnnouncements = (items: any[]) => {
       const now = Date.now();
-      const list = snapshot.docs
-        .map(docSnap => {
-          const data = docSnap.data();
+      const list = items
+        .map((data: any) => {
           const timestampMs = data.timestampMs || ((data.timestamp && typeof data.timestamp.toMillis === 'function')
             ? data.timestamp.toMillis()
-            : Date.now());
+            : (typeof data.timestamp === 'number' ? data.timestamp : Date.now()));
           return {
-            id: docSnap.id,
+            id: data.id,
             ...data,
             timestampMs
           };
@@ -79,28 +77,77 @@ export const GlobalAnnouncementsPopup: React.FC<GlobalAnnouncementsPopupProps> =
           if (item.schoolId && schoolId && item.schoolId !== '' && item.schoolId !== schoolId) return false;
           return true;
         })
-        .sort((a, b) => b.timestampMs - a.timestampMs);
+        .sort((a: any, b: any) => b.timestampMs - a.timestampMs);
 
-      setAnnouncementsList(list);
+      if (!isCancelled) {
+        setAnnouncementsList(list);
 
-      if (list.length > 0) {
-        const undismissed = list.find((item: any) => !localStorage.getItem(`dismissed_popup_${item.id}`));
-        if (undismissed) {
-          setPopupAnnouncement(undismissed);
-          setIsOpen(true);
+        if (list.length > 0) {
+          const undismissed = list.find((item: any) => !localStorage.getItem(`dismissed_popup_${item.id}`));
+          if (undismissed) {
+            setPopupAnnouncement(undismissed);
+            setIsOpen(true);
+          } else {
+            setPopupAnnouncement(list[0]);
+            setIsOpen(false);
+          }
         } else {
-          setPopupAnnouncement(list[0]);
+          setPopupAnnouncement(null);
           setIsOpen(false);
         }
-      } else {
-        setPopupAnnouncement(null);
-        setIsOpen(false);
       }
-    }, (err) => {
-      console.error("Popup announcements listener error:", err);
+    };
+
+    const fetchAnnouncements = async () => {
+      try {
+        const res = await fetch('/api/firestore-docs/broadcasts');
+        if (!res.ok) return;
+        const json = await res.json();
+        const items = Array.isArray(json.items) ? json.items : (Array.isArray(json.data) ? json.data : []);
+        
+        try {
+          localStorage.setItem('cached_global_broadcasts', JSON.stringify(items));
+        } catch {
+          // ignore localStorage errors
+        }
+
+        processAnnouncements(items);
+      } catch (err: any) {
+        // Handle transient network offline/reconnects gracefully without noisy console.error
+        if (err?.name !== 'AbortError') {
+          console.warn("Popup announcements background sync notice:", err?.message || err);
+        }
+        try {
+          const cached = localStorage.getItem('cached_global_broadcasts');
+          if (cached && !isCancelled) {
+            const items = JSON.parse(cached);
+            if (Array.isArray(items)) {
+              processAnnouncements(items);
+            }
+          }
+        } catch {
+          // ignore cache parse errors
+        }
+      }
+    };
+
+    fetchAnnouncements();
+
+    const unsubRealtime = realtimeManager.subscribe('broadcasts', () => {
+      fetchAnnouncements();
     });
 
-    return () => unsubscribe();
+    const handleLocalEvent = () => fetchAnnouncements();
+    window.addEventListener('app_broadcast_event', handleLocalEvent);
+
+    const interval = setInterval(fetchAnnouncements, 8000);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(interval);
+      window.removeEventListener('app_broadcast_event', handleLocalEvent);
+      unsubRealtime();
+    };
   }, [dashboardType, schoolId]);
 
   const handleClose = () => {

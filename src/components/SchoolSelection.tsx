@@ -23,7 +23,9 @@ import {
   Activity,
   ArrowRight,
   Tv,
-  Check
+  Check,
+  Lock,
+  Clock
 } from 'lucide-react';
 
 import { safeStorage } from '../lib/storage';
@@ -343,8 +345,13 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
   const [sheetCode, setSheetCode] = useState<string>('');
   const [sheetError, setSheetError] = useState<string>('');
   const [showNotificationModal, setShowNotificationModal] = useState<boolean>(false);
+  const [blockedSchoolNotice, setBlockedSchoolNotice] = useState<{
+    name: string;
+    type: 'suspended' | 'coming_soon';
+    message: string;
+  } | null>(null);
 
-  // Fetch active schools directly from PostgreSQL internal API
+  // Fetch active and suspended schools directly from PostgreSQL internal API
   useEffect(() => {
     let isMounted = true;
     
@@ -352,9 +359,7 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
       try {
         const list = await schoolService.fetchSchools();
         if (isMounted) {
-          // Filter out inactive schools
-          const activeList = list.filter((s) => s.status !== 'inactive');
-          setApiSchools(activeList);
+          setApiSchools(list);
         }
       } catch (err) {
         console.warn('Error loading schools from PostgreSQL:', err);
@@ -383,33 +388,76 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
       .trim();
   };
 
+  const isAcademySchool = (school: any) => {
+    if (!school) return false;
+    const norm = normalizeSchoolName(school.name);
+    return (
+      school.id === 'school8' ||
+      school.id === 'general' ||
+      school.id === 'academy' ||
+      norm.includes('اكاديميه') ||
+      norm.includes('اكاديمية') ||
+      norm.includes('بيرقالرقميه') ||
+      norm.includes('بيرقالرقمية')
+    );
+  };
+
+  const isSchoolSuspended = (school: any) => {
+    if (!school) return false;
+    return (
+      school.status === 'suspended' ||
+      school.status === 'inactive' ||
+      school.status === 'disabled' ||
+      school.status === 'frozen' ||
+      school.isSuspended === true
+    );
+  };
+
   // Merge predefined static list with real-time PostgreSQL updates with strict deduplication
   const allSchools = useMemo(() => {
     const seenIds = new Set<string>();
     const seenNames = new Set<string>();
 
-    const merged = SCHOOLS_DATA.map(sysSchool => {
-      const sysNorm = normalizeSchoolName(sysSchool.name);
-      const fs = apiSchools.find(f => f.id === sysSchool.id || normalizeSchoolName(f.name) === sysNorm);
-      const loc = fs?.location || fs?.city || fs?.governorate || (sysSchool as any).location || (sysSchool as any).city || 'الديوانية - غماس';
-      
-      const item = {
-        ...sysSchool,
-        name: fs?.name || sysSchool.name,
-        type: fs?.type || sysSchool.type,
-        city: loc,
-        location: loc,
-        students: fs?.students || 350,
-        schoolBairaqImageUrl: fs?.schoolBairaqImageUrl || sysSchool.schoolBairaqImageUrl,
-        schoolLogoUrl: fs?.schoolLogoUrl || sysSchool.schoolLogoUrl,
-      };
+    let deletedSchoolIds: string[] = [];
+    try {
+      if (typeof localStorage !== 'undefined') {
+        const savedDeleted = localStorage.getItem("s6_deleted_system_schools");
+        if (savedDeleted) {
+          deletedSchoolIds = JSON.parse(savedDeleted);
+        }
+      }
+    } catch (e) {}
 
-      seenIds.add(item.id);
-      seenNames.add(normalizeSchoolName(item.name));
-      return item;
-    });
+    const merged = SCHOOLS_DATA
+      .filter(sysSchool => !deletedSchoolIds.includes(sysSchool.id))
+      .map(sysSchool => {
+        const sysNorm = normalizeSchoolName(sysSchool.name);
+        const fs = apiSchools.find(f => f.id === sysSchool.id || normalizeSchoolName(f.name) === sysNorm);
+        const loc = fs?.location || fs?.city || fs?.governorate || (sysSchool as any).location || (sysSchool as any).city || 'الديوانية - غماس';
+        const st = fs?.status || (sysSchool as any).status || 'active';
+        
+        const item = {
+          ...sysSchool,
+          name: fs?.name || sysSchool.name,
+          type: fs?.type || sysSchool.type,
+          city: loc,
+          location: loc,
+          status: st,
+          isSuspended: (fs as any)?.isSuspended || st === 'suspended',
+          students: fs?.students || 350,
+          schoolBairaqImageUrl: fs?.schoolBairaqImageUrl || sysSchool.schoolBairaqImageUrl,
+          schoolLogoUrl: fs?.schoolLogoUrl || sysSchool.schoolLogoUrl,
+        };
+
+        seenIds.add(item.id);
+        seenNames.add(normalizeSchoolName(item.name));
+        return item;
+      });
 
     apiSchools.forEach((fs) => {
+      if (deletedSchoolIds.includes(fs.id) || fs.id === 'school_awail_ghamas' || fs.name === 'مدرسة جديدة') {
+        return;
+      }
       const fsNorm = normalizeSchoolName(fs.name);
       if (!seenIds.has(fs.id) && !seenNames.has(fsNorm)) {
         seenIds.add(fs.id);
@@ -419,6 +467,8 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
           type: fs.type || 'ميدان تعليمي',
           city: fs.location || fs.city || fs.governorate || 'الديوانية - غماس',
           location: fs.location || fs.city || fs.governorate || 'الديوانية - غماس',
+          status: fs.status || 'active',
+          isSuspended: (fs as any)?.isSuspended || fs.status === 'suspended',
           students: fs.students || fs.studentsCount || 350,
           schoolBairaqImageUrl: fs.schoolBairaqImageUrl || getSchoolBairaqImageUrl(fs.id, fs.name),
           schoolLogoUrl: fs.schoolLogoUrl || getOfficialSchoolLogoUrl(fs.id, fs.name),
@@ -483,6 +533,26 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
     safeStorage.setItem('s6_preferred_school', schoolId);
     safeStorage.setItem('s6_selectedSchoolId', schoolId);
     onSelectSchool(schoolId);
+  };
+
+  const handleCardClick = (school: any) => {
+    if (isSchoolSuspended(school)) {
+      setBlockedSchoolNotice({
+        name: school.name,
+        type: 'suspended',
+        message: `تم تعطيل وتجميد (${school.name}) حالياً من قبل إدارة المطور. تم إيقاف الدخول وكافة الخدمات مؤقتاً.`
+      });
+      return;
+    }
+    if (isAcademySchool(school)) {
+      setBlockedSchoolNotice({
+        name: school.name,
+        type: 'coming_soon',
+        message: 'أكاديمية بيرق الرقمية - قريباً | يجري حالياً تجهيز المنصة الإلكترونية لنخبة الأساتذة والدورات التفاعلية المباشرة.'
+      });
+      return;
+    }
+    handleSchoolClick(school.id);
   };
 
   const handleSheetSubmit = () => {
@@ -698,6 +768,8 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
               const theme = SCHOOL_THEMES[school.id] || DEFAULT_THEME;
               const coverUrl = school.schoolBairaqImageUrl || getSchoolBairaqImageUrl(school.id, school.name);
               const schoolCity = school.location || school.city || theme.city;
+              const isSuspended = isSchoolSuspended(school);
+              const isAcademy = isAcademySchool(school);
 
               return (
                 <motion.div
@@ -705,22 +777,26 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ duration: 0.25, delay: index * 0.03 }}
-                  onClick={() => handleSchoolClick(school.id)}
-                  className={`group relative w-full min-h-[102px] sm:min-h-[108px] rounded-2xl sm:rounded-3xl overflow-hidden cursor-pointer border transition-all duration-300 transform-gpu hover:scale-[1.01] active:scale-[0.99] bg-gradient-to-l ${theme.bgGradient}`}
+                  onClick={() => handleCardClick(school)}
+                  className={`group relative w-full min-h-[102px] sm:min-h-[108px] rounded-2xl sm:rounded-3xl overflow-hidden cursor-pointer border transition-all duration-300 transform-gpu hover:scale-[1.01] active:scale-[0.99] bg-gradient-to-l ${
+                    isSuspended 
+                      ? 'from-[#1a0f18] via-[#0f0c18] to-[#0a0712] border-rose-500/40 opacity-90' 
+                      : theme.bgGradient
+                  }`}
                   style={{
-                    borderColor: theme.borderColor,
-                    boxShadow: theme.glowShadow
+                    borderColor: isSuspended ? '#f43f5e66' : theme.borderColor,
+                    boxShadow: isSuspended ? '0 0 15px rgba(244,63,94,0.15)' : theme.glowShadow
                   }}
                   id={`school-card-${school.id}`}
                 >
                   {/* Subtle Neon Inner Glow Highlight on Hover */}
                   <div 
                     className="absolute inset-0 rounded-2xl sm:rounded-3xl pointer-events-none transition-opacity duration-300 opacity-0 group-hover:opacity-100 border"
-                    style={{ borderColor: `${theme.accentColor}80` }}
+                    style={{ borderColor: isSuspended ? '#f43f5e99' : `${theme.accentColor}80` }}
                   />
 
-                  {/* Left Side: School Cover Image (Full brilliance, clarity and lighting with zero dimming overlays) */}
-                  <div className="absolute top-0 bottom-0 left-0 w-[38%] sm:w-[42%] md:w-[45%] overflow-hidden pointer-events-none flex items-center justify-center">
+                  {/* Left Side: School Cover Image */}
+                  <div className={`absolute top-0 bottom-0 left-0 w-[38%] sm:w-[42%] md:w-[45%] overflow-hidden pointer-events-none flex items-center justify-center ${isSuspended ? 'grayscale-[50%] opacity-60' : ''}`}>
                     <SchoolCardCoverImage
                       schoolId={school.id}
                       imageUrl={coverUrl}
@@ -731,7 +807,7 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
                   {/* Right Side: School Content Information (RTL Layout) */}
                   <div className="relative z-10 w-full h-full p-3 sm:p-3.5 md:p-4 flex flex-col justify-between max-w-[70%] sm:max-w-[65%]">
                     
-                    {/* Top Row: School Logo (Right) + Full School Name & Location */}
+                    {/* Top Row: School Logo (Right) + Full School Name & Location & Badges */}
                     <div className="flex items-start gap-2.5 sm:gap-3">
                       
                       {/* 1. School Official Logo in Circular Glowing Frame */}
@@ -740,18 +816,36 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
                           schoolId={school.id}
                           schoolName={school.name}
                           customLogoUrl={school.schoolLogoUrl}
-                          themeColor={theme.accentColor}
+                          themeColor={isSuspended ? '#f43f5e' : theme.accentColor}
                         />
                       </div>
 
-                      {/* Text details column: 2. Full School Name & 3. Full Location */}
+                      {/* Text details column: Full School Name, Status Badge & Location */}
                       <div className="flex flex-col justify-center text-right space-y-1 min-w-0 flex-1">
-                        {/* 2. School Name - Full Display (no truncation/ellipsis) */}
-                        <h2 className="text-xs sm:text-[13px] md:text-sm font-black text-white leading-snug tracking-tight break-words group-hover:text-amber-300 transition-colors">
+                        
+                        {/* Status Badges: Frozen / Coming Soon */}
+                        {isSuspended && (
+                          <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-500/20 border border-rose-500/40 text-rose-300 text-[9px] sm:text-[10px] font-black w-fit">
+                            <Lock size={10} className="text-rose-400 shrink-0" />
+                            <span className="whitespace-nowrap">معطلة أو مجمدة من قبل المطور</span>
+                          </div>
+                        )}
+
+                        {!isSuspended && isAcademy && (
+                          <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-300 text-[9px] sm:text-[10px] font-black w-fit">
+                            <Sparkles size={10} className="text-amber-400 shrink-0 animate-pulse" />
+                            <span className="whitespace-nowrap">قريباً • إطلاق مرتقب</span>
+                          </div>
+                        )}
+
+                        {/* 2. School Name */}
+                        <h2 className={`text-xs sm:text-[13px] md:text-sm font-black leading-snug tracking-tight break-words transition-colors ${
+                          isSuspended ? 'text-white/80 group-hover:text-rose-300' : 'text-white group-hover:text-amber-300'
+                        }`}>
                           {school.name}
                         </h2>
 
-                        {/* 3. Location / District - Full Display (never truncated) */}
+                        {/* 3. Location / District */}
                         <div className="flex items-start gap-1 text-[#00E5FF]/90 sm:text-[#00E5FF] text-[10px] sm:text-[11px] font-semibold leading-tight pt-0.5">
                           <MapPin size={12} className="text-[#00E5FF] shrink-0 mt-0.5 drop-shadow-[0_0_4px_rgba(0,229,255,0.4)]" />
                           <span className="break-words leading-tight">{schoolCity}</span>
@@ -759,19 +853,45 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
                       </div>
                     </div>
 
-                    {/* Bottom Row / Beneath Logo & Info: 4. Enter School Button ("دخول المدرسة") */}
+                    {/* Bottom Row: Action Button */}
                     <div className="flex items-center justify-start pr-0 sm:pr-0.5 pt-1.5">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleSchoolClick(school.id);
-                        }}
-                        className="h-6 sm:h-6.5 px-3 rounded-full bg-white/[0.08] hover:bg-white/[0.18] active:scale-95 border border-white/15 hover:border-white/30 text-white font-bold text-[10px] sm:text-xs flex items-center gap-1 backdrop-blur-md transition-all shadow-sm group/btn"
-                        id={`btn-enter-school-${school.id}`}
-                      >
-                        <span>دخول المدرسة</span>
-                        <ChevronLeft size={12} className="text-white/70 transition-transform group-hover/btn:-translate-x-0.5" />
-                      </button>
+                      {isSuspended ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleCardClick(school);
+                          }}
+                          className="h-6 sm:h-6.5 px-3 rounded-full bg-rose-500/20 hover:bg-rose-500/30 active:scale-95 border border-rose-500/40 text-rose-300 font-black text-[10px] sm:text-xs flex items-center gap-1.5 backdrop-blur-md transition-all shadow-sm group/btn"
+                          id={`btn-enter-school-${school.id}`}
+                        >
+                          <Lock size={11} className="text-rose-400" />
+                          <span>معطلة من قبل المطور</span>
+                        </button>
+                      ) : isAcademy ? (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleCardClick(school);
+                          }}
+                          className="h-6 sm:h-6.5 px-3.5 rounded-full bg-amber-500/20 hover:bg-amber-500/30 active:scale-95 border border-amber-500/40 text-amber-300 font-black text-[10px] sm:text-xs flex items-center gap-1.5 backdrop-blur-md transition-all shadow-sm group/btn"
+                          id={`btn-enter-school-${school.id}`}
+                        >
+                          <Clock size={11} className="text-amber-400 animate-pulse" />
+                          <span>قريباً</span>
+                        </button>
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleCardClick(school);
+                          }}
+                          className="h-6 sm:h-6.5 px-3 rounded-full bg-white/[0.08] hover:bg-white/[0.18] active:scale-95 border border-white/15 hover:border-white/30 text-white font-bold text-[10px] sm:text-xs flex items-center gap-1 backdrop-blur-md transition-all shadow-sm group/btn"
+                          id={`btn-enter-school-${school.id}`}
+                        >
+                          <span>دخول المدرسة</span>
+                          <ChevronLeft size={12} className="text-white/70 transition-transform group-hover/btn:-translate-x-0.5" />
+                        </button>
+                      )}
                     </div>
 
                   </div>
@@ -896,6 +1016,73 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
                 className="w-full h-11 rounded-2xl bg-white/10 hover:bg-white/15 text-white text-xs font-black transition-all"
               >
                 إغلاق الإشعارات
+              </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Blocked / Suspended / Coming Soon School Modal */}
+      <AnimatePresence>
+        {blockedSchoolNotice && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 select-none" dir="rtl">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setBlockedSchoolNotice(null)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-md"
+            />
+            <motion.div
+              initial={{ scale: 0.92, opacity: 0, y: 10 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.92, opacity: 0, y: 10 }}
+              className={`relative w-full max-w-sm rounded-3xl p-6 shadow-2xl z-10 space-y-4 border text-center ${
+                blockedSchoolNotice.type === 'suspended'
+                  ? 'bg-[#130d1b] border-rose-500/40 shadow-[0_0_50px_rgba(244,63,94,0.25)]'
+                  : 'bg-[#0f1424] border-amber-500/40 shadow-[0_0_50px_rgba(245,158,11,0.25)]'
+              }`}
+            >
+              <div className="flex justify-center">
+                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center border shadow-inner ${
+                  blockedSchoolNotice.type === 'suspended'
+                    ? 'bg-rose-500/15 border-rose-500/30 text-rose-400'
+                    : 'bg-amber-500/15 border-amber-500/30 text-amber-400'
+                }`}>
+                  {blockedSchoolNotice.type === 'suspended' ? (
+                    <Lock size={28} />
+                  ) : (
+                    <Clock size={28} className="animate-pulse" />
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <h3 className="text-base font-black text-white">
+                  {blockedSchoolNotice.name}
+                </h3>
+                <div className="inline-block px-3 py-1 rounded-full text-xs font-bold border ${
+                  blockedSchoolNotice.type === 'suspended'
+                    ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+                    : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                }">
+                  {blockedSchoolNotice.type === 'suspended' ? '🚫 معطلة أو مجمدة من قبل المطور' : '✨ قريباً • إطلاق مرتقب'}
+                </div>
+              </div>
+
+              <p className="text-xs text-white/70 leading-relaxed px-2">
+                {blockedSchoolNotice.message}
+              </p>
+
+              <button
+                onClick={() => setBlockedSchoolNotice(null)}
+                className={`w-full h-11 rounded-2xl font-black text-xs transition-all active:scale-95 shadow-md ${
+                  blockedSchoolNotice.type === 'suspended'
+                    ? 'bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 border border-rose-500/40'
+                    : 'bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-black'
+                }`}
+              >
+                فهمت ذلك
               </button>
             </motion.div>
           </div>

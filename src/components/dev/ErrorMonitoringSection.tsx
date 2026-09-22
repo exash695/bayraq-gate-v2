@@ -37,7 +37,7 @@ export const ErrorMonitoringSection: React.FC = () => {
   const [errors, setErrors] = useState<SystemErrorItem[]>([]);
   const [severityFilter, setSeverityFilter] = useState<string>('all');
   const [serviceFilter, setServiceFilter] = useState<string>('all');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<string>('active');
   const [searchQuery, setSearchQuery] = useState('');
   const [expandedErrorId, setExpandedErrorId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
@@ -49,14 +49,30 @@ export const ErrorMonitoringSection: React.FC = () => {
     setTimeout(() => setFeedbackMsg(null), 4500);
   };
 
+  
+  const [isLoading, setIsLoading] = useState(false);
   useEffect(() => {
-    const unsubscribe = errorMonitoringService.subscribe((list) => {
-      setErrors(list);
-    });
-    return () => {
-      unsubscribe();
+    const fetchErrors = async () => {
+      setIsLoading(true);
+      try {
+        const res = await fetch('/api/system_errors');
+        if (res.ok) {
+          const data = await res.json();
+          data.sort((a, b) => new Date(b.lastSeen).getTime() - new Date(a.lastSeen).getTime());
+          setErrors(data);
+        }
+      } catch (err) {
+        console.error('Failed to fetch errors', err);
+      } finally {
+        setIsLoading(false);
+      }
     };
+    
+    fetchErrors();
+    const interval = setInterval(fetchErrors, 10000);
+    return () => clearInterval(interval);
   }, []);
+
 
   const handleCopy = (text: string, id: string) => {
     navigator.clipboard.writeText(text);
@@ -64,62 +80,93 @@ export const ErrorMonitoringSection: React.FC = () => {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  const handleStatusChange = async (signature: string, newStatus: ErrorStatus) => {
-    await errorMonitoringService.updateStatus(signature, newStatus);
+  
+  const handleRefreshData = async () => {
+    setIsLoading(true);
+    try {
+      const res = await fetch('/api/system_errors');
+      if (res.ok) {
+        const data = await res.json();
+        data.sort((a, b) => new Date(b.lastSeen).getTime() - new Date(a.lastSeen).getTime());
+        setErrors(data);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleStatusChange = async (targetId: string, newStatus: ErrorStatus) => {
+    // Optimistic update
+    setErrors(prev => prev.map(e => (e.id === targetId || e.errorId === targetId || e.signature === targetId) ? { ...e, status: newStatus } : e));
+    await errorMonitoringService.updateStatus(targetId, newStatus);
     await logActivity({
       action: 'تحديث حالة خطأ بالنظام',
       details: `تم تغيير حالة الخطأ إلى: ${newStatus}`,
-      targetId: signature,
+      targetId: targetId,
       targetType: 'system_error'
     });
+    handleRefreshData();
   };
 
-  const handleDelete = async (signature: string) => {
-    await errorMonitoringService.deleteError(signature);
+  const handleDelete = async (targetId: string) => {
+    setErrors(prev => prev.filter(e => e.id !== targetId && e.errorId !== targetId && e.signature !== targetId));
+    await errorMonitoringService.deleteError(targetId);
+    handleRefreshData();
   };
 
   const handleClearResolved = async () => {
+    setErrors(prev => prev.filter(e => e.status !== 'resolved' && e.status !== 'ignored'));
     await errorMonitoringService.clearAllResolved();
     showBanner('تم مسح كافة الأخطاء المحلولة بنجاح');
+    handleRefreshData();
   };
+
 
   // Smart Auto-Fix Handlers
   const handleSmartFix = async (err: SystemErrorItem) => {
-    setActionLoadingMap(prev => ({ ...prev, [err.signature]: true }));
+    const targetId = err.id || err.errorId || err.signature;
+    setActionLoadingMap(prev => ({ ...prev, [targetId]: true, [err.signature]: true }));
     try {
       const msg = err.errorMessage.toLowerCase();
       let res = { success: true, message: 'تم حل الخطأ وأرشفته بنجاح' };
 
       if (err.service === 'firestore' || msg.includes('permission') || msg.includes('auth')) {
-        res = await errorMonitoringService.resolvePermissionError(err.signature);
+        res = await errorMonitoringService.resolvePermissionError(targetId);
       } else if (err.service === 'network' || msg.includes('timeout') || msg.includes('504') || msg.includes('429')) {
-        res = await errorMonitoringService.resolveNetworkTimeout(err.signature);
+        res = await errorMonitoringService.resolveNetworkTimeout(targetId);
       } else if (err.service === 'ui' || msg.includes('typeerror') || msg.includes('undefined')) {
-        res = await errorMonitoringService.resolveUiRuntimeError(err.signature);
+        res = await errorMonitoringService.resolveUiRuntimeError(targetId);
       } else if (err.service === 'storage' || msg.includes('404') || msg.includes('not found') || msg.includes('image')) {
-        res = await errorMonitoringService.resolveStorageAssetError(err.signature);
+        res = await errorMonitoringService.resolveStorageAssetError(targetId);
       } else {
-        await errorMonitoringService.updateStatus(err.signature, 'resolved');
+        await errorMonitoringService.updateStatus(targetId, 'resolved');
       }
+
+      // Optimistic update
+      setErrors(prev => prev.map(e => (e.id === targetId || e.errorId === targetId || e.signature === targetId) ? { ...e, status: 'resolved' } : e));
 
       await logActivity({
         action: 'حل خطأ بالنظام تلقائياً',
-        details: `${err.errorId} (${err.service}) - ${res.message}`,
-        targetId: err.errorId,
+        details: `${err.errorId || targetId} (${err.service}) - ${res.message}`,
+        targetId: err.errorId || targetId,
         targetType: 'system_error_fix'
       });
 
       showBanner(res.message);
+      handleRefreshData();
     } catch (e: any) {
       showBanner(`فشلت محاولة الحل: ${e.message}`);
     } finally {
-      setActionLoadingMap(prev => ({ ...prev, [err.signature]: false }));
+      setActionLoadingMap(prev => ({ ...prev, [targetId]: false, [err.signature]: false }));
     }
   };
 
   const handleResolveAllCritical = async () => {
     setActionLoadingMap(prev => ({ ...prev, ['batch_critical']: true }));
     try {
+      setErrors(prev => prev.map(e => e.severity === 'critical' ? { ...e, status: 'resolved' } : e));
       const { count } = await errorMonitoringService.resolveBatchBySeverity('critical');
       await logActivity({
         action: 'حل كافة الأخطاء الحرجة دفعة واحدة',
@@ -127,6 +174,7 @@ export const ErrorMonitoringSection: React.FC = () => {
         targetType: 'batch_error_resolution'
       });
       showBanner(`تم حل وتصحيح ${count} خطأ حرج بالنظام دفعة واحدة بنجاح`);
+      handleRefreshData();
     } finally {
       setActionLoadingMap(prev => ({ ...prev, ['batch_critical']: false }));
     }
@@ -135,6 +183,7 @@ export const ErrorMonitoringSection: React.FC = () => {
   const handleResolveAllNetwork = async () => {
     setActionLoadingMap(prev => ({ ...prev, ['batch_network']: true }));
     try {
+      setErrors(prev => prev.map(e => e.service === 'network' ? { ...e, status: 'resolved' } : e));
       const { count } = await errorMonitoringService.resolveBatchByService('network');
       await logActivity({
         action: 'حل كافة استثناءات الشبكة دفعة واحدة',
@@ -142,45 +191,85 @@ export const ErrorMonitoringSection: React.FC = () => {
         targetType: 'batch_error_resolution'
       });
       showBanner(`تم حل وتنشيط ${count} استثناء شبكة دفعة واحدة`);
+      handleRefreshData();
     } finally {
       setActionLoadingMap(prev => ({ ...prev, ['batch_network']: false }));
     }
   };
 
+  
+  
+  
+  
+  
   const handleTriggerTestError = async () => {
     const testErrors = [
       {
-        service: 'firestore' as ErrorService,
+        signature: `test_err_${Date.now()}`,
+        service: 'firestore',
         module: 'collection:users',
         errorMessage: 'PERMISSION_DENIED: Missing or insufficient permissions on /users/test_user',
-        severity: 'critical' as ErrorSeverity,
+        severity: 'critical',
+        status: 'new',
+        occurrences: 1,
+        firstSeen: new Date().toISOString(),
+        lastSeen: new Date().toISOString(),
         action: 'test_simulation_probe'
       },
       {
-        service: 'network' as ErrorService,
+        signature: `test_err_${Date.now()}`,
+        service: 'network',
         module: 'api:worker:ai:chat',
         errorMessage: 'Network timeout (504 Gateway Timeout) when contacting AI Worker Gateway',
-        severity: 'warning' as ErrorSeverity,
+        severity: 'warning',
+        status: 'new',
+        occurrences: 1,
+        firstSeen: new Date().toISOString(),
+        lastSeen: new Date().toISOString(),
         action: 'test_simulation_probe'
       },
       {
-        service: 'ui' as ErrorService,
+        signature: `test_err_${Date.now()}`,
+        service: 'ui',
         module: 'DevDashboard',
         errorMessage: 'TypeError: Cannot read properties of undefined (reading "schoolConfig")',
-        severity: 'critical' as ErrorSeverity,
+        severity: 'critical',
+        status: 'new',
+        occurrences: 1,
+        firstSeen: new Date().toISOString(),
+        lastSeen: new Date().toISOString(),
         stackTrace: 'Error: Cannot read properties of undefined\n    at DevDashboard.render (DevDashboard.tsx:492)\n    at ReactCompositeComponent.mountComponent',
         action: 'test_simulation_probe'
       }
     ];
 
     const random = testErrors[Math.floor(Math.random() * testErrors.length)];
-    await errorMonitoringService.captureError(random);
+    try {
+      await fetch('/api/system_errors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: random.signature, ...random })
+      });
+      // Force refresh
+      handleRefreshData();
+    } catch (e) {
+      console.error(e);
+    }
   };
+
+
+
+
+
 
   const filteredErrors = errors.filter((item) => {
     if (severityFilter !== 'all' && item.severity !== severityFilter) return false;
     if (serviceFilter !== 'all' && item.service !== serviceFilter) return false;
-    if (statusFilter !== 'all' && item.status !== statusFilter) return false;
+    if (statusFilter === 'active') {
+      if (item.status === 'resolved' || item.status === 'ignored') return false;
+    } else if (statusFilter !== 'all' && item.status !== statusFilter) {
+      return false;
+    }
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
@@ -274,8 +363,18 @@ export const ErrorMonitoringSection: React.FC = () => {
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
+            
+            <button
+              onClick={handleRefreshData}
+              disabled={isLoading}
+              className="px-4 py-2.5 rounded-2xl bg-white/5 hover:bg-white/10 text-white font-bold text-xs transition-all border border-white/10 flex items-center gap-1.5"
+            >
+              <RefreshCw size={14} className={isLoading ? 'animate-spin' : ''} />
+              تحديث
+            </button>
             <button
               onClick={handleTriggerTestError}
+
               className="px-4 py-2.5 rounded-2xl bg-white/5 hover:bg-white/10 text-white font-bold text-xs transition-all border border-white/10 flex items-center gap-1.5"
             >
               <Zap size={14} className="text-amber-400" />
@@ -380,10 +479,11 @@ export const ErrorMonitoringSection: React.FC = () => {
             onChange={(e) => setStatusFilter(e.target.value)}
             className="bg-neutral-900 border border-white/10 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500"
           >
-            <option value="all">كافة الحالات</option>
+            <option value="active">الأخطاء النشطة فقط (غير المحلولة)</option>
+            <option value="all">كافة الحالات (بما فيها المحلولة)</option>
+            <option value="resolved">الأخطاء التي تم حلها (Resolved)</option>
             <option value="new">جديد (New)</option>
             <option value="investigating">قيد المتابعة</option>
-            <option value="resolved">تم الحل (Resolved)</option>
             <option value="ignored">متجاهل (Ignored)</option>
           </select>
         </div>
@@ -408,18 +508,21 @@ export const ErrorMonitoringSection: React.FC = () => {
             <CheckCircle2 size={36} className="text-emerald-400 mx-auto" />
             <h3 className="text-sm font-black text-white">لا توجد أخطاء مسجلة مطابقة</h3>
             <p className="text-xs text-white/40 max-w-sm mx-auto">
-              سجل الأخطاء نظيف تماماً! عند وقوع أي استثناء برمجي أو انقطاع شبكي سيتم التقاطه وعرضه لحظياً هنا.
+              {statusFilter === 'active' 
+                ? 'رادار الأخطاء نظيف تماماً! تم حل كافة الاستثناءات البرمجية والشبكية بنجاح.'
+                : 'سجل الأخطاء نظيف تماماً! عند وقوع أي استثناء برمجي أو انقطاع شبكي سيتم التقاطه وعرضه لحظياً هنا.'}
             </p>
           </div>
         ) : (
-          filteredErrors.map((err) => {
-            const isExpanded = expandedErrorId === err.signature;
-            const isResolving = actionLoadingMap[err.signature] || false;
+          filteredErrors.map((err, idx) => {
+            const uniqueKey = `${err.id || ''}_${err.errorId || err.signature || 'err'}_${idx}_${err.lastSeen || ''}`;
+            const isExpanded = expandedErrorId === uniqueKey;
+            const isResolving = actionLoadingMap[err.signature] || actionLoadingMap[uniqueKey] || false;
             const msgLower = err.errorMessage.toLowerCase();
 
             return (
               <div
-                key={err.signature}
+                key={uniqueKey}
                 className={`border rounded-2xl p-5 transition-all space-y-3 backdrop-blur-md ${
                   err.status === 'resolved'
                     ? 'bg-neutral-900/30 border-white/5 opacity-60'
@@ -475,7 +578,7 @@ export const ErrorMonitoringSection: React.FC = () => {
                 {err.stackTrace && (
                   <div>
                     <button
-                      onClick={() => setExpandedErrorId(isExpanded ? null : err.signature)}
+                      onClick={() => setExpandedErrorId(isExpanded ? null : uniqueKey)}
                       className="text-[10px] text-indigo-400 hover:text-indigo-300 font-bold flex items-center gap-1 transition-colors"
                     >
                       {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
@@ -485,10 +588,10 @@ export const ErrorMonitoringSection: React.FC = () => {
                     {isExpanded && (
                       <div className="mt-2 p-3 bg-black/70 border border-white/10 rounded-xl font-mono text-[10px] text-white/70 overflow-x-auto whitespace-pre leading-relaxed relative">
                         <button
-                          onClick={() => handleCopy(err.stackTrace || '', `stack_${err.signature}`)}
+                          onClick={() => handleCopy(err.stackTrace || '', `stack_${uniqueKey}`)}
                           className="absolute top-2 left-2 p-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-white/70 hover:text-white transition-all text-[10px] flex items-center gap-1"
                         >
-                          {copiedId === `stack_${err.signature}` ? <Check size={10} className="text-emerald-400" /> : <Copy size={10} />}
+                          {copiedId === `stack_${uniqueKey}` ? <Check size={10} className="text-emerald-400" /> : <Copy size={10} />}
                           نسخ
                         </button>
                         {err.stackTrace}
@@ -529,7 +632,7 @@ export const ErrorMonitoringSection: React.FC = () => {
                   <div className="flex items-center gap-1.5">
                     <span className="text-[10px] text-white/40">الحالة:</span>
                     <button
-                      onClick={() => handleStatusChange(err.signature, 'investigating')}
+                      onClick={() => handleStatusChange(err.id || err.errorId || err.signature, 'investigating')}
                       className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
                         err.status === 'investigating'
                           ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
@@ -539,7 +642,7 @@ export const ErrorMonitoringSection: React.FC = () => {
                       قيد المتابعة
                     </button>
                     <button
-                      onClick={() => handleStatusChange(err.signature, 'resolved')}
+                      onClick={() => handleStatusChange(err.id || err.errorId || err.signature, 'resolved')}
                       className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
                         err.status === 'resolved'
                           ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
@@ -549,7 +652,7 @@ export const ErrorMonitoringSection: React.FC = () => {
                       تم الحل
                     </button>
                     <button
-                      onClick={() => handleStatusChange(err.signature, 'ignored')}
+                      onClick={() => handleStatusChange(err.id || err.errorId || err.signature, 'ignored')}
                       className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all ${
                         err.status === 'ignored'
                           ? 'bg-neutral-700 text-white/80'
@@ -561,7 +664,7 @@ export const ErrorMonitoringSection: React.FC = () => {
                   </div>
 
                   <button
-                    onClick={() => handleDelete(err.signature)}
+                    onClick={() => handleDelete(err.id || err.errorId || err.signature)}
                     className="text-[10px] text-rose-400/80 hover:text-rose-400 hover:underline flex items-center gap-1 transition-all"
                   >
                     <Trash2 size={11} /> حذف السجل

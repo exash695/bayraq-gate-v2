@@ -1,13 +1,7 @@
-import { Gate6 } from './components/Gate6';
+import { Gate6 } from './components/Gate6.tsx';
+import { Gate6Demo } from './components/Gate6/Gate6Demo';
 import { matchesTargetGrades, isSchoolMatch } from './utils/gradeMatcher';
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- *
- * Cache bust: 1
- */
-
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { customAuth } from "./services/customAuthService";
 import { auth, db, purgeFirestore } from "./lib/firebase";
 import { api } from "./lib/api";
@@ -31,7 +25,9 @@ import {
   getDocs,
   getDocsFromServer,
 } from "@/src/lib/firebase";
-
+import { useRemoteConfig } from "./services/remoteConfig";
+import { useAppLogo } from "./components/BerqCharacterManager";
+import DevDashboard from "./components/DevDashboard";
 import { handleFirestoreError, OperationType } from "./lib/firestoreUtils";
 import { getStudentLevelInfo, getProfessionalAvatar } from "./lib/avatarLevel";
 import { updateDailyLogin, updatePoints } from "./lib/pointsEngine";
@@ -105,14 +101,35 @@ import { BroadcastTicker } from "./components/BroadcastTicker";
 import { SeasonalThemeBanner } from "./components/SeasonalThemeBanner";
 import { Sidebar } from "./components/Sidebar";
 import {
-  Menu,
-  Shield,
+  PhoneCall,
+  Globe,
+  Lock as LockIcon,
+  ShieldAlert,
+  ShieldOff,
+  RefreshCw,
+  Radio as RadioIcon,
+  Smartphone,
+  Presentation,
+  ClipboardCheck,
+  PlusCircle,
+  FileUp,
+  CalendarClock,
+  Bus,
+  BarChart3,
+  Wallet,
+  CreditCard,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUpDown,
+  Search,
+  Users,
   Bell,
   X,
+  Shield,
+  Menu,
   Swords,
   UserPlus,
   Radar,
-  Search,
   Headphones,
   BookOpen,
   ChevronLeft,
@@ -126,10 +143,9 @@ import {
   Compass,
   Sparkles,
   Rocket,
-  Users,
   MessageCircle,
   Award,
-  Megaphone,
+  Megaphone
 } from "lucide-react";
 import { LoadingScreen } from "./components/LoadingScreen";
 import { WelcomeIntroScreen } from "./components/WelcomeIntroScreen";
@@ -156,13 +172,9 @@ import { SCHOOLS_DATA, getOfficialSchoolName } from "./lib/constants";
 import { schoolService, SchoolRecord } from "./services/schoolService";
 import { STUDENT_REGISTRY } from "./lib/studentRegistry";
 import { ReceiptVerification } from "./components/ReceiptVerification";
-import { useAppLogo } from "./components/BerqCharacterManager";
-
-import DevDashboard from "./components/DevDashboard";
-import { useRemoteConfig } from "./services/remoteConfig";
-import { PhoneCall, Globe, Lock as LockIcon, ShieldAlert, RefreshCw, Radio as RadioIcon, Smartphone, Presentation, ClipboardCheck, PlusCircle, FileUp, CalendarClock, Bus, BarChart3, Wallet, CreditCard, ArrowLeft, ArrowRight } from "lucide-react";
 import { GlobalAnnouncementsPopup } from "./components/GlobalAnnouncementsPopup";
 import { SystemDialogsModal } from "./components/SystemDialogsModal";
+import { NetworkStatusListener } from "./components/NetworkStatusListener";
 
 export const AVAILABLE_GRADES = [
   "أول ابتدائي",
@@ -244,8 +256,6 @@ const getXpProgressDetails = (xp: number = 0) => {
   };
 };
 
-import { Gate6Demo } from './components/Gate6/Gate6Demo';
-
 export default function App() {
   const dynamicAppLogo = useAppLogo();
   const remoteConfig = useRemoteConfig();
@@ -299,11 +309,11 @@ export default function App() {
   const [user, setUser] = useState<any>(null);
   const [userProfile, setUserProfile] = useState<any>(null);
   const [portalType, setPortalType] = useState<
-    "student" | "parent" | "admin-boys" | "admin-girls" | "teacher" | "admin-observer" | "driver"
+    "student" | "parent" | "admin-boys" | "admin-girls" | "teacher" | "admin-observer" | "driver" | "developer" | "superadmin"
   >(() => {
     try {
       const savedRole = safeStorage.getItem("bayraq_user_role");
-      if (savedRole && ["student", "parent", "admin-boys", "admin-girls", "teacher", "admin-observer", "driver"].includes(savedRole)) {
+      if (savedRole && ["student", "parent", "admin-boys", "admin-girls", "teacher", "admin-observer", "driver", "developer", "superadmin"].includes(savedRole)) {
         return savedRole as any;
       }
     } catch {}
@@ -312,12 +322,18 @@ export default function App() {
 
   // Sync portalType when userProfile loads if not manually overridden
   useEffect(() => {
-    if (userProfile && userProfile.role && !safeStorage.getItem("bayraq_user_role")) {
-      const role = userProfile.role === "admin" 
+    if (userProfile && !safeStorage.getItem("bayraq_user_role")) {
+      const isDevEmail = userProfile.email?.toLowerCase() === 'mntzralghanm527@gmail.com';
+      let role = userProfile.role === "admin" 
         ? (userProfile.adminBranch === "boys" ? "admin-boys" : "admin-girls")
         : userProfile.role;
-      if (["student", "parent", "admin-boys", "admin-girls", "teacher", "admin-observer", "driver"].includes(role)) {
-        setPortalType(role);
+        
+      if (isDevEmail || userProfile.role === 'developer' || userProfile.role === 'dev') role = 'admin-boys'; // Default dev to admin for platform viewing
+      if (userProfile.role === 'superadmin') role = 'admin-boys';
+
+      const validRoles = ["student", "parent", "admin-boys", "admin-girls", "teacher", "admin-observer", "driver", "developer", "superadmin"];
+      if (validRoles.includes(role)) {
+        setPortalType(role as any);
       }
     }
   }, [userProfile]);
@@ -353,7 +369,7 @@ export default function App() {
     const list = Array.from(
       new Map(notifications.map((n) => [n.id, n])).values(),
     );
-    const isAdmin = portalType.startsWith('admin');
+    const isAdmin = portalType?.startsWith('admin');
     const isDev = Boolean(userProfile?.isDeveloper || userProfile?.role === 'developer');
 
     return list.filter((n: any) => {
@@ -538,6 +554,7 @@ export default function App() {
   const [verifiedStudentInfo, setVerifiedStudentInfo] = useState<any>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [bannedCode, setBannedCode] = useState<string | null>(null);
+  const [suspendedSchoolName, setSuspendedSchoolName] = useState<string | null>(null);
   const [activeKnightsCount, setActiveKnightsCount] = useState<number>(0);
   const [activeKnights, setActiveKnights] = useState<any[]>([]);
   const [showActiveKnights, setShowActiveKnights] = useState(false);
@@ -567,6 +584,55 @@ export default function App() {
       clearInterval(interval);
     };
   }, []);
+
+  // Monitor school suspension status in real-time
+  useEffect(() => {
+    if (!selectedSchoolId || portalType === 'developer') {
+      setSuspendedSchoolName(null);
+      return;
+    }
+
+    // Skip check for global developers/super admins
+    if (userProfile?.role === 'developer' || userProfile?.role === 'superadmin') {
+      setSuspendedSchoolName(null);
+      return;
+    }
+
+    const schoolRef = doc(db, "schools", selectedSchoolId);
+    const unsubscribe = onSnapshot(schoolRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const status = (data.status || '').toLowerCase();
+        const isSusp = status === 'suspended' || status === 'disabled' || status === 'inactive' || status === 'معطلة' || status === 'موقوفة';
+        
+        if (isSusp) {
+          setSuspendedSchoolName(data.name || selectedSchoolId);
+        } else {
+          setSuspendedSchoolName(null);
+        }
+      }
+    }, (err) => {
+      console.warn("Error listening to school status:", err);
+    });
+
+    return () => unsubscribe();
+  }, [selectedSchoolId, userProfile?.role, portalType]);
+
+  const performSuspensionLogout = () => {
+    setSuspendedSchoolName(null);
+    setSelectedSchoolId(null);
+    setIsSchoolVerified(false);
+    setPortalType(null);
+    setActiveSection("hub");
+    safeStorage.removeItem("s6_selectedSchoolId");
+    safeStorage.removeItem("s6_userProfile");
+    safeStorage.removeItem("s6_auth_token");
+    safeStorage.removeItem("s6_portalType");
+    safeStorage.removeItem("bayraq_user_role");
+    customAuth.logout();
+    setUser(null);
+    setUserProfile(null);
+  };
 
   const allSchoolsList = useMemo(() => {
     const normalize = (name?: string) => 
@@ -887,7 +953,7 @@ export default function App() {
       broadcastId,
       recipientRole:
         recipientRole ||
-        (portalType.startsWith("admin")
+        (portalType?.startsWith("admin")
           ? "admin"
           : (portalType === "parent" || portalType === "teacher" || portalType === "driver"
             ? (portalType as any)
@@ -1296,7 +1362,7 @@ export default function App() {
       possibleIdsSet.add(`${prefix}${upper}`);
       possibleIdsSet.add(`${prefix}${lower}`);
 
-      if (upper.startsWith("S-") || upper.startsWith("P-")) {
+      if (String(upper || "").startsWith("S-") || String(upper || "").startsWith("P-")) {
         const pure = upper.slice(2);
         possibleIdsSet.add(pure);
         possibleIdsSet.add(pure.toLowerCase());
@@ -1370,8 +1436,8 @@ export default function App() {
         possibleIdsSet.add(`tch_${clean}`);
         possibleIdsSet.add(`tch_${upper}`);
         possibleIdsSet.add(`tch_${lower}`);
-        if (upper.startsWith("TCH-") || upper.startsWith("T-")) {
-          const pure = upper.startsWith("TCH-") ? upper.slice(4) : upper.slice(2);
+        if (String(upper || "").startsWith("TCH-") || String(upper || "").startsWith("T-")) {
+          const pure = String(upper || "").startsWith("TCH-") ? upper.slice(4) : upper.slice(2);
           possibleIdsSet.add(pure);
           possibleIdsSet.add(pure.toLowerCase());
           possibleIdsSet.add(`tcode_${pure}`);
@@ -1422,6 +1488,11 @@ export default function App() {
          
          const contentType = res.headers.get('content-type');
          if (!contentType || !contentType.includes('application/json')) {
+            if (contentType?.includes('text/html')) {
+                // Vite or SPA fallback might intercept during fast reloads/HMR
+                // We'll safely ignore it to prevent cluttering the console
+                return;
+            }
             console.error('[App] Expected JSON notifications but got', contentType);
             return;
          }
@@ -1501,9 +1572,9 @@ export default function App() {
       }
     };
     document.addEventListener("visibilitychange", handleVisibilityChange);
-    
+
     import('./lib/realtimeManager').then(({ realtimeManager }) => {
-       realtimeManager.on('notifications_updated', fetchAppNotifs);
+       realtimeManager.on('notifications_updated', () => fetchAppNotifs());
     });
 
     return () => {
@@ -1511,7 +1582,7 @@ export default function App() {
        abortController.abort();
        document.removeEventListener("visibilitychange", handleVisibilityChange);
        import('./lib/realtimeManager').then(({ realtimeManager }) => {
-          realtimeManager.off('notifications_updated', fetchAppNotifs);
+          realtimeManager.off('notifications_updated', () => fetchAppNotifs());
        });
     };
   }, [
@@ -1822,7 +1893,82 @@ export default function App() {
 
 
 
+  // Watch for school suspension status in real-time
+  useEffect(() => {
+    if (!selectedSchoolId || portalType === 'developer') return;
+
+    const schoolRef = doc(db, "schools", selectedSchoolId);
+    const unsubscribe = onSnapshot(schoolRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        const status = (data.status || '').trim().toLowerCase();
+        const isSuspended = status === 'suspended' || status === 'disabled' || status === 'inactive' || status === 'معطلة' || status === 'موقوفة';
+        
+        if (isSuspended) {
+          setSuspendedSchoolName(data.name || 'المدرسة');
+        } else {
+          setSuspendedSchoolName(null);
+        }
+      }
+    }, (err) => {
+      console.error("Error watching school status:", err);
+    });
+
+    return () => unsubscribe();
+  }, [selectedSchoolId, portalType]);
+
   const renderContent = () => {
+    const isAuthDevEmail = auth.currentUser?.email?.toLowerCase() === 'mntzralghanm527@gmail.com';
+    const isProfileDevEmail = userProfile?.email?.toLowerCase() === 'mntzralghanm527@gmail.com';
+    const isDeveloperEmail = isAuthDevEmail || isProfileDevEmail;
+    const isDevOrSuper = portalType === 'developer' || portalType === 'superadmin' || isDeveloperEmail;
+
+    if (suspendedSchoolName && !isDevOrSuper) {
+      return (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/95 backdrop-blur-xl p-6 text-center animate-in fade-in duration-500" dir="rtl">
+          <div className="max-w-md w-full space-y-8">
+            <div className="relative mx-auto w-24 h-24 flex items-center justify-center bg-rose-500/10 rounded-3xl border border-rose-500/20 shadow-[0_0_50px_rgba(244,63,94,0.2)]">
+              <ShieldOff size={48} className="text-rose-500 animate-pulse" />
+              <div className="absolute -top-1 -right-1 w-6 h-6 bg-rose-600 rounded-full flex items-center justify-center border-2 border-black">
+                <LockIcon size={12} className="text-white" />
+              </div>
+            </div>
+            
+            <div className="space-y-4">
+              <h2 className="text-3xl font-black text-white leading-tight">
+                تنبيه: تم تجميد <br />
+                <span className="text-rose-400">حساب المدرسة</span>
+              </h2>
+              <p className="text-white/60 text-sm leading-relaxed font-medium">
+                نعتذر منك، تم تعطيل وتجميد كافة خدمات مدرسة <br />
+                <span className="text-white font-bold">({suspendedSchoolName})</span> <br />
+                من قبل إدارة المنظومة (المطور) لأسباب فنية أو إدارية.
+              </p>
+            </div>
+
+            <div className="bg-white/5 border border-white/10 rounded-2xl p-4 flex items-start gap-3 text-right">
+              <ShieldAlert size={20} className="text-amber-400 shrink-0 mt-1" />
+              <p className="text-[11px] text-white/50 leading-relaxed">
+                هذا الإجراء يمنع الدخول للمنصة التعليمية، لوحة الإدارة، وتطبيق أولياء الأمور والطلبة بشكل كامل حتى يتم معالجة الموقف من قبل الإدارة العامة للمدرسة.
+              </p>
+            </div>
+
+            <button
+              onClick={performSuspensionLogout}
+              className="w-full py-4 bg-white text-black font-black rounded-2xl hover:bg-neutral-200 transition-all flex items-center justify-center gap-2 group"
+            >
+              <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform" />
+              العودة للرئيسية
+            </button>
+
+            <p className="text-[10px] text-white/30 font-bold uppercase tracking-widest">
+              نظام بيرق التعليمي - الفئة الذهبية
+            </p>
+          </div>
+        </div>
+      );
+    }
+
     if (activeSection === "gate-6") {
       return <Gate6 onBack={() => setActiveSection('hub')} />;
     }
@@ -2006,7 +2152,9 @@ export default function App() {
                 });
               }
             } catch (e: any) {
-              if (e.message === 'ACCOUNT_BANNED') {
+              if (e.message === 'SCHOOL_SUSPENDED' || e.isSchoolSuspended) {
+                setSuspendedSchoolName(e.schoolName || institutionName || "المدرسة");
+              } else if (e.message === 'ACCOUNT_BANNED') {
                 setBannedCode(code);
               } else {
                 addNotification(
@@ -2429,7 +2577,7 @@ export default function App() {
                       أهلاً وسهلاً بك،
                     </h2>
                     <h1 className="text-xl sm:text-2xl font-black text-white truncate w-full text-right drop-shadow-sm">
-                      {loggedInTeacher?.name || userProfile?.name || "الأستاذ الفاضل"}
+                      {loggedInTeacher?.name || userProfile?.fullName || userProfile?.name || auth.currentUser?.displayName || "الأستاذ الفاضل"}
                     </h1>
                     <div className="mt-1 flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-full backdrop-blur-sm">
                       <span className="text-[10px] font-bold text-amber-300 truncate">
@@ -2478,7 +2626,7 @@ export default function App() {
                       أهلاً وسهلاً بك،
                     </h2>
                     <h1 className="text-xl sm:text-2xl font-black text-white truncate w-full text-right drop-shadow-sm">
-                      ولي أمر {verifiedStudentInfo?.fullName || verifiedStudentInfo?.name || userProfile?.studentName || "الطالب"}
+                      ولي أمر {verifiedStudentInfo?.fullName || verifiedStudentInfo?.name || userProfile?.studentName || userProfile?.fullName || userProfile?.name || auth.currentUser?.displayName || "الطالب"}
                     </h1>
                     <div className="mt-1 flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-full backdrop-blur-sm">
                       <span className="text-[10px] font-bold text-amber-300 truncate">
@@ -2528,7 +2676,7 @@ export default function App() {
                       عودة ميمونة،
                     </h2>
                     <h1 className="text-xl sm:text-2xl font-black text-white truncate w-full text-right drop-shadow-sm">
-                      {userProfile?.name?.split(" ")[0] || "يا بطل"}
+                      {(userProfile?.fullName || userProfile?.name || auth.currentUser?.displayName || "يا بطل").split(" ")[0]}
                     </h1>
                     <div className="mt-1 flex items-center gap-1.5 bg-white/5 border border-white/10 px-2 py-0.5 rounded-full backdrop-blur-sm">
                       <span className="text-[9px] sm:text-[10px] font-bold text-white/70 truncate">
@@ -3150,7 +3298,7 @@ export default function App() {
                       {gradeBroadcasts.length > 0 ? (
                         gradeBroadcasts.map((item, idx) => {
                           const bodyText = item.rawText || item.message || item.title || "";
-                          const alreadyHasPrefix = bodyText.startsWith("📢") || bodyText.startsWith("[");
+                          const alreadyHasPrefix = String(bodyText || "").startsWith("📢") || String(bodyText || "").startsWith("[");
                           const authorLabel = item.author
                             ? `[الأستاذ ${item.author}]`
                             : item.senderName
@@ -3190,7 +3338,7 @@ export default function App() {
                       {gradeBroadcasts.length > 0 ? (
                         gradeBroadcasts.map((item, idx) => {
                           const bodyText = item.rawText || item.message || item.title || "";
-                          const alreadyHasPrefix = bodyText.startsWith("📢") || bodyText.startsWith("[");
+                          const alreadyHasPrefix = String(bodyText || "").startsWith("📢") || String(bodyText || "").startsWith("[");
                           const authorLabel = item.author
                             ? `[الأستاذ ${item.author}]`
                             : item.senderName
@@ -4524,6 +4672,9 @@ export default function App() {
             )}
           </AnimatePresence>
 
+
+          {/* Global Network Connectivity Status Listener */}
+          <NetworkStatusListener />
 
         </>
       )}

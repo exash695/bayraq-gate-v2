@@ -7,10 +7,12 @@ import { supportService } from '../services/supportService';
 import { ideaService } from '../services/ideaService';
 import { notificationService } from '../services/notificationService';
 import { subscribeToPoseOverrides } from './BerqCharacterManager';
-import { generateSingleStudentPDF } from '../utils/studentUtils';
+import { generateSingleStudentPDF, isArchivedList } from '../utils/studentUtils';
+import { printAttendanceReport } from '../utils/attendancePrint';
 import { useAdminData } from '../hooks/useAdminData';
 import { useAcademicActions } from '../hooks/useAcademicActions';
 import { GlobalAnnouncementsBanner } from './GlobalAnnouncementsBanner';
+import { useSecuritySettings, securityService } from '../services/securityService';
 import { 
   ArrowRight, 
   Users, 
@@ -49,9 +51,12 @@ import {
   Lightbulb,
   Bus,
   ChevronUp,
-  ChevronDown
+  ChevronDown,
+  Printer,
+  Calendar
 } from 'lucide-react';
 import { db, auth, doc, getDoc, onSnapshot, collection, query, where, addDoc, updateDoc } from '@/src/lib/firebase';
+import { realtimeManager } from '../lib/realtimeManager';
 import { AdminSovereigntyManager } from './Sovereignty/AdminSovereigntyManager';
 // Removed redundant firestore imports
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
@@ -242,6 +247,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const { students, setStudents, savedLists, setSavedLists, pendingPayments, setPendingPayments, schoolSettings, isLoading } = useAdminData(selectedSchoolId, schoolName);
 
+  const activeSavedLists = React.useMemo(() => {
+    return (savedLists || []).filter(l => !isArchivedList(l));
+  }, [savedLists]);
+
+  const archivedSavedLists = React.useMemo(() => {
+    return (savedLists || []).filter(l => isArchivedList(l));
+  }, [savedLists]);
+
   useEffect(() => {
     if (schoolSettings?.tuitionFee) {
         const tuition = Number(schoolSettings.tuitionFee);
@@ -304,10 +317,256 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   }, [glowingTab]);
 
+  // Resolve active school ID with alias resilience
+  const resolvedSchoolId = React.useMemo(() => {
+    if (selectedSchoolId) return selectedSchoolId;
+    try {
+      const savedSchool = localStorage.getItem('berq_selected_school');
+      if (savedSchool) {
+        const parsed = JSON.parse(savedSchool);
+        if (parsed?.id) return parsed.id;
+      }
+    } catch (e) {}
+    return 'school1';
+  }, [selectedSchoolId]);
+
+  // Disabled modules state for the school (controlled centrally by Developer Dashboard)
+  const [disabledModules, setDisabledModules] = useState<string[]>(() => {
+    try {
+      const sId = selectedSchoolId || 'school1';
+      const cached = localStorage.getItem(`school_disabled_modules_${sId}`) || 
+                     localStorage.getItem(`s6_disabled_modules_${sId}`) ||
+                     (sId === 'school1' ? localStorage.getItem(`school_disabled_modules_school_awail_ghamas`) : null) ||
+                     (sId === 'school_awail_ghamas' ? localStorage.getItem(`school_disabled_modules_school1`) : null);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch (e) {}
+    return [];
+  });
+
+  // Listen in real-time to disabledModules updates across Firestore, DevDashboard events, and RealtimeManager
+  useEffect(() => {
+    let unsubDoc: (() => void) | null = null;
+    let unsubQuery: (() => void) | null = null;
+
+    const sId = resolvedSchoolId;
+
+    // 1. Listen directly to the school document in Firestore
+    if (sId) {
+      unsubDoc = onSnapshot(doc(db, "schools", sId), (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          if (Array.isArray(data?.disabledModules)) {
+            setDisabledModules(data.disabledModules);
+          } else if (Array.isArray(data?.disabled_modules)) {
+            setDisabledModules(data.disabled_modules);
+          }
+        }
+      }, (err) => console.warn("Admin school config doc listener:", err));
+    }
+
+    // 2. Query all schools to match by alias or school name
+    const targetName = schoolName || "";
+    const q = query(collection(db, "schools"));
+    unsubQuery = onSnapshot(q, (snap) => {
+      let foundModules: string[] | null = null;
+      snap.forEach((d) => {
+        const data = d.data();
+        if (
+          d.id === sId ||
+          d.id === selectedSchoolId ||
+          data.id === sId ||
+          (sId === 'school1' && (d.id === 'school_awail_ghamas' || data.id === 'school_awail_ghamas')) ||
+          (sId === 'school_awail_ghamas' && (d.id === 'school1' || data.id === 'school1')) ||
+          (targetName && (data.name === targetName || data.name?.includes(targetName) || targetName.includes(data.name)))
+        ) {
+          if (Array.isArray(data.disabledModules)) {
+            foundModules = data.disabledModules;
+          } else if (Array.isArray(data.disabled_modules)) {
+            foundModules = data.disabled_modules;
+          }
+        }
+      });
+      if (foundModules) {
+        setDisabledModules(foundModules);
+      }
+    }, (err) => console.warn("Admin school config query listener:", err));
+
+    // 3. In-tab custom event from DevDashboard toggle
+    const handleSchoolConfigEvent = (e: any) => {
+      const detail = e.detail;
+      if (!detail) return;
+      if (
+        detail.schoolId === sId ||
+        detail.schoolId === selectedSchoolId ||
+        (sId === 'school1' && detail.schoolId === 'school_awail_ghamas') ||
+        (sId === 'school_awail_ghamas' && detail.schoolId === 'school1') ||
+        (targetName && detail.schoolName === targetName) ||
+        !detail.schoolId
+      ) {
+        if (Array.isArray(detail.disabledModules)) {
+          setDisabledModules(detail.disabledModules);
+        }
+      }
+    };
+    window.addEventListener("school_config_updated", handleSchoolConfigEvent);
+
+    // 4. Multi-client RealtimeManager subscription
+    const unsubRealtime = realtimeManager.subscribe('schools', (payload: any) => {
+      if (
+        payload?.schoolId === sId || 
+        payload?.id === sId ||
+        payload?.schoolId === selectedSchoolId ||
+        (sId === 'school1' && (payload?.schoolId === 'school_awail_ghamas' || payload?.id === 'school_awail_ghamas')) ||
+        (sId === 'school_awail_ghamas' && (payload?.schoolId === 'school1' || payload?.id === 'school1'))
+      ) {
+        if (Array.isArray(payload?.disabledModules)) {
+          setDisabledModules(payload.disabledModules);
+        }
+      }
+    });
+
+    // 5. Initial HTTP fetch fallback
+    if (sId) {
+      fetch(`/api/schools/${sId}`)
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          const sch = data?.school || data?.data || (Array.isArray(data) ? data[0] : null);
+          if (sch && Array.isArray(sch.disabledModules)) {
+            setDisabledModules(sch.disabledModules);
+          } else if (sch && Array.isArray(sch.disabled_modules)) {
+            setDisabledModules(sch.disabled_modules);
+          }
+        })
+        .catch(() => {});
+    }
+
+    return () => {
+      if (unsubDoc) unsubDoc();
+      if (unsubQuery) unsubQuery();
+      window.removeEventListener("school_config_updated", handleSchoolConfigEvent);
+      if (typeof unsubRealtime === 'function') unsubRealtime();
+    };
+  }, [resolvedSchoolId, selectedSchoolId, schoolName]);
+
+  // Helper function to check if an admin tab is locked by the developer
+  const isTabDisabled = (tabId: string): boolean => {
+    if (tabId === 'pulse') return false; // Pulse dashboard is the admin home and is never disabled
+    if (disabledModules.includes(tabId)) return true;
+
+    // Finance & Subscriptions
+    if (tabId === 'finance' && (
+      disabledModules.includes('financial') || 
+      disabledModules.includes('finance') || 
+      disabledModules.includes('payment') || 
+      disabledModules.includes('financial_status')
+    )) return true;
+
+    // Codes & Activation
+    if (tabId === 'codes' && (
+      disabledModules.includes('activation_codes') || 
+      disabledModules.includes('codes_center') || 
+      disabledModules.includes('codes')
+    )) return true;
+
+    // Students, Grades, Control Hub
+    if (tabId === 'students' && (
+      disabledModules.includes('control_hub') || 
+      disabledModules.includes('students') || 
+      disabledModules.includes('control') || 
+      disabledModules.includes('grades')
+    )) return true;
+
+    // School Broadcast & Live
+    if (tabId === 'broadcast' && (
+      disabledModules.includes('broadcast') || 
+      disabledModules.includes('live_watch') || 
+      disabledModules.includes('teacher_live') || 
+      disabledModules.includes('teacher_broadcast')
+    )) return true;
+
+    // Attendance & Discipline
+    if (tabId === 'attendance' && (
+      disabledModules.includes('attendance') || 
+      disabledModules.includes('discipline') || 
+      disabledModules.includes('uniform')
+    )) return true;
+
+    // Teachers / Staff
+    if (tabId === 'teachers' && (
+      disabledModules.includes('teacher_control') || 
+      disabledModules.includes('teachers') || 
+      disabledModules.includes('admin_teachers')
+    )) return true;
+
+    // Resources / Content Monitoring / Questions Bank
+    if (tabId === 'resources' && (
+      disabledModules.includes('resources') || 
+      disabledModules.includes('content') || 
+      disabledModules.includes('teacher_content') || 
+      disabledModules.includes('questions_bank') || 
+      disabledModules.includes('files') || 
+      disabledModules.includes('materials')
+    )) return true;
+
+    // Audit Logs
+    if (tabId === 'audit' && disabledModules.includes('audit')) return true;
+
+    // Sovereignty / Competitions / Tournaments
+    if (tabId === 'sovereignty' && (
+      disabledModules.includes('sovereignty') || 
+      disabledModules.includes('competitions') || 
+      disabledModules.includes('excellence')
+    )) return true;
+
+    // Transport & Bus Management
+    if (tabId === 'transport' && (
+      disabledModules.includes('transport') || 
+      disabledModules.includes('bus_transport') || 
+      disabledModules.includes('drivers')
+    )) return true;
+
+    // Ideas Bank
+    if (tabId === 'ideas' && (
+      disabledModules.includes('ideas') || 
+      disabledModules.includes('ideas_bank')
+    )) return true;
+
+    // Support & Complaints
+    if (tabId === 'support' && (
+      disabledModules.includes('support') || 
+      disabledModules.includes('tickets')
+    )) return true;
+
+    return false;
+  };
+
+  const adminTabNamesMap: Record<string, string> = {
+    finance: 'الموقف المالي والإحصائيات',
+    codes: 'مركز الأكواد والتراخيص',
+    students: 'شؤون الطلاب والدرجات والكنترول',
+    broadcast: 'الإذاعة المدرسية والبث المباشر',
+    attendance: 'سجل الانضباط المدرسي والمواظبة',
+    teachers: 'إدارة الكادر والموظفين',
+    resources: 'مركز مراقبة المحتوى والملفات',
+    audit: 'سجل النشاطات الإدارية',
+    sovereignty: 'منصة السيادة والبطولات والمسابقات',
+    transport: 'إدارة النقل المدرسي والحافلات',
+    ideas: 'بنك الأفكار والمقترحات',
+    support: 'مركز الدعم والشكاوى',
+  };
+
   const [isAdminSidebarCollapsed, setIsAdminSidebarCollapsed] = useState(false);
   const [isMascotCollapsed, setIsMascotCollapsed] = useState(false);
   const [selectedStage, setSelectedStage] = useState<string | null>(null);
   const [selectedGrade, setSelectedGrade] = useState<string | null>(null);
+  const [selectedSection, setSelectedSection] = useState<string | null>(null);
+  const [attendanceDate, setAttendanceDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [attendanceSearchQuery, setAttendanceSearchQuery] = useState<string>('');
+  const [attendanceStatusFilter, setAttendanceStatusFilter] = useState<'all' | 'present' | 'absent' | 'late' | 'unrecorded'>('all');
+  const [isBatchUpdatingAttendance, setIsBatchUpdatingAttendance] = useState<boolean>(false);
   const [isFinanceUnlocked, setIsFinanceUnlocked] = useState(false);
   const [financePIN, setFinancePIN] = useState('');
 
@@ -359,6 +618,213 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     'المرحلة الابتدائية': ['أول ابتدائي', 'ثاني ابتدائي', 'ثالث ابتدائي', 'رابع ابتدائي', 'خامس ابتدائي', 'سادس ابتدائي'],
     'المرحلة المتوسطة': ['أول متوسط', 'ثاني متوسط', 'ثالث متوسط'],
     'المرحلة الاعدادية': ['رابع علمي', 'رابع أدبي', 'خامس علمي', 'خامس أدبي', 'سادس علمي', 'سادس أدبي']
+  };
+
+  // Memoized available sections for currently selectedGrade
+  const availableSectionsForGrade = React.useMemo(() => {
+    if (!selectedGrade) return [];
+
+    const norm = (str: string) => (str || '')
+      .replace(/\s+/g, '')
+      .replace(/^(الصف|صف)/g, '')
+      .replace(/^ال/, '')
+      .replace(/ة/g, 'ه')
+      .replace(/[أإآٱ]/g, 'ا')
+      .toLowerCase();
+
+    const targetGradeNorm = norm(selectedGrade);
+
+    // Find all active lists matching selectedGrade
+    const matchedLists = (activeSavedLists || []).filter(l => {
+      const listNorm = norm(l.name);
+      return listNorm.includes(targetGradeNorm) || targetGradeNorm.includes(listNorm);
+    });
+
+    if (matchedLists.length > 0) {
+      return matchedLists.map(l => {
+        // Filter out deleted students from this list
+        const activeListStudents = (Array.isArray(l.students) ? l.students : []).filter((st: any) => {
+          if (!st) return false;
+          if (st.isDeleted || st.status === 'deleted' || st.status === 'محذوف') return false;
+          const fullStudent = (students || []).find((s: any) => s.id === st.id || (st.code && s.code === st.code));
+          if (fullStudent && (fullStudent.isDeleted || fullStudent.status === 'deleted' || fullStudent.status === 'محذوف')) {
+            return false;
+          }
+          return true;
+        });
+
+        return {
+          id: l.id,
+          name: l.name,
+          studentCount: activeListStudents.length,
+          students: activeListStudents
+        };
+      });
+    }
+
+    // Fallback if no specific section lists exist yet for this grade
+    return [
+      { id: `${selectedGrade}_A`, name: `${selectedGrade} أ`, studentCount: 0, students: [] },
+      { id: `${selectedGrade}_B`, name: `${selectedGrade} ب`, studentCount: 0, students: [] }
+    ];
+  }, [selectedGrade, activeSavedLists, students]);
+
+  // Students belonging to currently selected section (strictly sourced from active lists to avoid deleted students)
+  const sectionStudents = React.useMemo(() => {
+    if (!selectedSection) return [];
+
+    const norm = (str: string) => (str || '')
+      .replace(/\s+/g, '')
+      .replace(/^(الصف|صف)/g, '')
+      .replace(/^ال/, '')
+      .replace(/ة/g, 'ه')
+      .replace(/[أإآٱ]/g, 'ا')
+      .toLowerCase();
+
+    const targetNorm = norm(selectedSection);
+
+    // 1. Try to find the exact section in availableSectionsForGrade or activeSavedLists
+    let rawList: any[] = [];
+    const sectionObj = availableSectionsForGrade.find(s => s.name === selectedSection || s.id === selectedSection || norm(s.name) === targetNorm);
+    const exactList = (activeSavedLists || []).find(l => l.name === selectedSection || l.id === selectedSection || norm(l.name) === targetNorm);
+    
+    if (sectionObj && Array.isArray(sectionObj.students) && sectionObj.students.length > 0) {
+      rawList = sectionObj.students;
+    } else if (exactList && Array.isArray(exactList.students) && exactList.students.length > 0) {
+      rawList = exactList.students;
+    } else {
+      rawList = [];
+    }
+
+    // Filter out deleted students and merge with latest attendance data
+    return rawList
+      .filter(st => {
+        if (!st) return false;
+        if (st.isDeleted || st.status === 'deleted' || st.status === 'محذوف') return false;
+        const fullStudent = (students || []).find((s: any) => s.id === st.id || (st.code && s.code === st.code));
+        if (fullStudent && (fullStudent.isDeleted || fullStudent.status === 'deleted' || fullStudent.status === 'محذوف')) {
+          return false;
+        }
+        return true;
+      })
+      .map(st => {
+        const fullStudent = (students || []).find((s: any) => s.id === st.id || (st.code && s.code === st.code));
+        return {
+          ...st,
+          ...(fullStudent || {}),
+          name: st.name || fullStudent?.name || 'طالب',
+          id: st.id || fullStudent?.id || `st_${st.code}`,
+          code: st.code || fullStudent?.code || '',
+          userId: fullStudent?.userId || st.userId || st.code || st.id,
+          attendance: fullStudent?.attendance || st.attendance || { present: 0, absent: 0, late: 0, logs: [] }
+        };
+      })
+      .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar'));
+  }, [selectedSection, selectedGrade, activeSavedLists, students]);
+
+  // Students with status evaluated specifically for attendanceDate
+  const studentsWithDayStatus = React.useMemo(() => {
+    return sectionStudents.map(student => {
+      const logs = (student.attendance?.logs || []) as any[];
+      const dayLogs = logs.filter((l: any) => l.date === attendanceDate);
+      let dayStatus: 'present' | 'absent' | 'late' | 'unrecorded' = 'unrecorded';
+      let latestLog: any = null;
+
+      if (dayLogs.length > 0) {
+        latestLog = dayLogs[dayLogs.length - 1];
+        if (latestLog.status === 'present') dayStatus = 'present';
+        else if (latestLog.status === 'absent') dayStatus = 'absent';
+        else if (latestLog.status === 'late') dayStatus = 'late';
+      }
+
+      return {
+        ...student,
+        dayStatus,
+        dayLogs,
+        latestLog
+      };
+    });
+  }, [sectionStudents, attendanceDate]);
+
+  // Attendance stats for section & date
+  const adminAttendanceStats = React.useMemo(() => {
+    const total = studentsWithDayStatus.length;
+    const present = studentsWithDayStatus.filter(s => s.dayStatus === 'present').length;
+    const absent = studentsWithDayStatus.filter(s => s.dayStatus === 'absent').length;
+    const late = studentsWithDayStatus.filter(s => s.dayStatus === 'late').length;
+    const unrecorded = studentsWithDayStatus.filter(s => s.dayStatus === 'unrecorded').length;
+    const attendanceRate = total > 0 ? Math.round((present / total) * 100) : 0;
+
+    return { total, present, absent, late, unrecorded, attendanceRate };
+  }, [studentsWithDayStatus]);
+
+  // Filtered students for display in UI
+  const displayAdminAttendanceStudents = React.useMemo(() => {
+    return studentsWithDayStatus.filter(s => {
+      if (attendanceSearchQuery.trim()) {
+        const q = attendanceSearchQuery.trim().toLowerCase();
+        const nameMatch = (s.name || '').toLowerCase().includes(q);
+        const codeMatch = (s.code || '').toLowerCase().includes(q);
+        if (!nameMatch && !codeMatch) return false;
+      }
+      if (attendanceStatusFilter !== 'all') {
+        return s.dayStatus === attendanceStatusFilter;
+      }
+      return true;
+    });
+  }, [studentsWithDayStatus, attendanceSearchQuery, attendanceStatusFilter]);
+
+  // Handler for printing attendance report
+  const handlePrintAdminAttendance = () => {
+    if (!selectedSection) return;
+    printAttendanceReport({
+      schoolName: schoolName || 'مجموعة مدارس بيرق الأهلية النموذجية',
+      className: selectedSection,
+      date: attendanceDate,
+      supervisorName: 'إدارة المدرسة',
+      students: studentsWithDayStatus.map(s => ({
+        name: s.name,
+        code: s.code,
+        dayStatus: s.dayStatus,
+        period: s.latestLog?.period,
+        reason: s.latestLog?.reason,
+        by: s.latestLog?.by || s.latestLog?.recordedBy || 'الإدارة'
+      })),
+      stats: adminAttendanceStats
+    });
+  };
+
+  // Handler for batch marking all unrecorded students as present
+  const handleBatchMarkAdminPresent = async () => {
+    const unrecorded = studentsWithDayStatus.filter(s => s.dayStatus === 'unrecorded');
+    if (unrecorded.length === 0) {
+      showToast('جميع طلاب الشعبة تم رصد حضورهم مسبقاً لهذا التاريخ');
+      return;
+    }
+    if (!confirm(`هل أنت متأكد من رصد (حضور) لجميع الطلاب غير المرصودين (${unrecorded.length} طالب) لشعبة "${selectedSection}" لتاريخ ${attendanceDate}؟`)) {
+      return;
+    }
+    setIsBatchUpdatingAttendance(true);
+    try {
+      for (const st of unrecorded) {
+        await academicService.updateAttendance(
+          st.id,
+          (st as any).userId || st.code || st.id,
+          'present',
+          'الإدارة',
+          '',
+          'يوم كامل',
+          selectedSchoolId || '',
+          attendanceDate
+        );
+      }
+      showToast(`تم تسجيل حضور لـ ${unrecorded.length} طالب بنجاح 🎉`);
+    } catch (err) {
+      console.error('Batch attendance error:', err);
+      showToast('حدث خطأ أثناء الرصد الجماعي');
+    } finally {
+      setIsBatchUpdatingAttendance(false);
+    }
   };
 
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -712,21 +1178,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     showToast('تم تحديث نسب الخصم بنجاح');
   };
 
-  const tabs = [
+  const { settings: securitySettings } = useSecuritySettings();
+
+  const allTabs = [
     { id: 'pulse', name: 'نبض البوابة', icon: Activity, color: 'text-cyan-400', bg: 'bg-cyan-400/10' },
-    { id: 'finance', name: 'الموقف المالي والإحصائيات', icon: PieChart, color: 'text-amber-400', bg: 'bg-amber-400/10' },
-    { id: 'codes', name: 'مركز الأكواد', icon: QrCode, color: 'text-purple-400', bg: 'bg-purple-400/10' },
-    { id: 'students', name: 'شؤون الطلاب والدرجات', icon: Users, color: 'text-blue-400', bg: 'bg-blue-400/10' },
-    { id: 'broadcast', name: 'الإذاعة المدرسية', icon: Megaphone, color: 'text-rose-400', bg: 'bg-rose-400/10' },
-    { id: 'attendance', name: 'سجل الانضباط المدرسي', icon: UserCheck, color: 'text-emerald-400', bg: 'bg-emerald-400/10' },
+    { id: 'finance', name: 'الموقف المالي والإحصائيات', icon: PieChart, color: 'text-amber-400', bg: 'bg-amber-400/10', cap: 'financial_view' },
+    { id: 'codes', name: 'مركز الأكواد', icon: QrCode, color: 'text-purple-400', bg: 'bg-purple-400/10', cap: 'generate_codes' },
+    { id: 'students', name: 'شؤون الطلاب والدرجات', icon: Users, color: 'text-blue-400', bg: 'bg-blue-400/10', cap: 'view_grades' },
+    { id: 'broadcast', name: 'الإذاعة المدرسية', icon: Megaphone, color: 'text-rose-400', bg: 'bg-rose-400/10', cap: 'live_broadcast' },
+    { id: 'attendance', name: 'سجل الانضباط المدرسي', icon: UserCheck, color: 'text-emerald-400', bg: 'bg-emerald-400/10', cap: 'enter_attendance' },
     { id: 'teachers', name: 'الكادر والموظفين', icon: BookOpenText, color: 'text-fuchsia-400', bg: 'bg-fuchsia-400/10' },
     { id: 'resources', name: 'مركز مراقبة المحتوى', icon: ShieldCheck, color: 'text-emerald-500', bg: 'bg-emerald-500/10' },
     { id: 'audit', name: 'سجل النشاطات', icon: History, color: 'text-purple-400', bg: 'bg-purple-400/10' },
-    { id: 'sovereignty', name: 'منصة السيادة (البطولات)', icon: Trophy, color: 'text-amber-400', bg: 'bg-amber-400/10' },
-    { id: "transport", name: "إدارة النقل المدرسي", icon: Bus, color: "text-blue-400", bg: "bg-blue-400/10" },
+    { id: 'sovereignty', name: 'منصة السيادة (البطولات)', icon: Trophy, color: 'text-amber-400', bg: 'bg-amber-400/10', cap: 'edit_school_info' },
+    { id: "transport", name: "إدارة النقل المدرسي", icon: Bus, color: "text-blue-400", bg: "bg-blue-400/10", cap: 'track_bus' },
     { id: 'ideas', name: 'بنك الأفكار', icon: Lightbulb, color: 'text-yellow-400', bg: 'bg-yellow-400/10' },
     { id: 'support', name: 'الدعم والشكاوى', icon: AlertCircle, color: 'text-cyan-400', bg: 'bg-cyan-400/10' },
   ];
+
+  const tabs = allTabs.filter(t => !t.cap || securityService.canRoleAccess('admin', t.cap));
+
+  useEffect(() => {
+    if (tabs.length > 0 && !tabs.some(t => t.id === activeTab)) {
+      setActiveTab('pulse');
+    }
+  }, [tabs, activeTab]);
 
 
   const handleTuitionUpdate = async (newFee: number) => {
@@ -946,6 +1422,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             {tabs.map((tab) => {
               const Icon = tab.icon;
               const isActive = activeTab === tab.id;
+              const isLocked = isTabDisabled(tab.id);
               
               return (
                 <button
@@ -978,11 +1455,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       setIsAdminSidebarCollapsed(true);
                     }
                   }}
-                  title={tab.name}
+                  title={isLocked ? `${tab.name} (مغلق من المطور)` : tab.name}
                   className={`w-full flex items-center gap-3 p-2.5 rounded-2xl transition-all duration-300 relative group cursor-pointer border ${
                     isActive
                       ? "bg-gradient-to-r from-amber-500/20 via-[#101935] to-[#101935] border-amber-500/50 shadow-[0_4px_20px_rgba(255,214,0,0.15)] text-white"
-                      : "bg-white/[0.02] border-transparent hover:bg-white/[0.08] hover:border-white/10 text-white/70"
+                      : isLocked
+                        ? "bg-rose-500/[0.03] border-rose-500/10 hover:bg-rose-500/[0.08] text-white/60"
+                        : "bg-white/[0.02] border-transparent hover:bg-white/[0.08] hover:border-white/10 text-white/70"
                   }`}
                 >
                   {/* Active Indicator Bar on right edge */}
@@ -995,10 +1474,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                   {/* Icon with notification badge */}
                   <div className={`p-2 rounded-xl shrink-0 relative transition-transform duration-300 group-hover:scale-110 ${
-                    isActive ? tab.bg + " " + tab.color : "bg-white/5 text-white/60"
+                    isActive ? tab.bg + " " + tab.color : isLocked ? "bg-rose-500/10 text-rose-400" : "bg-white/5 text-white/60"
                   }`}>
-                    <Icon size={20} className={isActive ? tab.color : "text-white/70"} />
+                    <Icon size={20} className={isActive ? tab.color : isLocked ? "text-rose-400" : "text-white/70"} />
                     
+                    {isLocked && (
+                      <span className="absolute -top-1.5 -left-1.5 w-4 h-4 bg-rose-600 text-white font-black text-[9px] rounded-full flex items-center justify-center border border-[#0A1024] shadow-sm">
+                        <LockIcon size={9} />
+                      </span>
+                    )}
+
                     {tab.id === 'finance' && pendingPayments.length > 0 && (
                       <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-rose-500 text-white font-black text-[9px] rounded-full flex items-center justify-center border border-[#0A1024] animate-pulse">
                         {pendingPayments.length}
@@ -1019,9 +1504,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   {/* Label Text */}
                   {!isAdminSidebarCollapsed && (
                     <div className="flex flex-col text-right overflow-hidden flex-1">
-                      <span className={`text-xs font-black truncate ${isActive ? "text-amber-400" : "text-white/90"}`}>
-                        {tab.name}
-                      </span>
+                      <div className="flex items-center justify-between gap-1">
+                        <span className={`text-xs font-black truncate ${isActive ? "text-amber-400" : isLocked ? "text-white/60" : "text-white/90"}`}>
+                          {tab.name}
+                        </span>
+                        {isLocked && (
+                          <span className="text-[9px] font-black text-rose-400 shrink-0 bg-rose-500/10 px-1.5 py-0.5 rounded border border-rose-500/20 flex items-center gap-0.5">
+                            <LockIcon size={8} />
+                            <span>مغلق</span>
+                          </span>
+                        )}
+                      </div>
                     </div>
                   )}
                 </button>
@@ -1062,6 +1555,65 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         )}
 
         <AnimatePresence mode="wait">
+          {/* Locked Module Guard when disabled by Developer */}
+          {isTabDisabled(activeTab) && activeTab !== 'pulse' && (
+            <motion.div
+              key={`locked-admin-${activeTab}`}
+              initial={{ opacity: 0, scale: 0.96 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.96 }}
+              className="flex-1 flex flex-col items-center justify-center py-16 px-6 text-center space-y-6 my-auto max-w-lg mx-auto"
+              dir="rtl"
+            >
+              <div className="relative">
+                <div className="w-24 h-24 rounded-3xl bg-rose-500/10 border-2 border-rose-500/40 flex items-center justify-center text-rose-400 shadow-[0_0_50px_rgba(244,63,94,0.25)] backdrop-blur-md">
+                  <LockIcon size={46} className="animate-pulse" />
+                </div>
+                <div className="absolute -bottom-2 -right-2 px-3 py-1 bg-[#0A0F24] border border-rose-500/50 rounded-full text-[10px] font-black text-rose-300 flex items-center gap-1.5 shadow-lg">
+                  <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
+                  <span>مغلق من قِبل المطور</span>
+                </div>
+              </div>
+
+              <div className="space-y-2.5">
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-black">
+                  <span>🛡️ إشعار إيقاف القسم برمجياً</span>
+                </div>
+                <h3 className="text-xl sm:text-2xl font-black text-white">
+                  قسم {adminTabNamesMap[activeTab] || activeTab} مغلق حالياً من قِبل المطور
+                </h3>
+                <p className="text-xs sm:text-sm font-medium text-white/70 leading-relaxed px-4">
+                  تم إيقاف وتعطيل هذا القسم لهذه المدرسة بناءً على ضبط صلاحيات المطور والإدارة المركزية. تم تجميد الوصول إليه مؤقتاً لحين إعادة التفعيل من لوحة المطور.
+                </p>
+              </div>
+
+              <div className="w-full p-4 rounded-2xl bg-[#080D21]/90 border border-white/10 text-right space-y-2 text-xs">
+                <div className="flex items-center justify-between text-white/60">
+                  <span>حالة القسم:</span>
+                  <span className="font-bold text-rose-400">معطل برمجياً (Locked by Developer)</span>
+                </div>
+                <div className="flex items-center justify-between text-white/60">
+                  <span>المدرسة المستهدفة:</span>
+                  <span className="font-bold text-amber-300">{schoolName || "الميدان التعليمي"}</span>
+                </div>
+                <div className="flex items-center justify-between text-white/60">
+                  <span>رمز القسم:</span>
+                  <span className="font-mono text-zinc-400 text-[11px]">{activeTab}</span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  onClick={() => setActiveTab('pulse')}
+                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-black text-xs transition-all cursor-pointer shadow-lg shadow-amber-500/20 hover:scale-[1.02] active:scale-95 flex items-center gap-2"
+                >
+                  <span>العودة لنبض البوابة</span>
+                  <ChevronLeft size={16} />
+                </button>
+              </div>
+            </motion.div>
+          )}
+
           {activeTab === 'pulse' && (
             <motion.div 
                key="pulse-tab-fixed"
@@ -1074,7 +1626,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </motion.div>
           )}
 
-          {activeTab === 'codes' && (
+          {!isTabDisabled('codes') && activeTab === 'codes' && (
             <motion.div 
                key="codes-tab-fixed"
                initial={{ opacity: 0 }} 
@@ -1117,21 +1669,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     onSaveList={(list) => handleSaveList(selectedSchoolId || '', list)}
                     isSaving={isSaving}
                     onSubViewChange={setCodesSubView}
-                  />
-
-                  <ArchiveSection 
-                    savedLists={savedLists}
-                    setSavedLists={setSavedLists}
                     setSelectedArchiveList={setSelectedArchiveList}
-                    showToast={showToast}
-                    onDelete={(id) => handleDelete('academic_lists', id)}
+                    onDeleteList={(id) => handleDelete('academic_lists', id)}
                   />
                 </>
               )}
             </motion.div>
           )}
 
-          {activeTab === 'students' && (
+          {!isTabDisabled('students') && activeTab === 'students' && (
             <motion.div 
                key="students-tab-fixed"
                initial={{ opacity: 0 }} 
@@ -1158,12 +1704,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 subjectMapping={subjectMapping}
                 isSaving={isSaving}
                 onSubViewChange={setStudentsSubView}
+                schoolId={selectedSchoolId || schoolName}
               />
               
             </motion.div>
           )}
 
-          {activeTab === 'attendance' && (
+          {!isTabDisabled('attendance') && activeTab === 'attendance' && (
             <motion.div 
                key="attendance-tab-fixed"
                initial={{ opacity: 0 }} 
@@ -1574,7 +2121,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       {GRADES_BY_STAGE[selectedStage].map(grade => (
                         <button 
                           key={grade}
-                          onClick={() => setSelectedGrade(grade)}
+                          onClick={() => { setSelectedGrade(grade); setSelectedSection(null); }}
                           className="bg-[#101935]/80 hover:bg-[#101935] p-4 rounded-2xl border border-white/5 text-white font-bold text-center hover:border-purple-500/50 hover:bg-purple-950/20 transition-all active:scale-[0.98] text-xs flex items-center justify-center gap-2"
                         >
                           <span>📚</span>
@@ -1583,162 +2130,409 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       ))}
                     </div>
                   </div>
-               ) : (
-                 <div className="space-y-4 mt-6" style={{ direction: 'rtl' }}>
-                    <div className="flex items-center justify-between pb-4 border-b border-white/5">
-                      <div className="flex items-center gap-2">
-                        <span className="w-2.5 h-2.5 rounded-full bg-purple-500" />
-                        <h3 className="text-white font-black text-base">{selectedGrade} ({selectedStage})</h3>
+               ) : !selectedSection ? (
+                  <div className="space-y-4 mt-6" style={{ direction: 'rtl' }}>
+                    <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-white/5">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-9 h-9 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center text-lg">
+                          👥
+                        </div>
+                        <div>
+                          <h3 className="text-white font-black text-base flex items-center gap-2">
+                            <span>شعب {selectedGrade}</span>
+                            <span className="text-xs text-white/40 font-normal">({selectedStage})</span>
+                          </h3>
+                          <p className="text-white/40 text-xs font-medium">اختر الشعبة لعرض السجل اليومي، رصد الحضور والغياب، وطباعة الكشوفات</p>
+                        </div>
                       </div>
-                      <div className="flex gap-2">
-                         <button onClick={() => setSelectedGrade(null)} className="text-blue-400 hover:text-blue-300 font-bold text-xs">تغيير الصف</button>
-                         <span className="text-white/20 text-xs">|</span>
-                         <button onClick={() => setSelectedStage(null)} className="text-blue-400 hover:text-blue-300 font-bold text-xs">تغيير المرحلة</button>
+                      <div className="flex items-center gap-2">
+                        <button 
+                          onClick={() => { setSelectedGrade(null); setSelectedSection(null); }} 
+                          className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-purple-400 hover:text-purple-300 font-bold text-xs flex items-center gap-1.5 transition-all border border-white/5"
+                        >
+                          <span>تغيير الصف</span>
+                          <span>⬅️</span>
+                        </button>
+                        <button 
+                          onClick={() => { setSelectedStage(null); setSelectedGrade(null); setSelectedSection(null); }} 
+                          className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-white/40 hover:text-white font-bold text-xs transition-all border border-white/5"
+                        >
+                          المراحل
+                        </button>
                       </div>
                     </div>
-                    
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                      {availableSectionsForGrade.map(section => (
+                        <button
+                          key={section.id}
+                          onClick={() => setSelectedSection(section.name)}
+                          className="bg-[#101935]/90 hover:bg-[#152042] p-5 rounded-2xl border border-white/10 hover:border-blue-500/50 transition-all text-right group active:scale-[0.98] relative overflow-hidden flex flex-col justify-between min-h-[120px]"
+                        >
+                          <div className="flex items-center justify-between w-full mb-3">
+                            <span className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500/20 to-indigo-500/20 text-blue-300 font-black flex items-center justify-center text-sm border border-blue-500/30 group-hover:from-blue-600 group-hover:to-indigo-600 group-hover:text-white transition-all shadow-sm">
+                              {section.name.split(' ').pop() || 'ش'}
+                            </span>
+                            <span className="text-xs font-black px-3 py-1 rounded-full bg-blue-500/10 text-blue-300 border border-blue-500/20 flex items-center gap-1">
+                              <Users size={12} />
+                              <span>{section.studentCount} طالب</span>
+                            </span>
+                          </div>
+                          <div>
+                            <h4 className="text-white font-black text-sm mb-1 group-hover:text-blue-200 transition-colors">{section.name}</h4>
+                            <p className="text-[11px] text-white/40 group-hover:text-blue-400 transition-colors flex items-center gap-1 font-medium">
+                              <span>انقر لفتح كشف الحضور ورصد الغياب</span>
+                              <span>←</span>
+                            </p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4 mt-6" style={{ direction: 'rtl' }}>
+                    {/* Header & Date Selector & Print */}
+                    <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-white/5 bg-[#101935]/60 p-4 rounded-2xl border border-white/5">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center text-lg">
+                          📋
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-white font-black text-base">{selectedSection}</h3>
+                            <span className="text-[11px] px-2.5 py-0.5 rounded-md bg-blue-500/10 text-blue-300 border border-blue-500/20 font-bold">
+                              {selectedGrade} - {selectedStage}
+                            </span>
+                          </div>
+                          <p className="text-white/40 text-xs mt-0.5 font-medium">
+                            رصد الحضور والغياب اليومي وطباعة الكشوفات المعتمدة
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-2">
+                        {/* Date Selector */}
+                        <div className="flex items-center bg-[#0d1428] p-1.5 rounded-xl border border-white/10 shadow-inner">
+                          <button
+                            onClick={() => {
+                              const d = new Date(attendanceDate);
+                              d.setDate(d.getDate() - 1);
+                              setAttendanceDate(d.toISOString().split('T')[0]);
+                            }}
+                            className="p-1.5 hover:bg-white/10 rounded-lg text-white/60 hover:text-white transition-colors"
+                            title="اليوم السابق"
+                          >
+                            <ChevronRight size={16} />
+                          </button>
+                          
+                          <div className="flex items-center gap-1.5 px-2">
+                            <Calendar size={14} className="text-blue-400" />
+                            <input
+                              type="date"
+                              value={attendanceDate}
+                              onChange={(e) => setAttendanceDate(e.target.value)}
+                              className="bg-transparent text-white font-bold text-xs outline-none cursor-pointer"
+                            />
+                          </div>
+
+                          <button
+                            onClick={() => {
+                              const d = new Date(attendanceDate);
+                              d.setDate(d.getDate() + 1);
+                              setAttendanceDate(d.toISOString().split('T')[0]);
+                            }}
+                            className="p-1.5 hover:bg-white/10 rounded-lg text-white/60 hover:text-white transition-colors"
+                            title="اليوم التالي"
+                          >
+                            <ChevronLeft size={16} />
+                          </button>
+
+                          {attendanceDate !== new Date().toISOString().split('T')[0] && (
+                            <button
+                              onClick={() => setAttendanceDate(new Date().toISOString().split('T')[0])}
+                              className="px-2 py-0.5 text-[10px] font-bold bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 rounded-md transition-colors mr-1"
+                            >
+                              اليوم
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Print Attendance Button */}
+                        <button
+                          onClick={handlePrintAdminAttendance}
+                          className="px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-black rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-blue-500/20 active:scale-95 transition-all cursor-pointer"
+                        >
+                          <Printer size={15} />
+                          <span>طباعة كشف الحضور</span>
+                        </button>
+
+                        {/* Change Buttons */}
+                        <button
+                          onClick={() => setSelectedSection(null)}
+                          className="px-3 py-2 bg-white/5 hover:bg-white/10 text-blue-400 hover:text-blue-300 font-bold text-xs rounded-xl border border-white/5 transition-colors"
+                        >
+                          تغيير الشعبة
+                        </button>
+                        <button
+                          onClick={() => { setSelectedGrade(null); setSelectedSection(null); }}
+                          className="px-3 py-2 bg-white/5 hover:bg-white/10 text-white/40 hover:text-white font-bold text-xs rounded-xl border border-white/5 transition-colors"
+                        >
+                          تغيير الصف
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* KPI Stats Cards */}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+                      <div className="bg-[#101935] p-3 rounded-xl border border-white/5 text-right">
+                        <span className="text-[10px] text-white/40 font-bold block mb-1">إجمالي الشعبة</span>
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-xl font-black text-white">{adminAttendanceStats.total}</span>
+                          <span className="text-[10px] text-white/30 font-bold">طالب</span>
+                        </div>
+                      </div>
+
+                      <div className="bg-emerald-950/20 p-3 rounded-xl border border-emerald-500/20 text-right">
+                        <span className="text-[10px] text-emerald-400 font-bold block mb-1">حاضرون ✅</span>
+                        <div className="flex items-baseline gap-1">
+                          <span className="text-xl font-black text-emerald-300">{adminAttendanceStats.present}</span>
+                          <span className="text-[10px] text-emerald-400/60 font-bold">({adminAttendanceStats.attendanceRate}%)</span>
+                        </div>
+                      </div>
+
+                      <div className="bg-rose-950/20 p-3 rounded-xl border border-rose-500/20 text-right">
+                        <span className="text-[10px] text-rose-400 font-bold block mb-1">غائبون ❌</span>
+                        <span className="text-xl font-black text-rose-300">{adminAttendanceStats.absent}</span>
+                      </div>
+
+                      <div className="bg-amber-950/20 p-3 rounded-xl border border-amber-500/20 text-right">
+                        <span className="text-[10px] text-amber-400 font-bold block mb-1">متأخرون ⏳</span>
+                        <span className="text-xl font-black text-amber-300">{adminAttendanceStats.late}</span>
+                      </div>
+
+                      <div className="bg-white/5 p-3 rounded-xl border border-white/5 text-right">
+                        <span className="text-[10px] text-white/40 font-bold block mb-1">غير مرصود ⚪</span>
+                        <span className="text-xl font-black text-white/60">{adminAttendanceStats.unrecorded}</span>
+                      </div>
+
+                      <div className="bg-blue-950/20 p-3 rounded-xl border border-blue-500/20 text-right">
+                        <span className="text-[10px] text-blue-400 font-bold block mb-1">نسبة الحضور</span>
+                        <span className="text-xl font-black text-blue-300">{adminAttendanceStats.attendanceRate}%</span>
+                      </div>
+                    </div>
+
+                    {/* Search & Filter & Batch Action */}
+                    <div className="flex flex-wrap items-center justify-between gap-3 bg-[#101935]/80 p-3 rounded-xl border border-white/5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <div className="relative">
+                          <Search size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-white/30" />
+                          <input
+                            type="text"
+                            placeholder="بحث بالاسم أو الكود..."
+                            value={attendanceSearchQuery}
+                            onChange={(e) => setAttendanceSearchQuery(e.target.value)}
+                            className="w-48 sm:w-60 bg-[#0d1428] border border-white/10 rounded-xl pr-8 pl-3 py-1.5 text-xs text-white outline-none focus:border-blue-500/50"
+                          />
+                        </div>
+
+                        <div className="flex items-center gap-1 bg-[#0d1428] p-1 rounded-xl border border-white/10">
+                          {(['all', 'present', 'absent', 'late', 'unrecorded'] as const).map(filter => {
+                            const labels = { all: 'الكل', present: 'حاضر', absent: 'غائب', late: 'متأخر', unrecorded: 'غير مرصود' };
+                            return (
+                              <button
+                                key={filter}
+                                onClick={() => setAttendanceStatusFilter(filter)}
+                                className={`px-2 py-1 rounded-lg text-[10px] font-bold transition-all ${attendanceStatusFilter === filter ? 'bg-blue-500 text-white shadow-sm' : 'text-white/40 hover:text-white'}`}
+                              >
+                                {labels[filter]}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {adminAttendanceStats.unrecorded > 0 && attendanceSubTab === 'attendance' && (
+                        <button
+                          onClick={handleBatchMarkAdminPresent}
+                          disabled={isBatchUpdatingAttendance}
+                          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-md shadow-emerald-600/20 transition-all active:scale-95 cursor-pointer"
+                        >
+                          <CheckCircle2 size={14} />
+                          <span>{isBatchUpdatingAttendance ? 'جاري الرصد...' : `تسجيل حضور لجميع غير المرصودين (${adminAttendanceStats.unrecorded})`}</span>
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Students List */}
                     {attendanceSubTab === 'attendance' ? (
-                      students
-                        .filter(s => (s as any).grade === selectedGrade)
-                        .slice()
-                        .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar'))
-                        .map((s, sIdx) => {
-                        const today = new Date().toISOString().split('T')[0];
-                        const dayLogs = ((s as any).attendance?.logs || []).filter((l: any) => l.date === today);
-                        const isEditing = attendanceAction?.studentId === s.id;
+                      displayAdminAttendanceStudents.length === 0 ? (
+                        <div className="bg-[#101935] p-8 rounded-2xl border border-white/5 text-center text-white/40 text-xs font-bold">
+                          {sectionStudents.length === 0 
+                            ? 'لا يوجد طلاب مسجلين في هذه الشعبة حالياً في مركز الأكواد' 
+                            : 'لا توجد نتائج مطابقة لبحثك أو عامل التصفية'}
+                        </div>
+                      ) : (
+                        displayAdminAttendanceStudents.map((s, sIdx) => {
+                          const dayLogs = s.dayLogs || [];
+                          const isEditing = attendanceAction?.studentId === s.id;
 
-                        return (
-                          <div key={`adm_stu_${s.id || s.code || sIdx}`} className="bg-[#101935] p-4 rounded-2xl border border-white/5 space-y-4 text-right">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <span className="text-white font-bold text-sm">{s.name}</span>
-                                <button
-                                  onClick={async () => {
-                                    const logs = await academicService.fetchAttendanceLogs(s.id);
-                                    if (logs.length > 0) {
-                                      const logText = logs.map((l: any) => `${l.date} (${l.period}): ${l.status === 'present' ? '✅' : l.status === 'absent' ? '❌' : '⏳'} ${l.status}${l.reason ? ` - ${l.reason}` : ''}`).join('\n');
-                                      alert(`سجل حضور الطالب ${s.name}:\n\n${logText}`);
-                                    } else {
-                                      showToast('لا يوجد سجل حضور سابق');
-                                    }
-                                  }}
-                                  className="text-white/20 hover:text-blue-400 transition-colors"
-                                  title="عرض السجل التاريخي"
-                                >
-                                  <History size={14} />
-                                </button>
-                              </div>
-                              <div className="flex gap-1.5">
-                                <button 
-                                  onClick={() => academicService.updateAttendance(s.id, (s as any).userId, 'present', 'الإدارة', '', 'عام', selectedSchoolId || '').then(() => {
-                                    showToast('تم تسجيل حضور');
-                                    setAttendanceAction(null);
-                                  })} 
-                                  className={`px-3 py-2 rounded-xl font-bold text-[10px] transition-all ${dayLogs.some((l: any) => l.status === 'present') ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'}`}
-                                >
-                                  حضور
-                                </button>
-                                <button 
-                                  onClick={() => setAttendanceAction(isEditing && attendanceAction?.status === 'absent' ? null : { studentId: s.id, status: 'absent', period: 'يوم كامل', reason: 'بدون عذر' })} 
-                                  className={`px-3 py-2 rounded-xl font-bold text-[10px] transition-all ${dayLogs.some((l: any) => l.status === 'absent') ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/20' : 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20'}`}
-                                >
-                                  غياب
-                                </button>
-                                <button 
-                                  onClick={() => setAttendanceAction(isEditing && attendanceAction?.status === 'late' ? null : { studentId: s.id, status: 'late', period: '1', reason: '' })} 
-                                  className={`px-3 py-2 rounded-xl font-bold text-[10px] transition-all ${dayLogs.some((l: any) => l.status === 'late') ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/20' : 'bg-amber-500/10 text-amber-400 hover:bg-amber-500/20'}`}
-                                >
-                                  تأخير
-                                </button>
-                              </div>
-                            </div>
-
-                            <AnimatePresence>
-                              {isEditing && (
-                                <motion.div 
-                                  initial={{ height: 0, opacity: 0 }}
-                                  animate={{ height: 'auto', opacity: 1 }}
-                                  exit={{ height: 0, opacity: 0 }}
-                                  className="overflow-hidden space-y-3 pt-2 border-t border-white/5"
-                                >
-                                  <div className="grid grid-cols-2 gap-3 text-right">
-                                    <div className="space-y-1.5">
-                                      <label className="text-[10px] text-white/40 font-bold block">تحديد الوقت/الحصة</label>
-                                      <div className="flex flex-wrap gap-1">
-                                        {['يوم كامل', '1', '2', '3', '4', '5', '6', '7', '8'].map(p => (
-                                          <button 
-                                            key={p}
-                                            onClick={() => setAttendanceAction({ ...attendanceAction, period: p })}
-                                            className={`px-2 h-7 rounded-lg text-[10px] font-bold border transition-all ${attendanceAction.period === p ? 'bg-blue-500 border-blue-400 text-white' : 'bg-white/5 border-white/10 text-white/60'}`}
-                                          >
-                                            {p}
-                                          </button>
-                                        ))}
-                                      </div>
+                          return (
+                            <div key={`adm_stu_${s.id || s.code || sIdx}`} className="bg-[#101935] p-4 rounded-2xl border border-white/5 space-y-4 text-right">
+                              <div className="flex flex-wrap items-center justify-between gap-3">
+                                <div className="flex items-center gap-3">
+                                  <span className="w-7 h-7 rounded-lg bg-white/5 text-white/40 font-mono text-xs flex items-center justify-center font-bold">
+                                    {sIdx + 1}
+                                  </span>
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-white font-black text-sm">{s.name}</span>
+                                      <span className="text-[10px] text-white/40 font-mono bg-white/5 px-2 py-0.5 rounded-md border border-white/5">
+                                        {s.code || 'بدون كود'}
+                                      </span>
+                                      <span className={`text-[10px] font-black px-2 py-0.5 rounded-md border ${
+                                        s.dayStatus === 'present'
+                                          ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                                          : s.dayStatus === 'absent'
+                                          ? 'bg-rose-500/10 text-rose-400 border-rose-500/20'
+                                          : s.dayStatus === 'late'
+                                          ? 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+                                          : 'bg-white/5 text-white/40 border-white/10'
+                                      }`}>
+                                        {s.dayStatus === 'present' ? 'حاضر ✅' : s.dayStatus === 'absent' ? 'غائب ❌' : s.dayStatus === 'late' ? 'متأخر ⏳' : 'غير مرصود ⚪'}
+                                      </span>
                                     </div>
-                                    
-                                    {attendanceAction.status === 'absent' && (
-                                      <div className="space-y-1.5">
-                                        <label className="text-[10px] text-white/40 font-bold block">سبب العذر</label>
-                                        <select 
-                                          value={attendanceAction?.reason || 'بدون عذر'}
-                                          onChange={(e) => setAttendanceAction({ ...attendanceAction, reason: e.target.value })}
-                                          className="w-full bg-[#101935] border border-white/10 rounded-lg p-2 text-xs text-white outline-none focus:border-rose-500/50"
-                                        >
-                                          <option value="بدون عذر">بدون عذر</option>
-                                          <option value="مرضي">عذر مرضي</option>
-                                          <option value="إجازة رسمية">إجازة رسمية</option>
-                                          <option value="ظرف عائلي">ظرف عائلي</option>
-                                        </select>
-                                      </div>
+                                    {s.latestLog && (
+                                      <p className="text-[10px] text-white/40 mt-0.5 font-medium">
+                                        الحصة: {s.latestLog.period || 'يوم كامل'} {s.latestLog.reason ? `• السبب: ${s.latestLog.reason}` : ''} {s.latestLog.by ? `• الرصد: ${s.latestLog.by}` : ''}
+                                      </p>
                                     )}
                                   </div>
-
-                                  <button 
-                                    onClick={() => {
-                                      academicService.updateAttendance(
-                                        s.id, 
-                                        (s as any).userId, 
-                                        attendanceAction.status, 
-                                        'الإدارة', 
-                                        attendanceAction.reason, 
-                                        attendanceAction.period,
-                                        selectedSchoolId || ''
-                                      ).then(() => {
-                                        showToast(`تم تسجيل ${attendanceAction.status === 'absent' ? 'الغياب' : 'التأخير'}`);
-                                        setAttendanceAction(null);
-                                      });
+                                  <button
+                                    onClick={async () => {
+                                      const logs = await academicService.fetchAttendanceLogs(s.id);
+                                      if (logs.length > 0) {
+                                        const logText = logs.map((l: any) => `${l.date} (${l.period}): ${l.status === 'present' ? '✅ حاضر' : l.status === 'absent' ? '❌ غائب' : '⏳ متأخر'}${l.reason ? ' - ' + l.reason : ''}`).join('\n');
+                                        alert(`سجل حضور الطالب ${s.name}:\n\n${logText}`);
+                                      } else {
+                                        showToast('لا يوجد سجل حضور سابق');
+                                      }
                                     }}
-                                    className="w-full py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-bold text-xs shadow-lg shadow-blue-500/20 transition-all flex items-center justify-center gap-2"
+                                    className="text-white/20 hover:text-blue-400 transition-colors p-1"
+                                    title="عرض السجل التاريخي"
                                   >
-                                    <Check size={14} />
-                                    تأكيد التسجيل لـ {attendanceAction.period}
+                                    <History size={15} />
                                   </button>
-                                </motion.div>
-                              )}
-                            </AnimatePresence>
+                                </div>
 
-                            {dayLogs.length > 0 && !isEditing && (
-                              <div className="flex flex-wrap gap-2 pt-1 justify-start">
-                                {dayLogs.map((log: any, i: number) => (
-                                  <div key={`day_log_${i}`} className="flex items-center gap-1.5 bg-white/5 px-2 py-1 rounded-lg border border-white/5 text-[9px]">
-                                    <span className={`w-1.5 h-1.5 rounded-full ${log.status === 'present' ? 'bg-emerald-500' : log.status === 'absent' ? 'bg-rose-500' : 'bg-amber-500'}`} />
-                                    <span className="text-white/60 font-bold">{log.period}:</span>
-                                    <span className="text-white/40">{log.status === 'present' ? 'حاضر' : log.status === 'absent' ? 'غائب' : 'تأخير'}</span>
-                                    {log.reason && <span className="text-rose-400/40">({log.reason})</span>}
-                                  </div>
-                                ))}
+                                <div className="flex items-center gap-1.5">
+                                  <button 
+                                    onClick={() => academicService.updateAttendance(s.id, (s as any).userId, 'present', 'الإدارة', '', 'يوم كامل', selectedSchoolId || '', attendanceDate).then(() => {
+                                      showToast(`تم تسجيل حضور "${s.name}"`);
+                                      setAttendanceAction(null);
+                                    })} 
+                                    className={`px-3.5 py-2 rounded-xl font-bold text-xs transition-all active:scale-95 cursor-pointer ${s.dayStatus === 'present' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'}`}
+                                  >
+                                    حضور
+                                  </button>
+                                  <button 
+                                    onClick={() => setAttendanceAction(isEditing && attendanceAction?.status === 'absent' ? null : { studentId: s.id, status: 'absent', period: 'يوم كامل', reason: 'بدون عذر' })} 
+                                    className={`px-3.5 py-2 rounded-xl font-bold text-xs transition-all active:scale-95 cursor-pointer ${s.dayStatus === 'absent' ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/20' : 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20'}`}
+                                  >
+                                    غياب
+                                  </button>
+                                  <button 
+                                    onClick={() => setAttendanceAction(isEditing && attendanceAction?.status === 'late' ? null : { studentId: s.id, status: 'late', period: '1', reason: '' })} 
+                                    className={`px-3.5 py-2 rounded-xl font-bold text-xs transition-all active:scale-95 cursor-pointer ${s.dayStatus === 'late' ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/20' : 'bg-amber-500/10 text-amber-400 hover:bg-amber-500/20'}`}
+                                  >
+                                    تأخير
+                                  </button>
+                                </div>
                               </div>
-                            )}
-                          </div>
-                        );
-                      })
+
+                              <AnimatePresence>
+                                {isEditing && (
+                                  <motion.div 
+                                    initial={{ height: 0, opacity: 0 }}
+                                    animate={{ height: 'auto', opacity: 1 }}
+                                    exit={{ height: 0, opacity: 0 }}
+                                    className="overflow-hidden space-y-3 pt-3 border-t border-white/5"
+                                  >
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-right">
+                                      <div className="space-y-1.5">
+                                        <label className="text-[10px] text-white/40 font-bold block">تحديد الوقت/الحصة</label>
+                                        <div className="flex flex-wrap gap-1">
+                                          {['يوم كامل', '1', '2', '3', '4', '5', '6', '7', '8'].map(p => (
+                                            <button 
+                                              key={p}
+                                              onClick={() => setAttendanceAction({ ...attendanceAction, period: p })}
+                                              className={`px-2.5 h-7 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${attendanceAction.period === p ? 'bg-blue-500 border-blue-400 text-white' : 'bg-white/5 border-white/10 text-white/60'}`}
+                                            >
+                                              {p}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      </div>
+                                      
+                                      {attendanceAction.status === 'absent' && (
+                                        <div className="space-y-1.5">
+                                          <label className="text-[10px] text-white/40 font-bold block">سبب العذر</label>
+                                          <select 
+                                            value={attendanceAction?.reason || 'بدون عذر'}
+                                            onChange={(e) => setAttendanceAction({ ...attendanceAction, reason: e.target.value })}
+                                            className="w-full bg-[#0d1428] border border-white/10 rounded-lg p-2 text-xs text-white outline-none focus:border-rose-500/50"
+                                          >
+                                            <option value="بدون عذر">بدون عذر</option>
+                                            <option value="مرضي">عذر مرضي</option>
+                                            <option value="إجازة رسمية">إجازة رسمية</option>
+                                            <option value="ظرف عائلي">ظرف عائلي</option>
+                                          </select>
+                                        </div>
+                                      )}
+                                    </div>
+
+                                    <button 
+                                      onClick={() => {
+                                        academicService.updateAttendance(
+                                          s.id, 
+                                          (s as any).userId, 
+                                          attendanceAction.status, 
+                                          'الإدارة', 
+                                          attendanceAction.reason, 
+                                          attendanceAction.period,
+                                          selectedSchoolId || '',
+                                          attendanceDate
+                                        ).then(() => {
+                                          showToast(`تم تسجيل ${attendanceAction.status === 'absent' ? 'الغياب' : 'التأخير'}`);
+                                          setAttendanceAction(null);
+                                        });
+                                      }}
+                                      className="w-full py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-bold text-xs shadow-lg shadow-blue-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
+                                    >
+                                      <Check size={14} />
+                                      تأكيد التسجيل لـ {attendanceAction.period} ({attendanceDate})
+                                    </button>
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+
+                              {dayLogs.length > 0 && !isEditing && (
+                                <div className="flex flex-wrap gap-2 pt-1 justify-start">
+                                  {dayLogs.map((log: any, i: number) => (
+                                    <div key={`day_log_${i}`} className="flex items-center gap-1.5 bg-white/5 px-2 py-1 rounded-lg border border-white/5 text-[9px]">
+                                      <span className={`w-1.5 h-1.5 rounded-full ${log.status === 'present' ? 'bg-emerald-500' : log.status === 'absent' ? 'bg-rose-500' : 'bg-amber-500'}`} />
+                                      <span className="text-white/60 font-bold">{log.period}:</span>
+                                      <span className="text-white/40">{log.status === 'present' ? 'حاضر' : log.status === 'absent' ? 'غائب' : 'تأخير'}</span>
+                                      {log.reason && <span className="text-rose-400/40">({log.reason})</span>}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })
+                      )
                     ) : (
-                      students
-                        .filter(s => (s as any).grade === selectedGrade)
-                        .slice()
-                        .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ar'))
-                        .map((s, sIdx) => {
+                      sectionStudents.map((s, sIdx) => {
                         const currentScore = typeof (s as any).behavior?.score === 'number' ? (s as any).behavior.score : 100;
                         return (
                           <div key={`beh_stu_${s.id || s.code || sIdx}`} className="bg-[#101935]/60 hover:bg-[#101935] p-4 rounded-2xl border border-white/5 transition-all text-right flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -1770,7 +2564,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   setShowCustomBehaviorNoteInput(false);
                                   setCustomBehaviorNoteText('');
                                 }}
-                                className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-[11px] rounded-xl shadow-lg shadow-purple-600/15 duration-200 transition-all active:scale-[0.97]"
+                                className="px-4 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold text-[11px] rounded-xl shadow-lg shadow-purple-600/15 duration-200 transition-all active:scale-[0.97] cursor-pointer"
                               >
                                 ⚙️ إجراء سلوكي
                               </button>
@@ -1779,14 +2573,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         );
                       })
                     )}
-                 </div>
-               )}
+                  </div>
+                )}
              </>
            )}
            </motion.div>
           )}
 
-          {activeTab === 'finance' && (
+          {!isTabDisabled('finance') && activeTab === 'finance' && (
             <motion.div 
                key="finance-tab-fixed"
                initial={{ opacity: 0 }} 
@@ -1826,7 +2620,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </motion.div>
           )}
 
-          {activeTab === 'broadcast' && (
+          {!isTabDisabled('broadcast') && activeTab === 'broadcast' && (
             <motion.div 
                key="broadcast-tab-fixed"
                initial={{ opacity: 0 }} 
@@ -1852,18 +2646,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </motion.div>
           )}
 
-            {activeTab === 'sovereignty' && (
-              <motion.div 
-                 key="sovereignty-tab-fixed" 
-                 initial={{ opacity: 0 }} 
-                 animate={{ opacity: 1 }} 
-                 exit={{ opacity: 0 }}
-                 className={`transition-all duration-500 ${glowingTab === 'sovereignty' ? 'ring-4 ring-amber-400 ring-offset-4 ring-offset-[#050B14] rounded-2xl p-2' : ''}`}
-              >
-                <ComingSoonPlaceholder title="منصة السيادة (البطولات)" />
-              </motion.div>
-            )}
-          {activeTab === 'teachers' && (
+          {!isTabDisabled('sovereignty') && activeTab === 'sovereignty' && (
+            <motion.div 
+               key="sovereignty-tab-fixed" 
+               initial={{ opacity: 0 }} 
+               animate={{ opacity: 1 }} 
+               exit={{ opacity: 0 }}
+               className={`transition-all duration-500 ${glowingTab === 'sovereignty' ? 'ring-4 ring-amber-400 ring-offset-4 ring-offset-[#050B14] rounded-2xl p-2' : ''}`}
+            >
+              <ComingSoonPlaceholder title="منصة السيادة (البطولات)" />
+            </motion.div>
+          )}
+
+          {!isTabDisabled('teachers') && activeTab === 'teachers' && (
             <motion.div 
                key="teachers-tab-fixed" 
                initial={{ opacity: 0 }} 
@@ -1875,18 +2670,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </motion.div>
           )}
 
-          {activeTab === 'support' && (
+          {!isTabDisabled('support') && activeTab === 'support' && (
             <motion.div key="support-tab-fixed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <SupportManager onSubViewChange={setSupportSubView} schoolId={selectedSchoolId} />
             </motion.div>
           )}
 
-          {activeTab === "transport" && (
+          {!isTabDisabled('transport') && activeTab === "transport" && (
             <motion.div key="transport-tab-fixed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <ComingSoonPlaceholder title="إدارة النقل المدرسي" />
             </motion.div>
           )}
-          {activeTab === 'ideas' && (
+
+          {!isTabDisabled('ideas') && activeTab === 'ideas' && (
             <motion.div key="ideabank-tab-fixed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <IdeaBankAdminView 
                 schoolId={selectedSchoolId} 
@@ -1906,13 +2702,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </motion.div>
           )}
 
-          {activeTab === 'resources' && (
+          {!isTabDisabled('resources') && activeTab === 'resources' && (
             <motion.div key="resources-tab-fixed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <ResourceManager />
             </motion.div>
           )}
 
-          {activeTab === 'audit' && (
+          {!isTabDisabled('audit') && activeTab === 'audit' && (
             <motion.div key="audit-tab-fixed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <AuditLogView showToast={showToast} />
             </motion.div>

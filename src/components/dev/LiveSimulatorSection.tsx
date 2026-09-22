@@ -24,8 +24,6 @@ import {
   Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { collection, getDocs, addDoc, serverTimestamp } from '@/src/lib/firebase';
-import { db } from '../../lib/firebase';
 import { logActivity } from '../../utils/auditLogger';
 import { schoolService } from '../../services/schoolService';
 

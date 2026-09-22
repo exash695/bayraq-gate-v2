@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Bot, FileUp, ClipboardCheck, HelpCircle, ScrollText, Edit2, Sparkles, Trophy, ChevronRight, Loader2, Copy, CheckCircle, Image as ImageIcon, X, Save, History, Trash2, Plus, Minus, Lock, Search } from 'lucide-react';
+import { Bot, FileUp, ClipboardCheck, HelpCircle, ScrollText, Edit2, Sparkles, Trophy, ChevronRight, Loader2, Copy, CheckCircle, Image as ImageIcon, X, Save, History, Trash2, Plus, Minus, Lock, Search, Camera, CheckCircle2, UploadCloud, Eye, ZoomIn } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import TeacherActivities from "./TeacherActivities";
 import { TeacherSovereigntyManager } from './Sovereignty/TeacherSovereigntyManager';
@@ -18,11 +18,19 @@ interface TeacherAIAssistantProps {
   schoolId: string;
   teacherData?: any;
   selectedClass?: string;
+  disabledModules?: string[];
+  rolePrefix?: string;
 }
 
 type AITool = 'questions' | 'summaries' | 'homework' | 'ideas' | 'competitions' | 'history' | 'activities' | 'sovereignty' | null;
 
-export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({ schoolId, teacherData, selectedClass }) => {
+export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({ 
+  schoolId, 
+  teacherData, 
+  selectedClass,
+  disabledModules = [],
+  rolePrefix = 'teacher'
+}) => {
   const remoteConfig = useRemoteConfig();
   const [activeTool, setActiveTool] = useState<AITool>(() => {
     const targetTool = safeStorage.getItem("s6_target_ai_tool") as AITool;
@@ -54,6 +62,14 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({ schoolId
 
   const [isManualInput, setIsManualInput] = useState(false);
   const [manualText, setManualText] = useState('');
+  const [hwMode, setHwMode] = useState<'ai' | 'manual' | 'image'>('ai');
+  const [imageHwFiles, setImageHwFiles] = useState<File[]>([]);
+  const [imageHwPreviews, setImageHwPreviews] = useState<string[]>([]);
+  const [imageHwTitle, setImageHwTitle] = useState('');
+  const [imageHwInstructions, setImageHwInstructions] = useState('');
+  const [isUploadingImageHw, setIsUploadingImageHw] = useState(false);
+  const [imageHwProgress, setImageHwProgress] = useState(0);
+  const imageHwInputRef = useRef<HTMLInputElement>(null);
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const isMountedRef = useRef(true);
@@ -100,6 +116,11 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({ schoolId
   useEffect(() => {
     setIsManualInput(false);
     setManualText('');
+    setHwMode('ai');
+    setImageHwFiles([]);
+    setImageHwPreviews([]);
+    setImageHwTitle('');
+    setImageHwInstructions('');
     
     const performScroll = () => {
       // 1. Scroll local container
@@ -190,6 +211,135 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({ schoolId
     }
   };
 
+  const handleImageHwChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const newFiles = Array.from(e.target.files);
+      setImageHwFiles(prev => [...prev, ...newFiles]);
+      const newPreviews = newFiles.map(file => URL.createObjectURL(file));
+      setImageHwPreviews(prev => [...prev, ...newPreviews]);
+      if (!imageHwTitle) {
+        setImageHwTitle(`واجب ${teacherData?.subject || ''} مصور - ${new Date().toLocaleDateString('ar-IQ')}`);
+      }
+    }
+  };
+
+  const removeImageHwFile = (index: number) => {
+    setImageHwFiles(prev => prev.filter((_, i) => i !== index));
+    setImageHwPreviews(prev => {
+      try {
+        if (prev[index]) URL.revokeObjectURL(prev[index]);
+      } catch {}
+      return prev.filter((_, i) => i !== index);
+    });
+  };
+
+  const handleDirectImageHwPublish = async () => {
+    if (imageHwFiles.length === 0) {
+      alert("يرجى اختيار صورة أو ورقة عمل للواجب أولاً");
+      return;
+    }
+    if (!schoolId) {
+      alert("معرف المدرسة غير متوفر");
+      return;
+    }
+
+    setIsUploadingImageHw(true);
+    setImageHwProgress(10);
+    try {
+      const uploadedUrls: string[] = [];
+      const totalFiles = imageHwFiles.length;
+      for (let i = 0; i < totalFiles; i++) {
+        const file = imageHwFiles[i];
+        const uploaded: any = await uploadFileToR2(
+          file,
+          (progress) => {
+            const currentFileWeight = 80 / totalFiles;
+            const currentProgress = 10 + (i * currentFileWeight) + (progress * currentFileWeight / 100);
+            setImageHwProgress(Math.round(currentProgress));
+          },
+          schoolId,
+          'image_homework'
+        );
+        const resolvedUrl = typeof uploaded === 'string' ? uploaded : (uploaded?.publicUrl || uploaded?.url || '');
+        if (resolvedUrl && typeof resolvedUrl === 'string' && resolvedUrl.trim().length > 0) {
+          uploadedUrls.push(resolvedUrl.trim());
+        }
+      }
+
+      if (uploadedUrls.length === 0) {
+        throw new Error("فشل في رفع صور الواجب إلى الخادم السحابي");
+      }
+
+      setImageHwProgress(90);
+
+      let mdContent = '';
+      uploadedUrls.forEach((url, i) => {
+        mdContent += `![صورة الواجب ${i + 1}](${url})\n\n`;
+      });
+      if (imageHwInstructions.trim()) {
+        mdContent += `### تعليمات وملاحظات الأستاذ:\n${imageHwInstructions.trim()}\n\n`;
+      }
+
+      const defaultTitle = `واجب ${teacherData?.subject || 'دراسي'} مصور - ${new Date().toLocaleDateString('ar-IQ')}`;
+      const finalTitle = imageHwTitle.trim() || defaultTitle;
+
+      const isAll = !selectedClass || selectedClass === 'ALL' || selectedClass === 'كافة الشُعب' || selectedClass === 'all';
+      const teacherSecNames = (teacherData?.classes || []).filter(Boolean);
+      const targetGrade = isAll ? "الكل" : selectedClass;
+      const targetSections = isAll ? teacherSecNames : [selectedClass];
+      const targetSectionLabel = isAll ? "كافة الشُعب" : selectedClass;
+      const subject = teacherData?.subject || "عام";
+
+      await addDoc(collection(db, "schools", schoolId, "ai_materials"), {
+        name: finalTitle,
+        content: mdContent,
+        fileUrl: uploadedUrls[0] || null,
+        imageUrl: uploadedUrls[0] || null,
+        imageUrls: uploadedUrls,
+        tool: 'صناعة واجبات',
+        subject: subject,
+        targetGrade: targetGrade,
+        section: isAll ? null : selectedClass,
+        targetSections: targetSections,
+        targetSectionLabel: targetSectionLabel,
+        teacherId: teacherData?.id || teacherData?.code || "unknown",
+        teacherName: teacherData?.name || "الأستاذ",
+        timestamp: serverTimestamp(),
+        date: new Date().toISOString(),
+        type: 'image_homework'
+      });
+
+      setImageHwProgress(100);
+      setGeneratedContent(mdContent);
+      setSaveName(finalTitle);
+      setIsPublished(true);
+      setTimeout(() => setIsPublished(false), 4000);
+
+      const newItem = {
+        id: Date.now().toString(),
+        name: finalTitle,
+        content: mdContent,
+        tool: 'صناعة واجبات (صورة)',
+        date: new Date().toISOString()
+      };
+      setSavedResults(prev => [newItem, ...prev]);
+      try {
+        localStorage.setItem('teacher_ai_saved_results', JSON.stringify([newItem, ...savedResults]));
+      } catch {}
+
+      setImageHwFiles([]);
+      setImageHwPreviews([]);
+      setImageHwInstructions('');
+      setImageHwTitle('');
+    } catch (err: any) {
+      console.error("Failed to upload image homework:", err);
+      alert(err?.message || "حدث خطأ أثناء رفع ونشر صورة الواجب");
+    } finally {
+      setIsUploadingImageHw(false);
+      setImageHwProgress(0);
+    }
+  };
+
   const [savedResults, setSavedResults] = useState<{id: string, name: string, content: string, tool: string, date: string}[]>(() => {
     try {
       const saved = localStorage.getItem('teacher_ai_saved_results');
@@ -214,15 +364,79 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({ schoolId
       icon: Trophy, 
       color: "text-amber-400", 
       bg: "bg-amber-500/10", 
-      border: "border-amber-500/20" 
+      border: "border-amber-500/20",
+      isLocked: disabledModules.includes(`${rolePrefix}:sovereignty`) || disabledModules.includes(`${rolePrefix}:sovereignty_mgmt`)
     },
-    { id: 'questions', title: "توليد أسئلة", desc: "استخراج أسئلة تلقائية استنتاجية أو نصية.", icon: HelpCircle, color: "text-blue-400", bg: "bg-blue-500/10", border: "border-blue-500/20" },
-    { id: 'summaries', title: "إنشاء ملخصات", desc: "تلخيص الفصول الطويلة لنقاط أساسية للطالب.", icon: ScrollText, color: "text-emerald-400", bg: "bg-emerald-500/10", border: "border-emerald-500/20" },
-    { id: 'homework', title: "صناعة واجبات", desc: "تكوين أنشطة صفية وواجبات منزلية مبتكرة بضغطة زر.", icon: Edit2, color: "text-amber-400", bg: "bg-amber-500/10", border: "border-amber-500/20" },
-    { id: 'ideas', title: "اقتراحات للشرح", desc: "أفكار وطرق مبتكرة لتوصيل الفكرة وتوضيحها للطلاب.", icon: Sparkles, color: "text-fuchsia-400", bg: "bg-fuchsia-500/10", border: "border-fuchsia-500/20" },
-    { id: 'competitions', title: "مسابقات صفية", desc: "إعداد تحديات ومسابقات سريعة للطلاب بأسلوب شيق.", icon: Trophy, color: "text-rose-400", bg: "bg-rose-500/10", border: "border-rose-500/20" },
-    { id: 'history', title: "المحفوظات", desc: "الرجوع للنتائج والملفات التي تم توليدها مسبقاً وحفظها.", icon: History, color: "text-teal-400", bg: "bg-teal-500/10", border: "border-teal-500/20" },
-    { id: 'activities', title: "متابعة الأنشطة", desc: "تتبع إنجازات الطلاب وتقييم الواجبات والمسابقات.", icon: ClipboardCheck, color: "text-indigo-400", bg: "bg-indigo-500/10", border: "border-indigo-500/20" },
+    { 
+      id: 'questions', 
+      title: "توليد أسئلة", 
+      desc: "استخراج أسئلة تلقائية استنتاجية أو نصية.", 
+      icon: HelpCircle, 
+      color: "text-blue-400", 
+      bg: "bg-blue-500/10", 
+      border: "border-blue-500/20",
+      isLocked: disabledModules.includes(`${rolePrefix}:questions_bank`) || disabledModules.includes(`${rolePrefix}:ai_gen_questions`)
+    },
+    { 
+      id: 'summaries', 
+      title: "إنشاء ملخصات", 
+      desc: "تلخيص الفصول الطويلة لنقاط أساسية للطالب.", 
+      icon: ScrollText, 
+      color: "text-emerald-400", 
+      bg: "bg-emerald-500/10", 
+      border: "border-emerald-500/20",
+      isLocked: disabledModules.includes(`${rolePrefix}:ai_gen_summary`)
+    },
+    { 
+      id: 'homework', 
+      title: "صناعة واجبات", 
+      desc: "تكوين أنشطة صفية وواجبات منزلية مبتكرة بضغطة زر.", 
+      icon: Edit2, 
+      color: "text-amber-400", 
+      bg: "bg-amber-500/10", 
+      border: "border-amber-500/20",
+      isLocked: disabledModules.includes(`${rolePrefix}:assignments`) || disabledModules.includes(`${rolePrefix}:ai_gen_assignments`)
+    },
+    { 
+      id: 'ideas', 
+      title: "اقتراحات للشرح", 
+      desc: "أفكار وطرق مبتكرة لتوصيل الفكرة وتوضيحها للطلاب.", 
+      icon: Sparkles, 
+      color: "text-fuchsia-400", 
+      bg: "bg-fuchsia-500/10", 
+      border: "border-fuchsia-500/20",
+      isLocked: disabledModules.includes(`${rolePrefix}:ai_teaching_suggestions`) || disabledModules.includes(`${rolePrefix}:ideas`)
+    },
+    { 
+      id: 'competitions', 
+      title: "مسابقات صفية", 
+      desc: "إعداد تحديات ومسابقات سريعة للطلاب بأسلوب شيق.", 
+      icon: Trophy, 
+      color: "text-rose-400", 
+      bg: "bg-rose-500/10", 
+      border: "border-rose-500/20",
+      isLocked: disabledModules.includes(`${rolePrefix}:competitions`)
+    },
+    { 
+      id: 'history', 
+      title: "المحفوظات", 
+      desc: "الرجوع للنتائج والملفات التي تم توليدها مسبقاً وحفظها.", 
+      icon: History, 
+      color: "text-teal-400", 
+      bg: "bg-teal-500/10", 
+      border: "border-teal-500/20",
+      isLocked: false 
+    },
+    { 
+      id: 'activities', 
+      title: "متابعة الأنشطة", 
+      desc: "تتبع إنجازات الطلاب وتقييم الواجبات والمسابقات.", 
+      icon: ClipboardCheck, 
+      color: "text-indigo-400", 
+      bg: "bg-indigo-500/10", 
+      border: "border-indigo-500/20",
+      isLocked: disabledModules.includes(`${rolePrefix}:activity_monitoring`)
+    },
   ];
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -564,10 +778,19 @@ ${baseFormatting}`;
               <motion.div 
                 key={idx}
                 whileHover={{ y: -5 }}
-                onClick={() => setActiveTool(item.id as AITool)}
-                className={`bg-[#0C1229]/80 backdrop-blur-md border ${item.border} rounded-3xl p-5 md:p-6 transition-all duration-300 cursor-pointer group shadow-[0_4px_20px_rgba(0,0,0,0.2)] overflow-hidden relative`}
+                onClick={() => !item.isLocked && setActiveTool(item.id as AITool)}
+                className={`bg-[#0C1229]/80 backdrop-blur-md border ${item.isLocked ? 'border-rose-500/30' : item.border} rounded-3xl p-5 md:p-6 transition-all duration-300 ${item.isLocked ? 'cursor-not-allowed grayscale-[0.5]' : 'cursor-pointer hover:shadow-[0_8px_30px_rgba(0,0,0,0.5)]'} group shadow-[0_4px_20px_rgba(0,0,0,0.2)] overflow-hidden relative`}
               >
-                <div className={`absolute -right-10 -top-10 w-32 h-32 ${item.bg} rounded-full blur-2xl group-hover:scale-150 transition-all duration-500`} />
+                {item.isLocked && (
+                  <div className="absolute inset-0 bg-rose-950/40 backdrop-blur-[1px] z-20 flex flex-col items-center justify-center text-center p-4">
+                    <div className="w-12 h-12 rounded-full bg-rose-500/20 flex items-center justify-center text-rose-400 mb-3 border border-rose-500/40 shadow-[0_0_15px_rgba(244,63,94,0.2)]">
+                      <Lock size={20} />
+                    </div>
+                    <span className="text-rose-400 text-sm font-black mb-1">التبويب مغلق</span>
+                    <span className="text-rose-300/60 text-[10px] font-bold">يرجى مراجعة إدارة المدرسة لتفعيل الخدمة</span>
+                  </div>
+                )}
+                <div className={`absolute -right-10 -top-10 w-32 h-32 ${item.bg} rounded-full blur-2xl ${!item.isLocked && 'group-hover:scale-150'} transition-all duration-500`} />
                 <div className="flex items-start justify-between gap-2 mb-5">
                   <div className={`w-12 h-12 rounded-2xl ${item.bg} ${item.color} flex items-center justify-center border ${item.border} group-hover:scale-110 transition-transform duration-300 shrink-0`}>
                     <item.icon size={24} />
@@ -753,20 +976,156 @@ ${baseFormatting}`;
                 ) : (
                   <>
                     {activeTool === 'homework' && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setIsManualInput(!isManualInput);
-                          setManualText('');
-                        }}
-                        className="w-full mb-3 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/20 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-1.5 shrink-0"
-                      >
-                        <Edit2 size={14} />
-                        {isManualInput ? 'العودة لرفع الملفات' : 'كتابة الواجب بنفسي'}
-                      </button>
+                      <div className="flex flex-col gap-2 mb-4 bg-black/30 p-1.5 rounded-2xl border border-white/5 shrink-0">
+                        <div className="grid grid-cols-3 gap-1">
+                          <button
+                            type="button"
+                            onClick={() => setHwMode('ai')}
+                            className={`py-2 px-1 rounded-xl text-[11px] font-black transition-all flex flex-col items-center justify-center gap-1 cursor-pointer ${
+                              hwMode === 'ai'
+                                ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md'
+                                : 'text-white/60 hover:text-white hover:bg-white/5'
+                            }`}
+                          >
+                            <Sparkles size={13} className={hwMode === 'ai' ? 'text-amber-300' : ''} />
+                            <span>توليد ذكي</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setHwMode('image')}
+                            className={`py-2 px-1 rounded-xl text-[11px] font-black transition-all flex flex-col items-center justify-center gap-1 cursor-pointer ${
+                              hwMode === 'image'
+                                ? 'bg-gradient-to-r from-teal-600 to-emerald-600 text-white shadow-md'
+                                : 'text-white/60 hover:text-white hover:bg-white/5'
+                            }`}
+                          >
+                            <ImageIcon size={13} className={hwMode === 'image' ? 'text-teal-200' : ''} />
+                            <span>رفع صورة</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => setHwMode('manual')}
+                            className={`py-2 px-1 rounded-xl text-[11px] font-black transition-all flex flex-col items-center justify-center gap-1 cursor-pointer ${
+                              hwMode === 'manual'
+                                ? 'bg-gradient-to-r from-amber-600 to-amber-700 text-white shadow-md'
+                                : 'text-white/60 hover:text-white hover:bg-white/5'
+                            }`}
+                          >
+                            <Edit2 size={13} className={hwMode === 'manual' ? 'text-amber-200' : ''} />
+                            <span>كتابة نص</span>
+                          </button>
+                        </div>
+                      </div>
                     )}
 
-                    {isManualInput ? (
+                    {activeTool === 'homework' && hwMode === 'image' ? (
+                      <div className="flex flex-col gap-3 shrink-0">
+                        <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-3 text-right">
+                          <p className="text-xs font-black text-emerald-300 flex items-center gap-1.5 mb-1">
+                            <ImageIcon size={14} />
+                            <span>نشر صورة الواجب أو ورقة العمل</span>
+                          </p>
+                          <p className="text-[10px] text-white/60 leading-relaxed font-medium">
+                            يمكنك رفع صورة لتمارين الكتاب، ملزمة، أو ورقة عمل مكتوبة ليراها الطلاب وأولياء الأمور مباشرة.
+                          </p>
+                        </div>
+
+                        <input 
+                          type="file" 
+                          accept="image/*"
+                          multiple
+                          className="hidden"
+                          ref={imageHwInputRef}
+                          onChange={handleImageHwChange}
+                        />
+
+                        {/* Dropzone */}
+                        <div 
+                          onClick={() => imageHwInputRef.current?.click()}
+                          className="w-full h-28 bg-black/40 border border-dashed border-teal-500/40 hover:border-teal-400 rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-all group shrink-0"
+                        >
+                          <div className="w-10 h-10 rounded-full bg-teal-500/10 flex items-center justify-center mb-1 group-hover:bg-teal-500/25 transition-colors text-teal-400">
+                            <Camera size={20} />
+                          </div>
+                          <span className="text-xs font-bold text-teal-200 group-hover:text-teal-100">انقر لاختيار صورة الواجب</span>
+                          <span className="text-[9px] text-white/40 mt-0.5">يدعم JPG, PNG, WEBP</span>
+                        </div>
+
+                        {/* Image Previews */}
+                        {imageHwPreviews.length > 0 && (
+                          <div className="flex flex-col gap-2 max-h-44 overflow-y-auto custom-scrollbar p-1">
+                            {imageHwPreviews.map((src, idx) => (
+                              <div key={idx} className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl p-2 relative group/img">
+                                <img src={src} alt={`معاينة ${idx + 1}`} className="w-12 h-12 rounded-lg object-cover bg-black/40 shrink-0 border border-white/10" />
+                                <div className="flex-1 min-w-0 text-right">
+                                  <span className="text-xs font-bold text-white block truncate">{imageHwFiles[idx]?.name || `صورة ${idx + 1}`}</span>
+                                  <span className="text-[10px] text-white/40">{( (imageHwFiles[idx]?.size || 0) / 1024 ).toFixed(0)} KB</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => removeImageHwFile(idx)}
+                                  className="text-white/40 hover:text-rose-400 p-1.5 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
+                                  title="حذف هذه الصورة"
+                                >
+                                  <X size={14} />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Title input */}
+                        <div className="space-y-1 text-right">
+                          <label className="text-[11px] font-bold text-white/70">عنوان الواجب:</label>
+                          <input
+                            type="text"
+                            value={imageHwTitle}
+                            onChange={(e) => setImageHwTitle(e.target.value)}
+                            placeholder="مثال: واجب الرياضيات - تمارين صفحة 45"
+                            className="w-full h-10 bg-black/40 border border-white/10 focus:border-teal-500/60 rounded-xl px-3 text-xs text-white outline-none"
+                          />
+                        </div>
+
+                        {/* Instructions */}
+                        <div className="space-y-1 text-right">
+                          <label className="text-[11px] font-bold text-white/70">تعليمات وملاحظات للطالب (اختياري):</label>
+                          <textarea
+                            value={imageHwInstructions}
+                            onChange={(e) => setImageHwInstructions(e.target.value)}
+                            placeholder="مثال: حل التمارين في الدفتر وتصوير الحل ورفعه قبل موعد الدرس القادم..."
+                            className="w-full h-20 bg-black/40 border border-white/10 focus:border-teal-500/60 rounded-xl p-2.5 text-xs text-white outline-none resize-none"
+                          />
+                        </div>
+
+                        {/* Upload & Publish Button */}
+                        {isUploadingImageHw ? (
+                          <div className="w-full space-y-2 py-2">
+                            <div className="flex items-center justify-between text-xs text-teal-300 font-bold">
+                              <span>جاري رفع ونشر صورة الواجب...</span>
+                              <span>{imageHwProgress}%</span>
+                            </div>
+                            <div className="w-full h-2 bg-black/40 rounded-full overflow-hidden border border-white/10">
+                              <div 
+                                className="h-full bg-gradient-to-r from-teal-500 to-emerald-500 transition-all duration-300 rounded-full"
+                                style={{ width: `${imageHwProgress}%` }}
+                              />
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={handleDirectImageHwPublish}
+                            disabled={imageHwFiles.length === 0}
+                            className="w-full py-3 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white font-black text-xs rounded-xl shadow-lg shadow-teal-500/20 flex items-center justify-center gap-2 transition-all disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                          >
+                            <UploadCloud size={16} />
+                            <span>اعتماد ونشر صورة الواجب</span>
+                          </button>
+                        )}
+                      </div>
+                    ) : (activeTool === 'homework' && hwMode === 'manual') || isManualInput ? (
                       <div className="flex flex-col gap-2 shrink-0">
                         <label className="block text-xs font-bold text-white/50">اكتب نص الواجب هنا:</label>
                         <textarea
@@ -785,7 +1144,7 @@ ${baseFormatting}`;
                               alert("يرجى كتابة نص الواجب أولاً.");
                             }
                           }}
-                          className="w-full py-2.5 bg-amber-500 text-black font-black text-xs rounded-xl flex items-center justify-center gap-1.5 hover:bg-amber-600 transition-all"
+                          className="w-full py-2.5 bg-amber-500 text-black font-black text-xs rounded-xl flex items-center justify-center gap-1.5 hover:bg-amber-600 transition-all cursor-pointer"
                         >
                           <CheckCircle size={14} />
                           اعتماد الواجب المكتوب
@@ -822,7 +1181,7 @@ ${baseFormatting}`;
                                   {f.type.startsWith('image/') ? <ImageIcon size={16} className="text-purple-400 shrink-0" /> : <ScrollText size={16} className="text-blue-400 shrink-0" />}
                                   <span className="text-xs text-white/80 truncate font-medium">{f.name}</span>
                                 </div>
-                                <button onClick={(e) => { e.stopPropagation(); removeFile(idx); }} className="text-white/40 hover:text-rose-400 transition-colors p-1">
+                                <button onClick={(e) => { e.stopPropagation(); removeFile(idx); }} className="text-white/40 hover:text-rose-400 transition-colors p-1 cursor-pointer">
                                   <X size={14} />
                                 </button>
                               </div>
@@ -833,7 +1192,7 @@ ${baseFormatting}`;
                         <button 
                           onClick={handleGenerate}
                           disabled={topicFiles.length === 0 || isGenerating}
-                          className="w-full mt-4 py-3.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl font-black text-sm transition-all shadow-[0_0_20px_rgba(168,85,247,0.4)] disabled:opacity-50 flex items-center justify-center gap-2 shrink-0"
+                          className="w-full mt-4 py-3.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white rounded-xl font-black text-sm transition-all shadow-[0_0_20px_rgba(168,85,247,0.4)] disabled:opacity-50 flex items-center justify-center gap-2 shrink-0 cursor-pointer"
                         >
                           {isGenerating ? (
                             <>
@@ -1218,10 +1577,8 @@ ${baseFormatting}`;
                         rehypePlugins={[rehypeRaw]}
                         components={{
                           p: ({node, children, ...props}) => (
-                            <div className="bg-white/5 border border-white/10 rounded-2xl p-5 shadow-[0_4px_20px_rgba(0,0,0,0.15)] hover:border-purple-500/30 transition-all duration-300 w-full overflow-hidden" dir="auto">
-                              <p className="text-white/80 leading-relaxed text-sm md:text-base font-medium break-words" {...props}>
-                                {children}
-                              </p>
+                            <div className="bg-white/5 border border-white/10 rounded-2xl p-5 shadow-[0_4px_20px_rgba(0,0,0,0.15)] hover:border-purple-500/30 transition-all duration-300 w-full overflow-hidden text-white/80 leading-relaxed text-sm md:text-base font-medium break-words my-2" dir="auto" {...props}>
+                              {children}
                             </div>
                           ),
                           h1: ({node, children, ...props}) => (
@@ -1336,6 +1693,17 @@ ${baseFormatting}`;
                             <pre className="max-w-full overflow-x-auto bg-transparent p-0 m-0" {...props}>
                               {children}
                             </pre>
+                          ),
+                          img: ({node, src, alt, ...props}: any) => (
+                            <span className="block my-4 rounded-2xl overflow-hidden border border-white/10 bg-black/40 shadow-xl max-w-full">
+                              <img 
+                                src={src} 
+                                alt={alt || "صورة الواجب"} 
+                                className="w-full max-h-[500px] object-contain rounded-xl block" 
+                                {...props} 
+                              />
+                              {alt && <span className="block p-2.5 text-center text-xs text-white/60 font-bold bg-black/20 border-t border-white/5">{alt}</span>}
+                            </span>
                           )
                         }}
                       >

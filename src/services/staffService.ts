@@ -73,31 +73,60 @@ export const staffService = {
   },
 
   addTeacher: async (teacherData: any) => {
+    staffCache.clear();
+    try {
+      const keys = ['all', teacherData.schoolId].filter(Boolean);
+      keys.forEach(k => safeStorage.removeItem(`s6_cache_teachers_${k}`));
+    } catch {}
     const response = await fetch('/api/teachers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(teacherData)
     });
     if (!response.ok) throw new Error('Failed to add teacher');
-    return await response.json();
+    const result = await response.json();
+    realtimeManager.emit('teachers_updated', { action: 'INSERT', data: teacherData, schoolId: teacherData?.schoolId });
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('teachers_updated', { detail: { action: 'INSERT', data: teacherData } }));
+    }
+    return result;
   },
 
   updateTeacher: async (id: string, updateData: any) => {
+    staffCache.clear();
+    try {
+      const keys = ['all', updateData.schoolId].filter(Boolean);
+      keys.forEach(k => safeStorage.removeItem(`s6_cache_teachers_${k}`));
+    } catch {}
     const response = await fetch(`/api/teachers/${id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updateData)
     });
     if (!response.ok) throw new Error('Failed to update teacher');
-    return await response.json();
+    const result = await response.json();
+    realtimeManager.emit('teachers_updated', { action: 'UPDATE', id, data: updateData, schoolId: updateData?.schoolId });
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('teachers_updated', { detail: { action: 'UPDATE', id, data: updateData } }));
+    }
+    return result;
   },
 
   deleteTeacher: async (id: string) => {
+    staffCache.clear();
+    try {
+      safeStorage.removeItem('s6_cache_teachers_all');
+    } catch {}
     const response = await fetch(`/api/teachers/${id}`, {
       method: 'DELETE'
     });
     if (!response.ok) throw new Error('Failed to delete teacher');
-    return await response.json();
+    const result = await response.json();
+    realtimeManager.emit('teachers_updated', { action: 'DELETE', id });
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('teachers_updated', { detail: { action: 'DELETE', id } }));
+    }
+    return result;
   },
 
   // Schedules

@@ -99,8 +99,29 @@ import {
 import type { Teacher, MaterialField, Post, SchoolPlatformProps, PlatformTab, HandRaiseRequest, LiveQuestion } from "./types";
 import { useSchoolPlatform } from "./SchoolPlatformContext";
 
-export const StudentFilesTab: React.FC = () => {
-  const { academicLists, grade, gradeName, highlightTasksSection, isFilesSidebarCollapsed, isTeacher, mapGradeForDocument, onClearHighlightTasks, recordedLessons, resolvedSchoolId, schoolExamPapers, schoolFiles, schoolId, schoolName, schoolQuestions, setActiveRadarFile, setCompetitionAnswers, setCompetitionScore, setCompetitionTimer, setHomeworkAnswer, setIsFilesSidebarCollapsed, setPdfLoadError, setPreviewingFile, setSelectedAIQuestion, setSelectedPaperForExtraction, setStudentExamPaperRole, setStudentExamPaperYear, setStudentLibrarySearch, setStudentLibrarySubject, setStudentLibraryTab, setStudentQuestionBankTab, setUserRatings, setViewingCompetition, setViewingHomework, setViewingRecordedLesson, setViewingSubmissionFeedback, showToast, studentExamPaperRole, studentExamPaperYear, studentLibrarySearch, studentLibrarySubject, studentLibraryTab, studentQuestionBankTab, studentSubmissions, subjectMapping, teacherAiResults, userProfile, userRatings } = useSchoolPlatform();
+export const StudentFilesTab: React.FC<{ disabledModules?: string[], rolePrefix?: string }> = ({ 
+  disabledModules: propsDisabledModules, 
+  rolePrefix: propsRolePrefix 
+}) => {
+  const context = useSchoolPlatform();
+  const { 
+    academicLists, grade, gradeName, highlightTasksSection, isFilesSidebarCollapsed, isTeacher, 
+    mapGradeForDocument, onClearHighlightTasks, recordedLessons, resolvedSchoolId, schoolExamPapers, 
+    schoolFiles, schoolId, schoolName, schoolQuestions, setActiveRadarFile, setCompetitionAnswers, 
+    setCompetitionScore, setCompetitionTimer, setHomeworkAnswer, setIsFilesSidebarCollapsed, 
+    setPdfLoadError, setPreviewingFile, setSelectedAIQuestion, setSelectedPaperForExtraction, 
+    setStudentExamPaperRole, setStudentExamPaperYear, setStudentLibrarySearch, setStudentLibrarySubject, 
+    setStudentLibraryTab, setStudentQuestionBankTab, setUserRatings, setViewingCompetition, 
+    setViewingHomework, setViewingRecordedLesson, setViewingSubmissionFeedback, showToast, 
+    studentExamPaperRole, studentExamPaperYear, studentLibrarySearch, studentLibrarySubject, 
+    studentLibraryTab, studentQuestionBankTab, studentSubmissions, subjectMapping, teacherAiResults, 
+    userProfile, userRatings 
+  } = context;
+
+  const disabledModules = propsDisabledModules || context.disabledModules || [];
+  const rolePrefix = propsRolePrefix || context.rolePrefix || 'student';
+
+  const checkLocked = (id: string) => disabledModules.includes(`${rolePrefix}:${id}`);
 
   const [selectedQuestionCategory, setSelectedQuestionCategory] = useState<string | null>(null);
   const [expandedQuestionId, setExpandedQuestionId] = useState<string | null>(null);
@@ -243,22 +264,61 @@ export const StudentFilesTab: React.FC = () => {
 
         const activeStudentSection = (userProfile as any)?.section || (userProfile as any)?.class_name || "";
         const normSection = activeStudentSection ? activeStudentSection.trim().toLowerCase() : "";
-        const isSectionMatch = (docSection: string | undefined | null) => {
-          if (!docSection || docSection.trim() === "" || docSection === "ALL" || docSection === "كافة الشُعب" || docSection === "all") return true;
+        const isSectionMatch = (docSection?: string | null, targetSections?: string[]) => {
+          if (Array.isArray(targetSections) && targetSections.length > 0) {
+            const hasAll = targetSections.some(s => !s || s === "ALL" || s === "كافة الشُعب" || s === "all" || s === "الكل");
+            if (hasAll) return true;
+            if (!normSection) return true;
+            return targetSections.some(s => {
+              const sNorm = String(s || '').trim().toLowerCase();
+              return sNorm === normSection || sNorm.includes(normSection) || normSection.includes(sNorm);
+            });
+          }
+          if (!docSection || docSection.trim() === "" || docSection === "ALL" || docSection === "كافة الشُعب" || docSection === "all" || docSection === "الكل") return true;
           if (!normSection) return true;
-          return docSection.trim().toLowerCase() === normSection;
+          const dNorm = docSection.trim().toLowerCase();
+          return dNorm === normSection || dNorm.includes(normSection) || normSection.includes(dNorm);
+        };
+
+        const isHomeworkItem = (r: any) => {
+          const tool = String(r.tool || '').trim();
+          const type = String(r.type || '').trim();
+          const toolId = String(r.toolId || '').trim();
+          return tool === 'صناعة واجبات' || 
+                 tool === 'صناعة واجبات بيتية' || 
+                 tool === 'واجبات' || 
+                 tool === 'الواجبات' || 
+                 tool === 'واجب بيتي' || 
+                 type === 'homework' || 
+                 toolId === 'homework' || 
+                 r.category === 'homework';
+        };
+
+        const isCompetitionItem = (r: any) => {
+          const tool = String(r.tool || '').trim();
+          const type = String(r.type || '').trim();
+          const toolId = String(r.toolId || '').trim();
+          return tool === 'مسابقات صفية' || 
+                 tool === 'مسابقات' || 
+                 tool === 'المسابقات' || 
+                 tool === 'تحديات ومسابقات' || 
+                 type === 'competition' || 
+                 toolId === 'competitions' || 
+                 r.category === 'competition';
         };
 
         const uncompletedHwCount = teacherAiResults.filter(r => {
           const rSections = Array.isArray(r.targetSections) ? r.targetSections : (r.section ? [r.section] : undefined);
           const matchesGrade = isGradeMatch(r.targetGrade, activeStudentGrade, rSections);
-          return r.tool === 'صناعة واجبات' && matchesGrade && !studentSubmissions.some(sub => sub.taskId === r.id && sub.type === 'homework');
+          const matchesSection = isSectionMatch(r.section, r.targetSections);
+          return isHomeworkItem(r) && matchesGrade && matchesSection && !studentSubmissions.some(sub => sub.taskId === r.id && sub.type === 'homework');
         }).length;
 
         const uncompletedCompCount = teacherAiResults.filter(r => {
           const rSections = Array.isArray(r.targetSections) ? r.targetSections : (r.section ? [r.section] : undefined);
           const matchesGrade = isGradeMatch(r.targetGrade, activeStudentGrade, rSections);
-          return r.tool === 'مسابقات صفية' && matchesGrade && !studentSubmissions.some(sub => sub.taskId === r.id && sub.type === 'competition');
+          const matchesSection = isSectionMatch(r.section, r.targetSections);
+          return isCompetitionItem(r) && matchesGrade && matchesSection && !studentSubmissions.some(sub => sub.taskId === r.id && sub.type === 'competition');
         }).length;
 
         const filteredDocs = schoolFiles.filter((doc) => {
@@ -266,8 +326,8 @@ export const StudentFilesTab: React.FC = () => {
           const matchesSearch = !searchLower || String(doc.title || '').toLowerCase().includes(searchLower) || 
                                 String(doc.name || '').toLowerCase().includes(searchLower);
           const matchesSubject = isSubjectMatch(doc.subject, doc.title || doc.name);
-          const matchesGrade = isGradeMatch(doc.grade, activeStudentGrade);
-          const matchesSection = isSectionMatch((doc as any).section);
+          const matchesGrade = isGradeMatch(doc.grade, activeStudentGrade, (doc as any).targetSections);
+          const matchesSection = isSectionMatch((doc as any).section, (doc as any).targetSections);
           return matchesSearch && matchesSubject && matchesGrade && matchesSection;
         });
 
@@ -276,8 +336,9 @@ export const StudentFilesTab: React.FC = () => {
           const matchesSearch = !searchLower || String(vid.title || '').toLowerCase().includes(searchLower) || 
                                 String(vid.description || '').toLowerCase().includes(searchLower);
           const matchesSubject = isSubjectMatch(vid.subject, vid.title || vid.description);
-          const matchesGrade = isGradeMatch(vid.grade, activeStudentGrade);
-          return matchesSearch && matchesSubject && matchesGrade;
+          const matchesGrade = isGradeMatch(vid.grade, activeStudentGrade, (vid as any).targetSections);
+          const matchesSection = isSectionMatch((vid as any).section, (vid as any).targetSections);
+          return matchesSearch && matchesSubject && matchesGrade && matchesSection;
         });
 
         const filteredQuestions = schoolQuestions.filter((q) => {
@@ -290,7 +351,8 @@ export const StudentFilesTab: React.FC = () => {
             ? (q as any).targetSections
             : (q as any).section ? [(q as any).section] : undefined;
           const matchesGrade = isGradeMatch(qGrade, activeStudentGrade, qSections);
-          return matchesSearch && matchesSubject && matchesGrade;
+          const matchesSection = isSectionMatch((q as any).section, (q as any).targetSections);
+          return matchesSearch && matchesSubject && matchesGrade && matchesSection;
         });
 
         const filteredPapers = schoolExamPapers.filter((p) => {
@@ -305,7 +367,8 @@ export const StudentFilesTab: React.FC = () => {
             ? (p as any).targetSections
             : (p as any).section ? [(p as any).section] : undefined;
           const matchesGrade = isGradeMatch(pGrade, activeStudentGrade, pSections);
-          return matchesSearch && matchesSubject && matchesYear && matchesRole && matchesGrade;
+          const matchesSection = isSectionMatch((p as any).section, (p as any).targetSections);
+          return matchesSearch && matchesSubject && matchesYear && matchesRole && matchesGrade && matchesSection;
         });
 
         // شريط المواد: يطابق حصراً المواد المضبوطة للصف من قبل الإدارة في مواد المرحلة في شؤون الطلاب والدرجات
@@ -374,13 +437,20 @@ export const StudentFilesTab: React.FC = () => {
               
               <div className="flex flex-col flex-1 justify-between pt-36 pb-8 min-h-[450px]">
                 <button
-                  onClick={() => setStudentLibraryTab("document")}
+                  onClick={() => !checkLocked("materials") && setStudentLibraryTab("document")}
                   className={`group w-full flex flex-col items-center justify-center py-6 transition-all outline-none gap-2 border-r-[3px] relative overflow-hidden ${
+                    checkLocked("materials") ? "opacity-50 grayscale cursor-not-allowed" : ""
+                  } ${
                     studentLibraryTab === "document"
                       ? "bg-[#050A18] text-amber-500 border-amber-500"
                       : "border-transparent text-white/40 hover:bg-white/5"
                   }`}
                 >
+                  {checkLocked("materials") && (
+                    <div className="absolute top-1 right-1 z-20 text-rose-500">
+                      <Lock size={12} />
+                    </div>
+                  )}
                   {studentLibraryTab === "document" && (
                     <div className="absolute inset-0 bg-amber-500/10 opacity-30" />
                   )}
@@ -393,13 +463,20 @@ export const StudentFilesTab: React.FC = () => {
                 </button>
 
                 <button
-                  onClick={() => setStudentLibraryTab("video")}
+                  onClick={() => !checkLocked("videos") && setStudentLibraryTab("video")}
                   className={`group w-full flex flex-col items-center justify-center py-6 transition-all outline-none gap-2 border-r-[3px] relative overflow-hidden ${
+                    checkLocked("videos") ? "opacity-50 grayscale cursor-not-allowed" : ""
+                  } ${
                     studentLibraryTab === "video"
                       ? "bg-[#050A18] text-[#00E5FF] border-[#00E5FF]"
                       : "border-transparent text-white/40 hover:bg-white/5"
                   }`}
                 >
+                  {checkLocked("videos") && (
+                    <div className="absolute top-1 right-1 z-20 text-rose-500">
+                      <Lock size={12} />
+                    </div>
+                  )}
                   {studentLibraryTab === "video" && (
                     <div className="absolute inset-0 bg-[#00E5FF]/10 opacity-30" />
                   )}
@@ -412,26 +489,35 @@ export const StudentFilesTab: React.FC = () => {
                 </button>
                 
                 <button
-                  onClick={() => setStudentLibraryTab("question_bank")}
+                  onClick={() => !checkLocked("questions_bank") && setStudentLibraryTab("question_bank")}
                   className={`group w-full flex flex-col items-center justify-center py-6 transition-all outline-none gap-2 border-r-[3px] relative overflow-hidden ${
+                    checkLocked("questions_bank") ? "opacity-50 grayscale cursor-not-allowed" : ""
+                  } ${
                     studentLibraryTab === "question_bank"
                       ? "bg-[#050A18] text-indigo-400 border-indigo-400"
                       : "border-transparent text-white/40 hover:bg-white/5"
                   }`}
                 >
+                  {checkLocked("questions_bank") && (
+                    <div className="absolute top-1 right-1 z-20 text-rose-500">
+                      <Lock size={12} />
+                    </div>
+                  )}
                   {studentLibraryTab === "question_bank" && (
                     <div className="absolute inset-0 bg-indigo-500/10 opacity-30" />
                   )}
-                  <Search 
-                    size={studentLibraryTab === "question_bank" ? 24 : 22} 
+                  <Database 
+                    size={studentLibraryTab === "question_bank" ? 26 : 22} 
                     strokeWidth={studentLibraryTab === "question_bank" ? 2.5 : 2}
                     className={`relative z-10 transition-transform ${studentLibraryTab === "question_bank" ? "scale-110" : "group-hover:scale-105 group-hover:text-white/60"}`} 
                   />
                   <span className={`text-[9px] font-bold px-1 text-center relative z-10 ${studentLibraryTab === "question_bank" ? "" : "group-hover:text-white/60"}`}>بنك الأسئلة</span>
                 </button>
                 <button
-                  onClick={() => setStudentLibraryTab("homework")}
+                  onClick={() => !checkLocked("assignments") && setStudentLibraryTab("homework")}
                   className={`group w-full flex flex-col items-center justify-center py-6 transition-all outline-none gap-2 border-r-[3px] relative overflow-hidden ${
+                    checkLocked("assignments") ? "opacity-50 grayscale cursor-not-allowed" : ""
+                  } ${
                     highlightTasksSection
                       ? "ring-2 ring-[#00E5FF] shadow-[0_0_20px_#00E5FF] border-[#00E5FF] bg-[#00E5FF]/10 text-[#00E5FF] animate-pulse"
                       : studentLibraryTab === "homework"
@@ -439,6 +525,11 @@ export const StudentFilesTab: React.FC = () => {
                       : "border-transparent text-white/40 hover:bg-white/5"
                   }`}
                 >
+                  {checkLocked("assignments") && (
+                    <div className="absolute top-1 right-1 z-20 text-rose-500">
+                      <Lock size={12} />
+                    </div>
+                  )}
                   {studentLibraryTab === "homework" && (
                     <div className="absolute inset-0 bg-amber-500/10 opacity-30" />
                   )}
@@ -455,8 +546,10 @@ export const StudentFilesTab: React.FC = () => {
                   <span className={`text-[9px] font-bold px-1 text-center relative z-10 ${studentLibraryTab === "homework" ? "" : "group-hover:text-white/60"}`}>الواجبات</span>
                 </button>
                 <button
-                  onClick={() => setStudentLibraryTab("competitions")}
+                  onClick={() => !checkLocked("excellence") && setStudentLibraryTab("competitions")}
                   className={`group w-full flex flex-col items-center justify-center py-6 transition-all outline-none gap-2 border-r-[3px] relative overflow-hidden ${
+                    checkLocked("excellence") ? "opacity-50 grayscale cursor-not-allowed" : ""
+                  } ${
                     highlightTasksSection
                       ? "ring-2 ring-[#00E5FF] shadow-[0_0_20px_#00E5FF] border-[#00E5FF] bg-[#00E5FF]/10 text-[#00E5FF] animate-pulse"
                       : studentLibraryTab === "competitions"
@@ -464,6 +557,11 @@ export const StudentFilesTab: React.FC = () => {
                       : "border-transparent text-white/40 hover:bg-white/5"
                   }`}
                 >
+                  {checkLocked("excellence") && (
+                    <div className="absolute top-1 right-1 z-20 text-rose-500">
+                      <Lock size={12} />
+                    </div>
+                  )}
                   {studentLibraryTab === "competitions" && (
                     <div className="absolute inset-0 bg-rose-500/10 opacity-30" />
                   )}
@@ -1405,10 +1503,12 @@ export const StudentFilesTab: React.FC = () => {
                   const homeworks = teacherAiResults.filter(r => {
                     const rSections = Array.isArray(r.targetSections) ? r.targetSections : (r.section ? [r.section] : undefined);
                     const matchesGrade = isGradeMatch(r.targetGrade, activeStudentGrade, rSections);
+                    const matchesSection = isSectionMatch(r.section, r.targetSections);
                     const rNameStr = String(r.name || "");
                     const rContentStr = String(r.content || "");
-                    return r.tool === 'صناعة واجبات' && 
+                    return isHomeworkItem(r) && 
                       matchesGrade &&
+                      matchesSection &&
                       (isSubjectMatch(r.subject, studentLibrarySubject) || rNameStr.includes(studentLibrarySubject) || rContentStr.includes(studentLibrarySubject)) && 
                       (studentLibrarySearch.trim() === "" || rNameStr.includes(studentLibrarySearch) || rContentStr.includes(studentLibrarySearch));
                   });
@@ -1500,10 +1600,12 @@ export const StudentFilesTab: React.FC = () => {
                   const competitions = teacherAiResults.filter(r => {
                     const rSections = Array.isArray(r.targetSections) ? r.targetSections : (r.section ? [r.section] : undefined);
                     const matchesGrade = isGradeMatch(r.targetGrade, activeStudentGrade, rSections);
+                    const matchesSection = isSectionMatch(r.section, r.targetSections);
                     const rNameStr = String(r.name || "");
                     const rContentStr = String(r.content || "");
-                    return r.tool === 'مسابقات صفية' && 
+                    return isCompetitionItem(r) && 
                       matchesGrade &&
+                      matchesSection &&
                       (isSubjectMatch(r.subject || "", studentLibrarySubject) || rNameStr.includes(studentLibrarySubject) || rContentStr.includes(studentLibrarySubject)) && 
                       (studentLibrarySearch.trim() === "" || rNameStr.includes(studentLibrarySearch) || rContentStr.includes(studentLibrarySearch));
                   });

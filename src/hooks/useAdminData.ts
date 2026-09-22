@@ -32,7 +32,14 @@ export const useAdminData = (selectedSchoolId: string | null, schoolName?: strin
   const [savedLists, setSavedLists] = useState<AcademicList[]>(() => {
     try {
       const stored = safeStorage.getItem(`s6_cache_lists_${safeSchoolId}`);
-      return stored ? JSON.parse(stored) : [];
+      if (!stored) return [];
+      const parsed = JSON.parse(stored);
+      if (!Array.isArray(parsed)) return [];
+      const map = new Map<string, AcademicList>();
+      parsed.forEach((item: any) => {
+        if (item?.id) map.set(item.id, item);
+      });
+      return Array.from(map.values());
     } catch {
       return [];
     }
@@ -181,7 +188,13 @@ export const useAdminData = (selectedSchoolId: string | null, schoolName?: strin
 
     // 3. Sync Academic Lists
     const unsubLists = academicService.subscribeToLists(currentSchoolId, (data) => {
-      setSavedLists(data);
+      const map = new Map<string, AcademicList>();
+      if (Array.isArray(data)) {
+        data.forEach((item: any) => {
+          if (item?.id) map.set(item.id, item);
+        });
+      }
+      setSavedLists(Array.from(map.values()));
       setIsLoading(false);
     }, schoolName);
 

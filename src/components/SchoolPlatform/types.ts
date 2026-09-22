@@ -1,6 +1,9 @@
 export interface Teacher {
   name: string;
   desc: string;
+  photo?: string;
+  rating?: number;
+  studentsCount?: number;
 }
 
 export interface MaterialField {
@@ -116,6 +119,7 @@ export interface SchoolFile {
 
 export type PlatformTab =
   | "feed"
+  | "attendance"
   | "files"
   | "materials"
   | "excellence"

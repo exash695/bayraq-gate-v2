@@ -8,9 +8,6 @@ export const initializeApp = () => ({});
 export const getAuth = () => ({});
 export const initializeFirestore = () => ({});
 export const getStorage = () => ({});
-export const GoogleAuthProvider = class {};
-export const signInWithPopup = async () => ({ user: null });
-export const signOut = async () => {};
 export const onAuthStateChanged = (auth: any, callback: any) => {
   // We handle this in customAuthService, but here is a mock for compatibility
   return () => {};

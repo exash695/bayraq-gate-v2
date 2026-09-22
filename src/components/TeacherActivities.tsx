@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { collection, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc, writeBatch, where } from '@/src/lib/firebase';
 import { db } from '../lib/firebase';
-import { ClipboardCheck, Search, CheckCircle, XCircle, Trophy, User, Calendar, MessageSquare, Send, Sparkles, Trash2, AlertTriangle } from 'lucide-react';
+import { ClipboardCheck, Search, CheckCircle, XCircle, Trophy, User, Calendar, MessageSquare, Send, Sparkles, Trash2, AlertTriangle, ExternalLink, Image as ImageIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import ReactMarkdown from 'react-markdown';
 
 export default function TeacherActivities({ 
   schoolId, 
@@ -297,7 +298,14 @@ export default function TeacherActivities({
                                         <User size={16} />
                                       </div>
                                       <div className="flex-1 min-w-0">
-                                        <h6 className="font-bold text-xs sm:text-sm text-white break-words leading-snug" title={sub.studentName}>{sub.studentName}</h6>
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          <h6 className="font-bold text-xs sm:text-sm text-white break-words leading-snug" title={sub.studentName}>{sub.studentName}</h6>
+                                          {sub.submittedBy === 'parent' && (
+                                            <span className="px-1.5 py-0.5 rounded-md bg-amber-500/20 text-amber-300 text-[9px] font-black shrink-0">
+                                              تم التسليم من ولي الأمر 👨‍👦
+                                            </span>
+                                          )}
+                                        </div>
                                         <div className="flex gap-2 items-center mt-1">
                                           <span className={`text-[10px] ${sub.aiGraded ? 'text-indigo-400' : sub.feedback ? 'text-emerald-400' : 'text-white/40'}`}>
                                             {sub.aiGraded ? 'تقييم تلقائي' : sub.feedback ? 'تم التقييم' : 'بانتظار التقييم'}
@@ -457,19 +465,60 @@ export default function TeacherActivities({
 
               <div className="p-6 flex-1 overflow-y-auto max-h-none">
                 <div className="flex items-center gap-3 mb-6 bg-white/5 p-4 rounded-xl border border-white/10">
-                  <div className="w-12 h-12 rounded-full bg-amber-500/20 text-amber-500 flex items-center justify-center">
+                  <div className="w-12 h-12 rounded-full bg-amber-500/20 text-amber-500 flex items-center justify-center shrink-0">
                     <User size={24} />
                   </div>
-                  <div>
-                    <h4 className="font-bold text-sm">{selectedSubmission.studentName}</h4>
-                    <p className="text-xs text-white/40 mt-1">{selectedSubmission.createdAt?.toDate().toLocaleString('ar-SA')}</p>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="font-bold text-sm text-white">{selectedSubmission.studentName}</h4>
+                      {selectedSubmission.submittedBy === 'parent' && (
+                        <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-black border border-amber-500/30">
+                          مرسل بواسطة ولي الأمر ({selectedSubmission.parentName || 'ولي الأمر'})
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-white/40 mt-1">
+                      {typeof selectedSubmission.createdAt?.toDate === 'function'
+                        ? selectedSubmission.createdAt.toDate().toLocaleString('ar-SA')
+                        : (selectedSubmission.submittedAt ? new Date(selectedSubmission.submittedAt).toLocaleString('ar-SA') : 'تاريخ غير محدد')}
+                    </p>
                   </div>
                 </div>
 
                 <div className="mb-6">
-                  <h5 className="text-xs font-bold text-amber-400/70 mb-2 uppercase tracking-wide">إجابة الطالب:</h5>
+                  <h5 className="text-xs font-bold text-amber-400/70 mb-2 uppercase tracking-wide">
+                    {selectedSubmission.submittedBy === 'parent' ? 'إجابة وحل الواجب (مرفق من ولي الأمر):' : 'إجابة الطالب:'}
+                  </h5>
                   <div className="bg-[#050A18] border border-white/10 rounded-xl p-4 text-sm leading-relaxed whitespace-pre-wrap select-text selection:bg-amber-500/30">
-                    {selectedSubmission.content}
+                    <ReactMarkdown
+                      components={{
+                        img: ({node, src, alt, ...props}: any) => (
+                          <span className="block my-3 rounded-xl overflow-hidden border border-white/10 bg-black/50 max-w-full">
+                            <img 
+                              src={src} 
+                              alt={alt || "صورة الحل"} 
+                              className="w-full max-h-[400px] object-contain rounded-lg block" 
+                              {...props} 
+                            />
+                            {alt && (
+                              <span className="p-2 bg-black/40 border-t border-white/5 flex items-center justify-between text-xs text-white/60">
+                                <span>{alt}</span>
+                                <a 
+                                  href={src} 
+                                  target="_blank" 
+                                  rel="noreferrer" 
+                                  className="text-amber-400 hover:underline flex items-center gap-1 text-[11px] font-bold"
+                                >
+                                  <ExternalLink size={12} /> فتح بالحجم الكامل
+                                </a>
+                              </span>
+                            )}
+                          </span>
+                        )
+                      }}
+                    >
+                      {selectedSubmission.content || 'لا توجد تفاصيل نصية للإجابة'}
+                    </ReactMarkdown>
                   </div>
                 </div>
 

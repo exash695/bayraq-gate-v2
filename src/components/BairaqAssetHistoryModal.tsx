@@ -1,6 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { doc, getDoc, setDoc } from '@/src/lib/firebase';
-import { db } from '../lib/firebase';
 import { History, RotateCcw, AlertCircle, CheckCircle } from 'lucide-react';
 import { POSE_ALIASES_MAP, updateGlobalPoses } from '../components/BerqCharacterManager';
 
@@ -33,11 +31,11 @@ export const BairaqAssetHistoryModal: React.FC<BairaqAssetHistoryModalProps> = (
     const fetchHistory = async () => {
       setLoading(true);
       try {
-        // 1. Primary: Server-side API with full admin privileges
+        // Authoritative Server-side PostgreSQL/File-backed API
         const res = await fetch(`/api/bairaq/history/${encodeURIComponent(assetId)}`);
         if (res.ok) {
           const json = await res.json();
-          if (json.records && Array.isArray(json.records) && json.records.length > 0) {
+          if (json.records && Array.isArray(json.records)) {
             if (isMounted) {
               setHistory(json.records);
               setLoading(false);
@@ -45,43 +43,14 @@ export const BairaqAssetHistoryModal: React.FC<BairaqAssetHistoryModalProps> = (
             }
           }
         }
-      } catch (e) {
-        console.warn("API history fetch fallback to Firestore:", e);
-      }
-
-      // 2. Fallback: Direct Firestore fetch from system_config and system_settings
-      try {
-        const snapConfig = await getDoc(doc(db, "system_config", `history_${assetId}`)).catch(() => null);
-        if (snapConfig && snapConfig.exists()) {
-          const data = snapConfig.data();
-          const records: HistoryRecord[] = data.records || [];
-          records.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
-          if (isMounted) {
-            setHistory(records);
-            setLoading(false);
-            return;
-          }
-        }
-
-        const snapSettings = await getDoc(doc(db, "system_settings", `history_${assetId}`)).catch(() => null);
-        if (snapSettings && snapSettings.exists()) {
-          const data = snapSettings.data();
-          const records: HistoryRecord[] = data.records || [];
-          records.sort((a, b) => new Date(b.uploadedAt).getTime() - new Date(a.uploadedAt).getTime());
-          if (isMounted) {
-            setHistory(records);
-            setLoading(false);
-            return;
-          }
-        }
-
         if (isMounted) {
           setHistory([]);
         }
       } catch (err) {
-        console.error("Failed to fetch history from all sources", err);
+        console.error("Failed to fetch history from server:", err);
         if (isMounted) {
-          triggerToast("تعذر جلب السجل", "error");
+          triggerToast("تعذر جلب السجل من السيرفر", "error");
+          setHistory([]);
         }
       } finally {
         if (isMounted) {
@@ -141,7 +110,7 @@ export const BairaqAssetHistoryModal: React.FC<BairaqAssetHistoryModalProps> = (
         console.warn("Server restore warning:", e);
       }
 
-      // 3. Fallback client-side Firestore writes and global state sync
+      // 3. Update global singleton state
       const aliases = POSE_ALIASES_MAP[assetId] || [];
       const keysToSave = Array.from(new Set([assetId, ...aliases]));
       const savePayload: Record<string, string> = {};
@@ -150,9 +119,6 @@ export const BairaqAssetHistoryModal: React.FC<BairaqAssetHistoryModalProps> = (
       });
 
       updateGlobalPoses(savePayload);
-      
-      await setDoc(doc(db, "system_config", "bairaq_poses"), savePayload, { merge: true }).catch(() => {});
-      await setDoc(doc(db, "system_settings", "bairaq_poses"), savePayload, { merge: true }).catch(() => {});
       
       triggerToast("تم استعادة النسخة السابقة بنجاح!", "success");
       onRestored(record.downloadUrl);

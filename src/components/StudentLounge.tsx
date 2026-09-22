@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Send, Image as ImageIcon, Smile, MoreVertical, Coffee, Search, Check, CheckCheck, User, MessageCircle, ArrowRight, Lock, Paperclip, FileText, Video, Headphones, Loader2, Mic } from 'lucide-react';
+import { X, Send, Image as ImageIcon, Smile, MoreVertical, Coffee, Search, Check, CheckCheck, User, MessageCircle, ArrowRight, Lock, Paperclip, FileText, Video, Headphones, Loader2, Mic, AlertTriangle, Maximize2, ExternalLink, Download, Film } from 'lucide-react';
 import { db, auth } from '../lib/firebase';
 import { collection, query, where, orderBy, getDocs, addDoc, updateDoc, doc, serverTimestamp, onSnapshot, limit } from '@/src/lib/firebase';
 import { realtimeManager } from '../lib/realtimeManager';
@@ -26,6 +26,8 @@ interface LoungeMessage {
   userRole: string; // 'student', 'teacher', 'admin'
   schoolId: string;
   createdAt: any;
+  timestamp?: any;
+  imageUrl?: string;
   recipientId?: string;
   read?: boolean;
 }
@@ -51,12 +53,59 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
   const [teachersList, setTeachersList] = useState<any[]>([]);
   const [isGeneralChat, setIsGeneralChat] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [pendingFile, setPendingFile] = useState<{ file: File; previewUrl: string; type: 'image' | 'video' | 'audio' | 'file' } | null>(null);
+  const [fullMediaPreview, setFullMediaPreview] = useState<{ url: string; type: 'image' | 'video' | 'audio' | 'file'; name?: string } | null>(null);
   const [activeTab, setActiveTab] = useState<'chat' | 'knights' | 'teachers'>(initialSelectedUser ? 'chat' : 'knights');
   const [selectedChatUser, setSelectedChatUser] = useState<any>(initialSelectedUser || null);
   const [searchQuery, setSearchQuery] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
   const currentUserUid = auth.currentUser?.uid;
+  // Grade Normalizer: Matches grades across all sections (e.g., "أول ابتدائي", "اول ابتدائي ب", "اول ابتدائي - أ")
+  const getGradeCore = (g?: string | null): string => {
+    if (!g) return "";
+    let norm = g
+      .replace(/[أإآ]/g, "ا")
+      .replace(/ة/g, "ه")
+      .replace(/ى/g, "ي")
+      .replace(/^ال/, "")
+      .trim();
+    norm = norm.replace(/[-/–]/g, " ");
+    norm = norm.replace(/\s+(ا|ب|ج|د|ه|و|أ|A|B|C|D)$/i, "");
+    return norm.replace(/\s+/g, " ").trim();
+  };
+
+  const isGradeMatch = (userGrade?: string | null, targetGrade?: string | null): boolean => {
+    if (isTeacher || !targetGrade) return true;
+    const coreTarget = getGradeCore(targetGrade);
+    const coreUser = getGradeCore(userGrade);
+    if (!coreTarget || !coreUser) return true;
+    return coreTarget === coreUser || coreUser.includes(coreTarget) || coreTarget.includes(coreUser);
+  };
+
   
+  const formatMessageTime = (msg: any): string => {
+    try {
+      const raw = msg.createdAt || msg.timestamp || msg.created_at;
+      if (!raw) {
+        return new Date().toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' });
+      }
+      if (typeof raw?.toDate === 'function') {
+        return raw.toDate().toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' });
+      }
+      if (raw?.seconds) {
+        return new Date(raw.seconds * 1000).toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' });
+      }
+      const parsedDate = new Date(raw);
+      if (!isNaN(parsedDate.getTime())) {
+        return parsedDate.toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' });
+      }
+      return new Date().toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' });
+    } catch {
+      return new Date().toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' });
+    }
+  };
+
   const currentChatRoomId = isGeneralChat 
     ? schoolId 
     : (selectedChatUser && currentUserUid ? [currentUserUid, selectedChatUser.id].sort().join('_') : null);
@@ -96,12 +145,18 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
             lastActive: u.lastActive || u.lastLogin
           }));
           
-          // Filter out current user
-          users = users.filter((u: any) => u.id !== currentUserUid);
+          // Filter out current user and non-students
+          users = users.filter((u: any) => u.id !== currentUserUid && u.role === 'student');
+          
+          // Filter strictly to student's own grade (including all sections of that grade)
+          if (!isTeacher && grade && grade !== 'غير محدد' && grade !== 'all') {
+            users = users.filter((u: any) => isGradeMatch(u.grade, grade));
+          }
+
           setKnights(users);
         }
       } catch (err) {
-        console.error("Error fetching knights", err);
+        console.warn("Notice: error fetching knights:", err);
       }
     };
 
@@ -110,7 +165,7 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
       fetchKnights();
     });
     return () => unsub();
-  }, [schoolId, currentUserUid]);
+  }, [schoolId, currentUserUid, grade, isTeacher]);
 
 
   // Track unread messages per user (PostgreSQL)
@@ -119,12 +174,14 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
     const fetchUnread = async () => {
       try {
         const res = await fetch(`/api/lounge-messages/unread/${currentUserUid}`);
-        const data = await res.json();
-        if (data.success) {
-          setUnreadCounts(data.counts);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.success && data.counts) {
+            setUnreadCounts(data.counts);
+          }
         }
       } catch (e) {
-        console.error("Error fetching unread", e);
+        console.warn("Notice: error fetching unread lounge count:", e);
       }
     };
     fetchUnread();
@@ -154,7 +211,8 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
              userRole: m.userRole || m.user_role,
              recipientId: m.recipientId || m.recipient_id,
              schoolId: m.schoolId || m.school_id,
-             timestamp: { seconds: new Date(m.timestamp).getTime() / 1000 }
+             createdAt: m.timestamp || m.created_at || m.createdAt || new Date(),
+             timestamp: m.timestamp || m.created_at || m.createdAt || new Date()
            }));
            setMessages(msgs.slice(-100));
 
@@ -180,7 +238,13 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+      
+      let mimeType = 'audio/webm';
+      if (typeof MediaRecorder !== 'undefined' && !MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = 'audio/mp4'; // Safari fallback
+      }
+      
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported(mimeType) ? mimeType : undefined });
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
       
@@ -192,8 +256,9 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
       
       mediaRecorder.onstop = async () => {
         if (audioChunksRef.current.length > 0) {
-           const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-           const audioFile = new File([audioBlob], 'voice_message.webm', { type: audioBlob.type || 'audio/webm' });
+           const ext = mimeType === 'audio/mp4' ? 'mp4' : 'webm';
+           const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+           const audioFile = new File([audioBlob], `voice_message.${ext}`, { type: mimeType });
            await uploadVoiceMessage(audioFile);
         }
         stream.getTracks().forEach(track => track.stop());
@@ -203,7 +268,8 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
       setIsRecording(true);
     } catch (err) {
       console.error('Error accessing microphone:', err);
-      alert('لا يمكن الوصول إلى الميكروفون. يرجى التحقق من الصلاحيات.');
+      setUploadError('لا يمكن الوصول إلى الميكروفون. يرجى التحقق من الصلاحيات واستخدام متصفح حديث.');
+      setTimeout(() => setUploadError(null), 5000);
     }
   };
   
@@ -260,100 +326,135 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
       }) });
     } catch (err) {
       console.error("Upload error", err);
-      alert("فشل إرسال البصمة الصوتية.");
+      setUploadError("فشل إرسال البصمة الصوتية. يرجى المحاولة مرة أخرى.");
+      setTimeout(() => setUploadError(null), 5000);
     } finally {
       setIsUploading(false);
     }
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !auth.currentUser || !currentChatRoomId) return;
+    if (!file) return;
 
     if (isLocked && !isTeacher && userProfile?.role !== 'admin' && userProfile?.role !== 'manager' && userProfile?.role !== 'super_admin') {
-      alert("الدردشة مقفلة حالياً من قبل الإدارة.");
+      setUploadError("الدردشة مقفلة حالياً من قبل الإدارة.");
+      setTimeout(() => setUploadError(null), 5000);
       return;
     }
 
-    setIsUploading(true);
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      
-      const uploadRes = await fetch('/api/upload', {
-        method: 'POST',
-        body: formData,
-      });
-      
-      const uploadData = await uploadRes.json();
-      if (!uploadRes.ok) throw new Error(uploadData.error || 'Failed to upload');
-      
-      const fileUrl = uploadData.publicUrl || uploadData.url;
-      
-      // Determine type
-      let typeText = 'مرفق';
-      const type = file.type;
-      if (type.startsWith('image/')) typeText = 'صورة';
-      else if (type.startsWith('video/')) typeText = 'فيديو';
-      else if (type.startsWith('audio/')) typeText = 'مقطع صوتي';
-      else typeText = 'ملف';
+    // Determine type
+    const type = file.type;
+    let mediaType: 'image' | 'video' | 'audio' | 'file' = 'file';
+    if (type.startsWith('image/')) mediaType = 'image';
+    else if (type.startsWith('video/')) mediaType = 'video';
+    else if (type.startsWith('audio/')) mediaType = 'audio';
 
-      const currentName = isTeacher ? (teacherData?.name || auth.currentUser.displayName) : (userProfile?.name || userProfile?.fullName || 'طالب');
-      const currentPhoto = isTeacher ? teacherData?.photoURL : userProfile?.photoURL;
-      const currentRole = isTeacher ? 'teacher' : (userProfile?.role === 'admin' ? 'admin' : 'student');
-      
-      await fetch('/api/lounge-messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-        text: typeText,
-        userId: auth.currentUser.uid,
-        userName: currentName || 'مستخدم',
-        userPhoto: currentPhoto || null,
-        userRole: currentRole,
-        schoolId: currentChatRoomId,
-        realSchoolId: schoolId,
-        recipientId: isGeneralChat ? 'all' : selectedChatUser?.id,
-        imageUrl: fileUrl, // using imageUrl to store the file url
-        read: false
-      }) });
-    } catch (err) {
-      console.error("Upload error", err);
-      alert("فشل رفع الملف. يرجى المحاولة مرة أخرى.");
-    } finally {
-      setIsUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+    const previewUrl = URL.createObjectURL(file);
+    setPendingFile({
+      file,
+      previewUrl,
+      type: mediaType
+    });
+    setUploadError(null);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
+  const cancelPendingFile = () => {
+    if (pendingFile?.previewUrl) {
+      URL.revokeObjectURL(pendingFile.previewUrl);
     }
+    setPendingFile(null);
   };
 
   const handleSendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault();
-    if (!newMessage.trim() || !auth.currentUser || !currentChatRoomId) return;
+    if ((!newMessage.trim() && !pendingFile) || !auth.currentUser || !currentChatRoomId) return;
 
     if (isLocked && !isTeacher && userProfile?.role !== 'admin' && userProfile?.role !== 'manager' && userProfile?.role !== 'super_admin') {
-      alert("الدردشة مقفلة حالياً من قبل الإدارة.");
+      setUploadError("الدردشة مقفلة حالياً من قبل الإدارة.");
+      setTimeout(() => setUploadError(null), 5000);
       return;
     }
 
+    const currentName = isTeacher ? (teacherData?.name || auth.currentUser.displayName) : (userProfile?.name || userProfile?.fullName || 'طالب');
+    const currentPhoto = isTeacher ? teacherData?.photoURL : userProfile?.photoURL;
+    const currentRole = isTeacher ? 'teacher' : (userProfile?.role === 'admin' ? 'admin' : 'student');
+    const msgText = newMessage.trim();
+
     try {
-      const currentName = isTeacher ? (teacherData?.name || auth.currentUser.displayName) : (userProfile?.name || userProfile?.fullName || 'طالب');
-      const currentPhoto = isTeacher ? teacherData?.photoURL : userProfile?.photoURL;
-      const currentRole = isTeacher ? 'teacher' : (userProfile?.role === 'admin' ? 'admin' : 'student');
-      
-      const msgText = newMessage.trim();
-      setNewMessage(''); // optimistic clear
-      
-      await fetch('/api/lounge-messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-        text: msgText,
-        userId: auth.currentUser.uid,
-        userName: currentName || 'مستخدم',
-        userPhoto: currentPhoto || null,
-        userRole: currentRole,
-        schoolId: currentChatRoomId,
-        realSchoolId: schoolId,
-        recipientId: isGeneralChat ? 'all' : selectedChatUser?.id,
-        read: false,
-        grade: grade || 'all',
-      })});
-    } catch (err) {
+      if (pendingFile) {
+        setIsUploading(true);
+        const fileToUpload = pendingFile.file;
+        const fileKind = pendingFile.type;
+        
+        // Clean up preview URL
+        if (pendingFile.previewUrl) URL.revokeObjectURL(pendingFile.previewUrl);
+        setPendingFile(null);
+        setNewMessage('');
+
+        const formData = new FormData();
+        formData.append('file', fileToUpload);
+
+        const uploadRes = await fetch('/api/upload', {
+          method: 'POST',
+          body: formData,
+        });
+
+        const uploadData = await uploadRes.json();
+        if (!uploadRes.ok) throw new Error(uploadData.error || 'فشل رفع الملف');
+
+        const fileUrl = uploadData.publicUrl || uploadData.url;
+
+        let typeText = 'مرفق';
+        if (fileKind === 'image') typeText = 'صورة';
+        else if (fileKind === 'video') typeText = 'فيديو';
+        else if (fileKind === 'audio') typeText = 'مقطع صوتي';
+        else typeText = 'ملف';
+
+        await fetch('/api/lounge-messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: msgText || typeText,
+            userId: auth.currentUser.uid,
+            userName: currentName || 'مستخدم',
+            userPhoto: currentPhoto || null,
+            userRole: currentRole,
+            schoolId: currentChatRoomId,
+            realSchoolId: schoolId,
+            recipientId: isGeneralChat ? 'all' : selectedChatUser?.id,
+            imageUrl: fileUrl,
+            read: false,
+            grade: grade || 'all',
+          })
+        });
+      } else {
+        setNewMessage(''); // optimistic clear
+        await fetch('/api/lounge-messages', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: msgText,
+            userId: auth.currentUser.uid,
+            userName: currentName || 'مستخدم',
+            userPhoto: currentPhoto || null,
+            userRole: currentRole,
+            schoolId: currentChatRoomId,
+            realSchoolId: schoolId,
+            recipientId: isGeneralChat ? 'all' : selectedChatUser?.id,
+            read: false,
+            grade: grade || 'all',
+          })
+        });
+      }
+    } catch (err: any) {
       console.error("Error sending message", err);
+      setUploadError(err.message || "حدث خطأ أثناء الإرسال. يرجى المحاولة مجدداً.");
+      setTimeout(() => setUploadError(null), 5000);
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
@@ -477,23 +578,14 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
               </div>
               
               {(() => {
-                const currentGrade = grade || 'غير محدد';
-                const getBaseGrade = (g: string) => g ? g.split('-')[0].split('/')[0].trim() : '';
-                const gradeMatch = (k: any) => {
-                   if (isTeacher || !grade) return true;
-                   const kg = k.grade || 'غير محدد';
-                   if (kg === 'غير محدد' || kg === 'all') return true;
-                   const currentBase = getBaseGrade(currentGrade);
-                   const userBase = getBaseGrade(kg);
-                   return currentBase === userBase || kg.includes(currentBase) || currentBase.includes(kg);
-                };
-                
                 // Merge knights with users who have unread messages but might be offline
                 const allInterestedUsers = [...knights];
-                // We ensure all users in unreadCounts are visible if they are students
-                // (Teachers are in the other tab)
                 
-                const filteredKnights = allInterestedUsers.filter(k => k.name.includes(searchQuery) && gradeMatch(k));
+                const filteredKnights = allInterestedUsers.filter(k => {
+                  const matchesSearch = k.name.includes(searchQuery);
+                  const matchesGrade = isTeacher || !grade || isGradeMatch(k.grade, grade);
+                  return matchesSearch && matchesGrade;
+                });
 
                 return filteredKnights.length === 0 ? (
                     <div className="flex-1 flex flex-col items-center justify-center opacity-50 grayscale mt-10">
@@ -561,15 +653,13 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
               </div>
               
               {(() => {
-                const getBaseGrade = (g: string) => g ? g.split('-')[0].split('/')[0].trim() : '';
                 const teacherMatch = (t: any) => {
                    if (isTeacher || !grade || grade === 'غير محدد') return true;
                    const tClasses = Array.isArray(t.classes) ? t.classes : [];
                    const tGrade = t.grade || '';
-                   if (tClasses.includes(grade)) return true;
-                   if (tGrade === grade) return true;
-                   const currentBase = getBaseGrade(grade);
-                   return tClasses.some((c: string) => c === currentBase || grade.includes(c)) || tGrade === currentBase || grade.includes(tGrade);
+                   if (tClasses.includes(grade) || tClasses.some((c: string) => isGradeMatch(c, grade))) return true;
+                   if (tGrade === grade || isGradeMatch(tGrade, grade)) return true;
+                   return false;
                 };
                 const filteredTeachers = teachersList.filter(t => t.name?.includes(searchQuery) && t.role === 'TEACHER' && teacherMatch(t));
 
@@ -678,27 +768,60 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                                       }`}>
                                           {msg.imageUrl && (
                                               <div className="mb-2">
-                                                  {msg.imageUrl.match(/\.(jpeg|jpg|gif|png|webp|svg)$/i) ? (
-                                                      <img src={msg.imageUrl} alt="attachment" className="max-w-[200px] sm:max-w-xs rounded-xl border border-white/10" />
-                                                  ) : msg.imageUrl.match(/\.(mp4|webm|ogg)$/i) ? (
-                                                      <video src={msg.imageUrl} controls className="max-w-[200px] sm:max-w-xs rounded-xl border border-white/10" />
-                                                  ) : msg.imageUrl.match(/\.(mp3|wav|ogg)$/i) ? (
+                                                  {msg.text === 'بصمة صوتية' || msg.imageUrl.match(/\.(mp3|wav|ogg)$/i) ? (
                                                       <audio src={msg.imageUrl} controls className="max-w-[200px] sm:max-w-[250px]" />
+                                                  ) : msg.imageUrl.match(/\.(jpeg|jpg|gif|png|webp|svg)$/i) ? (
+                                                      <div 
+                                                          onClick={() => setFullMediaPreview({ url: msg.imageUrl!, type: 'image' })} 
+                                                          className="relative group/media cursor-pointer rounded-xl overflow-hidden border border-white/10 hover:opacity-95 transition-all max-w-[220px] sm:max-w-xs"
+                                                      >
+                                                          <img src={msg.imageUrl} alt="attachment" className="w-full h-auto object-cover max-h-72" />
+                                                          <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/media:opacity-100 transition-opacity flex items-center justify-center gap-2">
+                                                              <div className="bg-black/60 p-2 rounded-full text-white backdrop-blur-sm shadow-md">
+                                                                  <Maximize2 size={18} />
+                                                              </div>
+                                                          </div>
+                                                      </div>
+                                                  ) : msg.imageUrl.match(/\.(mp4|webm|ogg)$/i) ? (
+                                                      <div className="relative group/media rounded-xl overflow-hidden border border-white/10 max-w-[240px] sm:max-w-xs">
+                                                          <video src={msg.imageUrl} controls className="w-full h-auto max-h-72" />
+                                                          <button
+                                                              type="button"
+                                                              onClick={() => setFullMediaPreview({ url: msg.imageUrl!, type: 'video' })}
+                                                              title="عرض بالكامل"
+                                                              className="absolute top-2 left-2 bg-black/60 hover:bg-black/80 text-white p-1.5 rounded-lg backdrop-blur-sm transition-colors"
+                                                          >
+                                                              <Maximize2 size={16} />
+                                                          </button>
+                                                      </div>
                                                   ) : (
-                                                      <a href={msg.imageUrl} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 bg-black/20 p-2 rounded-lg hover:bg-black/30 transition-colors">
-                                                          <FileText size={24} className={isMe ? 'text-white' : 'text-blue-400'} />
-                                                          <span className="text-xs truncate max-w-[150px]">{msg.imageUrl.split('/').pop() || 'تحميل الملف'}</span>
-                                                      </a>
+                                                      <div 
+                                                          onClick={() => setFullMediaPreview({ url: msg.imageUrl!, type: 'file', name: msg.imageUrl!.split('/').pop() })}
+                                                          className="flex items-center gap-3 bg-black/25 hover:bg-black/40 p-2.5 rounded-xl border border-white/10 cursor-pointer transition-all group/file"
+                                                      >
+                                                          <div className={`p-2 rounded-lg ${isMe ? "bg-white/15 text-white" : "bg-blue-500/20 text-blue-400"}`}>
+                                                              <FileText size={22} />
+                                                          </div>
+                                                          <div className="flex-1 min-w-0 text-right">
+                                                              <p className="text-xs font-medium text-white/90 truncate max-w-[150px] sm:max-w-[180px]">
+                                                                  {msg.imageUrl.split('/').pop() || 'مستند مرفق'}
+                                                              </p>
+                                                              <span className="text-[10px] text-white/50 group-hover/file:text-white/80 transition-colors">
+                                                                  اضغط لفتح الملف بالكامل
+                                                              </span>
+                                                          </div>
+                                                          <Maximize2 size={16} className="text-white/40 group-hover/file:text-white transition-colors shrink-0" />
+                                                      </div>
                                                   )}
                                               </div>
                                           )}
-                                          {msg.text && msg.text !== 'مرفق' && msg.text !== 'صورة' && msg.text !== 'فيديو' && msg.text !== 'مقطع صوتي' && msg.text !== 'ملف' && (
+                                          {msg.text && msg.text !== 'مرفق' && msg.text !== 'صورة' && msg.text !== 'فيديو' && msg.text !== 'مقطع صوتي' && msg.text !== 'ملف' && msg.text !== 'بصمة صوتية' && (
                                               <p className="text-[13px] leading-relaxed whitespace-pre-wrap break-words">{msg.text}</p>
                                           )}
                                           
                                           {/* Timestamp */}
-                                          <div className={`text-[9px] mt-1 flex items-center gap-1 ${isMe ? 'text-blue-200/70 justify-end' : 'text-white/30 justify-start'}`}>
-                                              {msg.createdAt?.toDate ? msg.createdAt.toDate().toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' }) : 'الآن'}
+                                          <div className={`text-[9px] mt-1 flex items-center gap-1 ${isMe ? 'text-blue-200/70 justify-end' : 'text-white/40 justify-start'}`}>
+                                              <span>{formatMessageTime(msg)}</span>
                                               {isMe && <CheckCheck size={12} className="text-blue-300" />}
                                           </div>
                                       </div>
@@ -724,13 +847,68 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                 </div>
 
                 {/* Input Area */}
-                <div className="h-auto min-h-[70px] bg-[#0D142A]/90 backdrop-blur-xl border-t border-white/10 px-4 py-3 shrink-0 z-20 flex items-end gap-3 pb-8 md:pb-4">
+                <div className="h-auto min-h-[70px] bg-[#0D142A]/90 backdrop-blur-xl border-t border-white/10 px-4 py-3 shrink-0 z-20 flex items-end gap-3 pb-8 md:pb-4 flex-col">
+                    {uploadError && (
+                        <motion.div 
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="w-full bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-bold px-4 py-2 rounded-xl flex items-center justify-between mb-2"
+                        >
+                            <div className="flex items-center gap-2">
+                                <AlertTriangle size={14} />
+                                <span>{uploadError}</span>
+                            </div>
+                            <button onClick={() => setUploadError(null)} className="text-red-400/50 hover:text-red-400 transition-colors">
+                                <X size={14} />
+                            </button>
+                        </motion.div>
+                    )}
                     {(isLocked && !isTeacher && userProfile?.role !== 'admin' && userProfile?.role !== 'manager' && userProfile?.role !== 'super_admin') ? (
                         <div className="w-full flex items-center justify-center bg-red-500/10 rounded-3xl border border-red-500/20 p-3 text-red-400 text-sm font-bold gap-2">
                             <Lock size={16} />
                             المجلس (الدردشة) مغلق حالياً من قبل الإدارة
                         </div>
                     ) : (
+                    <>
+                    {/* Pending file preview */}
+                    {pendingFile && (
+                        <div className="w-full bg-[#1A233A] border border-blue-500/30 rounded-2xl p-2.5 flex items-center justify-between gap-3 shadow-lg">
+                            <div className="flex items-center gap-3 overflow-hidden">
+                                {pendingFile.type === "image" ? (
+                                    <img src={pendingFile.previewUrl} alt="معاينة" className="w-12 h-12 rounded-xl object-cover border border-white/10 shrink-0" />
+                                ) : pendingFile.type === "video" ? (
+                                    <div className="w-12 h-12 rounded-xl bg-purple-500/20 border border-purple-500/30 flex items-center justify-center text-purple-400 shrink-0">
+                                        <Film size={20} />
+                                    </div>
+                                ) : pendingFile.type === "audio" ? (
+                                    <div className="w-12 h-12 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                                        <Mic size={20} />
+                                    </div>
+                                ) : (
+                                    <div className="w-12 h-12 rounded-xl bg-blue-500/20 border border-blue-500/30 flex items-center justify-center text-blue-400 shrink-0">
+                                        <FileText size={20} />
+                                    </div>
+                                )}
+                                <div className="flex flex-col min-w-0 text-right">
+                                    <span className="text-white text-xs font-bold truncate max-w-[200px] sm:max-w-[280px]">
+                                        {pendingFile.file.name}
+                                    </span>
+                                    <span className="text-white/40 text-[11px]">
+                                        {(pendingFile.file.size / 1024 / 1024).toFixed(2)} ميجابايت • اضغط إرسال لنشر الملف
+                                    </span>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={cancelPendingFile}
+                                className="w-8 h-8 rounded-full bg-white/5 hover:bg-red-500/20 hover:text-red-400 text-white/50 flex items-center justify-center transition-colors shrink-0"
+                                title="إلغاء المرفق"
+                            >
+                                <X size={16} />
+                            </button>
+                        </div>
+                    )}
+
                     <form onSubmit={handleSendMessage} className="w-full flex items-end gap-2 bg-[#050A18] rounded-3xl border border-white/10 p-1 pl-4">
                         
                         <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileUpload} />
@@ -768,10 +946,10 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                             />
                         )}
                         
-                        {newMessage.trim() || isUploading ? (
+                        {newMessage.trim() || pendingFile || isUploading ? (
                             <button 
                                 type="submit"
-                                disabled={!newMessage.trim() || isUploading}
+                                disabled={(!newMessage.trim() && !pendingFile) || isUploading}
                                 className="w-10 h-10 rounded-full bg-blue-600 hover:bg-blue-500 disabled:bg-white/5 disabled:text-white/30 text-white flex items-center justify-center transition-all shrink-0 shadow-lg mb-0.5"
                             >
                                 <div dir="ltr" className="flex items-center justify-center mr-0.5 mt-0.5" style={{ transform: 'rotate(225deg)' }}>
@@ -789,6 +967,7 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                             </button>
                         )}
                     </form>
+                    </>
                     )}
                 </div>
              </>
@@ -847,6 +1026,116 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
           )}
         </>
       )}
+
+      {/* Fullscreen Media Viewer Modal */}
+      <AnimatePresence>
+        {fullMediaPreview && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[10000] bg-black/95 backdrop-blur-md flex flex-col justify-between p-4"
+            onClick={() => setFullMediaPreview(null)}
+          >
+            {/* Top Toolbar */}
+            <div className="flex items-center justify-between z-10 w-full max-w-5xl mx-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center gap-3 text-white">
+                <span className="text-sm font-bold truncate max-w-xs md:max-w-md">
+                  {fullMediaPreview.name || (fullMediaPreview.type === "image" ? "صورة" : fullMediaPreview.type === "video" ? "فيديو" : "ملف")}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href={fullMediaPreview.url}
+                  download
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-2.5 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors flex items-center gap-1.5 text-xs font-bold"
+                  title="تحميل الملف"
+                >
+                  <Download size={18} />
+                  <span className="hidden sm:inline">تحميل</span>
+                </a>
+                <a
+                  href={fullMediaPreview.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="p-2.5 rounded-full bg-white/10 hover:bg-white/20 text-white transition-colors flex items-center gap-1.5 text-xs font-bold"
+                  title="فتح في نافذة جديدة"
+                >
+                  <ExternalLink size={18} />
+                  <span className="hidden sm:inline">فتح في علامة تبويب</span>
+                </a>
+                <button
+                  type="button"
+                  onClick={() => setFullMediaPreview(null)}
+                  className="p-2.5 rounded-full bg-white/10 hover:bg-red-500/80 text-white transition-colors"
+                  title="إغلاق"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+            </div>
+
+            {/* Media Content Area */}
+            <div 
+              className="flex-1 flex items-center justify-center p-2 md:p-6 w-full max-w-5xl mx-auto overflow-hidden" 
+              onClick={(e) => e.stopPropagation()}
+            >
+              {fullMediaPreview.type === "image" ? (
+                <img
+                  src={fullMediaPreview.url}
+                  alt="عرض بالكامل"
+                  className="max-h-[82vh] max-w-full object-contain rounded-2xl shadow-2xl border border-white/10"
+                />
+              ) : fullMediaPreview.type === "video" ? (
+                <video
+                  src={fullMediaPreview.url}
+                  controls
+                  autoPlay
+                  className="max-h-[82vh] max-w-full rounded-2xl shadow-2xl border border-white/10 bg-black"
+                />
+              ) : (
+                <div className="flex flex-col items-center justify-center p-8 bg-[#0D142A] border border-white/10 rounded-3xl max-w-md w-full text-center shadow-2xl">
+                  <div className="w-20 h-20 rounded-2xl bg-blue-500/20 text-blue-400 flex items-center justify-center mb-4 border border-blue-500/30">
+                    <FileText size={40} />
+                  </div>
+                  <h3 className="text-white font-bold text-lg mb-2 truncate max-w-xs">
+                    {fullMediaPreview.name || fullMediaPreview.url.split("/").pop() || "ملف مرفق"}
+                  </h3>
+                  <p className="text-white/50 text-sm mb-6">
+                    يمكنك استعراض هذا الملف بالكامل أو تحميله مباشرة على جهازك.
+                  </p>
+                  <div className="flex items-center gap-3 w-full">
+                    <a
+                      href={fullMediaPreview.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="flex-1 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-colors shadow-lg"
+                    >
+                      <ExternalLink size={18} />
+                      فتح في نافذة كاملة
+                    </a>
+                    <a
+                      href={fullMediaPreview.url}
+                      download
+                      className="flex-1 py-3 bg-white/10 hover:bg-white/20 text-white rounded-xl font-bold text-sm flex items-center justify-center gap-2 transition-colors"
+                    >
+                      <Download size={18} />
+                      تحميل الملف
+                    </a>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Bottom info */}
+            <div className="text-center text-white/40 text-xs py-1" onClick={(e) => e.stopPropagation()}>
+              انقر خارج النافذة أو زر الإغلاق للعودة إلى المجلس
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 });

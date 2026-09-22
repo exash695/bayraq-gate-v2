@@ -572,7 +572,7 @@ export const downloadDocumentFile = async (
       link.click();
       document.body.removeChild(link);
       setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
-      if (onProgress) onProgress(100);
+      if (typeof onProgress === 'function') onProgress(100);
       if (onNotify) onNotify("تم تنزيل وحفظ الملف بنجاح! ✅", "success");
       return;
     }
@@ -585,7 +585,7 @@ export const downloadDocumentFile = async (
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
-      if (onProgress) onProgress(100);
+      if (typeof onProgress === 'function') onProgress(100);
       if (onNotify) onNotify("تم تنزيل وحفظ الملف بنجاح! ✅", "success");
       return;
     }
@@ -608,7 +608,7 @@ export const downloadDocumentFile = async (
                   return;
                 }
                 loaded += value.byteLength;
-                if (total && onProgress) {
+                if (total && typeof onProgress === 'function') {
                   onProgress(Math.round((loaded / total) * 100));
                 }
                 controller.enqueue(value);
@@ -629,7 +629,7 @@ export const downloadDocumentFile = async (
         link.click();
         document.body.removeChild(link);
         setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
-        if (onProgress) onProgress(100);
+        if (typeof onProgress === 'function') onProgress(100);
         if (onNotify) onNotify("تم تنزيل وحفظ الملف بنجاح! ✅", "success");
         return;
       }
@@ -638,7 +638,7 @@ export const downloadDocumentFile = async (
     }
 
     // Fallback: use server download proxy
-    if (onProgress) onProgress(100);
+    if (typeof onProgress === 'function') onProgress(100);
     const proxyUrl = `/api/download-proxy?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(cleanFilename)}`;
     const link = document.createElement("a");
     link.href = proxyUrl;

@@ -366,127 +366,87 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <div className="absolute w-1.5 h-1.5 rounded-full bg-[#D4AF37] shadow-[0_0_8px_rgba(212,175,55,0.8)]"></div>
         </div>
 
-        {/* Navigation Menus */}
-        <div className="flex-1 overflow-y-auto px-5 space-y-3 custom-scrollbar relative z-10 pb-6 pt-2">
-          <MenuItem 
-            label={language === 'ar' ? 'الرئيسية' : 'Home'}
-            icon={Home}
-            colorClass="cyan"
-            isActive={activeSection === 'hub'}
-            onClick={() => { onSelectSection('hub'); setIsOpen(false); }}
-          />
-
-          <MenuItem 
-            label="📚 المحطة الأولى"
-            subLabel={userProfile?.activeUnitName || "الوحدة الأولى: الأساسيات"}
-            icon={BookOpen}
-            colorClass="sky"
-            isActive={activeSection === 'mayadeen'}
-            onClick={() => { onSelectSection('mayadeen'); setIsOpen(false); }}
-          />
-
-          <MenuItem 
-            label="🔒 المحطة الثانية"
-            subLabel="مقفلة حالياً"
-            icon={Lock}
-            colorClass="rose"
-            isActive={activeSection === 'unit-detail' && progress.currentUnit === 2}
-            onClick={() => { onSelectSection('mayadeen'); setIsOpen(false); }}
-          />
-
-          <MenuItem 
-            label="📡 رادار الذكاء"
-            subLabel="استنتاج الأسئلة الذكية"
-            icon={Radio}
-            colorClass="cyan"
-            isActive={activeSection === 'radar'}
-            onClick={() => { onSelectSection('radar'); setIsOpen(false); }}
-          />
-
-          <MenuItem 
-            label="🏆 قاعة الأبطال"
-            subLabel="لوحة الشرف والأوسمة"
-            icon={Trophy}
-            colorClass="gold"
-            isActive={activeSection === 'hall-of-fame'}
-            onClick={() => { onSelectSection('hall-of-fame'); setIsOpen(false); }}
-          />
-
-          <MenuItem 
-            label="💡 بنك الأفكار"
-            subLabel="تدوين الملاحظات الذكية"
-            icon={Lightbulb}
-            colorClass="amber"
-            isActive={activeSection === 'idea-bank'}
-            onClick={() => { onSelectSection('idea-bank'); setIsOpen(false); }}
-          />
-
-          <MenuItem 
-            label="تبليغات الإدارة"
-            subLabel="مركز الدعم والتبليغات"
-            icon={Bell}
-            colorClass="rose"
-            isActive={false}
-            badgeCount={unreadCount}
-            onClick={() => { onOpenNotifications(); setIsOpen(false); }}
-          />
-
-          <MenuItem 
-            label={language === 'ar' ? 'هوية الفارس' : 'Knight Identity'}
-            icon={Shield}
-            colorClass="purple"
-            isActive={activeSection === 'profile'}
-            onClick={() => { onSelectSection('profile'); setIsOpen(false); }}
-          />
-
-          <MenuItem 
-            label={language === 'ar' ? 'منصة السيادة' : 'Sovereignty'}
-            icon={Crown}
-            colorClass="purple"
-            isActive={activeSection === 'sovereignty'}
-            onClick={() => { onSelectSection('sovereignty'); setIsOpen(false); }}
-          />
-
-          <MenuItem 
-            label={language === 'ar' ? 'غرفة التحكم' : 'Control Room'}
-            icon={Settings}
-            colorClass="sky"
-            isActive={activeSection === 'control'}
-            onClick={() => { onSelectSection('control'); setIsOpen(false); }}
-          />
-
-          {isDev && (
+          {/* Navigation Menus */}
+          <div className="flex-1 overflow-y-auto px-5 space-y-3 custom-scrollbar relative z-10 pb-6 pt-2">
             <MenuItem 
-              label="لوحة المطور"
-              icon={Monitor}
+              label={language === 'ar' ? 'الرئيسية' : 'Home'}
+              icon={Home}
               colorClass="cyan"
-              isActive={activeSection === 'dev-dashboard'}
-              onClick={() => { onSelectSection('dev-dashboard'); setIsOpen(false); }}
+              isActive={activeSection === 'hub'}
+              onClick={() => { onSelectSection('hub'); setIsOpen(false); }}
             />
-          )}
 
-          {/* Bottom Divider */}
-          <div className="relative flex items-center justify-center my-6">
-            <div className="w-full h-px bg-gradient-to-r from-transparent via-white/10 to-transparent"></div>
-            <div className="absolute w-1.5 h-1.5 rounded-full bg-[#D4AF37] shadow-[0_0_8px_rgba(212,175,55,0.8)]"></div>
+            {(userProfile?.role === 'student' || !userProfile?.role) && (
+              <>
+                <MenuItem 
+                  label="📡 رادار الذكاء"
+                  subLabel="استنتاج الأسئلة الذكية"
+                  icon={Radio}
+                  colorClass="cyan"
+                  isActive={activeSection === 'radar'}
+                  onClick={() => { onSelectSection('radar'); setIsOpen(false); }}
+                />
+
+                <MenuItem 
+                  label={language === 'ar' ? 'هوية الفارس' : 'Knight Identity'}
+                  icon={Shield}
+                  colorClass="purple"
+                  isActive={activeSection === 'profile'}
+                  onClick={() => { onSelectSection('profile'); setIsOpen(false); }}
+                />
+
+                <MenuItem 
+                  label={language === 'ar' ? 'منصة السيادة' : 'Sovereignty'}
+                  icon={Crown}
+                  colorClass="purple"
+                  isActive={activeSection === 'sovereignty'}
+                  onClick={() => { onSelectSection('sovereignty'); setIsOpen(false); }}
+                />
+              </>
+            )}
+
+            {(userProfile?.role && userProfile.role !== 'student') && (
+              <MenuItem 
+                label={language === 'ar' ? 'غرفة التحكم' : 'Control Room'}
+                icon={Settings}
+                colorClass="sky"
+                isActive={activeSection === 'control'}
+                onClick={() => { onSelectSection('control'); setIsOpen(false); }}
+              />
+            )}
+
+            {isDev && (
+              <MenuItem 
+                label="لوحة المطور"
+                icon={Monitor}
+                colorClass="cyan"
+                isActive={activeSection === 'dev-dashboard'}
+                onClick={() => { onSelectSection('dev-dashboard'); setIsOpen(false); }}
+              />
+            )}
+
+            {/* Bottom Divider */}
+            <div className="relative flex items-center justify-center my-6">
+              <div className="w-full h-px bg-gradient-to-r from-transparent via-white/10 to-transparent"></div>
+              <div className="absolute w-1.5 h-1.5 rounded-full bg-[#D4AF37] shadow-[0_0_8px_rgba(212,175,55,0.8)]"></div>
+            </div>
+
+            <MenuItem 
+              label="حذف الحساب"
+              icon={UserX}
+              colorClass="rose"
+              isActive={false}
+              onClick={() => setShowDeleteConfirm(true)}
+            />
+
+            <MenuItem 
+              label="تسجيل الخروج"
+              icon={LogOut}
+              colorClass="amber"
+              isActive={false}
+              onClick={() => setShowLogoutConfirm(true)}
+            />
           </div>
-
-          <MenuItem 
-            label="حذف الحساب"
-            icon={UserX}
-            colorClass="rose"
-            isActive={false}
-            onClick={() => setShowDeleteConfirm(true)}
-          />
-
-          <MenuItem 
-            label="تسجيل الخروج"
-            icon={LogOut}
-            colorClass="amber"
-            isActive={false}
-            onClick={() => setShowLogoutConfirm(true)}
-          />
-        </div>
 
       </aside>
     </>

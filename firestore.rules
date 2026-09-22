@@ -89,13 +89,13 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read: if true; // Relaxed for transition
-      allow create: if isSignedIn() || true; // Relaxed for transition
-      allow update, delete: if isAdmin() || (isSignedIn() && (request.auth.uid == userId || userId.matches('^test_.*')));
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
     }
 
     match /admins/{adminId} {
-      allow read: if true;
+      allow read: if isAdmin();
       allow write: if isAdmin();
     }
 
@@ -105,66 +105,82 @@ service cloud.firestore {
     }
 
     match /finance/{financeId} {
-      allow read, write: if true;
+      allow read: if isAdmin() || (isSignedIn() && (resource.data.userId == request.auth.uid || isStudentOrParentDoc(resource.data.studentCode)));
+      allow create, update, delete: if isAdmin();
     }
 
     match /payments/{paymentId} {
-      allow read, write: if true;
+      allow read: if isAdmin() || (isSignedIn() && (resource.data.userId == request.auth.uid || isStudentOrParentDoc(resource.data.studentCode)));
+      allow create: if isSignedIn() && isValidPayment(incoming());
+      allow update, delete: if isAdmin();
     }
 
     match /schools/{schoolId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isAdmin();
 
       match /online_users/{userId} {
-        allow read, write: if true;
+        allow read, write: if isSignedIn();
       }
       match /ai_materials/{materialId} {
         allow read: if true;
-        allow write: if true;
+        allow write: if isTeacherOrAdmin();
       }
       match /activities_submissions/{submissionId} {
-        allow read, write: if true;
+        allow read: if isTeacherOrAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+        allow create: if isSignedIn();
+        allow update, delete: if isTeacherOrAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
       }
     }
 
     match /academy_pages/{pageId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
     match /notifications/{notifId} {
-      allow read, write: if true;
+      allow read: if isSignedIn() && (isAdmin() || resource.data.userId == request.auth.uid || resource.data.target == 'all' || resource.data.schoolId != null);
+      allow create: if isTeacherOrAdmin();
+      allow update, delete: if isAdmin();
     }
 
     match /support_tickets/{ticketId} {
-      allow read: if true; // Relaxed for transition
-      allow create: if true;
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isSignedIn();
       allow update, delete: if isAdmin();
     }
 
     match /school_students/{studentId} {
-      allow read, write: if true;
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
 
     match /activation_codes/{codeId} {
-      allow read: if true;
+      allow read: if isAdmin();
       allow create, delete: if isAdmin();
-      allow update: if true;
+      allow update: if isAdmin() || (isSignedIn() && incoming().diff(existing()).affectedKeys().hasOnly(['used', 'usedBy']));
     }
 
     match /developer_logs/{logId} {
-      allow read, write: if true;
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
     }
 
     match /system_stats/{docId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isAdmin();
     }
 
     match /audit_logs/{logId} {
-      allow read, write: if true;
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if false; // Immutable audit logs
     }
 
     match /teachers/{teacherId} { 
-      allow read, write: if true; 
+      allow read: if true; 
+      allow write: if isAdmin();
     }
     match /parent_requests/{requestId} {
       allow read, write: if isAdmin();
@@ -203,8 +219,8 @@ service cloud.firestore {
       }
     }
     match /class_schedules/{scheduleId} { allow read: if true; allow write: if isAdmin(); }
-    match /broadcasts/{broadcastId} { allow read, write: if true; }
-    match /global_announcements/{announcementId} { allow read, write: if true; }
+    match /broadcasts/{broadcastId} { allow read: if true; allow write: if isAdmin(); }
+    match /global_announcements/{announcementId} { allow read: if true; allow write: if isAdmin(); }
     match /battalions/{battalionId} {
       allow read: if isSignedIn();
       allow write: if isAdmin() || (isSignedIn() && resource.data.leaderId == request.auth.uid);
@@ -212,7 +228,7 @@ service cloud.firestore {
         allow read, write: if isSignedIn();
       }
     }
-    match /academic_lists/{listId} { allow read, write: if true; }
+    match /academic_lists/{listId} { allow read: if isSignedIn(); allow write: if isAdmin(); }
     match /content/{contentId} { allow read: if true; allow write: if isAdmin(); }
     match /admin_outbox/{outboxId} { allow read, write: if isAdmin(); }
     match /salaries/{salaryId} { allow read, write: if isAdmin(); }
@@ -228,7 +244,8 @@ service cloud.firestore {
     }
 
     match /saved_receipts/{receiptId} {
-      allow read, write: if true;
+      allow read: if isAdmin() || isSignedIn();
+      allow write: if isAdmin();
     }
 
     match /idea_bank/{ideaId} {
@@ -251,30 +268,32 @@ service cloud.firestore {
 
     match /live_sessions/{sessionId} {
       allow read: if true;
-      allow write: if true; // Allow teachers/users to write to start/stop live sessions
+      allow write: if isTeacherOrAdmin(); // Allow teachers/admins to write to start/stop live sessions
       match /responses/{userId} {
-        allow read, write: if true; // Allow students to read/write real-time quiz responses
+        allow read, write: if isSignedIn(); // Allow authenticated students to read/write real-time quiz responses
       }
       match /viewers/{viewerId} {
-        allow read, write: if true;
+        allow read, write: if isSignedIn();
       }
       match /webrtc_connections/{connectionId} {
-        allow read, write: if true;
+        allow read, write: if isSignedIn();
         match /teacher_candidates/{candidateId} {
-          allow read, write: if true;
+          allow read, write: if isTeacherOrAdmin();
         }
         match /student_candidates/{candidateId} {
-          allow read, write: if true;
+          allow read, write: if isSignedIn();
         }
       }
     }
 
     match /exam_papers/{paperId} {
-      allow read, write: if true;
+      allow read: if isSignedIn();
+      allow write: if isTeacherOrAdmin();
     }
 
     match /question_bank/{questionId} {
-      allow read, write: if true;
+      allow read: if isSignedIn();
+      allow write: if isTeacherOrAdmin();
     }
 
     match /social_notifications/{notifId} {
@@ -298,11 +317,12 @@ service cloud.firestore {
     }
 
     match /schools/{schoolId}/activities_submissions/{submissionId} {
-      allow read, write: if true;
+      allow read, write: if isTeacherOrAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
     }
 
     match /schools/{schoolId}/ai_materials/{materialId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isTeacherOrAdmin();
     }
 
     match /student_live_notes/{noteId} {
@@ -348,10 +368,12 @@ service cloud.firestore {
     }
     match /system_config/{configId} {
       allow read: if true;
-      allow write: if true;
+      allow write: if isAdmin();
     }
     match /system_errors/{errorId} {
-      allow read, write: if true;
+      allow read: if isAdmin();
+      allow create: if isSignedIn();
+      allow update, delete: if isAdmin();
     }
     match /bairaq_pose_chunks/{chunkId} {
       allow read: if true;
@@ -362,7 +384,7 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
     match /school_archives/{archiveId} {
-      allow read, write: if true;
+      allow read, write: if isAdmin();
     }
     match /system/{document=**} {
       allow read: if true;

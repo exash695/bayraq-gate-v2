@@ -344,6 +344,23 @@ export const AIEnhancedRadar: React.FC<AIEnhancedRadarProps> = ({
     '✨ تم بناء الاختبار التجريبي الشامل بنجاح! جاهز للانطلاق.'
   ];
 
+  const userSubjects = userProfile?.subjects || [];
+  const dynamicSubjects = Array.from(
+    new Set([
+      ...userSubjects,
+      ...DEFAULT_EXAMS.map(e => e.subject),
+      ...availableFiles.map(f => f.subject || f.tag || 'العامة')
+    ])
+  ).filter(Boolean);
+
+  const [selectedSubjectTab, setSelectedSubjectTab] = useState<string>(userSubjects[0] || DEFAULT_EXAMS[0]?.subject || 'الفيزياء');
+
+  useEffect(() => {
+    if (!selectedSubjectTab && dynamicSubjects.length > 0) {
+      setSelectedSubjectTab(dynamicSubjects[0]);
+    }
+  }, [dynamicSubjects, selectedSubjectTab]);
+
   useEffect(() => {
     if (activeTab === 'scanning') {
       sounds.playStart();
@@ -663,6 +680,22 @@ export const AIEnhancedRadar: React.FC<AIEnhancedRadarProps> = ({
 
             {/* List of uploaded custom files */}
             <div className="space-y-4">
+              
+              {/* Subject Tabs */}
+              {dynamicSubjects.length > 0 && (
+                <div className="flex gap-2 overflow-x-auto pb-2 custom-scrollbar">
+                  {dynamicSubjects.map(sub => (
+                    <button
+                      key={sub}
+                      onClick={() => setSelectedSubjectTab(sub)}
+                      className={`px-4 py-2 rounded-xl text-sm font-bold whitespace-nowrap transition-all border ${selectedSubjectTab === sub ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-300 shadow-[0_0_10px_rgba(99,102,241,0.2)]' : 'bg-white/5 border-white/10 text-white/50 hover:bg-white/10 hover:text-white/80'}`}
+                    >
+                      {sub}
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {isLoadingExam ? (
                 <div className="glass-card py-16 text-center rounded-3xl border border-indigo-500/20 bg-indigo-500/5 shadow-[0_0_30px_rgba(99,102,241,0.1)] space-y-6">
                   <div className="relative w-20 h-20 mx-auto">
@@ -676,14 +709,14 @@ export const AIEnhancedRadar: React.FC<AIEnhancedRadarProps> = ({
                     <p className="text-indigo-300/70 text-xs font-bold">يرجى الانتظار قليلاً بينما يقوم الرادار بتحليل المحتوى</p>
                   </div>
                 </div>
-              ) : availableFiles.filter(f => f.extractedText || f.title).length === 0 ? (
+              ) : availableFiles.filter(f => f.extractedText || f.title).filter(f => (f.subject || f.tag || 'العامة') === selectedSubjectTab).length === 0 ? (
                 <div className="glass-card p-8 text-center rounded-2xl border-white/5 space-y-2">
-                  <p className="text-white/40 font-bold">لم تقم برفع أي ملفات خاصة بك بعد في مكتبتك.</p>
-                  <p className="text-xs text-white/30">يمكنك رفع ملازمك وسيقوم الرادار بفحصها بالكامل فوراً. استخدم الامتحانات المعتمدة أدناه حالياً!</p>
+                  <p className="text-white/40 font-bold">لا توجد ملازم أو ملفات لهذه المادة حالياً.</p>
+                  <p className="text-xs text-white/30">يمكنك رفع ملازمك وسيقوم الرادار بفحصها بالكامل فوراً.</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {availableFiles.filter(f => f.extractedText || f.title).map((file) => (
+                  {availableFiles.filter(f => f.extractedText || f.title).filter(f => (f.subject || f.tag || 'العامة') === selectedSubjectTab).map((file) => (
                     <div 
                       key={file.id}
                       className="glass-card p-5 rounded-2xl border-white/5 hover:border-indigo-500/30 transition-all flex flex-col justify-between hover:shadow-[0_0_20px_rgba(99,102,241,0.1)] group relative overflow-hidden"

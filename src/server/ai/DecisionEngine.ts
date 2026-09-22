@@ -61,21 +61,43 @@ export class DecisionEngine {
       return cachedResult;
     }
 
-    console.log(`[DecisionEngine] Cache MISS. Calling ${this.primaryProvider.name}...`);
+    // Determine the active provider.
+    // If request contains image/base64 data, GeminiProvider MUST be used because OpenRouter models may lack vision endpoint support.
+    let activeProvider: IAIProvider;
+    let fallbackProvider: IAIProvider | null = null;
+
+    const hasImageData = Boolean(request.base64Data && request.mimeType);
+    if (hasImageData) {
+      // Prioritize Gemini for multimodal vision/OCR extraction
+      if (this.primaryProvider instanceof GeminiProvider) {
+        activeProvider = this.primaryProvider;
+        fallbackProvider = (this.secondaryProvider instanceof GeminiProvider) ? this.secondaryProvider : null;
+      } else if (this.secondaryProvider instanceof GeminiProvider) {
+        activeProvider = this.secondaryProvider;
+        fallbackProvider = null;
+      } else {
+        activeProvider = new GeminiProvider();
+        fallbackProvider = null;
+      }
+      console.log(`[DecisionEngine] Vision/multimodal input detected. Routing directly to ${activeProvider.name}`);
+    } else {
+      activeProvider = this.primaryProvider;
+      fallbackProvider = this.secondaryProvider;
+      console.log(`[DecisionEngine] Cache MISS. Calling ${activeProvider.name}...`);
+    }
 
     // 3. AI Service Call with Fallback
     let resultText = "";
-    let activeProvider = this.primaryProvider;
     
     try {
       resultText = await activeProvider.generate(request);
     } catch(err: any) {
       const errMsg = err.message || String(err);
-      console.warn(`[DecisionEngine] Primary provider (${activeProvider.name}) failed: ${errMsg}`);
+      console.warn(`[DecisionEngine] Provider (${activeProvider.name}) failed: ${errMsg}`);
       
-      if (this.secondaryProvider) {
-        console.log(`[DecisionEngine] Falling back to secondary provider: ${this.secondaryProvider.name}`);
-        activeProvider = this.secondaryProvider;
+      if (fallbackProvider) {
+        console.log(`[DecisionEngine] Falling back to secondary provider: ${fallbackProvider.name}`);
+        activeProvider = fallbackProvider;
         try {
           resultText = await activeProvider.generate(request);
         } catch(secErr: any) {
@@ -83,8 +105,8 @@ export class DecisionEngine {
           throw secErr;
         }
       } else {
-        console.log(`[DecisionEngine] No secondary provider. Retrying primary once after delay...`);
-        await new Promise(res => setTimeout(res, 3000));
+        console.log(`[DecisionEngine] No secondary fallback provider. Retrying active provider once after delay...`);
+        await new Promise(res => setTimeout(res, 2000));
         resultText = await activeProvider.generate(request);
       }
     }

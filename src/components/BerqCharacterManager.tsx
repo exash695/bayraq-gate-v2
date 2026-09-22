@@ -175,82 +175,17 @@ export function initPoseOverrides() {
         console.warn("[DATABASE READ] Server fetch notice (using cache):", err?.message || err);
       });
   } catch(e) {}
-
-  const handleSnapshot = async (docSnap: any) => {
-    if (docSnap.exists()) {
-      const poses = docSnap.data() as Record<string, string>;
-      const loadedPoses: Record<string, string> = { ...globalPoseOverrides };
-      let changed = false;
-
-      for (const [key, value] of Object.entries(poses)) {
-        if (typeof value === 'string' && value.startsWith('CHUNKED:')) {
-          const count = parseInt(value.split(':')[1]);
-          const chunkPromises = [];
-          for (let i = 0; i < count; i++) {
-            chunkPromises.push(
-              getDoc(doc(db, "bairaq_pose_chunks", `${key}_${i}`)).then(async (snap) => {
-                if (snap.exists()) return snap;
-                if (key === 'mayadeen_tab_bairaq' || key === 'pose_dual_arena' || key === 'captain_bairaq_guardian') {
-                  const snapGuardian = await getDoc(doc(db, "bairaq_pose_chunks", `captain_bairaq_guardian_${i}`));
-                  if (snapGuardian.exists()) return snapGuardian;
-                  const snapMayadeen = await getDoc(doc(db, "bairaq_pose_chunks", `mayadeen_tab_bairaq_${i}`));
-                  if (snapMayadeen.exists()) return snapMayadeen;
-                }
-                return null;
-              }).catch(err => {
-                console.warn(`Notice: Chunk ${key}_${i} unavailable (offline/missing):`, err?.message || err);
-                return null;
-              })
-            );
-          }
-          try {
-            const chunkSnaps = await Promise.all(chunkPromises);
-            let full = '';
-            for (const snap of chunkSnaps) {
-              if (snap && snap.exists()) full += snap.data().data;
-            }
-            if (full && loadedPoses[key] !== full) {
-              loadedPoses[key] = full;
-              changed = true;
-            }
-          } catch (e) {
-            console.warn("Could not load chunked pose (offline fallback in use)", e);
-          }
-        } else if (typeof value === 'string') {
-          if (loadedPoses[key] !== value) {
-            loadedPoses[key] = value;
-            changed = true;
-          }
+  // Listen to realtime socket for bairaq_poses
+  import("../lib/realtimeManager").then(({ realtimeManager }) => {
+    realtimeManager.subscribe("bairaq_poses", null, (event) => {
+      if (event.type === 'UPDATE' || event.type === 'INSERT') {
+        const payload = event.data as Record<string, string>;
+        if (payload) {
+          updateGlobalPoses(payload);
         }
       }
-
-      // Expand all bidirectional alias mappings into loadedPoses
-      for (const [key, value] of Object.entries(loadedPoses)) {
-        if (typeof value === 'string' && value) {
-          const aliases = POSE_ALIASES_MAP[key] || [];
-          for (const alias of aliases) {
-            if (loadedPoses[alias] !== value) {
-              loadedPoses[alias] = value;
-              changed = true;
-            }
-          }
-        }
-      }
-
-      if (changed) {
-        globalPoseOverrides = loadedPoses;
-        poseSubscribers.forEach(cb => cb(globalPoseOverrides));
-      }
-    }
-  };
-
-  onSnapshot(doc(db, "system_settings", "bairaq_poses"), handleSnapshot, (error) => {
-    console.warn("bairaq_poses system_settings snapshot listener paused:", error?.message || error);
-  });
-
-  onSnapshot(doc(db, "system_config", "bairaq_poses"), handleSnapshot, (error) => {
-    console.warn("bairaq_poses system_config snapshot listener paused:", error?.message || error);
-  });
+    });
+  }).catch(() => {});
 }
 initPoseOverrides();
 
@@ -582,12 +517,6 @@ export const BerqCharacter: React.FC<BerqCharacterProps> = ({
           }
         }
       }
-      // Sanitize: Ignore old static image fallbacks for guardian header poses so official video plays
-      if (resolved && (pose === 'captain_bairaq_guardian' || pose === 'mayadeen_tab_bairaq')) {
-        if (resolved === '/mascot/connect.jpg' || resolved === '/mascot/welcome.png' || resolved === '/mascot/welcome.jpg') {
-          resolved = null;
-        }
-      }
       setCustomImageUrl(resolved);
     });
   }, [pose]);
@@ -618,6 +547,9 @@ export const BerqCharacter: React.FC<BerqCharacterProps> = ({
         setIsVideoPlaying(true);
       }).catch(err => {
         console.log('[BERQ VIDEO] Autoplay status:', err?.message || err);
+        if (videoRef.current?.error || String(err).includes('NotSupportedError') || String(err).includes('source') || String(err).includes('format')) {
+          setVideoError(true);
+        }
       });
     }
   }, [effectiveVideoSrc, isVideoFile, videoError]);
@@ -677,6 +609,9 @@ export const BerqCharacter: React.FC<BerqCharacterProps> = ({
                 el.loop = true;
                 el.play().catch(err => {
                   console.log('[BERQ VIDEO] Ref play notice:', err?.message || err);
+                  if (el.error || String(err).includes('NotSupportedError') || String(err).includes('source') || String(err).includes('format')) {
+                    setVideoError(true);
+                  }
                 });
               }
             }}

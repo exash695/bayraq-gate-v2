@@ -16,12 +16,12 @@ import {
   SlidersHorizontal,
   KeyRound,
   Fingerprint,
-  Zap
+  Zap,
+  Globe
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { collection, getDocs, doc, setDoc, updateDoc, serverTimestamp } from '@/src/lib/firebase';
-import { db } from '../../lib/firebase';
 import { logActivity } from '../../utils/auditLogger';
+import { useSecuritySettings, securityService, SecuritySettings } from '../../services/securityService';
 
 interface BannedEntity {
   id: string;
@@ -34,41 +34,13 @@ interface BannedEntity {
   status: 'active_ban' | 'lifted';
 }
 
-const DEFAULT_BANNED: BannedEntity[] = [
-  {
-    id: 'ban-1',
-    type: 'device',
-    value: 'DEV-UUID-9842-BAIR-X7',
-    reason: 'محاولات تخمين أكواد تفعيل متكررة (12 محاولة فاشلة)',
-    failedAttempts: 12,
-    bannedAt: 'منذ 3 ساعات',
-    expiresAt: '24 ساعة',
-    status: 'active_ban'
-  },
-  {
-    id: 'ban-2',
-    type: 'ip',
-    value: '185.220.101.45',
-    reason: 'استعلامات API متكررة وغير مصرح بها (DDoS Protection)',
-    failedAttempts: 45,
-    bannedAt: 'منذ يوم',
-    expiresAt: 'دائم',
-    status: 'active_ban'
-  }
-];
-
 export const SecurityAccessSection: React.FC = () => {
-  const [bannedEntities, setBannedEntities] = useState<BannedEntity[]>(DEFAULT_BANNED);
+  const { settings, updateSettings, isSaving, reloadSettings } = useSecuritySettings();
+  const [bannedEntities, setBannedEntities] = useState<BannedEntity[]>([]);
   const [newBanType, setNewBanType] = useState<'ip' | 'device' | 'account'>('device');
   const [newBanValue, setNewBanValue] = useState('');
   const [newBanReason, setNewBanReason] = useState('محاولات تسجيل أو تخمين مشبوهة');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-
-  // Security Policies State
-  const [maxFailedAttempts, setMaxFailedAttempts] = useState(5);
-  const [lockoutDurationMinutes, setLockoutDurationMinutes] = useState(30);
-  const [allowMultiDeviceLogin, setAllowMultiDeviceLogin] = useState(true);
-  const [requirePinForFinance, setRequirePinForFinance] = useState(true);
 
   // RBAC Matrix State: Capabilities vs Roles
   const roles = [
@@ -80,26 +52,40 @@ export const SecurityAccessSection: React.FC = () => {
     { key: 'admin', label: '🏫 مدير مدرسة' },
   ];
 
-  const capabilities = [
-    { id: 'view_grades', name: '📊 عرض الدرجات والشهادات', student: true, parent: true, teacher: true, driver: false, supervisor: true, admin: true },
-    { id: 'enter_attendance', name: '📝 تسجيل الحضور والغياب اليومي', student: false, parent: false, teacher: true, driver: false, supervisor: true, admin: true },
-    { id: 'track_bus', name: '🚌 تتبع حافلات النقل المباشر', student: true, parent: true, teacher: false, driver: true, supervisor: false, admin: true },
-    { id: 'generate_codes', name: '🔑 توليد وإصدار أكواد التفعيل', student: false, parent: false, teacher: false, driver: false, supervisor: false, admin: true },
-    { id: 'live_broadcast', name: '📢 البث الإذاعي والتنبيهات المباشرة', student: false, parent: false, teacher: true, driver: false, supervisor: true, admin: true },
-    { id: 'ai_radar', name: '📡 رادار الذكاء وتحدي 60 ثانية', student: true, parent: true, teacher: true, driver: false, supervisor: true, admin: true },
-    { id: 'financial_view', name: '💰 الاطلاع على الموقف المالي والرسوم', student: false, parent: true, teacher: false, driver: false, supervisor: false, admin: true },
-    { id: 'edit_school_info', name: '⚙️ تعديل بيانات وهوية المدرسة', student: false, parent: false, teacher: false, driver: false, supervisor: false, admin: true },
-  ];
+  const permissionsMatrix = settings.permissionsMatrix || [];
 
-  const [permissionsMatrix, setPermissionsMatrix] = useState(capabilities);
+  const fetchBans = async () => {
+    try {
+      const res = await fetch('/api/security/bans');
+      if (res.ok) {
+        const data = await res.json();
+        setBannedEntities(data.map((d: any) => ({
+          id: d.id,
+          type: d.type,
+          value: d.value,
+          reason: d.reason,
+          failedAttempts: d.failed_attempts || 0,
+          bannedAt: d.banned_at || new Date().toISOString(),
+          expiresAt: d.expires_at || '',
+          status: d.status
+        })));
+      }
+    } catch (err) {
+      console.error('Failed to fetch security bans', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchBans();
+  }, []);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  const togglePermission = (capId: string, roleKey: string) => {
-    setPermissionsMatrix(prev => prev.map(cap => {
+  const togglePermission = async (capId: string, roleKey: string) => {
+    const updated = permissionsMatrix.map(cap => {
       if (cap.id === capId) {
         return {
           ...cap,
@@ -107,8 +93,31 @@ export const SecurityAccessSection: React.FC = () => {
         };
       }
       return cap;
-    }));
-    showToast(`تم تحديث صلاحية (${roleKey}) بنجاح`);
+    });
+    await updateSettings({ permissionsMatrix: updated });
+    showToast(`تم حفظ وتفعيل تعديل صلاحية (${roleKey}) بالسيرفر والواجهة بنجاح ✓`);
+  };
+
+  const handleToggleMultiDevice = async () => {
+    const nextVal = !settings.allowMultiDeviceLogin;
+    await updateSettings({ allowMultiDeviceLogin: nextVal });
+    showToast(`تم ${nextVal ? 'السماح بالدخول من أجهزة متعددة' : 'قصر الدخول على جهاز واحد فقط'} وتعميمه فوراً`);
+  };
+
+  const handleTogglePinForFinance = async () => {
+    const nextVal = !settings.requirePinForFinance;
+    await updateSettings({ requirePinForFinance: nextVal });
+    showToast(`تم ${nextVal ? 'تفعيل طلب رمز PIN للمالية إجبارياً' : 'تعطيل طلب رمز PIN للمالية وتسهيل الدخول'} فوراً`);
+  };
+
+  const handleMaxAttemptsChange = async (val: number) => {
+    await updateSettings({ maxFailedAttempts: val });
+    showToast(`تم تحديث الحد الأقصى لمحاولات التخمين إلى (${val}) محاولات`);
+  };
+
+  const handleLockoutDurationChange = async (val: number) => {
+    await updateSettings({ lockoutDurationMinutes: val });
+    showToast(`تم تحديث مدة حظر التخمين إلى (${val}) دقيقة`);
   };
 
   const handleAddBan = async (e: React.FormEvent) => {
@@ -124,14 +133,25 @@ export const SecurityAccessSection: React.FC = () => {
       value: newBanValue.trim(),
       reason: newBanReason,
       failedAttempts: 6,
-      bannedAt: 'الآن',
-      expiresAt: '24 ساعة',
+      bannedAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       status: 'active_ban'
     };
 
+    try {
+      await fetch('/api/security/bans', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(item)
+      });
+      fetchBans();
+    } catch (e) {
+      console.error(e);
+    }
+
     setBannedEntities(prev => [item, ...prev]);
     setNewBanValue('');
-    showToast(`تم حظر ${item.value} وتعميمه على جدار الحماية 🛡️`);
+    showToast(`تم حظر ${item.value} وتعميمه على جدار الحماية وقاعدة البيانات 🛡️`);
 
     await logActivity({
       action: 'إضافة حظر أمني',
@@ -142,8 +162,13 @@ export const SecurityAccessSection: React.FC = () => {
   };
 
   const handleLiftBan = async (id: string, val: string) => {
+    try {
+      await fetch(`/api/security/bans/${id}`, { method: 'DELETE' });
+    } catch (e) {
+      console.error(e);
+    }
     setBannedEntities(prev => prev.filter(b => b.id !== id));
-    showToast(`تم رفع الحظر عن (${val}) بنجاح ✓`);
+    showToast(`تم رفع الحظر عن (${val}) واستعادة إمكانية الوصول بنجاح ✓`);
 
     await logActivity({
       action: 'رفع حظر أمني',
@@ -152,6 +177,7 @@ export const SecurityAccessSection: React.FC = () => {
       targetType: 'security_bans'
     });
   };
+
 
   return (
     <div className="space-y-6 text-right font-sans" dir="rtl">
@@ -216,8 +242,8 @@ export const SecurityAccessSection: React.FC = () => {
                 type="number"
                 min={3}
                 max={10}
-                value={maxFailedAttempts}
-                onChange={(e) => setMaxFailedAttempts(Number(e.target.value))}
+                value={settings.maxFailedAttempts || 5}
+                onChange={(e) => handleMaxAttemptsChange(Number(e.target.value))}
                 className="w-20 bg-black/40 border border-white/10 rounded-xl p-2 text-white font-bold text-center"
               />
               <span className="text-[10px] text-white/40">محاولات متتالية</span>
@@ -231,8 +257,8 @@ export const SecurityAccessSection: React.FC = () => {
                 type="number"
                 min={5}
                 max={1440}
-                value={lockoutDurationMinutes}
-                onChange={(e) => setLockoutDurationMinutes(Number(e.target.value))}
+                value={settings.lockoutDurationMinutes || 30}
+                onChange={(e) => handleLockoutDurationChange(Number(e.target.value))}
                 className="w-20 bg-black/40 border border-white/10 rounded-xl p-2 text-white font-bold text-center"
               />
               <span className="text-[10px] text-white/40">دقيقة</span>
@@ -242,25 +268,25 @@ export const SecurityAccessSection: React.FC = () => {
           <div className="bg-white/5 border border-white/5 rounded-2xl p-4 flex flex-col justify-between">
             <span className="block text-[11px] font-bold text-white/60 mb-2">السماح بتسجيل الدخول من عدة أجهزة:</span>
             <button
-              onClick={() => setAllowMultiDeviceLogin(!allowMultiDeviceLogin)}
+              onClick={handleToggleMultiDevice}
               className={`py-2 px-3 rounded-xl font-bold transition-all text-xs flex items-center justify-between ${
-                allowMultiDeviceLogin ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-300'
+                settings.allowMultiDeviceLogin ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
               }`}
             >
-              <span>{allowMultiDeviceLogin ? 'مفعل (أجهزة متعددة)' : 'مغلق (جهاز واحد فقط)'}</span>
-              {allowMultiDeviceLogin ? <Unlock size={14} /> : <Lock size={14} />}
+              <span>{settings.allowMultiDeviceLogin ? 'مفعل (أجهزة متعددة)' : 'مغلق (جهاز واحد فقط)'}</span>
+              {settings.allowMultiDeviceLogin ? <Unlock size={14} /> : <Lock size={14} />}
             </button>
           </div>
 
           <div className="bg-white/5 border border-white/5 rounded-2xl p-4 flex flex-col justify-between">
             <span className="block text-[11px] font-bold text-white/60 mb-2">طلب رمز PIN لقسم الرسوم والمالية:</span>
             <button
-              onClick={() => setRequirePinForFinance(!requirePinForFinance)}
+              onClick={handleTogglePinForFinance}
               className={`py-2 px-3 rounded-xl font-bold transition-all text-xs flex items-center justify-between ${
-                requirePinForFinance ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-300'
+                settings.requirePinForFinance ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' : 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
               }`}
             >
-              <span>{requirePinForFinance ? 'مطلوب إجباري ✓' : 'غير مفعل'}</span>
+              <span>{settings.requirePinForFinance ? 'مطلوب إجباري ✓' : 'معطل (دخول مباشر)'}</span>
               <Fingerprint size={14} />
             </button>
           </div>
@@ -278,6 +304,16 @@ export const SecurityAccessSection: React.FC = () => {
               <h3 className="text-sm font-black text-white">مصفوفة صلاحيات الأدوار المدرسية (RBAC Matrix)</h3>
               <p className="text-[10px] text-white/40">التحكم الدقيق بما يمكن لكل فئة قراءته أو تعديله في المنظومة</p>
             </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className={`text-[10px] px-2.5 py-1 rounded-full flex items-center gap-1.5 font-bold border ${
+              isSaving 
+                ? 'bg-amber-500/20 text-amber-300 border-amber-500/30 animate-pulse' 
+                : 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+            }`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${isSaving ? 'bg-amber-400 animate-ping' : 'bg-emerald-400'}`} />
+              {isSaving ? 'جاري المزامنة...' : 'مطبق حياً على كافة المستخدمين'}
+            </span>
           </div>
         </div>
 

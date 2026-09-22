@@ -33,13 +33,25 @@ export const activationCodesService = {
     return await response.json();
   },
 
-  syncToSql: async (codes: any[]) => {
+  syncToSql: async (codes: any) => {
+    let codeList: any[] = [];
+    if (Array.isArray(codes)) {
+      codeList = codes;
+    } else if (codes && Array.isArray(codes.codes)) {
+      codeList = codes.codes;
+    } else if (codes && typeof codes === 'object') {
+      codeList = Object.values(codes).filter(Boolean);
+    }
+
     const response = await fetch('/api/activation-codes/sync', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ codes })
+      body: JSON.stringify({ codes: codeList })
     });
-    if (!response.ok) throw new Error('Failed to sync codes');
+    if (!response.ok) {
+      const errData = await response.json().catch(() => ({}));
+      throw new Error(errData.message || 'Failed to sync codes');
+    }
     return await response.json();
   },
 

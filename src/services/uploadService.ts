@@ -1,8 +1,24 @@
 export const uploadFileToR2 = async (
   file: File, 
-  onProgress?: (progress: number) => void,
+  onProgressOrCategory?: ((progress: number) => void) | string,
+  onProgressOrXhr?: ((progress: number) => void) | ((xhr: XMLHttpRequest) => void),
   onXhrCreated?: (xhr: XMLHttpRequest) => void
 ): Promise<string> => {
+  // Normalize parameters in case caller passed (file, category, onProgress) or (file, onProgress, onXhr)
+  const onProgress: ((progress: number) => void) | undefined = 
+    typeof onProgressOrCategory === 'function' 
+      ? onProgressOrCategory 
+      : typeof onProgressOrXhr === 'function' && onProgressOrXhr.length <= 1 
+        ? (onProgressOrXhr as (progress: number) => void) 
+        : undefined;
+
+  const resolvedOnXhrCreated: ((xhr: XMLHttpRequest) => void) | undefined =
+    typeof onXhrCreated === 'function'
+      ? onXhrCreated
+      : typeof onProgressOrXhr === 'function' && typeof onProgressOrCategory === 'function'
+        ? (onProgressOrXhr as (xhr: XMLHttpRequest) => void)
+        : undefined;
+
   try {
     // 1. First Priority: Check if Cloudflare R2 presigned URL is available
     let presignData: any = null;
@@ -27,10 +43,10 @@ export const uploadFileToR2 = async (
       try {
         return await new Promise<string>((resolve, reject) => {
           const xhr = new XMLHttpRequest();
-          if (onXhrCreated) onXhrCreated(xhr);
+          if (resolvedOnXhrCreated) resolvedOnXhrCreated(xhr);
 
           xhr.upload.addEventListener('progress', (event) => {
-            if (event.lengthComputable && onProgress) {
+            if (event.lengthComputable && typeof onProgress === 'function') {
               const progress = Math.round((event.loaded / event.total) * 100);
               onProgress(progress);
             }
@@ -61,10 +77,10 @@ export const uploadFileToR2 = async (
     // Provides real-time progress events and permanent CDN/accessible URL
     return await new Promise<string>((resolve, reject) => {
       const fallbackXhr = new XMLHttpRequest();
-      if (onXhrCreated) onXhrCreated(fallbackXhr);
+      if (resolvedOnXhrCreated) resolvedOnXhrCreated(fallbackXhr);
 
       fallbackXhr.upload.addEventListener('progress', (event) => {
-        if (event.lengthComputable && onProgress) {
+        if (event.lengthComputable && typeof onProgress === 'function') {
           const progress = Math.round((event.loaded / event.total) * 100);
           onProgress(progress);
         }

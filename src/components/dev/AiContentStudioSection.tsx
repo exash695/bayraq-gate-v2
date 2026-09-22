@@ -22,8 +22,6 @@ import {
   ChevronDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { collection, getDocs, doc, setDoc, deleteDoc, addDoc, serverTimestamp, query, orderBy } from '@/src/lib/firebase';
-import { db } from '../../lib/firebase';
 import { logActivity } from '../../utils/auditLogger';
 
 export interface CurriculumQuestion {
@@ -144,44 +142,59 @@ export const AiContentStudioSection: React.FC = () => {
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Load questions from PostgreSQL with fallback to defaults
+  
+  // Load questions from PostgreSQL
   useEffect(() => {
     const fetchQuestions = async () => {
       setLoading(true);
       try {
-        const snap = await getDocs(collection(db, 'curriculum_questions'));
-        if (!snap.empty) {
-          const list: CurriculumQuestion[] = [];
-          snap.forEach(d => {
-            list.push({ id: d.id, ...d.data() } as CurriculumQuestion);
-          });
-          setQuestions(list);
+        const res = await fetch('/api/curriculum-questions?category=all');
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.length > 0) {
+            setQuestions(data.map((d: any) => ({
+              ...d,
+              questionText: d.questionText || d.question || d.text || '',
+              timeLimitSec: d.timeLimitSec || d.timeLimit || 60,
+              correctOptionIndex: d.correctOptionIndex || 0,
+              options: d.options || [],
+            })));
+            return;
+          }
         }
       } catch (e) {
-        console.warn('Using default questions:', e);
+        console.warn('Failed to fetch from postgres:', e);
       } finally {
         setLoading(false);
       }
+      setQuestions(DEFAULT_QUESTIONS);
     };
     fetchQuestions();
   }, []);
 
   const handleSaveQuestion = async (q: CurriculumQuestion) => {
     try {
-      if (editingQuestion) {
-        // Update
-        await setDoc(doc(db, 'curriculum_questions', q.id), {
+      if (!editingQuestion) {
+        q.id = `q-${Date.now()}`;
+      }
+      
+      const res = await fetch('/api/curriculum-questions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           ...q,
-          updatedAt: serverTimestamp()
-        }, { merge: true });
+          schoolId: 'all',
+          question: q.questionText
+        })
+      });
+
+      if (!res.ok) throw new Error('Failed to save to backend');
+
+      if (editingQuestion) {
         setQuestions(prev => prev.map(item => item.id === q.id ? q : item));
         showToast('تم تحديث السؤال بنجاح في بنك الأسئلة ✓');
       } else {
-        // Create
-        const newId = `q-${Date.now()}`;
-        const itemToSave = { ...q, id: newId, createdAt: serverTimestamp() };
-        await setDoc(doc(db, 'curriculum_questions', newId), itemToSave);
-        setQuestions(prev => [itemToSave, ...prev]);
+        setQuestions(prev => [q, ...prev]);
         showToast('تمت إضافة السؤال الجديد إلى بنك المناهج ⚡');
       }
       setIsModalOpen(false);
@@ -202,11 +215,12 @@ export const AiContentStudioSection: React.FC = () => {
   const handleDeleteQuestion = async (id: string) => {
     if (!window.confirm('هل أنت متأكد من رغبتك في حذف هذا السؤال من بنك المناهج؟')) return;
     try {
-      await deleteDoc(doc(db, 'curriculum_questions', id));
+      await fetch(`/api/curriculum-questions/${id}`, { method: 'DELETE' });
     } catch (e) {}
     setQuestions(prev => prev.filter(q => q.id !== id));
     showToast('تم حذف السؤال من البنك');
   };
+
 
   // AI Extraction Simulator
   const handleRunAiGenerator = async () => {

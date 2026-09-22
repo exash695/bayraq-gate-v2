@@ -1,12 +1,24 @@
 import {createRoot} from 'react-dom/client';
 import './index.css';
-import './lib/pdfWorker';
 import ErrorBoundary from './components/ErrorBoundary';
 import App from './App.tsx';
 import { errorMonitoringService } from './services/errorMonitoringService';
 
 // Initialize global error monitoring
 errorMonitoringService.init();
+
+// Lazily load PDF worker in background so it doesn't block initial hydration
+if (typeof window !== 'undefined') {
+  if ('requestIdleCallback' in window) {
+    (window as any).requestIdleCallback(() => {
+      import('./lib/pdfWorker').catch(() => {});
+    });
+  } else {
+    setTimeout(() => {
+      import('./lib/pdfWorker').catch(() => {});
+    }, 1500);
+  }
+}
 
 // Global polyfills for date/timestamp compatibility across Firebase and PostgreSQL APIs
 if (typeof (String.prototype as any).toMillis !== 'function') {
@@ -142,11 +154,19 @@ console.log = function (...args: any[]) {
 };
 */
 
-createRoot(document.getElementById('root')!).render(
-    <ErrorBoundary>
-      <App />
-    </ErrorBoundary>
-);
+try {
+  const rootElement = document.getElementById('root');
+  if (rootElement) {
+    const root = createRoot(rootElement);
+    root.render(
+      <ErrorBoundary>
+        <App />
+      </ErrorBoundary>
+    );
+  }
+} catch (mountErr) {
+  console.error("Critical mounting error:", mountErr);
+}
 
 if (typeof window !== 'undefined') {
   window.addEventListener('unhandledrejection', (event) => {

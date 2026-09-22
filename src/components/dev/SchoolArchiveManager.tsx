@@ -24,7 +24,6 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { schoolArchiveService, SchoolArchiveRecord } from '../../services/schoolArchiveService';
-import { auth } from '../../lib/firebase';
 
 interface SchoolArchiveManagerProps {
   schools: Array<{

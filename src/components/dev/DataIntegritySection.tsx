@@ -38,8 +38,6 @@ import {
 } from '../../services/dataIntegrityService';
 import { logActivity } from '../../utils/auditLogger';
 import { activationCodesService } from '../../services/activationCodesService';
-import { collection, getDocs, query } from '@/src/lib/firebase';
-import { db } from '../../lib/firebase';
 
 export const DataIntegritySection: React.FC = () => {
   const [report, setReport] = useState<FullIntegrityReport | null>(null);
@@ -52,6 +50,7 @@ export const DataIntegritySection: React.FC = () => {
   const [repairingMap, setRepairingMap] = useState<Record<string, boolean>>({});
   const [selectedSchoolMap, setSelectedSchoolMap] = useState<Record<string, string>>({});
   const [actionSuccessMsg, setActionSuccessMsg] = useState<string | null>(null);
+  const [actionErrorMsg, setActionErrorMsg] = useState<string | null>(null);
   const [inspectSchool, setInspectSchool] = useState<SchoolAuditSummary | null>(null);
   const [userListRoleFilter, setUserListRoleFilter] = useState<string>('all');
 
@@ -59,6 +58,13 @@ export const DataIntegritySection: React.FC = () => {
     setActionSuccessMsg(msg);
     setTimeout(() => {
       setActionSuccessMsg(null);
+    }, 5000);
+  };
+
+  const showErrorBanner = (msg: string) => {
+    setActionErrorMsg(msg);
+    setTimeout(() => {
+      setActionErrorMsg(null);
     }, 5000);
   };
 
@@ -274,7 +280,8 @@ export const DataIntegritySection: React.FC = () => {
       const updated = await dataIntegrityService.runFullAudit();
       setReport(updated);
     } catch (e: any) {
-      console.error('Failed to delete schedule:', e);
+      console.warn('Notice: Failed to delete schedule:', e);
+      showErrorBanner(e.message || 'فشل حذف الجدول المعزول');
     } finally {
       setRepairingMap(prev => ({ ...prev, [scheduleId]: false }));
     }
@@ -294,50 +301,111 @@ export const DataIntegritySection: React.FC = () => {
       const updated = await dataIntegrityService.runFullAudit();
       setReport(updated);
     } catch (e: any) {
-      console.error('Failed to fix mismatched user:', e);
+      console.warn('Notice: Failed to fix mismatched user:', e);
+      showErrorBanner(e.message || 'فشل مواءمة مدرسة المستخدم');
     } finally {
       setRepairingMap(prev => ({ ...prev, [userId]: false }));
     }
   };
 
-  const handleDeleteOrphanUser = async (userId: string, userName?: string) => {
+  const handleDeleteOrphanUser = async (userId: string, userName?: string, collectionName: string = 'users') => {
     setRepairingMap(prev => ({ ...prev, [userId]: true }));
     try {
-      await dataIntegrityService.deleteOrphanUser(userId);
+      await dataIntegrityService.deleteOrphanUser(userId, collectionName);
       await logActivity({
-        action: 'حذف حساب معزول',
-        details: `تم حذف الحساب المعزول [${userName || userId}]`,
+        action: 'حذف سجل معزول',
+        details: `تم حذف السجل المعزول [${userName || userId}] من (${collectionName})`,
         targetId: userId,
-        targetType: 'users'
+        targetType: collectionName
       });
-      showSuccessBanner(`تم حذف الحساب المعزول [${userName || userId}] بنجاح`);
+      showSuccessBanner(`تم حل المشكلة وحذف السجل [${userName || userId}] بنجاح`);
       const updated = await dataIntegrityService.runFullAudit();
       setReport(updated);
     } catch (e: any) {
-      console.error('Failed to delete user:', e);
+      console.warn('Notice: Failed to delete user:', e);
+      showErrorBanner(e.message || 'فشل حذف السجل المعزول');
     } finally {
       setRepairingMap(prev => ({ ...prev, [userId]: false }));
     }
   };
 
-  const handleReassignUser = async (userId: string, schoolId: string, userName?: string) => {
+  const handleReassignUser = async (userId: string, schoolId: string, userName?: string, collectionName: string = 'users') => {
     if (!schoolId) return;
     setRepairingMap(prev => ({ ...prev, [userId]: true }));
     try {
-      await dataIntegrityService.reassignUserToSchool(userId, schoolId);
+      await dataIntegrityService.reassignUserToSchool(userId, schoolId, collectionName);
+      const schoolObj = report?.validSchools?.find(s => s.id === schoolId);
       await logActivity({
-        action: 'إسناد مستخدم لمدرسة',
-        details: `تم إسناد المستخدم [${userName || userId}] إلى المدرسة ID: ${schoolId}`,
+        action: 'إسناد سجل لمدرسة',
+        details: `تم إسناد السجل [${userName || userId}] إلى مدرسة: ${schoolObj?.name || schoolId}`,
         targetId: userId,
-        targetType: 'users'
+        targetType: collectionName
       });
-      showSuccessBanner(`تم إسناد المستخدم إلى المدرسة بنجاح`);
+      showSuccessBanner(`تم حل المشكلة وإسناد السجل إلى مدرسة (${schoolObj?.name || schoolId}) بنجاح`);
       const updated = await dataIntegrityService.runFullAudit();
       setReport(updated);
     } catch (e: any) {
-      console.error('Failed to reassign user:', e);
+      console.warn('Notice: Failed to reassign user:', e);
+      showErrorBanner(e.message || 'فشل إسناد السجل للمدرسة');
     } finally {
       setRepairingMap(prev => ({ ...prev, [userId]: false }));
+    }
+  };
+
+  const handleDirectSolveIssue = async (issue: IntegrityIssue) => {
+    const recordId = issue.affectedRecordId;
+    setRepairingMap(prev => ({ ...prev, [recordId]: true }));
+    try {
+      if (issue.affectedCollection === 'students' || issue.type === 'orphan_student') {
+        await dataIntegrityService.deleteOrphanUser(recordId, 'students');
+        showSuccessBanner(`تم حل المشكلة بنجاح: تم حذف سجل الطالب غير المرتبط`);
+      } else if (issue.affectedCollection === 'teachers' || issue.type === 'unlinked_teacher') {
+        await dataIntegrityService.deleteOrphanUser(recordId, 'teachers');
+        showSuccessBanner(`تم حل المشكلة بنجاح: تم حذف سجل المعلم غير المرتبط`);
+      } else if (issue.affectedCollection === 'users' || issue.type === 'orphan_user') {
+        await dataIntegrityService.deleteOrphanUser(recordId, 'users');
+        showSuccessBanner(`تم حل المشكلة بنجاح: تم حذف حساب المستخدم غير المرتبط`);
+      } else if (issue.affectedCollection === 'activation_codes' || issue.type === 'orphan_code') {
+        await dataIntegrityService.deleteOrphanCode(recordId);
+        showSuccessBanner(`تم حل المشكلة بنجاح: تم حذف كود التفعيل المهمل`);
+      } else if (issue.type === 'orphan_schedule') {
+        await dataIntegrityService.deleteOrphanSchedule(recordId);
+        showSuccessBanner(`تم حل المشكلة بنجاح: تم حذف جدول الحصص المهمل`);
+      } else if (issue.type === 'orphan_parent') {
+        await dataIntegrityService.unlinkOrphanParent(recordId);
+        showSuccessBanner(`تم حل المشكلة بنجاح: تم فك ارتباط كود الطالب التالف`);
+      } else if (issue.type === 'unverified_school_parent') {
+        await dataIntegrityService.unlinkUserFromSchool(recordId);
+        showSuccessBanner(`تم حل المشكلة بنجاح: تم فك ارتباط الحساب غير المؤكد`);
+      } else if (issue.type === 'mismatched_user_school' && issue.meta?.correctSchoolId) {
+        await dataIntegrityService.fixMismatchedUser(recordId, issue.meta.correctSchoolId);
+        showSuccessBanner(`تم حل المشكلة بنجاح: تمت مواءمة مدرسة المستخدم`);
+      } else if (issue.type === 'stat_discrepancy' && issue.meta?.actualUserStats) {
+        await dataIntegrityService.fixSingleStatDiscrepancy(recordId, issue.meta.actualUserStats);
+        showSuccessBanner(`تمت مواءمة وتحديث عدادات المدرسة بنجاح`);
+      } else {
+        await fetch('/api/admin/data-integrity/fix', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'delete', recordId, collectionName: issue.affectedCollection })
+        });
+        showSuccessBanner(`تم حل المشكلة بنجاح`);
+      }
+
+      await logActivity({
+        action: 'حل مسألة في سلامة البيانات',
+        details: `${issue.title} (ID: ${recordId})`,
+        targetId: recordId,
+        targetType: issue.affectedCollection
+      });
+
+      const updated = await dataIntegrityService.runFullAudit();
+      setReport(updated);
+    } catch (e: any) {
+      console.error('Failed to solve issue:', e);
+      showErrorBanner(e.message || 'فشل حل المشكلة');
+    } finally {
+      setRepairingMap(prev => ({ ...prev, [recordId]: false }));
     }
   };
 
@@ -355,7 +423,8 @@ export const DataIntegritySection: React.FC = () => {
       const updated = await dataIntegrityService.runFullAudit();
       setReport(updated);
     } catch (e: any) {
-      console.error('Failed to unlink parent:', e);
+      console.warn('Notice: Failed to unlink parent:', e);
+      showErrorBanner(e.message || 'فشل فك ارتباط الكود التالف');
     } finally {
       setRepairingMap(prev => ({ ...prev, [userId]: false }));
     }
@@ -365,33 +434,15 @@ export const DataIntegritySection: React.FC = () => {
     setIsSyncingCodes(true);
     try {
       console.log('Starting sync of activation codes...');
-      const q = query(collection(db, 'activation_codes'));
-      const snap = await getDocs(q);
-      
-      const codes = snap.docs
-        .map(doc => {
-          const data = doc.data();
-          if (!data.code) return null;
-          return {
-            id: doc.id,
-            code: data.code,
-            schoolId: data.schoolId || data.school_id || 'general',
-            role: data.role || 'student',
-            used: data.status === 'used' || data.used === true,
-            usedBy: data.usedBy || null,
-            usedAt: data.usedAt ? (data.usedAt.toDate ? data.usedAt.toDate().toISOString() : data.usedAt) : null,
-            createdAt: data.createdAt ? (data.createdAt.toDate ? data.createdAt.toDate().toISOString() : data.createdAt) : new Date().toISOString()
-          };
-        })
-        .filter(Boolean);
+      const codes = await activationCodesService.fetchCodes();
 
-      if (codes.length === 0) {
+      if (!codes || codes.length === 0) {
         showSuccessBanner('لا توجد أكواد تفعيل صالحة للمزامنة');
         return;
       }
 
       console.log(`Syncing ${codes.length} codes to SQL...`);
-      const result = await activationCodesService.syncToSql(codes as any[]);
+      const result = await activationCodesService.syncToSql(codes);
       console.log('Sync result:', result);
       
       await logActivity({
@@ -399,11 +450,16 @@ export const DataIntegritySection: React.FC = () => {
         details: `تمت مزامنة ${result.synced || codes.length} كود تفعيل بنجاح`,
         targetType: 'system_integrity'
       });
+      showSuccessBanner(`تمت مزامنة ${result.synced || codes.length} كود تفعيل مع قاعدة البيانات (PostgreSQL)`);
       
-      showSuccessBanner(`تمت مزامنة (${result.synced || codes.length}) كود تفعيل إلى قاعدة بيانات SQL بنجاح!`);
-    } catch (error: any) {
-      console.error('Failed to sync codes:', error);
-      alert('فشلت عملية المزامنة: ' + error.message);
+      if (result.failed > 0) {
+        setTimeout(() => showSuccessBanner(`فشلت مزامنة ${result.failed} كود بسبب التكرار أو أخطاء`), 4000);
+      }
+      
+      handleRunAudit();
+    } catch (e: any) {
+      console.error('Error syncing codes:', e);
+      showErrorBanner('فشلت مزامنة أكواد التفعيل: ' + e.message);
     } finally {
       setIsSyncingCodes(false);
     }
@@ -455,7 +511,16 @@ export const DataIntegritySection: React.FC = () => {
         i =>
           i.type === 'stat_discrepancy' ||
           i.type === 'orphan_schedule' ||
-          i.type === 'mismatched_user_school'
+          i.type === 'mismatched_user_school' ||
+          i.type === 'orphan_user' ||
+          i.type === 'orphan_student' ||
+          i.type === 'unlinked_teacher' ||
+          i.type === 'orphan_code' ||
+          i.affectedCollection === 'students' ||
+          i.affectedCollection === 'teachers' ||
+          i.affectedCollection === 'users' ||
+          i.affectedCollection === 'activation_codes' ||
+          i.fixable
       ).length
     : 0;
 
@@ -511,6 +576,26 @@ export const DataIntegritySection: React.FC = () => {
         </div>
       )}
 
+      {/* Error Toast Banner */}
+      {actionErrorMsg && (
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 z-[9999] w-full max-w-md px-4 animate-in fade-in slide-in-from-bottom-4">
+          <div className="bg-rose-950/90 border border-rose-500/30 rounded-2xl p-4 flex items-center justify-between gap-3 text-rose-300 text-xs font-bold shadow-2xl backdrop-blur-xl ring-1 ring-white/10">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-full bg-rose-500/20 flex items-center justify-center">
+                <AlertTriangle size={18} className="text-rose-400" />
+              </div>
+              <span>{actionErrorMsg}</span>
+            </div>
+            <button
+              onClick={() => setActionErrorMsg(null)}
+              className="w-8 h-8 rounded-xl hover:bg-white/5 flex items-center justify-center text-white/40 hover:text-white transition-colors"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Header Banner */}
       <div className="bg-gradient-to-r from-emerald-950/40 via-indigo-950/40 to-neutral-900 border border-emerald-500/20 rounded-3xl p-6 relative overflow-hidden backdrop-blur-xl">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -529,10 +614,10 @@ export const DataIntegritySection: React.FC = () => {
               onClick={handleResetEmptySchools}
               disabled={isResettingEmpty || isAuditing}
               className="px-4 py-3 rounded-2xl bg-neutral-800 hover:bg-neutral-700 active:scale-95 text-white/90 font-bold text-xs transition-all border border-white/10 flex items-center gap-2 disabled:opacity-50"
-              title="تصفير عدادات أي مدرسة لا تملك أكواداً أو طلاباً لضمان عدم ظهور أرقام وهمية"
+              title="إعادة ضبط ومعايرة العدادات الإحصائية (طلاب/أكواد) للمدارس الفارغة لتصبح 0 ومنع أي أرقام وهمية دون حذف المدارس"
             >
               <Eraser size={15} className={isResettingEmpty ? 'animate-spin text-amber-400' : 'text-amber-400'} />
-              {isResettingEmpty ? 'جاري تصفير المدارس الفارغة...' : 'تصفير المدارس الفارغة (0 كود/طالب)'}
+              {isResettingEmpty ? 'جاري معايرة وضبط العدادات...' : 'معايرة عدادات المدارس الفارغة (إزالة الوهمية)'}
             </button>
 
             {report && autoFixableCount > 0 && (
@@ -1077,7 +1162,28 @@ export const DataIntegritySection: React.FC = () => {
                   لا توجد مشاكل مطابقة لهذا الفلتر! كافة البيانات سليمة.
                 </div>
               ) : (
-                filteredIssues.map(issue => {
+                <>
+                  {/* Quick Action Top Bar */}
+                  <div className="bg-neutral-900/80 border border-white/10 rounded-2xl p-4 flex flex-col sm:flex-row items-center justify-between gap-3 backdrop-blur-md">
+                    <div className="flex items-center gap-2.5">
+                      <ShieldAlert size={18} className="text-amber-400" />
+                      <span className="text-xs font-bold text-white">
+                        تم رصد ({filteredIssues.length}) مسألة بحاجة إلى معالجة
+                      </span>
+                    </div>
+                    {autoFixableCount > 0 && (
+                      <button
+                        onClick={handleFixAllAutoFixable}
+                        disabled={isBatchFixing || isAuditing}
+                        className="px-4 py-2 bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 active:scale-95 text-white rounded-xl text-xs font-black transition-all shadow-lg shadow-amber-600/30 flex items-center gap-2 disabled:opacity-50"
+                      >
+                        <Zap size={14} className={isBatchFixing ? 'animate-spin' : ''} />
+                        {isBatchFixing ? 'جاري الإصلاح الشامل...' : `حل كافة المشاكل دفعة واحدة (${autoFixableCount}) ⚡`}
+                      </button>
+                    )}
+                  </div>
+
+                  {filteredIssues.map(issue => {
                   const isProcessing = Boolean(repairingMap[issue.affectedRecordId]);
                   const currentSelectedSchool = selectedSchoolMap[issue.id] || (report.validSchools?.[0]?.id || '');
 
@@ -1119,18 +1225,19 @@ export const DataIntegritySection: React.FC = () => {
                             <button
                               onClick={() => handleFixSingleStat(issue.affectedRecordId, issue.meta.actualUserStats)}
                               disabled={isProcessing}
-                              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 disabled:opacity-50"
+                              className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white rounded-xl text-xs font-black transition-all shadow-md shadow-emerald-600/30 flex items-center gap-1.5 disabled:opacity-50"
                             >
                               <Zap size={13} className={isProcessing ? 'animate-spin' : ''} />
-                              تطبيق مواءمة العدادات وتحديث المدرسة فوراً
+                              حل المشكلة: مواءمة وتحديث العدادات فوراً ⚡
                             </button>
                             <button
                               onClick={() => handleResetSingleSchool(issue.affectedRecordId, issue.title)}
                               disabled={isProcessing}
                               className="px-3.5 py-2 bg-neutral-800 hover:bg-neutral-700 active:scale-95 text-amber-300 border border-white/10 rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 disabled:opacity-50"
+                              title="معايرة العدادات إلى 0 لإزالة الأرقام الوهمية"
                             >
                               <Eraser size={13} className={isProcessing ? 'animate-spin' : 'text-amber-400'} />
-                              تصفير عدادات المدرسة (0)
+                              معايرة العدادات للصفر (0)
                             </button>
                           </div>
                         )}
@@ -1138,6 +1245,14 @@ export const DataIntegritySection: React.FC = () => {
                         {/* Unverified School Parent Action */}
                         {issue.type === 'unverified_school_parent' && (
                           <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              onClick={() => handleDirectSolveIssue(issue)}
+                              disabled={isProcessing}
+                              className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white rounded-xl text-xs font-black transition-all shadow-md shadow-emerald-600/30 flex items-center gap-1.5 disabled:opacity-50"
+                            >
+                              <Zap size={13} className={isProcessing ? 'animate-spin' : ''} />
+                              حل المسألة فوراً ⚡
+                            </button>
                             <button
                               onClick={() => handleUnlinkUserFromSchool(issue.affectedRecordId, issue.meta?.userName)}
                               disabled={isProcessing}
@@ -1161,6 +1276,14 @@ export const DataIntegritySection: React.FC = () => {
                         {(issue.affectedCollection === 'activation_codes' || issue.type === 'orphan_code' || issue.type === 'invalid_school_reference') &&
                           issue.affectedCollection === 'activation_codes' && (
                             <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                onClick={() => handleDirectSolveIssue(issue)}
+                                disabled={isProcessing}
+                                className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white rounded-xl text-xs font-black transition-all shadow-md shadow-emerald-600/30 flex items-center gap-1.5 disabled:opacity-50"
+                              >
+                                <Zap size={13} className={isProcessing ? 'animate-spin' : ''} />
+                                حل المسألة فوراً ⚡
+                              </button>
                               {/* Reassign to valid school selector */}
                               {report.validSchools && report.validSchools.length > 0 && (
                                 <div className="flex items-center gap-1.5 bg-black/40 border border-white/10 rounded-xl px-2 py-1">
@@ -1205,31 +1328,69 @@ export const DataIntegritySection: React.FC = () => {
 
                         {/* 3. Orphan Schedule Action */}
                         {issue.type === 'orphan_schedule' && (
-                          <button
-                            onClick={() => handleDeleteOrphanSchedule(issue.affectedRecordId)}
-                            disabled={isProcessing}
-                            className="px-4 py-2 bg-rose-600 hover:bg-rose-500 active:scale-95 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 disabled:opacity-50"
-                          >
-                            <Trash2 size={13} className={isProcessing ? 'animate-spin' : ''} />
-                            حذف جدول الحصص المهمل فوراً
-                          </button>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              onClick={() => handleDirectSolveIssue(issue)}
+                              disabled={isProcessing}
+                              className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white rounded-xl text-xs font-black transition-all shadow-md shadow-emerald-600/30 flex items-center gap-1.5 disabled:opacity-50"
+                            >
+                              <Zap size={13} className={isProcessing ? 'animate-spin' : ''} />
+                              حل المسألة فوراً ⚡
+                            </button>
+                            <button
+                              onClick={() => handleDeleteOrphanSchedule(issue.affectedRecordId)}
+                              disabled={isProcessing}
+                              className="px-4 py-2 bg-rose-600 hover:bg-rose-500 active:scale-95 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 disabled:opacity-50"
+                            >
+                              <Trash2 size={13} className={isProcessing ? 'animate-spin' : ''} />
+                              حذف جدول الحصص المهمل
+                            </button>
+                          </div>
                         )}
 
                         {/* 4. Mismatched User School Action */}
                         {issue.type === 'mismatched_user_school' && issue.meta?.correctSchoolId && (
-                          <button
-                            onClick={() => handleFixMismatchedUser(issue.affectedRecordId, issue.meta.correctSchoolId)}
-                            disabled={isProcessing}
-                            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 disabled:opacity-50"
-                          >
-                            <Zap size={13} className={isProcessing ? 'animate-spin' : ''} />
-                            مواءمة مدرسة الحساب مع كود التسجيل
-                          </button>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              onClick={() => handleDirectSolveIssue(issue)}
+                              disabled={isProcessing}
+                              className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white rounded-xl text-xs font-black transition-all shadow-md shadow-emerald-600/30 flex items-center gap-1.5 disabled:opacity-50"
+                            >
+                              <Zap size={13} className={isProcessing ? 'animate-spin' : ''} />
+                              حل المسألة فوراً ⚡
+                            </button>
+                            <button
+                              onClick={() => handleFixMismatchedUser(issue.affectedRecordId, issue.meta.correctSchoolId)}
+                              disabled={isProcessing}
+                              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 disabled:opacity-50"
+                            >
+                              مواءمة مدرسة الحساب مع كود التسجيل
+                            </button>
+                          </div>
                         )}
 
-                        {/* 5. Orphan User / Invalid School User Actions */}
-                        {issue.affectedCollection === 'users' && issue.type !== 'orphan_parent' && issue.type !== 'mismatched_user_school' && issue.type !== 'unverified_school_parent' && (
+                        {/* 5. Orphan Student / Teacher / User Actions */}
+                        {(issue.affectedCollection === 'students' ||
+                          issue.affectedCollection === 'teachers' ||
+                          issue.affectedCollection === 'users' ||
+                          issue.type === 'orphan_user' ||
+                          issue.type === 'orphan_student' ||
+                          issue.type === 'unlinked_teacher') &&
+                          issue.type !== 'orphan_parent' &&
+                          issue.type !== 'mismatched_user_school' &&
+                          issue.type !== 'unverified_school_parent' && (
                           <div className="flex flex-wrap items-center gap-2">
+                            {/* Prominent Solve Issue Button */}
+                            <button
+                              onClick={() => handleDirectSolveIssue(issue)}
+                              disabled={isProcessing}
+                              className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white rounded-xl text-xs font-black transition-all shadow-md shadow-emerald-600/30 flex items-center gap-1.5 disabled:opacity-50"
+                              title="تنفيذ الإجراء المقترح فوراً"
+                            >
+                              <Zap size={13} className={isProcessing ? 'animate-spin' : ''} />
+                              {issue.suggestedAction ? `حل المشكلة (${issue.suggestedAction}) ⚡` : 'حل المشكلة فوراً ⚡'}
+                            </button>
+
                             {report.validSchools && report.validSchools.length > 0 && (
                               <div className="flex items-center gap-1.5 bg-black/40 border border-white/10 rounded-xl px-2 py-1">
                                 <select
@@ -1249,7 +1410,7 @@ export const DataIntegritySection: React.FC = () => {
                                   ))}
                                 </select>
                                 <button
-                                  onClick={() => handleReassignUser(issue.affectedRecordId, currentSelectedSchool, issue.meta?.userName)}
+                                  onClick={() => handleReassignUser(issue.affectedRecordId, currentSelectedSchool, issue.meta?.userName, issue.affectedCollection)}
                                   disabled={isProcessing}
                                   className="px-2.5 py-1 bg-indigo-600/80 hover:bg-indigo-600 text-white rounded-lg text-[10px] font-bold transition-all flex items-center gap-1 disabled:opacity-50"
                                 >
@@ -1260,44 +1421,65 @@ export const DataIntegritySection: React.FC = () => {
                             )}
 
                             <button
-                              onClick={() => handleDeleteOrphanUser(issue.affectedRecordId, issue.meta?.userName)}
+                              onClick={() => handleDeleteOrphanUser(issue.affectedRecordId, issue.meta?.userName, issue.affectedCollection)}
                               disabled={isProcessing}
                               className="px-3.5 py-2 bg-rose-600/90 hover:bg-rose-600 active:scale-95 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 disabled:opacity-50"
                             >
                               <Trash2 size={13} className={isProcessing ? 'animate-spin' : ''} />
-                              حذف الحساب المعزول
+                              حذف نهائي
                             </button>
                           </div>
                         )}
 
                         {/* 6. Orphan Parent Action */}
                         {issue.type === 'orphan_parent' && (
-                          <button
-                            onClick={() => handleUnlinkOrphanParent(issue.affectedRecordId)}
-                            disabled={isProcessing}
-                            className="px-4 py-2 bg-amber-600 hover:bg-amber-500 active:scale-95 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 disabled:opacity-50"
-                          >
-                            <Wrench size={13} className={isProcessing ? 'animate-spin' : ''} />
-                            فك ارتباط كود الطالب التالف
-                          </button>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              onClick={() => handleDirectSolveIssue(issue)}
+                              disabled={isProcessing}
+                              className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white rounded-xl text-xs font-black transition-all shadow-md shadow-emerald-600/30 flex items-center gap-1.5 disabled:opacity-50"
+                            >
+                              <Zap size={13} className={isProcessing ? 'animate-spin' : ''} />
+                              حل المشكلة فوراً ⚡
+                            </button>
+                            <button
+                              onClick={() => handleUnlinkOrphanParent(issue.affectedRecordId)}
+                              disabled={isProcessing}
+                              className="px-4 py-2 bg-amber-600 hover:bg-amber-500 active:scale-95 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 disabled:opacity-50"
+                            >
+                              <Wrench size={13} className={isProcessing ? 'animate-spin' : ''} />
+                              فك ارتباط كود الطالب التالف
+                            </button>
+                          </div>
                         )}
 
                         {/* 7. Duplicate Code Action */}
                         {issue.type === 'duplicate_code' && (
-                          <button
-                            onClick={() => handleDeleteOrphanCode(issue.affectedRecordId, issue.meta?.code)}
-                            disabled={isProcessing}
-                            className="px-4 py-2 bg-rose-600 hover:bg-rose-500 active:scale-95 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 disabled:opacity-50"
-                          >
-                            <Trash2 size={13} className={isProcessing ? 'animate-spin' : ''} />
-                            حذف السجل المكرر
-                          </button>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              onClick={() => handleDirectSolveIssue(issue)}
+                              disabled={isProcessing}
+                              className="px-4 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white rounded-xl text-xs font-black transition-all shadow-md shadow-emerald-600/30 flex items-center gap-1.5 disabled:opacity-50"
+                            >
+                              <Zap size={13} className={isProcessing ? 'animate-spin' : ''} />
+                              حل المشكلة فوراً ⚡
+                            </button>
+                            <button
+                              onClick={() => handleDeleteOrphanCode(issue.affectedRecordId, issue.meta?.code)}
+                              disabled={isProcessing}
+                              className="px-4 py-2 bg-rose-600 hover:bg-rose-500 active:scale-95 text-white rounded-xl text-xs font-bold transition-all shadow-md flex items-center gap-1.5 disabled:opacity-50"
+                            >
+                              <Trash2 size={13} className={isProcessing ? 'animate-spin' : ''} />
+                              حذف السجل المكرر
+                            </button>
+                          </div>
                         )}
                       </div>
                     </div>
                   );
-                })
-              )}
+                })}
+              </>
+            )}
             </div>
           )}
         </div>

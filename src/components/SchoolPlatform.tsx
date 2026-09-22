@@ -21,6 +21,7 @@ import { useRemoteConfig } from '../services/remoteConfig';
 import { SeasonalThemeBanner } from "./SeasonalThemeBanner";
 import { TeacherAIAssistant } from "./TeacherAIAssistant";
 import { copyToClipboard } from "../utils/clipboard";
+import { useSecuritySettings, securityService } from '../services/securityService';
 
 import { AIEnhancedRadar } from "./AIEnhancedRadar";
 import { AIQuestionAssistantModal } from "./AIQuestionAssistantModal";
@@ -60,6 +61,7 @@ import {
   getSubjectsForGrade,
   normalizeArabicText,
   normalizeGradeName,
+  isArchivedList,
 } from "../utils/studentUtils";
 
 import {
@@ -125,6 +127,8 @@ import {
   Upload,
   Eye,
   Save,
+  UserCheck,
+  FileSpreadsheet,
 } from "lucide-react";
 import {
   Heart,
@@ -168,6 +172,7 @@ import { safeStorage, safeSessionStorage } from '../lib/storage';
 import { processPdfInForeground, parseLiteralTextToBlocks } from "../utils/pdfProcessor";
 import { SixtySecondChallenge } from "./SixtySecondChallenge";
 import { TeacherQuestionBank } from "./TeacherQuestionBank";
+import { TeacherAttendanceTab } from "./TeacherAttendanceTab";
 import DevDashboard from "./DevDashboard";
 
 import { VerticalScrollPicker } from "./SchoolPlatform/VerticalScrollPicker";
@@ -203,6 +208,7 @@ import { StudentLiveWatchTab } from "./SchoolPlatform/StudentLiveWatchTab";
 import { TeacherControlLiveTab } from "./SchoolPlatform/TeacherControlLiveTab";
 import { TeacherControlContentTab } from "./SchoolPlatform/TeacherControlContentTab";
 import { TeacherControlFilesTab } from "./SchoolPlatform/TeacherControlFilesTab";
+import { TeacherControlGradesTab } from "./SchoolPlatform/TeacherControlGradesTab";
 import { TeacherControlAssessmentTab } from "./SchoolPlatform/TeacherControlAssessmentTab";
 import { TeacherControlAnnouncementsTab } from "./SchoolPlatform/TeacherControlAnnouncementsTab";
 import { PlatformOverlays } from "./SchoolPlatform/PlatformOverlays";
@@ -241,7 +247,14 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     loungeLock: false
   });
 
-  const [subjectMapping, setSubjectMapping] = useState<any>(null);
+  const [subjectMapping, setSubjectMapping] = useState<any>(() => {
+    try {
+      const cached = safeStorage.getItem("s6_cached_subject_mapping");
+      return cached ? JSON.parse(cached) : null;
+    } catch {
+      return null;
+    }
+  });
 
   useEffect(() => {
     if (!resolvedSchoolId) return;
@@ -503,7 +516,15 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
   };
 
   const remoteConfig = useRemoteConfig();
-  const [schoolConfigData, setSchoolConfigData] = useState<{ disabledModules?: string[]; [key: string]: any } | null>(null);
+  const [schoolConfigData, setSchoolConfigData] = useState<{ disabledModules?: string[]; [key: string]: any } | null>(() => {
+    try {
+      const cached = localStorage.getItem(`school_disabled_modules_${resolvedSchoolId}`) || localStorage.getItem(`s6_disabled_modules_${resolvedSchoolId}`);
+      if (cached) {
+        return { disabledModules: JSON.parse(cached) };
+      }
+    } catch (e) {}
+    return null;
+  });
 
   useEffect(() => {
     let unsubDoc: (() => void) | null = null;
@@ -537,15 +558,202 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
       }
     }, (err) => console.warn("School config query listener:", err));
 
+    // In-tab instant sync listener from DevDashboard toggle
+    const handleSchoolConfigEvent = (e: any) => {
+      const detail = e.detail;
+      if (!detail) return;
+      if (
+        detail.schoolId === resolvedSchoolId ||
+        detail.schoolId === schoolId ||
+        (targetName && detail.schoolName === targetName) ||
+        !detail.schoolId
+      ) {
+        setSchoolConfigData(prev => ({
+          ...(prev || {}),
+          disabledModules: detail.disabledModules || []
+        }));
+      }
+    };
+    window.addEventListener("school_configs_updated", handleSchoolConfigEvent);
+
+    // Multi-user realtimeManager listener
+    const unsubRealtime = realtimeManager.subscribe('school_configs', (payload: any) => {
+      if (payload?.schoolId === resolvedSchoolId || payload?.id === resolvedSchoolId) {
+        if (Array.isArray(payload?.disabledModules)) {
+          setSchoolConfigData(prev => ({ ...(prev || {}), disabledModules: payload.disabledModules }));
+        }
+      }
+    });
+
+    // Also fetch initial disabled modules from backend API
+    if (resolvedSchoolId) {
+      fetch(`/api/schools/${resolvedSchoolId}`)
+        .then(res => res.ok ? res.json() : null)
+        .then(data => {
+          const sch = data?.school || data?.data || (Array.isArray(data) ? data[0] : null);
+          if (sch && Array.isArray(sch.disabledModules)) {
+            setSchoolConfigData(prev => ({ ...(prev || {}), disabledModules: sch.disabledModules }));
+          }
+        })
+        .catch(() => {});
+    }
+
     return () => {
       if (unsubDoc) unsubDoc();
       if (unsubQuery) unsubQuery();
+      window.removeEventListener("school_configs_updated", handleSchoolConfigEvent);
+      if (typeof unsubRealtime === 'function') unsubRealtime();
     };
   }, [resolvedSchoolId, schoolName, schoolId, userProfile?.schoolName]);
 
   const disabledModules = useMemo(() => {
     return Array.isArray(schoolConfigData?.disabledModules) ? schoolConfigData.disabledModules : [];
   }, [schoolConfigData]);
+
+  const isSuperAdmin = auth.currentUser?.email === "mntzralghanm527@gmail.com" || userProfile?.email === "mntzralghanm527@gmail.com";
+  const { settings: secSettings } = useSecuritySettings();
+  const effectiveRole = isTeacher ? 'teacher' : (userProfile?.role || 'student');
+  const rolePrefix = effectiveRole;
+  const [isLiveActive, setIsLiveActive] = useState(false);
+
+  const checkIsModuleDisabled = (tabId: string): boolean => {
+    // Current role-specific prefix (e.g. "student:feed", "parent:financial")
+    const specificId = `${rolePrefix}:${tabId}`;
+
+    // 1. Check for specific role-based disable (Priority)
+    if (disabledModules.includes(specificId)) return true;
+
+    // 2. Removed global fallback to ensure absolute portal isolation as requested by user
+
+    // 3. Special handling for aliases and cross-references - ONLY check role-prefixed versions
+    if (tabId === "feed") {
+      return disabledModules.includes(`${rolePrefix}:arena`) || disabledModules.includes(`${rolePrefix}:feed`);
+    }
+    
+    if (tabId === "grades") {
+      return disabledModules.includes(`${rolePrefix}:grades_parent`) || disabledModules.includes(`${rolePrefix}:grades`);
+    }
+
+    if (tabId === "attendance") {
+      return disabledModules.includes(`${rolePrefix}:attendance_parent`) || 
+             disabledModules.includes(`${rolePrefix}:attendance`) || 
+             disabledModules.includes(`${rolePrefix}:attendance_tracking`) ||
+             disabledModules.includes(`${rolePrefix}:discipline`);
+    }
+
+    if (tabId === "control") {
+      return disabledModules.includes(`${rolePrefix}:control_hub`) || 
+             disabledModules.includes(`${rolePrefix}:teacher_control`) ||
+             disabledModules.includes(`${rolePrefix}:control`);
+    }
+
+    if (tabId === "live_watch" || tabId === "broadcast") {
+      return disabledModules.includes(`${rolePrefix}:broadcast`) || 
+             disabledModules.includes(`${rolePrefix}:teacher_live`) ||
+             disabledModules.includes(`${rolePrefix}:teacher_broadcast`) ||
+             disabledModules.includes(`${rolePrefix}:live_watch`);
+    }
+
+    if (tabId === "questions_bank") {
+      return disabledModules.includes(`${rolePrefix}:questions_bank`);
+    }
+
+    if (tabId === "files") {
+      return disabledModules.includes(`${rolePrefix}:files`);
+    }
+
+    if (tabId === "ai_assistant") {
+      return disabledModules.includes(`${rolePrefix}:ai_assistant`);
+    }
+
+    if (tabId === "excellence" || tabId === "sovereignty") {
+      return disabledModules.includes(`${rolePrefix}:competitions`) || 
+             disabledModules.includes(`${rolePrefix}:sovereignty_mgmt`) || 
+             disabledModules.includes(`${rolePrefix}:excellence`) ||
+             disabledModules.includes(`${rolePrefix}:excellence_parent`) ||
+             disabledModules.includes(`${rolePrefix}:sovereignty`);
+    }
+
+    if (tabId === "evaluation") {
+      return disabledModules.includes(`${rolePrefix}:evaluation`) || 
+             disabledModules.includes(`${rolePrefix}:grading`);
+    }
+
+    if (tabId === "announcements") {
+      return disabledModules.includes(`${rolePrefix}:announcements`) || 
+             disabledModules.includes(`${rolePrefix}:teacher_news`);
+    }
+
+    if (tabId === "activity_monitoring" || tabId === "monitoring") {
+      return disabledModules.includes(`${rolePrefix}:activity_monitoring`) || 
+             disabledModules.includes(`${rolePrefix}:monitoring`);
+    }
+
+    if (tabId === "assignments") {
+      return disabledModules.includes(`${rolePrefix}:assignments_parent`) || disabledModules.includes(`${rolePrefix}:assignments`);
+    }
+
+    if (tabId === "discipline_reports") {
+      return disabledModules.includes(`${rolePrefix}:discipline_reports_parent`) || disabledModules.includes(`${rolePrefix}:discipline_reports`);
+    }
+
+    if (tabId === "uniform") {
+      return disabledModules.includes(`${rolePrefix}:uniform_parent`) || disabledModules.includes(`${rolePrefix}:uniform`);
+    }
+
+    if (tabId === "transport") {
+      return disabledModules.includes(`${rolePrefix}:transport_parent`) || disabledModules.includes(`${rolePrefix}:transport`);
+    }
+
+    if (tabId === "financial" || tabId === "finance") {
+      return disabledModules.includes(`${rolePrefix}:financial_parent`) || disabledModules.includes(`${rolePrefix}:financial`);
+    }
+
+    if (tabId === "support") {
+      return disabledModules.includes(`${rolePrefix}:support_parent`) || disabledModules.includes(`${rolePrefix}:support`);
+    }
+
+    if (tabId === "ideas") {
+      return disabledModules.includes(`${rolePrefix}:ideas_parent`) || disabledModules.includes(`${rolePrefix}:ideas`);
+    }
+
+    if (tabId === "materials") {
+      return disabledModules.includes(`${rolePrefix}:content`) || 
+             disabledModules.includes(`${rolePrefix}:teacher_content`) ||
+             disabledModules.includes(`${rolePrefix}:teacher_materials`) ||
+             disabledModules.includes(`${rolePrefix}:materials`) ||
+             disabledModules.includes(`${rolePrefix}:mayadeen`);
+    }
+
+    return false;
+  };
+
+  const rawTabs = [
+    { id: "feed", name: "الساحة", icon: LayoutGrid },
+    ...(isTeacher || userProfile?.role === "admin"
+      ? [
+          { id: "attendance", name: "رصد الحضور", icon: UserCheck, cap: "enter_attendance" },
+          { id: "control", name: "التحكم", icon: ShieldCheck, cap: "enter_attendance" },
+        ]
+      : isLiveActive 
+        ? [{ id: "live_watch", name: "البث 📡", icon: Radio, cap: "live_broadcast" }]
+        : []),
+    ...(isTeacher || userProfile?.role === "admin"
+      ? [
+          { id: "questions_bank", name: "بنك الأسئلة", icon: Database },
+          { id: "ai_assistant", name: "مساعد الذكاء", icon: Bot, cap: "ai_radar" },        
+        ]
+      : [
+          { id: "files", name: "الملفات", icon: FolderOpen },
+          { id: "materials", name: "الميادين", icon: BookOpen, cap: "view_grades" },
+        ]),
+    {
+      id: "schedule",
+      name: isTeacher ? "جدولي" : "جدولي اليومي",
+      icon: Calendar,
+    },
+    { id: "excellence", name: "التميز", icon: Award },
+  ];
 
   const [activeTab, setActiveTabState] = useState<PlatformTab>(() => {
     const target = safeStorage.getItem("s6_target_tab") as PlatformTab;
@@ -642,6 +850,10 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
   const getFileNameFromStack = (s: string) => s;
   
   const setActiveTab = (newTab: PlatformTab, callerName: string = 'unknown') => {
+    if (checkIsModuleDisabled(newTab)) {
+      showToast("هذا القسم مقفل حالياً من قبل الإدارة المركزية", "error");
+      return;
+    }
     setActiveTabState(newTab);
     if (newTab === "files") {
       setStudentLibraryTab("document");
@@ -783,20 +995,49 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     return () => unsub();
   }, [resolvedSchoolId]);
 
-  // 2. Real-time sync for teacher data so class additions/changes reflect immediately
+  const [schoolTeachersList, setSchoolTeachersList] = useState<any[]>(() => {
+    try {
+      return staffService.getCachedTeachers(resolvedSchoolId) || [];
+    } catch {
+      return [];
+    }
+  });
+
+  // 2. Real-time sync for teachers data so teacher list, photos, and assignments reflect immediately
   useEffect(() => {
-    if (!resolvedSchoolId || !isTeacher) return;
-    const teacherId = currentTeacherData?.id || teacherData?.id;
-    if (!teacherId) return;
-    const unsub = staffService.subscribeToTeachers(resolvedSchoolId, (teachersList) => {
-      const fresh = teachersList.find(
-        (t) => t.id === teacherId || (t.code && (t.code === teacherData?.code || t.code === currentTeacherData?.code))
-      );
-      if (fresh) {
-        setCurrentTeacherData((prev: any) => ({ ...prev, ...fresh }));
+    if (!resolvedSchoolId) return;
+    const syncTeacherFromList = (teachersList: any[]) => {
+      if (Array.isArray(teachersList)) {
+        setSchoolTeachersList(teachersList);
       }
-    });
-    return () => unsub();
+      if (isTeacher) {
+        const teacherId = currentTeacherData?.id || teacherData?.id;
+        if (teacherId) {
+          const fresh = teachersList.find(
+            (t) => t.id === teacherId || (t.code && (t.code === teacherData?.code || t.code === currentTeacherData?.code))
+          );
+          if (fresh) {
+            setCurrentTeacherData((prev: any) => ({ ...prev, ...fresh, classes: fresh.classes || [] }));
+          }
+        }
+      }
+    };
+
+    const unsub = staffService.subscribeToTeachers(resolvedSchoolId, syncTeacherFromList);
+
+    const handleWindowTeachersUpdated = () => {
+      staffService.getTeachers(resolvedSchoolId).then((freshList) => {
+        if (Array.isArray(freshList)) {
+          syncTeacherFromList(freshList);
+        }
+      });
+    };
+    window.addEventListener('teachers_updated', handleWindowTeachersUpdated);
+
+    return () => {
+      unsub();
+      window.removeEventListener('teachers_updated', handleWindowTeachersUpdated);
+    };
   }, [resolvedSchoolId, isTeacher, teacherData?.id, teacherData?.code, currentTeacherData?.id, currentTeacherData?.code]);
 
   // 3. Dropdown ref and click-outside handler
@@ -813,7 +1054,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // 4. Compute all assigned sections as registered in administration
+  // 4. Compute all assigned sections as registered in administration (strictly excluding archived lists)
   const teacherAssignedSections = useMemo<{ name: string; grade: string; studentCount: number; listId?: string }[]>(() => {
     if (!isTeacher) return [];
     const tData = currentTeacherData || teacherData;
@@ -822,51 +1063,65 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     const normArabic = (s: string) => normalizeArabicText(s || '');
     const normGrade = (s: string) => normalizeGradeName(s || '');
 
-    // Collect all raw assigned grade/class strings
-    const rawAssigned = new Set<string>();
-    if (Array.isArray(tData.classes)) {
+    // Collect all raw assigned grade/class strings (excluding archived)
+    const rawAssignedRaw = new Set<string>();
+    const hasClasses = Array.isArray(tData.classes) && tData.classes.length > 0;
+    if (hasClasses) {
       tData.classes.forEach((c: string) => {
-        if (c && typeof c === 'string') rawAssigned.add(c.trim());
+        if (c && typeof c === 'string' && !isArchivedList(c)) rawAssignedRaw.add(c.trim());
       });
     }
-    if (tData.grade && typeof tData.grade === 'string') {
-      rawAssigned.add(tData.grade.trim());
+    if (tData.grade && typeof tData.grade === 'string' && !hasClasses && !isArchivedList(tData.grade)) {
+      rawAssignedRaw.add(tData.grade.trim());
     }
-    if (tData.classCodes && typeof tData.classCodes === 'object') {
+    if (!hasClasses && tData.classCodes && typeof tData.classCodes === 'object') {
       Object.keys(tData.classCodes).forEach(k => {
-        if (k && k !== 'default' && k !== 'master') {
-          rawAssigned.add(k.trim());
+        if (k && k !== 'default' && k !== 'master' && !isArchivedList(k)) {
+          rawAssignedRaw.add(k.trim());
         }
       });
     }
 
     const sectionsMap = new Map<string, { name: string; grade: string; studentCount: number; listId?: string }>();
 
-    // Match against academic_lists
+    const isSpecificMatch = (listName: string, assigned: string) => {
+      if (!listName || !assigned || isArchivedList(listName) || isArchivedList(assigned)) return false;
+      const lTrim = listName.trim();
+      const aTrim = assigned.trim();
+      if (lTrim === aTrim) return true;
+      if (normArabic(lTrim) === normArabic(aTrim)) return true;
+      if (lTrim.endsWith(aTrim) || aTrim.endsWith(lTrim)) return true;
+      if (lTrim.split(' - ').pop()?.trim() === aTrim.split(' - ').pop()?.trim()) return true;
+      return false;
+    };
+
+    const isGenericGradeMatch = (listGrade: string, listName: string, assigned: string) => {
+      if (!assigned || isArchivedList(assigned) || isArchivedList(listName) || isArchivedList(listGrade)) return false;
+      const gAssigned = normGrade(assigned);
+      const gList = normGrade(listGrade) || normGrade(listName);
+      if (!gAssigned || !gList || gAssigned !== gList) return false;
+
+      // Make sure assigned is truly a generic grade name and NOT a specific section
+      const assignedCleaned = normArabic(assigned).replace(normArabic(gAssigned), '').trim();
+      if (assignedCleaned.length > 0) return false;
+      return true;
+    };
+
+    // Match against active (non-archived) academic_lists
     if (academicLists && academicLists.length > 0) {
       academicLists.forEach((list: any) => {
+        if (!list || isArchivedList(list)) return;
         const listName = (list.name || '').trim();
-        if (!listName) return;
+        if (!listName || isArchivedList(listName)) return;
 
         const listStudents = Array.isArray(list.students) ? list.students : [];
         const listGrade = listStudents[0]?.grade || '';
 
-        const lNameNorm = normArabic(listName);
-        const lNameGrade = normGrade(listName);
-        const lGradeNorm = normArabic(listGrade);
-        const lGrade = normGrade(listGrade);
-
-        const matches = Array.from(rawAssigned).some(assignedItem => {
-          const aNorm = normArabic(assignedItem);
-          const aGrade = normGrade(assignedItem);
-
-          return (
-            listName === assignedItem ||
-            (lNameNorm && aNorm && (lNameNorm === aNorm || lNameNorm.includes(aNorm) || aNorm.includes(lNameNorm))) ||
-            (lNameGrade && aGrade && lNameGrade === aGrade) ||
-            (lGradeNorm && aNorm && (lGradeNorm === aNorm || lGradeNorm.includes(aNorm) || aNorm.includes(lGradeNorm))) ||
-            (lGrade && aGrade && lGrade === aGrade)
-          );
+        const matches = Array.from(rawAssignedRaw).some(assignedItem => {
+          if (isArchivedList(assignedItem)) return false;
+          if (isSpecificMatch(listName, assignedItem)) return true;
+          if (isGenericGradeMatch(listGrade, listName, assignedItem)) return true;
+          return false;
         });
 
         if (matches) {
@@ -874,7 +1129,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
           if (count === 0 && topStudents && topStudents.length > 0) {
             count = topStudents.filter((st: any) => {
               const sNorm = normArabic(st.grade || '');
-              return sNorm === lNameNorm;
+              return sNorm === normArabic(listName);
             }).length;
           }
 
@@ -889,54 +1144,31 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     }
 
     // Include raw items not covered by specific academicLists
-    rawAssigned.forEach(rawItem => {
-      const rawNorm = normArabic(rawItem);
-      const rawGradeNorm = normGrade(rawItem);
-
-      const alreadyCovered = Array.from(sectionsMap.values()).some(sec => {
-        const secNorm = normArabic(sec.name);
-        const secGrade = normGrade(sec.grade);
-        return sec.name === rawItem || (secGrade && rawGradeNorm && secGrade === rawGradeNorm);
-      });
-
-      if (!alreadyCovered && !sectionsMap.has(rawItem)) {
-        const count = (topStudents || []).filter((st: any) => {
-          const sNorm = normArabic(st.grade || '');
-          return st.grade === rawItem || sNorm === rawNorm;
-        }).length;
-
-        sectionsMap.set(rawItem, {
-          name: rawItem,
-          grade: normGrade(rawItem) || rawItem,
-          studentCount: count
-        });
-      }
-    });
-
-    // Fallback: If empty but school has academicLists, list all
-    if (sectionsMap.size === 0 && academicLists && academicLists.length > 0) {
-      academicLists.forEach((l: any) => {
-        const stCount = Array.isArray(l.students) ? l.students.length : 0;
-        sectionsMap.set(l.name, {
-          name: l.name,
-          grade: l.students?.[0]?.grade || l.name,
-          studentCount: stCount,
-          listId: l.id
-        });
+    if (sectionsMap.size === 0 && rawAssignedRaw.size > 0) {
+      rawAssignedRaw.forEach(rawItem => {
+        if (!isArchivedList(rawItem)) {
+          sectionsMap.set(rawItem, {
+            name: rawItem,
+            grade: normGrade(rawItem) || rawItem,
+            studentCount: 0
+          });
+        }
       });
     }
 
     // Final fallback
     if (sectionsMap.size === 0) {
-      const fallback = tData.grade || (Array.isArray(tData.classes) && tData.classes[0]) || "سادس علمي";
+      const fallback = (!isArchivedList(tData.grade) ? tData.grade : '') || 
+                       (Array.isArray(tData.classes) && tData.classes.find((c: string) => !isArchivedList(c))) || 
+                       "الصف الدراسي";
       sectionsMap.set(fallback, {
         name: fallback,
         grade: fallback,
-        studentCount: (topStudents || []).filter((st: any) => normArabic(st.grade || '') === normArabic(fallback)).length || (topStudents || []).length
+        studentCount: 0
       });
     }
 
-    return Array.from(sectionsMap.values());
+    return Array.from(sectionsMap.values()).filter(sec => !isArchivedList(sec.name));
   }, [isTeacher, currentTeacherData, teacherData, academicLists, topStudents]);
 
   const [selectedTeacherClass, setSelectedTeacherClass] = useState<string>("");
@@ -1088,7 +1320,6 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
       }
     }
   }, [teacherAssignedSections, isTeacher, selectedTeacherClass]);
-  const [isLiveActive, setIsLiveActive] = useState(false);
   const [activeLiveMaterialIndex, setActiveLiveMaterialIndex] = useState<number | null>(null);
   const [activeLiveTeacherName, setActiveLiveTeacherName] = useState<string | null>(null);
   const [liveSeconds, setLiveSeconds] = useState(0);
@@ -2088,7 +2319,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
            return timeA - timeB;
         }));
       } catch (err) {
-        console.error("error fetching notes:", err);
+        console.warn("Notice: error fetching notes:", err);
       }
     };
     fetchNotes();
@@ -2101,7 +2332,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     const studentGrade = mapGradeForDocument(userProfile?.grade || grade || "");
     const studentSection = userProfile?.section || userProfile?.class;
 
-    // Fetch initial data from SQL API with filtering
+    // Fetch initial data from SQL API with filtering and Firestore fallback
     const fetchRecordedLessons = async () => {
       try {
         let url = `/api/recorded-lessons?schoolId=${encodeURIComponent(resolvedSchoolId)}`;
@@ -2109,8 +2340,33 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
         if (res.ok) {
           const data = await res.json();
           const lessons = data.lessons || data.data || [];
+          if (Array.isArray(lessons) && lessons.length > 0) {
+            setRecordedLessons(prev => {
+              const combined = [...lessons];
+              prev.forEach(p => {
+                if (!combined.find(c => c.id === p.id)) combined.push(p);
+              });
+              return combined.sort((a: any, b: any) => {
+                const timeA = new Date(a.createdAt || a.timestamp || 0).getTime();
+                const timeB = new Date(b.createdAt || b.timestamp || 0).getTime();
+                return timeB - timeA;
+              });
+            });
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Notice: Error fetching recorded lessons from SQL, trying Firestore fallback:", err);
+      }
+
+      // Firestore fallback
+      try {
+        const q = query(collection(db, "recorded_lessons"), where("schoolId", "==", resolvedSchoolId));
+        const snap = await getDocs(q).catch(() => null);
+        if (snap && !snap.empty) {
+          const fbLessons = snap.docs.map(d => ({ id: d.id, ...d.data() }));
           setRecordedLessons(prev => {
-            const combined = [...lessons];
+            const combined = [...fbLessons];
             prev.forEach(p => {
               if (!combined.find(c => c.id === p.id)) combined.push(p);
             });
@@ -2121,8 +2377,8 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
             });
           });
         }
-      } catch (err) {
-        console.error("Error fetching recorded lessons from SQL:", err);
+      } catch (fbErr) {
+        console.warn("Notice: Firestore recorded lessons fallback notice:", fbErr);
       }
     };
 
@@ -3349,14 +3605,18 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     
     const fetchCount = async () => {
       try {
-        const res = await fetch(`/api/lounge-messages/unread/${auth.currentUser?.uid}`);
-        const data = await res.json();
-        if (data.success) {
-          const total = Object.values(data.counts as Record<string, number>).reduce((a, b) => a + b, 0);
-          setUnreadLoungeCount(total);
+        const uid = auth.currentUser?.uid;
+        if (!uid) return;
+        const res = await fetch(`/api/lounge-messages/unread/${uid}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.success && data.counts) {
+            const total = Object.values(data.counts as Record<string, number>).reduce((a, b) => a + b, 0);
+            setUnreadLoungeCount(total);
+          }
         }
       } catch (e) {
-        console.error("Error fetching unread lounge count", e);
+        console.warn("Notice: could not fetch unread lounge count:", e);
       }
     };
 
@@ -5127,47 +5387,17 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     }
   };
 
-  const isSuperAdmin = auth.currentUser?.email === "mntzralghanm527@gmail.com" || userProfile?.email === "mntzralghanm527@gmail.com";
-
-  const rawTabs = [
-    { id: "feed", name: "الساحة", icon: LayoutGrid },
-    ...(isTeacher || userProfile?.role === "admin"
-      ? [{ id: "control", name: "التحكم", icon: ShieldCheck }]
-      : isLiveActive 
-        ? [{ id: "live_watch", name: "البث 📡", icon: Radio }]
-        : []),
-    ...(isTeacher || userProfile?.role === "admin"
-      ? [
-          { id: "questions_bank", name: "بنك الأسئلة", icon: Database },
-          { id: "ai_assistant", name: "مساعد الذكاء", icon: Bot },        
-        ]
-      : [
-          { id: "files", name: "الملفات", icon: FolderOpen },
-          { id: "materials", name: "الميادين", icon: BookOpen },
-        ]),
-    {
-      id: "schedule",
-      name: isTeacher ? "جدولي" : "جدولي اليومي",
-      icon: Calendar,
-    },
-    { id: "excellence", name: "التميز", icon: Award },
-  ];
-
   const tabs = useMemo(() => {
-    return rawTabs.filter(tab => {
-      if (disabledModules.includes(tab.id)) return false;
-      if (tab.id === "feed" && (disabledModules.includes("feed") || disabledModules.includes("arena"))) return false;
-      if (tab.id === "control" && (disabledModules.includes("control") || disabledModules.includes("control_hub") || disabledModules.includes("teacher_control"))) return false;
-      if (tab.id === "live_watch" && (disabledModules.includes("live_watch") || disabledModules.includes("broadcast"))) return false;
-      if (tab.id === "questions_bank" && (disabledModules.includes("questions_bank") || disabledModules.includes("files"))) return false;
-      if (tab.id === "files" && (disabledModules.includes("files") || disabledModules.includes("questions_bank"))) return false;
-      if (tab.id === "materials" && (disabledModules.includes("materials") || disabledModules.includes("content"))) return false;
-      if (tab.id === "schedule" && disabledModules.includes("schedule")) return false;
-      if (tab.id === "excellence" && (disabledModules.includes("excellence") || disabledModules.includes("competitions"))) return false;
-      if (tab.id === "ai_assistant" && disabledModules.includes("ai_assistant")) return false;
-      return true;
-    });
-  }, [rawTabs, disabledModules, isTeacher, userProfile?.role, isLiveActive]);
+    return rawTabs
+      .filter(tab => {
+        if ((tab as any).cap && !securityService.canRoleAccess(effectiveRole, (tab as any).cap)) return false;
+        return true;
+      })
+      .map(tab => ({
+        ...tab,
+        isDisabled: checkIsModuleDisabled(tab.id)
+      }));
+  }, [rawTabs, disabledModules, isTeacher, userProfile?.role, isLiveActive, effectiveRole, secSettings]);
 
   useEffect(() => {
     if (tabs.length > 0 && !tabs.some(t => t.id === activeTab)) {
@@ -5202,7 +5432,9 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
       return { icon: BookOpenText, color: "text-amber-400", bgColor: "bg-amber-400/10" };
     };
 
-    const effectiveGrade = targetBroadcastGrade || gradeName || grade || (userProfile as any)?.grade || "";
+    const effectiveGrade = (!isTeacher
+      ? (gradeName || grade || (userProfile as any)?.grade || targetBroadcastGrade)
+      : (targetBroadcastGrade || gradeName || grade || (userProfile as any)?.grade)) || "";
 
     const myCode = ((userProfile as any)?.studentCode || (userProfile as any)?.code || "").toString().trim().toLowerCase();
     const studentList = (academicLists || []).find((l: any) => {
@@ -5222,10 +5454,50 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
       return subjects.map((s: any) => {
         const matName = typeof s === "string" ? s : s?.name || s?.title || "";
         const visuals = getSubjectVisuals(matName);
-        const norm = matName.trim().toLowerCase();
-        let teachers: { name: string; desc: string }[] = [];
-        if (norm.includes("انجليز") || norm.includes("انكليز")) teachers = baseTeachers.english;
-        else if (norm.includes("فيزياء")) teachers = baseTeachers.physics;
+        const norm = matName.trim().replace(/أ|إ|آ/g, "ا").replace(/ة/g, "ه").toLowerCase();
+
+        // Match teachers from registered school staff
+        const matched = (schoolTeachersList || []).filter((t: any) => {
+          if (t.role && t.role !== 'TEACHER') return false;
+          const tSub = (t.subject || "").trim().replace(/أ|إ|آ/g, "ا").replace(/ة/g, "ه").toLowerCase();
+          if (!tSub) return false;
+          return (
+            tSub.includes(norm) ||
+            norm.includes(tSub) ||
+            (tSub.includes("انكليز") && norm.includes("نجليز")) ||
+            (norm.includes("انكليز") && tSub.includes("نجليز")) ||
+            (tSub.includes("عرب") && norm.includes("عرب")) ||
+            (tSub.includes("اسلام") && (norm.includes("اسلام") || norm.includes("دين"))) ||
+            (norm.includes("اسلام") && (tSub.includes("اسلام") || tSub.includes("دين"))) ||
+            (tSub.includes("حاسوب") && norm.includes("حاسب")) ||
+            (tSub.includes("رياضيات") && norm.includes("رياض"))
+          );
+        });
+
+        let teachers: { name: string; desc: string; photo?: string; rating?: number; studentsCount?: number }[] = [];
+        if (matched.length > 0) {
+          teachers = matched.map((t: any) => ({
+            name: t.name,
+            desc: t.bio || `أستاذ مادة ${matName}`,
+            photo: t.photo || t.avatar || "",
+            rating: t.rating || 5.0,
+            studentsCount: (Array.isArray(t.classes) && t.classes.length > 0) ? t.classes.length * 15 : 18
+          }));
+        } else {
+          if (norm.includes("انجليز") || norm.includes("انكليز")) teachers = baseTeachers.english;
+          else if (norm.includes("فيزياء")) teachers = baseTeachers.physics;
+          else {
+            teachers = [
+              {
+                name: `أستاذ ${matName}`,
+                desc: `كادر تدريس ${matName}`,
+                photo: "",
+                rating: 5.0,
+                studentsCount: 15
+              }
+            ];
+          }
+        }
 
         return {
           material: matName,
@@ -5274,7 +5546,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
         teachers: [],
       },
     ];
-  }, [targetBroadcastGrade, gradeName, grade, userProfile, academicLists, subjectMapping]);
+  }, [targetBroadcastGrade, gradeName, grade, userProfile, academicLists, subjectMapping, schoolTeachersList, isTeacher]);
 
   useEffect(() => {
     if (isTeacher && typeof teacherData?.subject === 'string' && educationalFields.length > 0) {
@@ -5605,7 +5877,11 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
       doc(db, "settings", "subject_mapping"),
       (snap) => {
         if (snap.exists()) {
-          setSubjectMapping(snap.data());
+          const data = snap.data();
+          setSubjectMapping(data);
+          try {
+            safeStorage.setItem("s6_cached_subject_mapping", JSON.stringify(data));
+          } catch(e) {}
         }
       },
       (error) => {
@@ -5809,6 +6085,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     deletingAcademyPageId,
     deletingPostId,
     disabledModules,
+    rolePrefix,
     dismissedAlertIds,
     documentXhr,
     draw,
@@ -6415,36 +6692,71 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
   };
 
   const renderTabContent = () => {
-    const isTabDisabled = 
-      disabledModules.includes(activeTab) ||
-      (activeTab === "feed" && (disabledModules.includes("feed") || disabledModules.includes("arena"))) ||
-      (activeTab === "control" && (disabledModules.includes("control") || disabledModules.includes("control_hub") || disabledModules.includes("teacher_control"))) ||
-      (activeTab === "ai_assistant" && disabledModules.includes("ai_assistant")) ||
-      (activeTab === "live_watch" && (disabledModules.includes("live_watch") || disabledModules.includes("broadcast"))) ||
-      (activeTab === "questions_bank" && (disabledModules.includes("questions_bank") || disabledModules.includes("files"))) ||
-      (activeTab === "files" && (disabledModules.includes("files") || disabledModules.includes("questions_bank"))) ||
-      (activeTab === "materials" && (disabledModules.includes("materials") || disabledModules.includes("content"))) ||
-      (activeTab === "schedule" && disabledModules.includes("schedule")) ||
-      (activeTab === "excellence" && (disabledModules.includes("excellence") || disabledModules.includes("competitions")));
+    const isTabDisabled = checkIsModuleDisabled(activeTab);
 
     if (isTabDisabled) {
+      const tabNamesMap: Record<string, string> = {
+        feed: "الساحة والمنشورات",
+        attendance: "رصد الحضور والغياب",
+        control: "لوحة التحكم والدروس",
+        live_watch: "البث المباشر والإذاعة",
+        questions_bank: "بنك الأسئلة والملفات",
+        files: "الملفات والمستندات",
+        materials: "المحتوى والمناهج الدراسية",
+        schedule: "الجدول المدرسي",
+        excellence: "لوحة التميز والفرسان",
+        ai_assistant: "مساعد الذكاء الاصطناعي",
+      };
+      const currentTabName = tabNamesMap[activeTab] || "هذا القسم";
+
       return (
-        <div className="flex-1 flex flex-col items-center justify-center py-24 px-6 text-center space-y-4 my-auto" dir="rtl">
-          <div className="w-20 h-20 rounded-3xl bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 shadow-[0_0_40px_rgba(244,63,94,0.2)]">
-            <Lock size={40} />
+        <div className="flex-1 flex flex-col items-center justify-center py-16 px-6 text-center space-y-6 my-auto max-w-lg mx-auto" dir="rtl">
+          <div className="relative">
+            <div className="w-24 h-24 rounded-3xl bg-rose-500/10 border-2 border-rose-500/40 flex items-center justify-center text-rose-400 shadow-[0_0_50px_rgba(244,63,94,0.3)] backdrop-blur-md">
+              <Lock size={46} className="animate-pulse" />
+            </div>
+            <div className="absolute -bottom-2 -right-2 px-3 py-1 bg-[#050A18] border border-rose-500/50 rounded-full text-[10px] font-black text-rose-300 flex items-center gap-1.5 shadow-xl">
+              <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping"></span>
+              <span>مغلق برمجياً</span>
+            </div>
           </div>
-          <div className="max-w-md space-y-2">
-            <h3 className="text-xl font-black text-white">هذا القسم موقّف حالياً لهذه المدرسة</h3>
-            <p className="text-xs font-bold text-white/60 leading-relaxed">
-              تم إيقاف صلاحية الوصول إلى هذا القسم لهذه المدرسة بقرار من الإدارة المركزية. يرجى التواصل مع إدارة النظام للمزيد من التفاصيل.
+
+          <div className="space-y-2.5">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-black">
+              <span>🛡️ إشعار إيقاف القسم برمجياً</span>
+            </div>
+            <h3 className="text-xl sm:text-2xl font-black text-white">
+              قسم {currentTabName} مغلق حالياً من قِبل المطور
+            </h3>
+            <p className="text-xs sm:text-sm font-medium text-white/70 leading-relaxed px-4">
+              تم إيقاف وتعطيل هذا القسم لهذه المدرسة بناءً على ضبط صلاحيات المطور والإدارة المركزية. تم تجميد الوصول إليه مؤقتاً لحين إعادة التفعيل.
             </p>
           </div>
-          <button
-            onClick={() => setActiveTab("feed", "Back to feed from locked tab")}
-            className="px-6 py-2.5 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-black font-black text-xs transition-all cursor-pointer shadow-lg"
-          >
-            العودة للرئيسية
-          </button>
+
+          <div className="w-full p-4 rounded-2xl bg-[#080D21]/90 border border-white/10 text-right space-y-2 text-xs">
+            <div className="flex items-center justify-between text-white/60">
+              <span>حالة القسم:</span>
+              <span className="font-bold text-rose-400">معطل برمجياً (Locked by Developer)</span>
+            </div>
+            <div className="flex items-center justify-between text-white/60">
+              <span>المدرسة المستهدفة:</span>
+              <span className="font-bold text-amber-300">{schoolName || "الميدان التعليمي"}</span>
+            </div>
+            <div className="flex items-center justify-between text-white/60">
+              <span>رمز القسم:</span>
+              <span className="font-mono text-zinc-400 text-[11px]">{activeTab}</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3 pt-2">
+            <button
+              onClick={() => setActiveTab("feed", "Back to feed from locked tab")}
+              className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-black text-xs transition-all cursor-pointer shadow-lg shadow-amber-500/20 hover:scale-[1.02] active:scale-95 flex items-center gap-2"
+            >
+              <LayoutGrid size={15} />
+              <span>العودة إلى الساحة الرئيسية</span>
+            </button>
+          </div>
         </div>
       );
     }
@@ -6455,8 +6767,33 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     switch (activeTab) {
       case "feed":
         return <StudentFeedTab />;
+      case "attendance": {
+        const assignedClassesList: string[] = (teacherAssignedSections && teacherAssignedSections.length > 0)
+          ? teacherAssignedSections.map((s: any) => s.name)
+          : ((currentTeacherData?.classes || teacherData?.classes) || []);
+
+        const resolvedAttendanceClass = (selectedTeacherClass && selectedTeacherClass !== "ALL" && selectedTeacherClass !== "all" && (assignedClassesList.length === 0 || assignedClassesList.includes(selectedTeacherClass)))
+          ? selectedTeacherClass
+          : (assignedClassesList[0] || academicLists?.[0]?.name || "اول ابتدائي أ");
+
+        return (
+          <TeacherAttendanceTab
+            schoolId={resolvedSchoolId}
+            teacherData={currentTeacherData || teacherData}
+            schoolName={schoolName}
+            selectedClass={resolvedAttendanceClass}
+            onSelectClass={(cls) => {
+              setSelectedTeacherClass(cls);
+            }}
+            availableClasses={assignedClassesList.length > 0 ? assignedClassesList : undefined}
+            showToast={showToast}
+            initialAcademicLists={academicLists}
+            initialStudents={topStudents}
+          />
+        );
+      }
       case "files":
-        return <StudentFilesTab />;
+        return <StudentFilesTab disabledModules={disabledModules} rolePrefix={rolePrefix} />;
       case "materials":
         return <StudentMaterialsTab />;
       case "excellence":
@@ -6467,7 +6804,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
         return <TeacherQuestionBank schoolId={resolvedSchoolId} teacherData={currentTeacherData || teacherData} schoolName={schoolName} selectedClass={selectedTeacherClass} />;
 
       case "ai_assistant":
-        return <TeacherAIAssistant schoolId={resolvedSchoolId} teacherData={currentTeacherData || teacherData} selectedClass={selectedTeacherClass || ((currentTeacherData?.classes || teacherData?.classes)?.[0] || "سادس علمي")} />;
+        return <TeacherAIAssistant schoolId={resolvedSchoolId} teacherData={currentTeacherData || teacherData} selectedClass={selectedTeacherClass || ((currentTeacherData?.classes || teacherData?.classes)?.[0] || "سادس علمي")} disabledModules={disabledModules} rolePrefix={rolePrefix} />;
       
       case "dev_dashboard":
         return <DevDashboard schoolId={resolvedSchoolId} userProfile={userProfile} showToast={showToast} />;
@@ -6485,6 +6822,18 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
           </div>
         );
       case "control": {
+        const isControlLiveDisabled = 
+          disabledModules.includes(`${rolePrefix}:teacher_live`) || 
+          disabledModules.includes(`${rolePrefix}:teacher_broadcast`) || 
+          disabledModules.includes(`${rolePrefix}:broadcast`) || 
+          disabledModules.includes(`${rolePrefix}:live_watch`);
+
+        const isControlContentDisabled = 
+          disabledModules.includes(`${rolePrefix}:teacher_content`) || 
+          disabledModules.includes(`${rolePrefix}:teacher_materials`) || 
+          disabledModules.includes(`${rolePrefix}:content`) || 
+          disabledModules.includes(`${rolePrefix}:materials`);
+
         const controlTabs = [
           {
             id: "live",
@@ -6492,6 +6841,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
             icon: Radio,
             color: "text-red-400",
             bgColor: "bg-red-500/10",
+            isLocked: isControlLiveDisabled,
           },
           {
             id: "content",
@@ -6499,6 +6849,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
             icon: Layers,
             color: "text-blue-400",
             bgColor: "bg-blue-500/10",
+            isLocked: isControlContentDisabled,
           },
           {
             id: "files_center",
@@ -6506,6 +6857,19 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
             icon: FileUp,
             color: "text-amber-400",
             bgColor: "bg-amber-500/10",
+            isLocked: disabledModules.includes(`${rolePrefix}:questions_bank`) || 
+                     disabledModules.includes(`${rolePrefix}:files`) ||
+                     disabledModules.includes(`${rolePrefix}:teacher_upload`),
+          },
+          {
+            id: "grades_center",
+            name: "رصد الدرجات",
+            icon: FileSpreadsheet,
+            color: "text-cyan-400",
+            bgColor: "bg-cyan-500/10",
+            isLocked: disabledModules.includes(`${rolePrefix}:grades`) || 
+                     disabledModules.includes(`${rolePrefix}:grading_center`) ||
+                     disabledModules.includes(`${rolePrefix}:grading_hub`),
           },
           {
             id: "assessment",
@@ -6513,6 +6877,8 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
             icon: CheckCircle,
             color: "text-emerald-400",
             bgColor: "bg-emerald-500/10",
+            isLocked: disabledModules.includes(`${rolePrefix}:evaluation`) || 
+                     disabledModules.includes(`${rolePrefix}:grading`),
           },
           {
             id: "announcements",
@@ -6520,6 +6886,8 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
             icon: Megaphone,
             color: "text-purple-400",
             bgColor: "bg-purple-500/10",
+            isLocked: disabledModules.includes(`${rolePrefix}:announcements`) || 
+                     disabledModules.includes(`${rolePrefix}:teacher_news`),
           },
         ];
 
@@ -6712,9 +7080,11 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
                   <button
                     key={tab.id}
                     onClick={() => setSelectedControlTab(tab.id)}
-                    className={`group flex flex-col items-center justify-center py-5 transition-all outline-none gap-2 border-r-[3px] relative overflow-hidden ${
+                    className={`group flex flex-col items-center justify-center py-5 transition-all outline-none gap-1.5 border-r-[3px] relative overflow-hidden ${
                       isSelected
                         ? `bg-[#050A18] ${tab.color}`
+                        : tab.isLocked
+                        ? "border-transparent text-rose-400/50 hover:bg-rose-500/5"
                         : "border-transparent text-white/40 hover:bg-white/5"
                     }`}
                     style={{
@@ -6726,16 +7096,26 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
                         className={`absolute inset-0 ${tab.bgColor} opacity-30`}
                       />
                     )}
+                    {tab.isLocked && (
+                      <span className="absolute top-1.5 left-1.5 p-1 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30 z-20" title="مغلق من قِبل المطور">
+                        <Lock size={10} />
+                      </span>
+                    )}
                     <Icon
                       size={isSelected ? 24 : 22}
                       strokeWidth={isSelected ? 2.5 : 2}
-                      className={`relative z-10 transition-transform ${isSelected ? "scale-110" : "group-hover:scale-105"} ${isSelected ? "" : "group-hover:" + tab.color}`}
+                      className={`relative z-10 transition-transform ${isSelected ? "scale-110" : "group-hover:scale-105"} ${isSelected ? "" : tab.isLocked ? "text-rose-400/60" : "group-hover:" + tab.color}`}
                     />
                     <span
-                      className={`text-[9px] font-bold px-1 text-center relative z-10 ${isSelected ? "" : "group-hover:" + tab.color}`}
+                      className={`text-[9px] font-bold px-1 text-center relative z-10 leading-tight ${isSelected ? "" : tab.isLocked ? "text-rose-400/70" : "group-hover:" + tab.color}`}
                     >
                       {tab.name}
                     </span>
+                    {tab.isLocked && (
+                      <span className="text-[8px] font-black text-rose-400/90 leading-none">
+                        مغلق 🔒
+                      </span>
+                    )}
                   </button>
                 );
               })}
@@ -7187,19 +7567,99 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
               </div>
 
               {/* Selected Tab content */}
-              {/* Selected Tab content */}
               {selectedControlTab === "live" && (
-                <TeacherControlLiveTab
-                  realActiveKnights={realActiveKnights}
-                  displayAttendees={displayAttendees}
-                  displayActiveNotAttending={displayActiveNotAttending}
-                  toggleStudentMic={toggleStudentMic}
-                  toggleStudentCam={toggleStudentCam}
-                  toggleStudentBoard={toggleStudentBoard}
-                />
+                isControlLiveDisabled ? (
+                  <div className="flex-1 flex flex-col items-center justify-center py-20 px-6 text-center space-y-5 my-auto max-w-lg mx-auto" dir="rtl">
+                    <div className="relative">
+                      <div className="w-20 h-20 rounded-2xl bg-rose-500/10 border-2 border-rose-500/40 flex items-center justify-center text-rose-400 shadow-[0_0_35px_rgba(244,63,94,0.25)] backdrop-blur-md">
+                        <Lock size={38} className="animate-pulse" />
+                      </div>
+                      <div className="absolute -bottom-2 -right-2 px-2.5 py-0.5 bg-[#0A0F24] border border-rose-500/50 rounded-full text-[9px] font-black text-rose-300 flex items-center gap-1 shadow-md">
+                        <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping"></span>
+                        <span>مغلق من قِبل المطور</span>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-black">
+                        <span>📡 قسم البث المباشر للأستاذ</span>
+                      </div>
+                      <h3 className="text-lg sm:text-xl font-black text-white">
+                        قسم البث المباشر مغلق حالياً من قِبل المطور
+                      </h3>
+                      <p className="text-xs font-medium text-white/70 leading-relaxed px-4">
+                        تم إيقاف صلاحية إطلاق وإدارة غرف البث المباشر الصوتي والمرئي لمنصة الأستاذ لهذه المدرسة بقرار من مطور النظام والإدارة المركزية. تم تعليق غرف البث التفاعلي مؤقتاً لحين إعادة التفعيل.
+                      </p>
+                    </div>
+                    <div className="w-full p-3.5 rounded-xl bg-[#090F24]/90 border border-white/10 text-right space-y-2 text-xs">
+                      <div className="flex items-center justify-between text-white/60">
+                        <span>الحالة:</span>
+                        <span className="font-bold text-rose-400">إيقاف مركزي (Developer Lockdown)</span>
+                      </div>
+                      <div className="flex items-center justify-between text-white/60">
+                        <span>المدرسة المستهدفة:</span>
+                        <span className="font-bold text-amber-300">{schoolName || "الميدان التعليمي"}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-white/60">
+                        <span>رمز الخاصية:</span>
+                        <span className="font-mono text-zinc-400 text-[11px]">teacher_live</span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <TeacherControlLiveTab
+                    realActiveKnights={realActiveKnights}
+                    displayAttendees={displayAttendees}
+                    displayActiveNotAttending={displayActiveNotAttending}
+                    toggleStudentMic={toggleStudentMic}
+                    toggleStudentCam={toggleStudentCam}
+                    toggleStudentBoard={toggleStudentBoard}
+                  />
+                )
               )}
-              {selectedControlTab === "content" && <TeacherControlContentTab />}
+              {selectedControlTab === "content" && (
+                isControlContentDisabled ? (
+                  <div className="flex-1 flex flex-col items-center justify-center py-20 px-6 text-center space-y-5 my-auto max-w-lg mx-auto" dir="rtl">
+                    <div className="relative">
+                      <div className="w-20 h-20 rounded-2xl bg-rose-500/10 border-2 border-rose-500/40 flex items-center justify-center text-rose-400 shadow-[0_0_35px_rgba(244,63,94,0.25)] backdrop-blur-md">
+                        <Lock size={38} className="animate-pulse" />
+                      </div>
+                      <div className="absolute -bottom-2 -right-2 px-2.5 py-0.5 bg-[#0A0F24] border border-rose-500/50 rounded-full text-[9px] font-black text-rose-300 flex items-center gap-1 shadow-md">
+                        <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-ping"></span>
+                        <span>مغلق من قِبل المطور</span>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-black">
+                        <span>📚 قسم المحتوى والدروس للأستاذ</span>
+                      </div>
+                      <h3 className="text-lg sm:text-xl font-black text-white">
+                        قسم المحتوى مغلق حالياً من قِبل المطور
+                      </h3>
+                      <p className="text-xs font-medium text-white/70 leading-relaxed px-4">
+                        تم إيقاف صلاحية إدارة ورفع المحتوى التعليمي والدروس والملازم في منصة الأستاذ لهذه المدرسة من قِبل مطور النظام. تم تجميد التعديل ونشر الملفات مؤقتاً.
+                      </p>
+                    </div>
+                    <div className="w-full p-3.5 rounded-xl bg-[#090F24]/90 border border-white/10 text-right space-y-2 text-xs">
+                      <div className="flex items-center justify-between text-white/60">
+                        <span>الحالة:</span>
+                        <span className="font-bold text-rose-400">إيقاف مركزي (Developer Lockdown)</span>
+                      </div>
+                      <div className="flex items-center justify-between text-white/60">
+                        <span>المدرسة المستهدفة:</span>
+                        <span className="font-bold text-amber-300">{schoolName || "الميدان التعليمي"}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-white/60">
+                        <span>رمز الخاصية:</span>
+                        <span className="font-mono text-zinc-400 text-[11px]">teacher_content</span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <TeacherControlContentTab />
+                )
+              )}
               {selectedControlTab === "files_center" && <TeacherControlFilesTab />}
+              {selectedControlTab === "grades_center" && <TeacherControlGradesTab />}
               {selectedControlTab === "assessment" && <TeacherControlAssessmentTab />}
               {selectedControlTab === "announcements" && <TeacherControlAnnouncementsTab />}
             </div>
@@ -7347,7 +7807,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
       {/* 2. Platform Page Content Area */}
       <div 
         id="main-platform-scroll-container" 
-        className={`flex-1 overflow-x-hidden relative ${activeTab === "materials" ? "overflow-hidden h-full flex flex-col" : "overflow-y-auto"}`}
+        className={`flex-1 min-h-0 overflow-x-hidden relative ${activeTab === "materials" ? "overflow-hidden flex flex-col" : "overflow-y-auto"}`}
       >
         {/* 1. رأس الصفحة الملكي (الاسم الكامل + شريط التبليغات) - يظهر في تبويب النشر ويرتفع للأعلى مع التمرير */}
         <AnimatePresence>
@@ -7508,7 +7968,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -20 }}
             transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            className="h-full w-full flex flex-col"
+            className="h-full w-full flex flex-col min-h-0 flex-1"
           >
             {isTeacher ? (
               <TeacherViewWrapper title={activeTab}>
@@ -7592,7 +8052,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
                 animate={
                   isSelected ? { scale: 1.1, y: -2 } : { scale: 1, y: 0 }
                 }
-                className={`transition-all duration-300 ${isSelected ? "text-[#FFD600]" : "text-white/30 group-hover:text-white/70"}`}
+                className={`transition-all duration-300 ${isSelected ? "text-[#FFD600]" : (tab as any).isDisabled ? "text-rose-400/60" : "text-white/30 group-hover:text-white/70"}`}
               >
                 <div
                   className={`p-1.5 rounded-xl transition-all duration-300 ${isSelected ? "bg-[#FFD600]/10 shadow-[0_0_15px_rgba(255,214,0,0.1)]" : "bg-transparent"}`}
@@ -7602,12 +8062,18 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
               </motion.div>
               <span
                 className={`text-[10px] font-bold transition-all duration-300 tracking-wide
-                ${isSelected ? "text-[#FFD600] scale-105" : "text-white/30"}`}
+                ${isSelected ? "text-[#FFD600] scale-105" : (tab as any).isDisabled ? "text-rose-400/70" : "text-white/30"}`}
               >
                 {tab.name}
               </span>
 
-              {tab.id === "live_watch" && (
+              {(tab as any).isDisabled && (
+                <span className="absolute top-1 left-2 p-0.5 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30 z-20" title="مغلق من قِبل المطور">
+                  <Lock size={9} />
+                </span>
+              )}
+
+              {tab.id === "live_watch" && !(tab as any).isDisabled && (
                 <span className="absolute top-1 right-2 w-2 h-2 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)] border border-black z-20"></span>
               )}
 

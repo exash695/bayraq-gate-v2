@@ -528,11 +528,11 @@ export const normalizeExtractedResult = (rawResult: any, fallbackTitle: string =
 };
 
 export const processPdfInForeground = async (
-
   file: File,
-  onProgress: (state: Partial<ProcessingState>) => void,
+  rawOnProgress?: (state: Partial<ProcessingState>) => void,
   abortSignal?: AbortSignal
 ): Promise<BatchProcessingResult> => {
+  const onProgress = typeof rawOnProgress === 'function' ? rawOnProgress : () => {};
   const logs: string[] = [];
   let totalPages = 0;
   let progressInterval: any = null;

@@ -1,6 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { doc, onSnapshot } from "../lib/firebase";
-import { db } from "../lib/firebase";
+import { realtimeManager } from "../lib/realtimeManager";
 import { THEME_PRESETS, ACCENT_STYLES, ThemePresetInfo, AccentStyleConfig } from "../utils/themePresets";
 
 export type SeasonalThemeType =
@@ -124,6 +123,126 @@ export const DEFAULT_REMOTE_CONFIG: RemoteConfig = {
   supportButtonEnabled: true
 };
 
+export async function fetchRemoteConfigFromServer(): Promise<RemoteConfig> {
+  try {
+    const [resRemote, resTheme] = await Promise.allSettled([
+      fetch('/api/system_config/remote_control'),
+      fetch('/api/system_config/seasonal_theme')
+    ]);
+
+    let remoteData: any = {};
+    let themeData: any = {};
+
+    if (resRemote.status === 'fulfilled' && resRemote.value.ok) {
+      const json = await resRemote.value.json();
+      remoteData = json.data || json.config || json.remote_control || {};
+    }
+    if (resTheme.status === 'fulfilled' && resTheme.value.ok) {
+      const json = await resTheme.value.json();
+      themeData = json.data || json.config || json.seasonal_theme || {};
+    }
+
+    const merged = { ...DEFAULT_REMOTE_CONFIG, ...remoteData, ...themeData };
+    try {
+      localStorage.setItem("bayraq_remote_config", JSON.stringify(merged));
+    } catch (e) {}
+    return merged;
+  } catch (err) {
+    console.warn("fetchRemoteConfigFromServer warning:", err);
+    try {
+      const cached = localStorage.getItem("bayraq_remote_config");
+      if (cached) return { ...DEFAULT_REMOTE_CONFIG, ...JSON.parse(cached) };
+    } catch (e) {}
+    return DEFAULT_REMOTE_CONFIG;
+  }
+}
+
+export async function saveRemoteConfigToServer(config: Partial<RemoteConfig>): Promise<{ success: boolean; data?: RemoteConfig }> {
+  try {
+    const sanitized = Object.fromEntries(
+      Object.entries(config).map(([k, v]) => [k, v === undefined ? "" : v])
+    );
+
+    // 1. Immediately cache locally
+    try {
+      const current = localStorage.getItem("bayraq_remote_config");
+      const base = current ? JSON.parse(current) : DEFAULT_REMOTE_CONFIG;
+      const combined = { ...base, ...sanitized };
+      localStorage.setItem("bayraq_remote_config", JSON.stringify(combined));
+    } catch (e) {}
+
+    // 2. Prepare payloads for server
+    const remotePayload = {
+      id: 'remote_control',
+      maintenanceMode: sanitized.maintenanceMode,
+      maintenanceMessage: sanitized.maintenanceMessage,
+      systemPaused: sanitized.systemPaused,
+      systemPauseReason: sanitized.systemPauseReason,
+      systemPauseEta: sanitized.systemPauseEta,
+      aiFeaturesEnabled: sanitized.aiFeaturesEnabled,
+      liveRadioEnabled: sanitized.liveRadioEnabled,
+      onlinePaymentsEnabled: sanitized.onlinePaymentsEnabled,
+      newRegistrationsEnabled: sanitized.newRegistrationsEnabled,
+      minRequiredVersion: sanitized.minRequiredVersion,
+      latestVersion: sanitized.latestVersion,
+      playStoreUrl: sanitized.playStoreUrl,
+      appStoreUrl: sanitized.appStoreUrl,
+      updateChangelog: sanitized.updateChangelog,
+      forceUpdateActive: sanitized.forceUpdateActive,
+      optionalUpdateActive: sanitized.optionalUpdateActive,
+      newVersionNoticeActive: sanitized.newVersionNoticeActive,
+      tickerEnabled: sanitized.tickerEnabled,
+      tickerText: sanitized.tickerText,
+      tickerSpeed: sanitized.tickerSpeed,
+      supportWhatsapp: sanitized.supportWhatsapp,
+      supportTelegram: sanitized.supportTelegram,
+      supportChannelUrl: sanitized.supportChannelUrl,
+      supportButtonEnabled: sanitized.supportButtonEnabled,
+    };
+
+    const themePayload = {
+      id: 'seasonal_theme',
+      seasonalTheme: sanitized.seasonalTheme,
+      themeActive: sanitized.themeActive,
+      themeStartDate: sanitized.themeStartDate,
+      themeEndDate: sanitized.themeEndDate,
+      themeCardTitle: sanitized.themeCardTitle,
+      themeMessage: sanitized.themeMessage,
+      themeAccentColor: sanitized.themeAccentColor,
+      themeMascotUrl: sanitized.themeMascotUrl,
+      themeEffectsEnabled: sanitized.themeEffectsEnabled,
+      themeEffectType: sanitized.themeEffectType,
+      seasonalHeroText: sanitized.seasonalHeroText,
+    };
+
+    // 3. Post to backend server API
+    await Promise.allSettled([
+      fetch('/api/system_config/remote_control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(remotePayload)
+      }),
+      fetch('/api/system_config/seasonal_theme', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(themePayload)
+      })
+    ]);
+
+    // 4. Trigger local and realtime notifications
+    try {
+      realtimeManager.trigger('system_config', { id: 'remote_control', data: remotePayload });
+      realtimeManager.trigger('system_config', { id: 'seasonal_theme', data: themePayload });
+      window.dispatchEvent(new CustomEvent('bayraq_remote_config_updated', { detail: sanitized }));
+    } catch (e) {}
+
+    return { success: true };
+  } catch (err: any) {
+    console.error("saveRemoteConfigToServer error:", err);
+    return { success: false };
+  }
+}
+
 export function useRemoteConfig(): RemoteConfig {
   const [config, setConfig] = useState<RemoteConfig>(() => {
     try {
@@ -138,39 +257,44 @@ export function useRemoteConfig(): RemoteConfig {
   });
 
   useEffect(() => {
-    const unsubRemote = onSnapshot(doc(db, "system_config", "remote_control"), (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data();
+    let isCancelled = false;
+
+    const loadConfig = async () => {
+      const fetched = await fetchRemoteConfigFromServer();
+      if (!isCancelled) {
+        setConfig(fetched);
+      }
+    };
+
+    loadConfig();
+
+    // Realtime updates from the server
+    const unsubRealtime = realtimeManager.subscribe('system_config', (event?: any) => {
+      if (isCancelled) return;
+      if (event && event.data) {
         setConfig(prev => {
-          const next = { ...prev, ...data };
+          const next = { ...prev, ...event.data };
           try {
             localStorage.setItem("bayraq_remote_config", JSON.stringify(next));
           } catch (e) {}
           return next;
         });
+      } else {
+        loadConfig();
       }
-    }, (err) => {
-      console.warn("Remote config subscription info:", err);
     });
 
-    const unsubTheme = onSnapshot(doc(db, "system_config", "seasonal_theme"), (snapshot) => {
-      if (snapshot.exists()) {
-        const data = snapshot.data();
-        setConfig(prev => {
-          const next = { ...prev, ...data };
-          try {
-            localStorage.setItem("bayraq_remote_config", JSON.stringify(next));
-          } catch (e) {}
-          return next;
-        });
+    const handleLocalEvent = (e: any) => {
+      if (e?.detail && !isCancelled) {
+        setConfig(prev => ({ ...prev, ...e.detail }));
       }
-    }, (err) => {
-      console.warn("Seasonal theme subscription info:", err);
-    });
+    };
+    window.addEventListener('bayraq_remote_config_updated', handleLocalEvent);
 
     return () => {
-      unsubRemote();
-      unsubTheme();
+      isCancelled = true;
+      unsubRealtime();
+      window.removeEventListener('bayraq_remote_config_updated', handleLocalEvent);
     };
   }, []);
 

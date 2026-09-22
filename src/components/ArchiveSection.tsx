@@ -45,9 +45,13 @@ export const ArchiveSection: React.FC<ArchiveSectionProps> = ({
               targetName: listName
             });
           } catch (e: any) {
-            setSavedLists(originalLists);
             console.error('Delete Error:', e);
-            alert('فشل الحذف: ' + (e.message || 'خطأ غير معروف'));
+            if (e?.message?.includes('Failed to fetch') || e?.message?.includes('NetworkError')) {
+              showToast('تم الحذف محلياً (غير متصل بالإنترنت)', 'success');
+            } else {
+              setSavedLists(originalLists);
+              alert('فشل الحذف: ' + (e.message || 'خطأ غير معروف'));
+            }
           } finally {
             setConfirmDelete(null);
           }

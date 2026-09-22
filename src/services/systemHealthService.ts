@@ -1,5 +1,5 @@
-import { db, auth } from '../lib/firebase';
-import { doc, getDocFromServer, setDoc, serverTimestamp } from '@/src/lib/firebase';
+import { auth } from '../lib/firebase';
+
 
 export type HealthStatus = 'healthy' | 'warning' | 'critical' | 'offline';
 
@@ -187,46 +187,40 @@ class SystemHealthService {
     const id = 'postgresql_db';
     const start = performance.now();
     try {
-      // Test server-side read or write ping to system collection
-      const pingDocRef = doc(db, 'system_config', 'health_ping');
-      await getDocFromServer(pingDocRef).catch(async () => {
-        // If not found or initial, test fallback
-        return null;
-      });
+      // Test server-side read ping to PostgreSQL
+      const res = await fetch('/api/schools?limit=1', { signal: AbortSignal.timeout(5000) });
+      if (!res.ok) throw new Error('Database unreachable');
 
       const responseTimeMs = Math.round(performance.now() - start);
       const hist = this.updateHistory(id, true);
 
-      let status: HealthStatus = 'healthy';
-      if (responseTimeMs > 2500) status = 'warning';
-
       return {
         id,
-        name: 'قاعدة بيانات PostgreSQL الحية',
+        name: 'قاعدة البيانات المركزية (PostgreSQL)',
         category: 'database',
-        status,
+        status: 'healthy',
         responseTimeMs,
         checkedAt: new Date().toISOString(),
         lastSuccessfulCheck: hist.lastSuccess,
         lastFailedCheck: hist.lastFail,
         consecutiveFailures: hist.consecutiveFails,
         errorMessage: null,
-        details: { syncMode: 'Live WebSockets', latencyRating: responseTimeMs < 500 ? 'ممتاز' : 'متوسط' }
+        details: { connection: 'active', dialect: 'pg' }
       };
     } catch (error: any) {
       const responseTimeMs = Math.round(performance.now() - start);
       const hist = this.updateHistory(id, false);
       return {
         id,
-        name: 'قاعدة بيانات PostgreSQL الحية',
+        name: 'قاعدة البيانات المركزية (PostgreSQL)',
         category: 'database',
-        status: hist.consecutiveFails > 1 ? 'offline' : 'critical',
+        status: 'critical',
         responseTimeMs,
         checkedAt: new Date().toISOString(),
         lastSuccessfulCheck: hist.lastSuccess,
         lastFailedCheck: hist.lastFail,
         consecutiveFailures: hist.consecutiveFails,
-        errorMessage: error.message || 'فشل الاتصال بخادم PostgreSQL',
+        errorMessage: error.message || 'فشل الاتصال بقاعدة البيانات',
         details: { error: String(error) }
       };
     }
@@ -483,8 +477,7 @@ class SystemHealthService {
     const start = performance.now();
     try {
       if (serviceId === 'postgresql_db') {
-        const pingDocRef = doc(db, 'system_config', 'health_ping');
-        await getDocFromServer(pingDocRef).catch(() => null);
+        await fetch('/api/schools?limit=1', { signal: AbortSignal.timeout(5000) });
         await this.probePostgreSQL();
         const latency = Math.round(performance.now() - start);
         return { success: true, message: `تم فحص وإعادة الاتصال بقاعدة بيانات PostgreSQL بنجاح (${latency}ms)`, latencyMs: latency };

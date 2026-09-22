@@ -80,7 +80,14 @@ export const SubjectManager: React.FC<{
   initialStage?: string,
   onClose?: () => void
 }> = ({ showToast, initialStage, onClose }) => {
-  const [mappings, setMappings] = useState<Record<string, Subject[]>>(DEFAULT_SUBJECTS);
+  const [mappings, setMappings] = useState<Record<string, Subject[]>>(() => {
+    try {
+      const cached = localStorage.getItem('s6_cached_subject_mapping');
+      return cached ? JSON.parse(cached) : DEFAULT_SUBJECTS;
+    } catch {
+      return DEFAULT_SUBJECTS;
+    }
+  });
   const [loading, setLoading] = useState(true);
   const [expandedStage, setExpandedStage] = useState<string | null>(initialStage || 'primary');
   const [selectedGrade, setSelectedGrade] = useState<string>('الأول الابتدائي');
@@ -106,6 +113,9 @@ export const SubjectManager: React.FC<{
           });
           
           setMappings(merged);
+          try {
+            localStorage.setItem('s6_cached_subject_mapping', JSON.stringify(merged));
+          } catch(e) {}
           setPendingDeletions({});
           setHasUnsavedChanges(false);
         } else {
@@ -164,6 +174,9 @@ export const SubjectManager: React.FC<{
 
       await setDoc(doc(db, 'settings', 'subject_mapping'), updatedMappings);
       setMappings(updatedMappings);
+      try {
+        localStorage.setItem('s6_cached_subject_mapping', JSON.stringify(updatedMappings));
+      } catch(e) {}
       setPendingDeletions(prev => ({ ...prev, [selectedGrade]: [] }));
       setHasUnsavedChanges(false);
       showToast(`تم حفظ وتطبيق مواد ${selectedGrade} بنجاح`, 'success');

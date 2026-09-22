@@ -30,11 +30,13 @@ import {
   Check,
   CheckCircle2,
   Sparkles,
-  Plus,
   School,
   KeyRound,
   ChevronDown,
-  Layers
+  Layers,
+  Camera,
+  UploadCloud,
+  ImageIcon
 } from 'lucide-react';
 import { ConfirmDialog } from './ConfirmDialog';
 import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, where } from '@/src/lib/firebase';
@@ -42,9 +44,9 @@ import { db } from '../lib/firebase';
 import { useSubjectDistributor } from '../hooks/useSubjectDistributor';
 import { staffService } from '../services/staffService';
 import { logActivity } from '../utils/auditLogger';
+import { compressImage } from '../utils/imageCompressor';
 
-
-import { getPrefixForGrade, getStageFromGrade, getSanitizedSubCode, SUBJECT_KEYWORDS, normalizeArabicText, normalizeGradeName } from '../utils/studentUtils';
+import { getPrefixForGrade, getStageFromGrade, getSanitizedSubCode, SUBJECT_KEYWORDS, normalizeArabicText, normalizeGradeName, isArchivedList } from '../utils/studentUtils';
 import { ScheduleManager } from './ScheduleManager';
 import { copyToClipboard } from '../utils/clipboard';
 import { subscribeMultiQuery } from '../utils/firestoreSubscriptions';
@@ -53,6 +55,7 @@ import { realtimeManager } from '../lib/realtimeManager';
 interface Teacher {
   id: string;
   name: string;
+  photo?: string;
   subject: string;
   role: 'TEACHER' | 'STAFF';
   bio: string;
@@ -107,7 +110,8 @@ export const TeachersSection: React.FC<TeachersSectionProps> = ({ showToast, sch
     bio: '', 
     classes: [] as string[], 
     schedule: [] as string[],
-    code: ''
+    code: '',
+    photo: ''
   });
   const [activeSubTab, setActiveSubTab] = useState<'teachers' | 'staff' | 'schedule'>('teachers');
   const [confirmDelete, setConfirmDelete] = useState<Teacher | null>(null);
@@ -203,6 +207,9 @@ export const TeachersSection: React.FC<TeachersSectionProps> = ({ showToast, sch
     const gNameNorm = normalizeGradeName(gradeName);
     
     return (savedLists || []).filter(l => {
+      // Filter out archived lists
+      if (isArchivedList(l)) return false;
+
       const listGrade = l.students?.[0]?.grade || '';
       const lGradeNorm = normalizeArabicText(listGrade);
       const lGradeNameNorm = normalizeGradeName(listGrade);
@@ -222,34 +229,81 @@ export const TeachersSection: React.FC<TeachersSectionProps> = ({ showToast, sch
   const getTeacherSections = (teacher: Teacher | any): string[] => {
     if (!teacher) return [];
     const rawClasses = Array.isArray(teacher.classes) ? teacher.classes : [];
-    const result: string[] = [];
-
-    rawClasses.forEach((c: string) => {
-      if (!c) return;
-      const matchingLists = getListsForGrade(c);
-      if (matchingLists.length > 0) {
-        matchingLists.forEach(l => {
-          const secName = l.name;
-          if (!result.includes(secName)) {
-            result.push(secName);
-          }
-        });
-      } else {
-        if (!result.includes(c)) {
-          result.push(c);
-        }
-      }
-    });
-
-    if (teacher.classCodes && typeof teacher.classCodes === 'object') {
-      Object.keys(teacher.classCodes).forEach(secKey => {
-        if (secKey && secKey !== 'default' && secKey !== 'master' && !result.includes(secKey)) {
-          result.push(secKey);
+    if (rawClasses.length > 0) {
+      const result: string[] = [];
+      rawClasses.forEach((c: string) => {
+        if (!c || isArchivedList(c)) return;
+        const specificList = (savedLists || []).find(l => (l.name === c || l.name === c.split(' - ').pop()) && !isArchivedList(l));
+        const nameToUse = specificList ? specificList.name : c;
+        if (!result.includes(nameToUse)) {
+          result.push(nameToUse);
         }
       });
+      return result.filter(item => !isArchivedList(item));
     }
 
-    return result.length > 0 ? result : rawClasses;
+    if (teacher.classCodes && typeof teacher.classCodes === 'object') {
+      const keys = Object.keys(teacher.classCodes).filter(k => k && k !== 'default' && k !== 'master' && !isArchivedList(k));
+      if (keys.length > 0) return keys;
+    }
+
+    if (teacher.grade && typeof teacher.grade === 'string' && !isArchivedList(teacher.grade)) {
+      return [teacher.grade];
+    }
+
+    return [];
+  };
+
+  // Helper to check if a class or section is currently selected in form
+  const isSectionSelected = (targetSection: string, classesList: string[] = []): boolean => {
+    if (!targetSection || !classesList || classesList.length === 0) return false;
+    if (classesList.includes(targetSection)) return true;
+
+    const normTarget = normalizeArabicText(targetSection);
+    return classesList.some(c => {
+      if (!c) return false;
+      if (c === targetSection) return true;
+      const normC = normalizeArabicText(c);
+      if (normC === normTarget) return true;
+      if ((normC.includes(normTarget) || normTarget.includes(normC)) && isGradeMatch(c, targetSection, targetSection)) {
+        return true;
+      }
+      return false;
+    });
+  };
+
+  // Helper to toggle a class/section in formData.classes
+  const toggleSection = (targetSection: string) => {
+    const current = formData.classes || [];
+    const isSelected = isSectionSelected(targetSection, current);
+    
+    if (isSelected) {
+      // Remove all matching variants
+      const normTarget = normalizeArabicText(targetSection);
+      const filtered = current.filter(c => {
+        if (!c) return false;
+        if (c === targetSection) return false;
+        const normC = normalizeArabicText(c);
+        if (normC === normTarget) return false;
+        if ((normC.includes(normTarget) || normTarget.includes(normC)) && isGradeMatch(c, targetSection, targetSection)) {
+          return false;
+        }
+        return true;
+      });
+      setFormData({ ...formData, classes: filtered });
+    } else {
+      // Add canonical targetSection
+      if (!current.includes(targetSection)) {
+        setFormData({ ...formData, classes: [...current, targetSection] });
+      }
+    }
+  };
+
+  // Helper to remove an exact section from formData.classes
+  const removeSection = (targetSection: string) => {
+    const current = formData.classes || [];
+    const filtered = current.filter(c => c !== targetSection);
+    setFormData({ ...formData, classes: filtered });
   };
 
   const handleUpdateNotes = async (teacher: Teacher, notes: string) => {
@@ -307,13 +361,43 @@ export const TeachersSection: React.FC<TeachersSectionProps> = ({ showToast, sch
 
   const handleOpenAdd = (type: 'TEACHER' | 'STAFF' = 'TEACHER') => {
     setEditingTeacher(null);
-    setFormData({ name: '', subject: '', role: type, bio: '', classes: [], schedule: [], code: '' });
+    setSelectedStageForForm('primary');
+    setSelectedGradeForForm(null);
+    setFormData({ name: '', subject: '', role: type, bio: '', classes: [], schedule: [], code: '', photo: '' });
     setIsAdding(true);
   };
   
   const handleOpenEdit = (teacher: Teacher) => {
     setEditingTeacher(teacher);
     const resolvedSections = getTeacherSections(teacher);
+
+    // Automatically detect and set the initial stage and grade for the form
+    let initialStage: string = 'primary';
+    let initialGrade: string | null = null;
+
+    if (resolvedSections.length > 0) {
+      const firstSection = resolvedSections[0];
+      const detectedStage = getStageFromGrade(firstSection);
+      if (detectedStage) initialStage = detectedStage;
+      
+      // Match with STAGE_GROUPS to open the right grade
+      for (const stg of STAGE_GROUPS) {
+        for (const grd of stg.classes) {
+          if (isGradeMatch(grd, firstSection, firstSection)) {
+            initialStage = stg.id;
+            initialGrade = grd;
+            break;
+          }
+        }
+        if (initialGrade) break;
+      }
+    } else if (teacher.stage) {
+      initialStage = teacher.stage;
+    }
+
+    setSelectedStageForForm(initialStage);
+    setSelectedGradeForForm(initialGrade);
+
     setFormData({ 
       name: teacher.name || '', 
       subject: teacher.subject || '', 
@@ -321,7 +405,8 @@ export const TeachersSection: React.FC<TeachersSectionProps> = ({ showToast, sch
       bio: teacher.bio || '', 
       classes: resolvedSections, 
       schedule: teacher.schedule || [],
-      code: teacher.code || ''
+      code: teacher.code || '',
+      photo: teacher.photo || ''
     });
     setIsAdding(true);
   };
@@ -334,34 +419,97 @@ export const TeachersSection: React.FC<TeachersSectionProps> = ({ showToast, sch
     let derivedStage = '';
     let primaryGrade = '';
     
-    const safeClasses = formData.classes || [];
+    const safeClasses = (formData.classes || []).filter(Boolean);
     const safeSchedule = formData.schedule || [];
 
-    // Ensure all sections are explicitly expanded if any generic grade was included
-    const expandedClasses: string[] = [];
+    const finalClasses: string[] = [];
     safeClasses.forEach(c => {
-      if (!c) return;
-      const listsForGrade = getListsForGrade(c);
-      if (listsForGrade.length > 0) {
-        listsForGrade.forEach(l => {
-          const secName = l.name;
-          if (!expandedClasses.includes(secName)) expandedClasses.push(secName);
-        });
-      } else {
-        if (!expandedClasses.includes(c)) expandedClasses.push(c);
+      const trimmed = typeof c === 'string' ? c.trim() : '';
+      if (!trimmed) return;
+      const specificList = (savedLists || []).find(l => 
+        l.name === trimmed || 
+        normalizeArabicText(l.name) === normalizeArabicText(trimmed) ||
+        l.name === trimmed.split(' - ').pop()
+      );
+      const resolvedName = specificList ? specificList.name : trimmed;
+      if (!finalClasses.includes(resolvedName)) {
+        finalClasses.push(resolvedName);
       }
     });
 
-    const finalClasses = expandedClasses.length > 0 ? expandedClasses : safeClasses;
-
     if (formData.role === 'TEACHER' && finalClasses.length > 0) {
-      derivedStage = getStageFromGrade(finalClasses[0]);
+      derivedStage = getStageFromGrade(finalClasses[0]) || (selectedStageForForm || 'primary');
       primaryGrade = finalClasses[0];
+    }
+
+    // Build complete updated classCodes for every class in finalClasses
+    const subCode = getSanitizedSubCode(formData.subject || editingTeacher?.subject || 'GEN');
+    const existingClassCodes = (editingTeacher?.classCodes && typeof editingTeacher.classCodes === 'object') 
+      ? { ...editingTeacher.classCodes } 
+      : {};
+    const finalClassCodes: Record<string, string> = {};
+
+    finalClasses.forEach(cls => {
+      let foundCode = existingClassCodes[cls];
+      if (!foundCode) {
+        const matchingKey = Object.keys(existingClassCodes).find(k => 
+          normalizeArabicText(k) === normalizeArabicText(cls) || isGradeMatch(k, cls)
+        );
+        if (matchingKey) foundCode = existingClassCodes[matchingKey];
+      }
+
+      if (foundCode) {
+        finalClassCodes[cls] = foundCode;
+      } else {
+        // Generate new unique code for the added class
+        const prefix = getPrefixForGrade(cls);
+        let randomNum: number;
+        let isUnique = false;
+        let code = '';
+        do {
+          randomNum = Math.floor(1000 + Math.random() * 9000);
+          code = `TCH-${subCode}-${prefix}-${randomNum}`;
+          isUnique = !teachers.some(t => 
+            t.id !== (editingTeacher?.id || '') && (
+              t.code === code || 
+              (t.classCodes && Object.values(t.classCodes).includes(code))
+            )
+          );
+        } while (!isUnique);
+        finalClassCodes[cls] = code;
+      }
+    });
+
+    // Master Unified Code
+    let masterCode = formData.code || editingTeacher?.code;
+    if (formData.role === 'TEACHER') {
+      if (!masterCode || !masterCode.startsWith('TCH-')) {
+        const primaryPrefix = finalClasses[0] ? getPrefixForGrade(finalClasses[0]) : 'GEN';
+        let randomNum: number;
+        let isUnique = false;
+        do {
+          randomNum = Math.floor(1000 + Math.random() * 9000);
+          masterCode = `TCH-${subCode}-${primaryPrefix}-${randomNum}`;
+          isUnique = !teachers.some(t => 
+            t.id !== (editingTeacher?.id || '') && (
+              t.code === masterCode || 
+              (t.classCodes && Object.values(t.classCodes).includes(masterCode))
+            )
+          );
+        } while (!isUnique);
+      }
+    } else {
+      if (!masterCode) {
+        const randomNum = Math.floor(1000 + Math.random() * 9000);
+        masterCode = `TCH-STAFF-${randomNum}`;
+      }
     }
 
     const payload = {
       ...formData,
+      code: masterCode,
       classes: finalClasses,
+      classCodes: finalClassCodes,
       schedule: safeSchedule,
       stage: derivedStage,
       teacherStage: derivedStage,
@@ -374,6 +522,12 @@ export const TeachersSection: React.FC<TeachersSectionProps> = ({ showToast, sch
       if (editingTeacher) {
           await staffService.updateTeacher(editingTeacher.id, payload);
           setTeachers(prev => prev.map(t => t.id === editingTeacher.id ? { ...t, ...payload } : t));
+          if (selectedTeacher?.id === editingTeacher.id) {
+            setSelectedTeacher(prev => prev ? { ...prev, ...payload } : null);
+          }
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('teachers_updated', { detail: { action: 'UPDATE', id: editingTeacher.id, data: payload } }));
+          }
           logActivity({
             action: `تعديل بيانات ${typeLabel}`,
             details: `تم تعديل بيانات ال${typeLabel}: ${editingTeacher.name}`,
@@ -389,6 +543,9 @@ export const TeachersSection: React.FC<TeachersSectionProps> = ({ showToast, sch
             rating: 0
           });
           setTeachers(prev => [...prev, { ...payload, id: res.id, canPublish: false, isActive: true, rating: 0 } as any]);
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('teachers_updated', { detail: { action: 'INSERT', id: res.id, data: payload } }));
+          }
           logActivity({
             action: `إضافة ${typeLabel}`,
             details: `تم إضافة ${typeLabel} جديد: ${formData.name}`,
@@ -398,8 +555,9 @@ export const TeachersSection: React.FC<TeachersSectionProps> = ({ showToast, sch
           });
       }
       setIsAdding(false);
-      setFormData({ name: '', subject: '', role: 'TEACHER', bio: '', classes: [], schedule: [], code: '' });
-      showToast('تم الحفظ بنجاح', 'success');
+      setEditingTeacher(null);
+      setFormData({ name: '', subject: '', role: 'TEACHER', bio: '', classes: [], schedule: [], code: '', photo: '' });
+      showToast('تم الحفظ وتحديث شُعب الأستاذ بنجاح', 'success');
     } catch (err) {
       showToast('فشل في عملية الحفظ', 'error');
     }
@@ -415,7 +573,12 @@ export const TeachersSection: React.FC<TeachersSectionProps> = ({ showToast, sch
       const effectiveClasses = resolvedSections.length > 0 ? resolvedSections : (teacher.classes || []);
 
       if (teacher.role === 'TEACHER' && effectiveClasses.length > 0) {
-        const classCodes: Record<string, string> = { ...teacher.classCodes };
+        const classCodes: Record<string, string> = {};
+        for (const className of effectiveClasses) {
+          if (teacher.classCodes && teacher.classCodes[className]) {
+            classCodes[className] = teacher.classCodes[className];
+          }
+        }
         const classesToProcess = targetClass ? [targetClass] : effectiveClasses;
 
         for (const className of classesToProcess) {
@@ -684,8 +847,12 @@ ${!className && isMultiClass ? `✨ *ميزة الدخول الموحد:*
                           >
                               <div className="flex justify-between items-start">
                                   <div className="flex items-center gap-3">
-                                      <div className="w-12 h-12 bg-amber-400/10 rounded-full flex items-center justify-center text-amber-500">
-                                          {getRoleIcon(teacher.subject, 'TEACHER')}
+                                      <div className="w-12 h-12 bg-amber-400/10 rounded-full flex items-center justify-center text-amber-500 overflow-hidden border border-amber-400/20 shrink-0">
+                                          {teacher.photo ? (
+                                            <img src={teacher.photo} alt={teacher.name} className="w-full h-full object-cover" />
+                                          ) : (
+                                            getRoleIcon(teacher.subject, 'TEACHER')
+                                          )}
                                       </div>
                                       <div>
                                           <h4 className="text-white font-black text-lg">{teacher.name}</h4>
@@ -859,8 +1026,12 @@ ${!className && isMultiClass ? `✨ *ميزة الدخول الموحد:*
                           >
                               <div className="flex justify-between items-start">
                                   <div className="flex items-center gap-3">
-                                      <div className="w-12 h-12 bg-blue-400/10 rounded-full flex items-center justify-center text-blue-400">
-                                          {getRoleIcon(staff.subject, 'STAFF')}
+                                      <div className="w-12 h-12 bg-blue-400/10 rounded-full flex items-center justify-center text-blue-400 overflow-hidden border border-blue-400/20 shrink-0">
+                                          {staff.photo ? (
+                                            <img src={staff.photo} alt={staff.name} className="w-full h-full object-cover" />
+                                          ) : (
+                                            getRoleIcon(staff.subject, 'STAFF')
+                                          )}
                                       </div>
                                       <div>
                                           <h4 className="text-white font-black text-lg">{staff.name}</h4>
@@ -952,8 +1123,12 @@ ${!className && isMultiClass ? `✨ *ميزة الدخول الموحد:*
                     
                     <div className="text-white space-y-4">
                         <div className="flex items-center gap-4">
-                            <div className="w-20 h-20 bg-amber-400/10 rounded-full flex items-center justify-center text-amber-500">
-                                {getRoleIcon(selectedTeacher.subject, selectedTeacher.role || 'TEACHER', 40)}
+                            <div className="w-20 h-20 bg-amber-400/10 rounded-full flex items-center justify-center text-amber-500 overflow-hidden border border-amber-400/20 shadow-md shrink-0">
+                                {selectedTeacher.photo ? (
+                                  <img src={selectedTeacher.photo} alt={selectedTeacher.name} className="w-full h-full object-cover" />
+                                ) : (
+                                  getRoleIcon(selectedTeacher.subject, selectedTeacher.role || 'TEACHER', 40)
+                                )}
                             </div>
                             <div>
                                 <h3 className="text-2xl font-black">{selectedTeacher.name}</h3>
@@ -1112,6 +1287,78 @@ ${!className && isMultiClass ? `✨ *ميزة الدخول الموحد:*
                     <span>المعلومات الأساسية</span>
                   </div>
 
+                  {/* Teacher Photo Upload Box */}
+                  <div className="flex flex-col sm:flex-row items-center gap-4 p-4 rounded-2xl bg-black/40 border border-white/10">
+                    <div className="relative group shrink-0">
+                      <div className="w-20 h-20 rounded-2xl overflow-hidden bg-gradient-to-br from-[#121c38] to-[#0a1022] border-2 border-amber-400/40 flex items-center justify-center shadow-lg">
+                        {formData.photo ? (
+                          <img src={formData.photo} alt="معاينة الصورة" className="w-full h-full object-cover" />
+                        ) : (
+                          <div className="flex flex-col items-center justify-center text-white/30">
+                            <User size={34} />
+                          </div>
+                        )}
+                      </div>
+                      {formData.photo && (
+                        <button
+                          type="button"
+                          onClick={() => setFormData(prev => ({ ...prev, photo: '' }))}
+                          className="absolute -top-2 -right-2 w-6 h-6 bg-rose-600 hover:bg-rose-500 text-white rounded-full flex items-center justify-center shadow-md border border-black text-xs transition-transform active:scale-90"
+                          title="إزالة الصورة"
+                        >
+                          <X size={12} strokeWidth={3} />
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="flex-1 text-center sm:text-right space-y-1.5 min-w-0">
+                      <div className="flex items-center justify-center sm:justify-start gap-2 flex-wrap">
+                        <span className="text-white text-xs font-black">
+                          {formData.role === 'TEACHER' ? 'صورة الأستاذ الشخصية' : 'صورة الموظف'}
+                        </span>
+                        <span className="text-[10px] text-amber-400/90 bg-amber-400/10 px-2 py-0.5 rounded-full border border-amber-400/20 font-bold">
+                          تظهر في بطاقات الميادين وحسابه
+                        </span>
+                      </div>
+                      <p className="text-white/40 text-[11px] font-semibold">
+                        ارفع صورة واضحة ومميزة لتظهر للطلاب في ساحة المادة وبطاقات الأساتذة
+                      </p>
+                      <div className="pt-1 flex flex-wrap items-center justify-center sm:justify-start gap-2">
+                        <label className="cursor-pointer inline-flex items-center gap-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-black font-black text-xs px-4 py-2 rounded-xl transition-all shadow-md active:scale-95">
+                          <Camera size={15} />
+                          <span>{formData.photo ? 'تغيير الصورة' : (formData.role === 'TEACHER' ? 'رفع صورة الأستاذ' : 'رفع صورة الموظف')}</span>
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={async (e) => {
+                              const file = e.target.files?.[0];
+                              if (file) {
+                                try {
+                                  const compressed = await compressImage(file, 400, 0.85);
+                                  setFormData(prev => ({ ...prev, photo: compressed }));
+                                  showToast('تم تحميل الصورة بنجاح', 'success');
+                                } catch (err) {
+                                  console.error(err);
+                                  showToast('فشل في معالجة الصورة، يرجى اختيار صورة أخرى', 'error');
+                                }
+                              }
+                            }}
+                          />
+                        </label>
+                        {formData.photo && (
+                          <button
+                            type="button"
+                            onClick={() => setFormData(prev => ({ ...prev, photo: '' }))}
+                            className="text-white/50 hover:text-rose-400 text-xs font-bold px-3 py-2 rounded-xl bg-white/5 hover:bg-rose-500/10 border border-white/5 transition-all"
+                          >
+                            حذف الصورة
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
                   {/* Name Input */}
                   <div className="space-y-1.5">
                     <label className="text-white/80 text-xs font-bold flex items-center justify-between">
@@ -1235,9 +1482,9 @@ ${!className && isMultiClass ? `✨ *ميزة الدخول الموحد:*
                     <div className="flex items-center justify-between pb-2 border-b border-white/5">
                       <div className="flex items-center gap-2 text-amber-400 text-xs font-black">
                         <GraduationCap size={16} />
-                        <span>الصفوف الدراسية الموكلة</span>
-                        <span className="bg-amber-400/20 text-amber-300 text-[10px] px-2 py-0.5 rounded-full font-bold">
-                          {formData.classes?.length || 0} صفوف
+                        <span>الصفوف الدراسية والشُعب الموكلة</span>
+                        <span className="bg-amber-400/20 text-amber-300 text-[10px] px-2.5 py-0.5 rounded-full font-bold">
+                          {formData.classes?.length || 0} شُعب
                         </span>
                       </div>
                       <div className="flex items-center gap-2">
@@ -1249,8 +1496,7 @@ ${!className && isMultiClass ? `✨ *ميزة الدخول الموحد:*
                               const lists = getListsForGrade(g);
                               if (lists.length > 0) {
                                 lists.forEach(l => {
-                                  const secName = l.name;
-                                  if (!allExpanded.includes(secName)) allExpanded.push(secName);
+                                  if (!allExpanded.includes(l.name)) allExpanded.push(l.name);
                                 });
                               } else {
                                 if (!allExpanded.includes(g)) allExpanded.push(g);
@@ -1277,31 +1523,68 @@ ${!className && isMultiClass ? `✨ *ميزة الدخول الموحد:*
                       </div>
                     </div>
 
-                    <div className="space-y-4">
+                    {/* CURRENTLY ASSIGNED CLASSES & SECTIONS CHIPS (WITH REMOVE BUTTON) */}
+                    <div className="space-y-2">
+                      <div className="text-xs font-bold text-white/70 flex items-center justify-between">
+                        <span>الشُعب والصفوف المحددة حالياً ({formData.classes?.length || 0}):</span>
+                        {formData.classes && formData.classes.length > 0 && (
+                          <span className="text-[10px] text-amber-400">انقر (✕) لإلغاء أي شعبة مباشرة</span>
+                        )}
+                      </div>
+                      {formData.classes && formData.classes.length > 0 ? (
+                        <div className="flex flex-wrap gap-2 p-3 bg-black/40 rounded-2xl border border-amber-500/20">
+                          {formData.classes.map(cls => (
+                            <span 
+                              key={cls} 
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-400/15 text-amber-300 border border-amber-400/30 text-xs font-bold shadow-sm"
+                            >
+                              <span>📌 {cls}</span>
+                              <button
+                                type="button"
+                                onClick={() => removeSection(cls)}
+                                className="w-4 h-4 rounded-full bg-amber-400/20 hover:bg-rose-500 hover:text-white flex items-center justify-center transition-all ml-0.5"
+                                title="إزالة هذه الشعبة"
+                              >
+                                <X size={11} />
+                              </button>
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="p-3 bg-black/20 rounded-xl border border-dashed border-white/10 text-center text-xs text-white/40 font-bold">
+                          لم يتم تحديد أي صفوف أو شُعب حتى الآن. اختر المرحلة والصف أدناه لإسناد الشُعب.
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-4 pt-1">
                       {/* Stages Selection */}
-                      <div className="flex flex-wrap gap-2">
-                        {STAGE_GROUPS.map(stage => (
-                          <button
-                            key={stage.id}
-                            type="button"
-                            onClick={() => {
-                              setSelectedStageForForm(stage.id);
-                              setSelectedGradeForForm(null); // Reset grade selection when stage changes
-                            }}
-                            className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                              selectedStageForForm === stage.id ? 'bg-amber-400 text-black shadow-md' : 'bg-black/30 text-white/50 hover:text-white border border-white/5'
-                            }`}
-                          >
-                            <span>{stage.icon}</span>
-                            <span>{stage.name}</span>
-                          </button>
-                        ))}
+                      <div className="space-y-1.5">
+                        <div className="text-xs font-bold text-white/60">1. اختر المرحلة التعليمية:</div>
+                        <div className="flex flex-wrap gap-2">
+                          {STAGE_GROUPS.map(stage => (
+                            <button
+                              key={stage.id}
+                              type="button"
+                              onClick={() => {
+                                setSelectedStageForForm(stage.id);
+                                setSelectedGradeForForm(null); // Reset grade selection when stage changes
+                              }}
+                              className={`flex-1 py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                                selectedStageForForm === stage.id ? 'bg-amber-400 text-black shadow-md font-black' : 'bg-black/30 text-white/50 hover:text-white border border-white/5'
+                              }`}
+                            >
+                              <span>{stage.icon}</span>
+                              <span>{stage.name}</span>
+                            </button>
+                          ))}
+                        </div>
                       </div>
 
                       {/* Grades Selection */}
                       {selectedStageForForm && (
-                        <div className="animate-in fade-in slide-in-from-top-2 duration-200">
-                          <div className="text-xs font-bold text-white/70 mb-2">اختر الصف:</div>
+                        <div className="animate-in fade-in slide-in-from-top-2 duration-200 space-y-1.5">
+                          <div className="text-xs font-bold text-white/60">2. اختر الصف الدراسي:</div>
                           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                             {STAGE_GROUPS.find(s => s.id === selectedStageForForm)?.classes.map(grade => (
                               <button
@@ -1319,139 +1602,70 @@ ${!className && isMultiClass ? `✨ *ميزة الدخول الموحد:*
                         </div>
                       )}
 
-                      {/* Classes/Lists Selection */}
+                      {/* Classes/Lists Selection for the Chosen Grade */}
                       {selectedGradeForForm && (
-                        <div className="animate-in fade-in slide-in-from-top-2 duration-200 bg-black/25 p-3 rounded-2xl border border-white/5 mt-3 space-y-3">
+                        <div className="animate-in fade-in slide-in-from-top-2 duration-200 bg-black/25 p-3.5 rounded-2xl border border-white/5 mt-3 space-y-4">
                           <div className="flex items-center justify-between">
-                            <div className="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+                            <div className="text-xs font-black text-amber-400 flex items-center gap-1.5">
                               <BookOpen size={14} />
-                              <span>شعب ووجبات الصف: {selectedGradeForForm}</span>
+                              <span>شُعب وقوائم: {selectedGradeForForm}</span>
                             </div>
-                            {(() => {
-                              const availableLists = getListsForGrade(selectedGradeForForm);
-                              
-                              if (availableLists.length > 0) {
-                                const allSectionsStrings = availableLists.map(l => {
-                                  if (l.name.includes(selectedGradeForForm)) return l.name;
-                                  return `${selectedGradeForForm} - ${l.name}`;
-                                });
-                                const isAllSelected = allSectionsStrings.every(s => (formData.classes || []).includes(s));
-                                
-                                return (
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      const current = formData.classes || [];
-                                      let newClasses = [...current];
-                                      if (isAllSelected) {
-                                        newClasses = current.filter(c => !allSectionsStrings.includes(c));
-                                      } else {
-                                        allSectionsStrings.forEach(s => {
-                                          if (!newClasses.includes(s)) newClasses.push(s);
-                                        });
-                                      }
-                                      setFormData({ ...formData, classes: newClasses });
-                                    }}
-                                    className="text-[9px] bg-blue-600/20 text-blue-400 px-2 py-1 rounded-lg border border-blue-600/30 font-bold"
-                                  >
-                                    {isAllSelected ? 'إلغاء تحديد كل الشعب' : 'تحديد كل الشعب'}
-                                  </button>
-                                );
-                              }
-                              return null;
-                            })()}
+                            
+                            {/* Whole Grade Toggle */}
+                            <button
+                              type="button"
+                              onClick={() => toggleSection(selectedGradeForForm)}
+                              className={`text-[10px] px-2.5 py-1 rounded-lg border font-bold transition-all ${
+                                isSectionSelected(selectedGradeForForm, formData.classes)
+                                  ? 'bg-amber-400 text-black border-amber-400'
+                                  : 'bg-white/5 text-white/70 hover:text-white border-white/10'
+                              }`}
+                            >
+                              {isSectionSelected(selectedGradeForForm, formData.classes) ? '✓ الصف بالكامل محدد' : '+ تحديد الصف بالكامل'}
+                            </button>
                           </div>
                           
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                            {/* Generic Grade Option */}
-                            {(() => {
-                              const availableLists = getListsForGrade(selectedGradeForForm);
-                              const allSectionsStrings = availableLists.map(l => {
-                                if (l.name.includes(selectedGradeForForm)) return l.name;
-                                return `${selectedGradeForForm} - ${l.name}`;
-                              });
-                              const currentClasses = formData.classes || [];
-                              const isFullyChecked = currentClasses.includes(selectedGradeForForm) || 
-                                (allSectionsStrings.length > 0 && allSectionsStrings.every(s => currentClasses.includes(s)));
-
+                          {/* Lists from savedLists for this grade */}
+                          {(() => {
+                            const availableLists = getListsForGrade(selectedGradeForForm);
+                            if (availableLists.length > 0) {
                               return (
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                     let newClasses = [...currentClasses];
-                                     if (isFullyChecked) {
-                                       newClasses = newClasses.filter(c => c !== selectedGradeForForm && !allSectionsStrings.includes(c));
-                                     } else {
-                                       if (!newClasses.includes(selectedGradeForForm)) newClasses.push(selectedGradeForForm);
-                                       allSectionsStrings.forEach(s => {
-                                         if (!newClasses.includes(s)) newClasses.push(s);
-                                       });
-                                     }
-                                     setFormData({ ...formData, classes: newClasses });
-                                  }}
-                                  className={`min-h-[44px] px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-between text-right border ${
-                                    isFullyChecked
-                                      ? 'bg-amber-400/15 border-amber-400/60 text-amber-300 shadow-md shadow-amber-500/5'
-                                      : 'bg-black/40 border-white/5 text-white/60 hover:text-white hover:border-white/15'
-                                  }`}
-                                >
-                                   <div className="flex flex-col">
-                                     <span className="leading-tight text-amber-200">شامل لكل شعب هذا الصف</span>
-                                     <span className="text-[9px] text-white/40 mt-0.5">
-                                       {allSectionsStrings.length > 0 ? `تعيين تلقائي لكافة الشُعب (${allSectionsStrings.length} شعبة)` : 'تعيين للمرحلة بالكامل (عام)'}
-                                     </span>
-                                   </div>
-                                   <span className={`w-4 h-4 rounded-md flex items-center justify-center text-[10px] shrink-0 ${isFullyChecked ? 'bg-amber-400 text-black font-black' : 'border border-white/20'}`}>
-                                     {isFullyChecked ? '✓' : ''}
-                                   </span>
-                                </button>
+                                <div className="space-y-2">
+                                  <div className="text-[11px] font-bold text-white/60">القوائم والشُعب المسجلة:</div>
+                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                    {availableLists.map(list => {
+                                      const isChecked = isSectionSelected(list.name, formData.classes);
+                                      return (
+                                        <button
+                                          key={list.id || list.name}
+                                          type="button"
+                                          onClick={() => toggleSection(list.name)}
+                                          className={`min-h-[44px] px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-between text-right border ${
+                                            isChecked
+                                              ? 'bg-amber-400/20 border-amber-400/80 text-amber-300 shadow-md shadow-amber-500/10'
+                                              : 'bg-black/40 border-white/5 text-white/60 hover:text-white hover:border-white/15'
+                                          }`}
+                                        >
+                                          <div className="flex flex-col text-right">
+                                            <span className="leading-tight font-black">{list.name}</span>
+                                            <span className="text-[9px] text-white/40 mt-0.5">{list.students?.length || 0} طالب/طالبة</span>
+                                          </div>
+                                          <span className={`w-5 h-5 rounded-md flex items-center justify-center text-xs shrink-0 ${isChecked ? 'bg-amber-400 text-black font-black' : 'border border-white/20'}`}>
+                                            {isChecked ? '✓' : ''}
+                                          </span>
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                </div>
                               );
-                            })()}
-
-                            {/* Specific Lists */}
-                            {(() => {
-                              const availableLists = getListsForGrade(selectedGradeForForm);
-                              
-                              return availableLists.map(list => {
-                                // Clean redundant name
-                                const listDisplayName = list.name.startsWith(selectedGradeForForm) 
-                                  ? list.name.replace(selectedGradeForForm, '').replace(/^[\s\-_]+/, '') 
-                                  : list.name;
-                                
-                                const classString = list.name.includes(selectedGradeForForm) 
-                                  ? list.name 
-                                  : `${selectedGradeForForm} - ${list.name}`;
-
-                                const isChecked = (formData.classes || []).includes(classString);
-                                return (
-                                  <button
-                                    key={list.id}
-                                    type="button"
-                                    onClick={() => {
-                                       const current = formData.classes || [];
-                                       const newClasses = isChecked 
-                                         ? current.filter(c => c !== classString)
-                                         : [...current, classString];
-                                       setFormData({ ...formData, classes: newClasses });
-                                    }}
-                                    className={`min-h-[44px] px-3 py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-between text-right border ${
-                                      isChecked
-                                        ? 'bg-amber-400/15 border-amber-400/60 text-amber-300 shadow-md shadow-amber-500/5'
-                                        : 'bg-black/40 border-white/5 text-white/60 hover:text-white hover:border-white/15'
-                                    }`}
-                                  >
-                                     <div className="flex flex-col text-right">
-                                       <span className="leading-tight">{listDisplayName}</span>
-                                       <span className="text-[9px] text-white/40 mt-0.5">{list.students?.length || 0} طالب/طالبة</span>
-                                     </div>
-                                     <span className={`w-4 h-4 rounded-md flex items-center justify-center text-[10px] shrink-0 ${isChecked ? 'bg-amber-400 text-black font-black' : 'border border-white/20'}`}>
-                                       {isChecked ? '✓' : ''}
-                                     </span>
-                                  </button>
-                                );
-                              });
-                            })()}
-                          </div>
+                            }
+                            return (
+                              <div className="p-3 bg-black/20 rounded-xl border border-white/5 text-center text-xs text-white/40 font-bold">
+                                لا توجد قوائم مسجلة لهذا الصف حالياً. يمكنك النقر على &quot;تحديد الصف بالكامل&quot; أعلاه.
+                              </div>
+                            );
+                          })()}
                         </div>
                       )}
                     </div>

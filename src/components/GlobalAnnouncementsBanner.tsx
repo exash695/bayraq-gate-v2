@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, orderBy, limit, onSnapshot } from '@/src/lib/firebase';
-import { db } from '../lib/firebase';
 import { Sparkles, X, Maximize2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import { realtimeManager } from '../lib/realtimeManager';
 
 interface GlobalAnnouncementsBannerProps {
   dashboardType: 'admin' | 'student' | 'teacher' | 'parent' | 'driver';
@@ -23,66 +22,92 @@ export const GlobalAnnouncementsBanner: React.FC<GlobalAnnouncementsBannerProps>
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
 
   useEffect(() => {
-    const q = query(collection(db, 'broadcasts'));
+    let isCancelled = false;
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const now = Date.now();
-      const list = snapshot.docs
-        .map(docSnap => {
-          const data = docSnap.data();
-          const timestampMs = data.timestampMs || ((data.timestamp && typeof data.timestamp.toMillis === 'function')
-            ? data.timestamp.toMillis()
-            : Date.now());
-          return {
-            id: docSnap.id,
-            ...data,
-            timestampMs
-          };
-        })
-        .filter((item: any) => {
-          if (item.expiryDate && item.expiryDate < now) return false;
-          // STRICT SEPARATION: Exclude all school radio broadcasts, class announcements, and ticker notices
-          if (
-            item.type === 'school_broadcast' ||
-            item.isSchoolBroadcast === true ||
-            item.targetLocation === 'ticker' ||
-            item.subject === 'الإذاعة المدرسية' ||
-            item.subject === 'شؤون الطلاب' ||
-            item.subject === 'الإذاعة'
-          ) {
-            return false;
-          }
+    const fetchAnnouncements = async () => {
+      try {
+        const res = await fetch('/api/firestore-docs/broadcasts');
+        if (!res.ok) return;
+        const json = await res.json();
+        const items = Array.isArray(json.items) ? json.items : (Array.isArray(json.data) ? json.data : []);
 
-          // STRICT BANNER RULE: Only explicit platform announcements, celebrations, greetings, or condolences trigger this banner
-          const isCelebrationOrPlatformNews = 
-            item.isCentralPlatform === true ||
-            item.isGlobalAnnouncement === true ||
-            item.type === 'global_celebration' ||
-            item.category === 'تبريكات' ||
-            item.category === 'إعلان وتبريكات' ||
-            item.category === 'تهنئة' ||
-            item.category === 'تعزية' ||
-            item.category === 'إعلان عام للمنصة';
+        const now = Date.now();
+        const list = items
+          .map((data: any) => {
+            const timestampMs = data.timestampMs || ((data.timestamp && typeof data.timestamp.toMillis === 'function')
+              ? data.timestamp.toMillis()
+              : (typeof data.timestamp === 'number' ? data.timestamp : Date.now()));
+            return {
+              id: data.id,
+              ...data,
+              timestampMs
+            };
+          })
+          .filter((item: any) => {
+            if (item.expiryDate && item.expiryDate < now) return false;
+            // STRICT SEPARATION: Exclude all school radio broadcasts, class announcements, and ticker notices
+            if (
+              item.type === 'school_broadcast' ||
+              item.isSchoolBroadcast === true ||
+              item.targetLocation === 'ticker' ||
+              item.subject === 'الإذاعة المدرسية' ||
+              item.subject === 'شؤون الطلاب' ||
+              item.subject === 'الإذاعة'
+            ) {
+              return false;
+            }
 
-          if (!isCelebrationOrPlatformNews) {
-            return false;
-          }
+            // STRICT BANNER RULE: Only explicit platform announcements, celebrations, greetings, or condolences trigger this banner
+            const isCelebrationOrPlatformNews = 
+              item.isCentralPlatform === true ||
+              item.isGlobalAnnouncement === true ||
+              item.type === 'global_celebration' ||
+              item.category === 'تبريكات' ||
+              item.category === 'إعلان وتبريكات' ||
+              item.category === 'تهنئة' ||
+              item.category === 'تعزية' ||
+              item.category === 'إعلان عام للمنصة';
 
-          const loc = item.targetLocation || (item.isCentralPlatform ? 'both' : 'top_banner');
-          if (loc !== 'top_banner' && loc !== 'both' && loc !== 'all') return false;
-          const targets = Array.isArray(item.targetDashboards) ? item.targetDashboards : ['all'];
-          if (dashboardType && dashboardType !== 'admin' && !targets.includes('all') && !targets.includes(dashboardType)) return false;
-          if (item.schoolId && schoolId && item.schoolId !== '' && item.schoolId !== schoolId) return false;
-          return true;
-        })
-        .sort((a, b) => b.timestampMs - a.timestampMs);
+            if (!isCelebrationOrPlatformNews) {
+              return false;
+            }
 
-      setAnnouncements(list);
-    }, (err) => {
-      console.error("Global announcements banner listener error:", err);
+            const loc = item.targetLocation || (item.isCentralPlatform ? 'both' : 'top_banner');
+            if (loc !== 'top_banner' && loc !== 'both' && loc !== 'all') return false;
+            const targets = Array.isArray(item.targetDashboards) ? item.targetDashboards : ['all'];
+            if (dashboardType && dashboardType !== 'admin' && !targets.includes('all') && !targets.includes(dashboardType)) return false;
+            if (item.schoolId && schoolId && item.schoolId !== '' && item.schoolId !== schoolId) return false;
+            return true;
+          })
+          .sort((a: any, b: any) => b.timestampMs - a.timestampMs);
+
+        if (!isCancelled) {
+          setAnnouncements(list);
+        }
+      } catch (err: any) {
+        if (err?.name !== 'AbortError') {
+          console.warn("Global announcements banner sync notice:", err?.message || err);
+        }
+      }
+    };
+
+    fetchAnnouncements();
+
+    const unsubRealtime = realtimeManager.subscribe('broadcasts', () => {
+      fetchAnnouncements();
     });
 
-    return () => unsubscribe();
+    const handleLocalEvent = () => fetchAnnouncements();
+    window.addEventListener('app_broadcast_event', handleLocalEvent);
+
+    const interval = setInterval(fetchAnnouncements, 8000);
+
+    return () => {
+      isCancelled = true;
+      clearInterval(interval);
+      window.removeEventListener('app_broadcast_event', handleLocalEvent);
+      unsubRealtime();
+    };
   }, [dashboardType, schoolId]);
 
   const activeAnnouncements = announcements.filter(a => !dismissedIds.includes(a.id));

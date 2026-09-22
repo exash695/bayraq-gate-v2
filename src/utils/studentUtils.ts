@@ -1,14 +1,61 @@
 import jsPDF from 'jspdf';
 
+export const isArchivedList = (l: any): boolean => {
+  if (!l) return false;
+  if (typeof l === 'string') {
+    const s = l.trim();
+    return (
+      s.includes('أرشيف') ||
+      s.includes('ارشيف') ||
+      s.includes('[أرشيف') ||
+      s.includes('[ارشيف') ||
+      s.toLowerCase().includes('archive')
+    );
+  }
+  return Boolean(
+    l.isArchive || 
+    l.isArchived || 
+    l.archived ||
+    l.status === 'archived' ||
+    (typeof l.name === 'string' && (
+      l.name.includes('أرشيف') ||
+      l.name.includes('ارشيف') ||
+      l.name.includes('[أرشيف') ||
+      l.name.includes('[ارشيف') ||
+      l.name.toLowerCase().includes('archive')
+    )) || 
+    (typeof l.title === 'string' && (
+      l.title.includes('أرشيف') ||
+      l.title.includes('ارشيف') ||
+      l.title.includes('[أرشيف') ||
+      l.title.includes('[ارشيف') ||
+      l.title.toLowerCase().includes('archive')
+    )) || 
+    (typeof l.grade === 'string' && (
+      l.grade.includes('أرشيف') ||
+      l.grade.includes('ارشيف') ||
+      l.grade.includes('[أرشيف') ||
+      l.grade.includes('[ارشيف') ||
+      l.grade.toLowerCase().includes('archive')
+    )) || 
+    l.archiveYear
+  );
+};
+
 export const SUBJECT_KEYWORDS: [string, string][] = [
   ['اسلام', 'ISL'],
+  ['قرآن', 'QUR'],
   ['عرب', 'ARB'],
   ['انجليز', 'ENG'],
+  ['انجليزي', 'ENG'],
+  ['english', 'ENG'],
   ['رياضيات', 'MAT'],
+  ['math', 'MAT'],
   ['كيمياء', 'CHE'],
   ['فيزياء', 'PHY'],
   ['احياء', 'BIO'],
   ['علوم', 'SCI'],
+  ['science', 'SCI'],
   ['تاريخ', 'HIS'],
   ['جغراف', 'GEO'],
   ['اقتصاد', 'ECO'],
@@ -16,6 +63,7 @@ export const SUBJECT_KEYWORDS: [string, string][] = [
   ['فني', 'ART'],
   ['رياض', 'SPO'],
   ['حاسوب', 'COM'],
+  ['computer', 'COM'],
   ['فرنس', 'FRE'],
 ];
 
@@ -36,29 +84,72 @@ export const getSanitizedSubCode = (subject: string) => {
     return subject.substring(0, 3).toUpperCase();
   }
   
-  return 'SUB'; 
+  // Use first 3 letters of subject if no keyword match
+  return subject.substring(0, 3).toUpperCase();
 };
 
-export const normalizeGradeName = (grade: string) => {
+export const normalizeGradeName = (grade: string): string => {
   if (!grade) return '';
-  const norm = normalizeArabicText(grade);
-  if (norm.includes('اولابتدائي') || norm === 'p1' || norm === '1ابتدائي') return 'أول ابتدائي';
-  if (norm.includes('ثانيابتدائي') || norm === 'p2' || norm === '2ابتدائي') return 'ثاني ابتدائي';
-  if (norm.includes('ثالثابتدائي') || norm === 'p3' || norm === '3ابتدائي') return 'ثالث ابتدائي';
-  if (norm.includes('رابعابتدائي') || norm === 'p4' || norm === '4ابتدائي') return 'رابع ابتدائي';
-  if (norm.includes('خامسابتدائي') || norm === 'p5' || norm === '5ابتدائي') return 'خامس ابتدائي';
-  if (norm.includes('سادسابتدائي') || norm === 'p6' || norm === '6ابتدائي') return 'سادس ابتدائي';
+  const g = String(grade).trim();
+  const upper = g.toUpperCase();
   
-  if (norm.includes('اولمتوسط') || norm === 'm1' || norm === '1متوسط') return 'أول متوسط';
-  if (norm.includes('ثانيمتوسط') || norm === 'm2' || norm === '2متوسط') return 'ثاني متوسط';
-  if (norm.includes('ثالثمتوسط') || norm === 'm3' || norm === '3متوسط') return 'ثالث متوسط';
+  // Direct prefix checks
+  if (upper === 'P1' || upper === '1P' || upper === 'PRI1') return 'أول ابتدائي';
+  if (upper === 'P2' || upper === '2P' || upper === 'PRI2') return 'ثاني ابتدائي';
+  if (upper === 'P3' || upper === '3P' || upper === 'PRI3') return 'ثالث ابتدائي';
+  if (upper === 'P4' || upper === '4P' || upper === 'PRI4') return 'رابع ابتدائي';
+  if (upper === 'P5' || upper === '5P' || upper === 'PRI5') return 'خامس ابتدائي';
+  if (upper === 'P6' || upper === '6P' || upper === 'PRI6') return 'سادس ابتدائي';
   
-  if (norm.includes('رابععلمي') || norm === 's4s') return 'رابع علمي';
-  if (norm.includes('رابعادبي') || norm === 's4a') return 'رابع أدبي';
-  if (norm.includes('خامسعلمي') || norm === 's5s') return 'خامس علمي';
-  if (norm.includes('خامسادبي') || norm === 's5a') return 'خامس أدبي';
-  if (norm.includes('سادسعلمي') || norm === 's6s') return 'سادس علمي';
-  if (norm.includes('سادسادبي') || norm === 's6a') return 'سادس أدبي';
+  if (upper === 'M1' || upper === '1M' || upper === 'INT1') return 'أول متوسط';
+  if (upper === 'M2' || upper === '2M' || upper === 'INT2') return 'ثاني متوسط';
+  if (upper === 'M3' || upper === '3M' || upper === 'INT3') return 'ثالث متوسط';
+  
+  if (upper === 'S4S' || upper === 'S4' || upper === '4S') return 'رابع علمي';
+  if (upper === 'S4A' || upper === '4A') return 'رابع أدبي';
+  if (upper === 'S5S' || upper === 'S5' || upper === '5S') return 'خامس علمي';
+  if (upper === 'S5A' || upper === '5A') return 'خامس أدبي';
+  if (upper === 'S6S' || upper === 'S6' || upper === '6S' || upper === 'SCI') return 'سادس علمي';
+  if (upper === 'S6A' || upper === '6A' || upper === 'LIT') return 'سادس أدبي';
+
+  const norm = normalizeArabicText(g);
+  
+  // Primary (أول - سادس ابتدائي)
+  if (norm.includes('اولابتدائي') || norm.includes('1ابتدائي') || norm === 'صفاول' || norm === 'الصفالاول' || norm === 'الاول' || norm === 'اول') {
+    if (!norm.includes('متوسط')) return 'أول ابتدائي';
+  }
+  if (norm.includes('ثانيابتدائي') || norm.includes('2ابتدائي') || norm === 'صفثاني' || norm === 'الصفالثاني' || norm === 'الثاني' || norm === 'ثاني') {
+    if (!norm.includes('متوسط')) return 'ثاني ابتدائي';
+  }
+  if (norm.includes('ثالثابتدائي') || norm.includes('3ابتدائي') || norm === 'صفثالث' || norm === 'الصفالثالث' || norm === 'الثالث' || norm === 'ثالث') {
+    if (!norm.includes('متوسط')) return 'ثالث ابتدائي';
+  }
+  if (norm.includes('رابعابتدائي') || norm.includes('4ابتدائي') || (norm.includes('رابع') && norm.includes('ابتدائي'))) return 'رابع ابتدائي';
+  if (norm.includes('خامسابتدائي') || norm.includes('5ابتدائي') || (norm.includes('خامس') && norm.includes('ابتدائي'))) return 'خامس ابتدائي';
+  if (norm.includes('سادسابتدائي') || norm.includes('6ابتدائي') || (norm.includes('سادس') && norm.includes('ابتدائي'))) return 'سادس ابتدائي';
+  
+  // Intermediate (أول - ثالث متوسط)
+  if (norm.includes('اولمتوسط') || norm.includes('1متوسط') || (norm.includes('اول') && norm.includes('متوسط'))) return 'أول متوسط';
+  if (norm.includes('ثانيمتوسط') || norm.includes('2متوسط') || (norm.includes('ثاني') && norm.includes('متوسط'))) return 'ثاني متوسط';
+  if (norm.includes('ثالثمتوسط') || norm.includes('3متوسط') || (norm.includes('ثالث') && norm.includes('متوسط'))) return 'ثالث متوسط';
+  
+  // Secondary Scientific & Literary
+  if (norm.includes('رابععلمي') || (norm.includes('رابع') && norm.includes('علمي'))) return 'رابع علمي';
+  if (norm.includes('رابعادبي') || (norm.includes('رابع') && norm.includes('ادبي'))) return 'رابع أدبي';
+  if (norm.includes('خامسعلمي') || (norm.includes('خامس') && norm.includes('علمي'))) return 'خامس علمي';
+  if (norm.includes('خامسادبي') || (norm.includes('خامس') && norm.includes('ادبي'))) return 'خامس أدبي';
+  if (norm.includes('سادسعلمي') || norm.includes('سادساحيائي') || norm.includes('سادستطبيقي') || (norm.includes('سادس') && norm.includes('علمي'))) return 'سادس علمي';
+  if (norm.includes('سادسادبي') || (norm.includes('سادس') && norm.includes('ادبي'))) return 'سادس أدبي';
+  
+  if (norm.includes('ابتدائي') || norm.includes('ابتدائيه')) {
+    if (norm.includes('1') || norm.includes('اول')) return 'أول ابتدائي';
+    if (norm.includes('2') || norm.includes('ثاني')) return 'ثاني ابتدائي';
+    if (norm.includes('3') || norm.includes('ثالث')) return 'ثالث ابتدائي';
+    if (norm.includes('4') || norm.includes('رابع')) return 'رابع ابتدائي';
+    if (norm.includes('5') || norm.includes('خامس')) return 'خامس ابتدائي';
+    if (norm.includes('6') || norm.includes('سادس')) return 'سادس ابتدائي';
+  }
+
   return grade;
 };
 
@@ -72,6 +163,64 @@ export const normalizeArabicText = (text: string) => {
     .replace(/[ىي]/g, 'ي')
     .replace(/(?:^|\s)ال/g, ' ')
     .replace(/\s+/g, '');
+};
+
+export const getGradeFromPrefix = (prefix: string): string => {
+  if (!prefix) return '';
+  const p = String(prefix).toUpperCase().trim().replace(/[^A-Z0-9]/g, '');
+  switch (p) {
+    case 'P1': 
+    case '1P':
+      return 'أول ابتدائي';
+    case 'P2': 
+    case '2P':
+      return 'ثاني ابتدائي';
+    case 'P3': 
+    case '3P':
+      return 'ثالث ابتدائي';
+    case 'P4': 
+    case '4P':
+      return 'رابع ابتدائي';
+    case 'P5': 
+    case '5P':
+      return 'خامس ابتدائي';
+    case 'P6': 
+    case '6P':
+      return 'سادس ابتدائي';
+    case 'M1': 
+    case '1M':
+      return 'أول متوسط';
+    case 'M2': 
+    case '2M':
+      return 'ثاني متوسط';
+    case 'M3': 
+    case '3M':
+      return 'ثالث متوسط';
+    case 'S4S': 
+    case 'S4':
+    case '4S':
+      return 'رابع علمي';
+    case 'S4A': 
+    case '4A':
+      return 'رابع أدبي';
+    case 'S5S': 
+    case 'S5':
+    case '5S':
+      return 'خامس علمي';
+    case 'S5A': 
+    case '5A':
+      return 'خامس أدبي';
+    case 'S6S': 
+    case 'S6':
+    case '6S':
+    case 'SCI':
+      return 'سادس علمي';
+    case 'S6A': 
+    case '6A':
+    case 'LIT':
+      return 'سادس أدبي';
+    default: return '';
+  }
 };
 
 export const getPrefixForGrade = (grade: string): string => {
@@ -141,12 +290,12 @@ export const getPrefixForGrade = (grade: string): string => {
 
   // Normalized Arabic check
   const norm = normalizeArabicText(g);
-  if (norm.includes('اولابتدائي')) return 'P1';
-  if (norm.includes('ثانيابتدائي')) return 'P2';
-  if (norm.includes('ثالثابتدائي')) return 'P3';
-  if (norm.includes('رابعابتدائي')) return 'P4';
-  if (norm.includes('خامسابتدائي')) return 'P5';
-  if (norm.includes('سادسابتدائي')) return 'P6';
+  if (norm.includes('اولابتدائي') || norm === 'صفاول' || norm === 'الصفالاول' || norm === 'الاول' || norm === 'اول') return 'P1';
+  if (norm.includes('ثانيابتدائي') || norm === 'صفثاني' || norm === 'الصفالثاني' || norm === 'الثاني' || norm === 'ثاني') return 'P2';
+  if (norm.includes('ثالثابتدائي') || norm === 'صفثالث' || norm === 'الصفالثالث' || norm === 'الثالث' || norm === 'ثالث') return 'P3';
+  if (norm.includes('رابعابتدائي') || (norm.includes('رابع') && norm.includes('ابتدائي'))) return 'P4';
+  if (norm.includes('خامسابتدائي') || (norm.includes('خامس') && norm.includes('ابتدائي'))) return 'P5';
+  if (norm.includes('سادسابتدائي') || (norm.includes('سادس') && norm.includes('ابتدائي'))) return 'P6';
 
   if (norm.includes('اولمتوسط')) return 'M1';
   if (norm.includes('ثانيمتوسط')) return 'M2';
@@ -158,11 +307,6 @@ export const getPrefixForGrade = (grade: string): string => {
   if (norm.includes('خامسادبي')) return 'S5A';
   if (norm.includes('سادسعلمي')) return 'S6S';
   if (norm.includes('سادسادبي')) return 'S6A';
-
-  // Fallback for standalone ordinals
-  if (s.includes('ثالث') && !s.includes('ابتدائ')) return 'M3';
-  if (s.includes('ثاني') && !s.includes('ابتدائ')) return 'M2';
-  if (s.includes('اول') && !s.includes('ابتدائ')) return 'M1';
 
   return 'STU';
 };
@@ -304,29 +448,62 @@ export const generateStudentCodes = (
     const studentCode = `${prefix}-${branchSuffix}-${randomNum}`;
     const parentCode = `PAR-${branchSuffix}-${randomNum}`;
     
-    const baseGradeTuition = (tuitionFeesByGrade && s.grade && tuitionFeesByGrade[s.grade] !== undefined) ? tuitionFeesByGrade[s.grade] : tuitionFee;
-    const discountRate = s.discountType ? (discountRates[s.discountType] || 0) : 0;
-    const discountAmount = (baseGradeTuition * discountRate) / 100;
-    const totalAmount = baseGradeTuition - discountAmount;
+    const baseGradeTuition = (tuitionFeesByGrade && s.grade && tuitionFeesByGrade[s.grade] !== undefined) ? Number(tuitionFeesByGrade[s.grade]) : tuitionFee;
     
-    const discountFactor = (100 - discountRate) / 100;
-    const installmentSum = installmentPlan.reduce((sum, inst) => sum + (inst.amount || 0), 0);
+    let discountRate = 0;
+    let totalAmount = baseGradeTuition;
+    let discountAmount = 0;
+
+    if (s.discountType === 'SPECIAL') {
+      if (s.discountAmount !== undefined && s.discountAmount !== null && Number(s.discountAmount) > 0) {
+        discountAmount = Number(s.discountAmount);
+        totalAmount = (s.totalAmount !== undefined && s.totalAmount !== null && Number(s.totalAmount) >= 0 && Number(s.totalAmount) < baseGradeTuition)
+          ? Number(s.totalAmount)
+          : Math.max(0, baseGradeTuition - discountAmount);
+        discountRate = baseGradeTuition > 0 ? ((discountAmount / baseGradeTuition) * 100) : 0;
+      } else if (s.totalAmount !== undefined && s.totalAmount !== null && s.totalAmount !== '' && Number(s.totalAmount) >= 0 && Number(s.totalAmount) < baseGradeTuition) {
+        totalAmount = Number(s.totalAmount);
+        discountAmount = Math.max(0, baseGradeTuition - totalAmount);
+        discountRate = baseGradeTuition > 0 ? ((discountAmount / baseGradeTuition) * 100) : 0;
+      } else if (s.discountRate !== undefined && s.discountRate !== null && Number(s.discountRate) > 0) {
+        discountRate = Number(s.discountRate);
+        discountAmount = Math.round((baseGradeTuition * discountRate) / 100);
+        totalAmount = Math.max(0, baseGradeTuition - discountAmount);
+      } else if (s.totalAmount !== undefined && s.totalAmount !== null && s.totalAmount !== '') {
+        totalAmount = Number(s.totalAmount);
+        discountAmount = Math.max(0, baseGradeTuition - totalAmount);
+        discountRate = baseGradeTuition > 0 ? ((discountAmount / baseGradeTuition) * 100) : 0;
+      }
+    } else {
+      discountRate = s.discountType ? (discountRates[s.discountType] || 0) : 0;
+      discountAmount = Math.round((baseGradeTuition * discountRate) / 100);
+      totalAmount = Math.max(0, baseGradeTuition - discountAmount);
+    }
+    
+    const discountFactor = baseGradeTuition > 0 ? (totalAmount / baseGradeTuition) : ((100 - discountRate) / 100);
+    const installmentSum = (installmentPlan || []).reduce((sum, inst) => sum + (Number(inst.amount) || 0), 0);
     const gradeProportion = installmentSum > 0 ? (baseGradeTuition / installmentSum) : 1;
     const combinedFactor = gradeProportion * discountFactor;
 
     // Scale installments based on student's discount and grade proportion
-    const installments = installmentPlan.map(inst => ({
+    const installments = (installmentPlan || []).map((inst, idx) => ({
       ...inst,
-      id: crypto.randomUUID(),
-      amount: Math.round((inst.amount || 0) * combinedFactor),
+      id: inst.id || crypto.randomUUID(),
+      amount: Math.round((Number(inst.amount) || 0) * combinedFactor),
       paid: false
     }));
+
+    const finalGrade = normalizeGradeName(s.grade) || s.grade;
 
     return {
       ...s,
       id: s.id || crypto.randomUUID(),
       student: studentCode,
+      code: studentCode,
       parent: parentCode,
+      parentCode: parentCode,
+      grade: finalGrade,
+      discountType: s.discountType || 'NONE',
       discountAmount,
       totalAmount,
       discountRate,
@@ -335,7 +512,8 @@ export const generateStudentCodes = (
         installments,
         totalTuition: totalAmount,
         paidAmount: 0,
-        remainingAmount: totalAmount
+        remainingAmount: totalAmount,
+        lastUpdated: new Date().toISOString()
       }
     };
   });
@@ -412,12 +590,19 @@ export const generateSingleStudentPDF = (student: any) => {
 
 export const getSubjectsForGrade = (grade: string, removedIds: string[] = [], customMapping: any = null) => {
   if (customMapping) {
-    const stage = getStageFromGrade(grade);
+    const cleanGrade = normalizeGradeName(grade) || grade;
+    const stage = getStageFromGrade(cleanGrade || grade);
     let base: any[] = [];
     
     // Check if there's a specific mapping for this exact grade first (normalized)
-    const normalizedGrade = normalizeArabicText(grade);
-    const mappingKey = Object.keys(customMapping).find(k => normalizeArabicText(k) === normalizedGrade);
+    const normalizedGrade = normalizeArabicText(cleanGrade);
+    const rawNormalized = normalizeArabicText(grade);
+    const mappingKey = Object.keys(customMapping).find(k => {
+      const normK = normalizeArabicText(k);
+      return normK === normalizedGrade || normK === rawNormalized || 
+             (normK && normalizedGrade && (normK.includes(normalizedGrade) || normalizedGrade.includes(normK))) ||
+             (normK && rawNormalized && (normK.includes(rawNormalized) || rawNormalized.includes(normK)));
+    });
 
     if (mappingKey && Array.isArray(customMapping[mappingKey])) {
       base = customMapping[mappingKey];
@@ -426,15 +611,19 @@ export const getSubjectsForGrade = (grade: string, removedIds: string[] = [], cu
       base = customMapping[stage];
     } else {
       // Compatibility with older structure or direct stage names as keys
-      if (grade.includes('ابتدائي')) base = customMapping.primary;
-      else if (grade.includes('متوسط')) base = customMapping.intermediate;
-      else if (grade.includes('علمي')) base = customMapping.scientific;
-      else if (grade.includes('أدبي')) base = customMapping.literary;
+      if (cleanGrade.includes('ابتدائي') || grade.includes('ابتدائي')) base = customMapping.primary;
+      else if (cleanGrade.includes('متوسط') || grade.includes('متوسط')) base = customMapping.intermediate;
+      else if (cleanGrade.includes('علمي') || grade.includes('علمي')) base = customMapping.scientific;
+      else if (cleanGrade.includes('أدبي') || grade.includes('أدبي')) base = customMapping.literary;
       else base = customMapping.scientific;
     }
     
     if (Array.isArray(base) && base.length > 0) {
-      return base.filter((s: any) => s && s.id && !removedIds.includes(s.id));
+      return base.filter((s: any) => {
+        if (!s) return false;
+        const sId = typeof s === 'string' ? s : (s.id || s.name || s.title || '');
+        return !removedIds.includes(sId);
+      });
     }
   }
 

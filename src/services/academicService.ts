@@ -62,17 +62,32 @@ const academicCache = {
 export const academicService = {
   // --- Academic Lists ---
   subscribeToLists: (schoolId: string, callback: (lists: AcademicList[]) => void, schoolName?: string) => {
-    const key = schoolId || 'all';
+    const cleanSchoolId = (schoolId || '').trim();
+    let key = cleanSchoolId && cleanSchoolId !== 'undefined' && cleanSchoolId !== 'null' ? cleanSchoolId : 'all';
+    if (key.toLowerCase() === 'school_awail_ghamas' || key.toLowerCase() === 'ghamas_awail') {
+      key = 'school1';
+    }
     
     // 1. Instant Synchronous Cache Emission
-    let cachedEntry = academicCache.lists.get(key);
+    let cachedEntry = academicCache.lists.get(key) || academicCache.lists.get('school1') || academicCache.lists.get('all');
     if (!cachedEntry) {
       try {
-        const stored = safeStorage.getItem(`s6_cache_lists_${key}`);
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          cachedEntry = { data: parsed, raw: stored };
-          academicCache.lists.set(key, cachedEntry);
+        const checkKeys = [
+          `s6_cache_lists_${key}`,
+          's6_cache_lists_school1',
+          's6_cache_lists_all',
+          's6_cache_lists_school_awail_ghamas'
+        ];
+        for (const k of checkKeys) {
+          const stored = safeStorage.getItem(k);
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              cachedEntry = { data: parsed, raw: stored };
+              academicCache.lists.set(key, cachedEntry);
+              break;
+            }
+          }
         }
       } catch {}
     }
@@ -82,7 +97,10 @@ export const academicService = {
 
     const fetchLists = async () => {
       try {
-        const response = await fetch(`/api/academic-lists/${schoolId}`);
+        const endpoint = key !== 'all' 
+          ? `/api/academic-lists/${encodeURIComponent(key)}`
+          : '/api/academic-lists';
+        const response = await fetch(endpoint);
         if (!response.ok) {
           const text = await response.text();
           if (text.includes('Rate exceeded')) {
@@ -94,18 +112,24 @@ export const academicService = {
         
         const contentType = response.headers.get('content-type');
         if (!contentType || !contentType.includes('application/json')) {
+           const text = await response.text();
+           if (text.includes('<!doctype html>') || text.includes('<html')) {
+             console.warn('[AcademicService] Received HTML response instead of JSON for academic lists, ignoring SPA fallback');
+             return;
+           }
            console.error('[AcademicService] Expected JSON but got', contentType);
            return;
         }
         
         const data = await response.json();
         if (data.success && Array.isArray(data.academicLists)) {
-          const rawStr = JSON.stringify(data.academicLists);
           const currentEntry = academicCache.lists.get(key);
+          const serverLists = data.academicLists;
+          const rawStr = JSON.stringify(serverLists);
           if (!currentEntry || currentEntry.raw !== rawStr) {
-            academicCache.lists.set(key, { data: data.academicLists, raw: rawStr });
+            academicCache.lists.set(key, { data: serverLists, raw: rawStr });
             safeStorage.setItem(`s6_cache_lists_${key}`, rawStr);
-            callback(data.academicLists);
+            callback(serverLists);
           }
         }
       } catch (error) {
@@ -123,14 +147,15 @@ export const academicService = {
   saveList: async (schoolId: string, listData: any) => {
     if (!listData) return;
     
+    const targetSchoolId = schoolId || listData.schoolId || 'school1';
     const fullListData = {
       ...listData,
-      schoolId,
+      schoolId: targetSchoolId,
       updatedAt: new Date().toISOString()
     };
 
     // 1. Optimistic Cache & LocalStorage update so UI reflects immediately
-    const key = schoolId || 'all';
+    const key = targetSchoolId || 'all';
     const currentEntry = academicCache.lists.get(key);
     const existingLists = currentEntry?.data ? [...currentEntry.data] : [];
     const idx = existingLists.findIndex(l => l.id === fullListData.id);
@@ -143,8 +168,16 @@ export const academicService = {
     academicCache.lists.set(key, { data: existingLists, raw: rawStr });
     safeStorage.setItem(`s6_cache_lists_${key}`, rawStr);
 
-    // Dispatch realtime event locally for instant UI response
-    realtimeManager.trigger('academic_lists', { action: 'INSERT', id: fullListData.id, data: fullListData });
+    if (key !== 'all') {
+      const allEntry = academicCache.lists.get('all');
+      const allLists = allEntry?.data ? [...allEntry.data] : [];
+      const allIdx = allLists.findIndex(l => l.id === fullListData.id);
+      if (allIdx >= 0) allLists[allIdx] = fullListData;
+      else allLists.unshift(fullListData);
+      const allRaw = JSON.stringify(allLists);
+      academicCache.lists.set('all', { data: allLists, raw: allRaw });
+      safeStorage.setItem('s6_cache_lists_all', allRaw);
+    }
 
     // 2. Save to PostgreSQL via API
     const response = await fetch('/api/academic-lists', {
@@ -161,22 +194,29 @@ export const academicService = {
     const result = await response.json();
     if (!result.success) throw new Error(result.message || 'Failed to save list to SQL');
 
-    // 3. Batch Sync Students to PostgreSQL (runs efficiently in background)
+    // 3. Dispatch realtime event now that server has committed the list
+    realtimeManager.trigger('academic_lists', { 
+      action: 'INSERT', 
+      id: fullListData.id, 
+      data: result.academicList || fullListData 
+    });
+
+    // 4. Batch Sync Students to PostgreSQL (runs efficiently in background)
     if (listData.students && Array.isArray(listData.students)) {
       const studentsToSync = listData.students.map((student: any) => ({
-        id: `${schoolId}_${student.student || student.code}`.replace(/\s+/g, '_'),
-        schoolId,
+        id: `${targetSchoolId}_${student.student || student.code}`.replace(/\s+/g, '_'),
+        schoolId: targetSchoolId,
         name: student.name,
         grade: student.grade,
         code: student.student || student.code,
         parentCode: student.parent || student.parentCode,
         status: student.status || 'نشط',
-        paidAmount: student.paidAmount || 0,
-        totalAmount: student.totalAmount || 0,
+        paidAmount: Math.round(Number(student.paidAmount || 0)),
+        totalAmount: Math.round(Number(student.totalAmount || 0)),
         discountType: student.discountType || null,
-        discountRate: student.discountRate || 0,
+        discountRate: Math.round(Number(student.discountRate || 0)),
         finance: student.finance || { installments: [], transactions: [] },
-        isTopStudent: student.isTopStudent || false,
+        isTopStudent: Boolean(student.isTopStudent),
         topStudentPeriod: student.topStudentPeriod || null,
         lastSyncedPeriod: listData.lastSyncedPeriod || null,
         grades: student.grades || {}
@@ -203,12 +243,12 @@ export const academicService = {
       code: student.student || student.code,
       parentCode: student.parent || student.parentCode,
       status: student.status || 'نشط',
-      paidAmount: student.paidAmount || 0,
-      totalAmount: student.totalAmount || 0,
+      paidAmount: Math.round(Number(student.paidAmount || 0)),
+      totalAmount: Math.round(Number(student.totalAmount || 0)),
       discountType: student.discountType || null,
-      discountRate: student.discountRate || 0,
+      discountRate: Math.round(Number(student.discountRate || 0)),
       finance: student.finance || { installments: [], transactions: [] },
-      isTopStudent: student.isTopStudent || false,
+      isTopStudent: Boolean(student.isTopStudent),
       topStudentPeriod: student.topStudentPeriod || null,
       grades: student.grades || {}
     }));
@@ -245,17 +285,32 @@ export const academicService = {
 
   // --- School Students ---
   subscribeToStudents: (schoolId: string, callback: (students: SchoolStudent[]) => void) => {
-    const key = schoolId || 'all';
+    const cleanSchoolId = (schoolId || '').trim();
+    let key = cleanSchoolId && cleanSchoolId !== 'undefined' && cleanSchoolId !== 'null' ? cleanSchoolId : 'all';
+    if (key.toLowerCase() === 'school_awail_ghamas' || key.toLowerCase() === 'ghamas_awail') {
+      key = 'school1';
+    }
 
     // 1. Instant Synchronous Cache Emission
-    let cachedEntry = academicCache.students.get(key);
+    let cachedEntry = academicCache.students.get(key) || academicCache.students.get('school1') || academicCache.students.get('all');
     if (!cachedEntry) {
       try {
-        const stored = safeStorage.getItem(`s6_cache_students_${key}`);
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          cachedEntry = { data: parsed, raw: stored };
-          academicCache.students.set(key, cachedEntry);
+        const checkKeys = [
+          `s6_cache_students_${key}`,
+          's6_cache_students_school1',
+          's6_cache_students_all',
+          's6_cache_students_school_awail_ghamas'
+        ];
+        for (const k of checkKeys) {
+          const stored = safeStorage.getItem(k);
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              cachedEntry = { data: parsed, raw: stored };
+              academicCache.students.set(key, cachedEntry);
+              break;
+            }
+          }
         }
       } catch {}
     }
@@ -265,7 +320,10 @@ export const academicService = {
 
     const fetchStudents = async () => {
       try {
-        const response = await fetch(`/api/students/${schoolId}`);
+        const endpoint = key !== 'all' 
+          ? `/api/students/${encodeURIComponent(key)}`
+          : '/api/students';
+        const response = await fetch(endpoint);
         if (!response.ok) {
           const text = await response.text();
           if (text.includes('Rate exceeded')) {
@@ -277,6 +335,11 @@ export const academicService = {
 
         const contentType = response.headers.get('content-type');
         if (!contentType || !contentType.includes('application/json')) {
+           const text = await response.text();
+           if (text.includes('<!doctype html>') || text.includes('<html')) {
+             console.warn('[AcademicService] Received HTML response instead of JSON for students, ignoring SPA fallback');
+             return;
+           }
            console.error('[AcademicService] Expected JSON but got', contentType);
            return;
         }
@@ -424,11 +487,11 @@ export const academicService = {
   },
 
   // --- سجل الانضباط المدرسي (Attendance & Discipline) ---
-  updateAttendance: async (studentId: string, userId: string, status: string, by: string, reason: string, period: string, schoolId?: string) => { 
+  updateAttendance: async (studentId: string, userId: string, status: string, by: string, reason: string, period: string, schoolId?: string, date?: string) => { 
     const response = await fetch(`/api/students/${studentId}/attendance`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status, by, reason, period, schoolId })
+      body: JSON.stringify({ status, by, reason, period, schoolId, date })
     });
     if (!response.ok) throw new Error('Failed to update attendance');
     return await response.json();

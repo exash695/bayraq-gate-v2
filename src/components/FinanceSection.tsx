@@ -14,10 +14,11 @@ import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { logActivity } from '../utils/auditLogger';
 import { auth, db } from '../lib/firebase';
 import { collection, query, onSnapshot, orderBy, doc, setDoc, updateDoc, writeBatch, where, addDoc } from '@/src/lib/firebase';
-import { calculateStudentFinancials } from '../utils/studentUtils';
+import { calculateStudentFinancials, isArchivedList } from '../utils/studentUtils';
 import { DigitalReceiptModal } from './DigitalReceiptModal';
 import { safeStorage, safeSessionStorage } from '../lib/storage';
 import { realtimeManager } from '../lib/realtimeManager';
+import { useSecuritySettings } from '../services/securityService';
 
 interface FinanceSectionProps {
   isFinanceUnlocked: boolean;
@@ -369,7 +370,7 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
   setPendingPayments,
   students,
   setStudents,
-  savedLists,
+  savedLists: propsSavedLists,
   setSavedLists,
   discountLabels,
   discountRates,
@@ -389,6 +390,9 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
   installmentPlan,
   setInstallmentPlan
 }) => {
+  const savedLists = useMemo(() => {
+    return (propsSavedLists || []).filter(l => !isArchivedList(l));
+  }, [propsSavedLists]);
   const safeDiscountLabels = useMemo(() => {
     try {
       return discountLabels || {};
@@ -1873,7 +1877,10 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
     }
   };
 
-  if (!isFinanceUnlocked) {
+  const { settings: secSettings } = useSecuritySettings();
+  const requirePin = secSettings.requirePinForFinance ?? true;
+
+  if (requirePin && !isFinanceUnlocked) {
     const isFirstTimeSetup = !correctPIN && false; // Disable forced setup, use fallback
     const effectivePIN = correctPIN || '1234';
 

@@ -82,14 +82,20 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onOpenPrivacy }) => {
   };
 
   const handleGoogleSignIn = async () => {
-    const provider = new GoogleAuthProvider();
-    provider.setCustomParameters({
-      prompt: 'select_account',
-    });
-    
-    setAuthLoading(true);
     try {
-      await signInWithPopup(auth, provider);
+      const provider = new GoogleAuthProvider();
+      if (typeof provider?.setCustomParameters === 'function') {
+        provider.setCustomParameters({
+          prompt: 'select_account',
+        });
+      }
+      
+      setAuthLoading(true);
+      if (formData.email && formData.email.includes('@')) {
+        await customAuth.loginWithGoogle(formData.email);
+      } else {
+        await signInWithPopup(auth, provider);
+      }
       safeStorage.setItem('s6_activeSection', 'hub');
     } catch (err: any) {
       if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {

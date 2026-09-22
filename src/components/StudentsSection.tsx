@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Users, Search, CheckCircle2, GraduationCap, ArrowRight, Save, Printer, FileSpreadsheet, Send, Plus, X, RotateCcw, Trash2, Layout,
-  DollarSign, CreditCard, TrendingUp, Star, BookOpen, Award, Camera, Filter, Share2
+  DollarSign, CreditCard, TrendingUp, Star, BookOpen, Award, Camera, Filter, Share2, Archive, FolderOpen, Settings
 } from 'lucide-react';
 import { collection, query, where, getDocs, updateDoc, doc, writeBatch } from '@/src/lib/firebase';
 import { db } from '../lib/firebase';
@@ -11,6 +11,7 @@ import { SubjectManager } from './SubjectManager';
 import { SearchStudentsGlobal } from './SearchStudentsGlobal';
 import { ExcellenceShareModal } from './ExcellenceShareModal';
 import { BookDistributionManager } from './BookDistributionManager';
+import { StudentPromotionWizard } from './StudentPromotionWizard';
 import { getSubjectsForGrade, getGradePriority, calculateStudentFinancials, getPrefixForGrade, SUBJECT_BADGES_CONFIG, computeAcademicIdentity, OUTSTANDING_BADGES } from '../utils/studentUtils';
 import { logActivity } from '../utils/auditLogger';
 import { academicService } from '../services/academicService';
@@ -72,6 +73,7 @@ interface StudentsSectionProps {
   subjectMapping?: any;
   isSaving?: boolean;
   onSubViewChange?: (isOpen: boolean) => void;
+  schoolId?: string;
 }
 
 export const StudentsSection: React.FC<StudentsSectionProps> = ({
@@ -92,7 +94,8 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
   onDeleteList,
   subjectMapping,
   isSaving,
-  onSubViewChange
+  onSubViewChange,
+  schoolId
 }) => {
   const fileInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({});
   const controlRoomRef = useRef<HTMLDivElement | null>(null);
@@ -115,6 +118,8 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
   const [highlightedStudentId, setHighlightedStudentId] = useState<string | null>(null);
   const [selectedStage, setSelectedStage] = useState<'all' | 'primary' | 'intermediate' | 'high'>('all');
   const [mainTab, setMainTab] = useState<'academic' | 'excellence' | 'books'>('academic');
+  const [archiveSearch, setArchiveSearch] = useState('');
+  const [archiveYearFilter, setArchiveYearFilter] = useState('all');
   const [excellenceSearch, setExcellenceSearch] = useState('');
   const [activeExcellenceStudentCode, setActiveExcellenceStudentCode] = useState<string | null>(null);
   const [selectedExcellenceStage, setSelectedExcellenceStage] = useState<'all' | 'primary' | 'intermediate' | 'high'>('all');
@@ -128,6 +133,8 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
   const [showCustomBadgeInput, setShowCustomBadgeInput] = useState(false);
   const [customBadgeTitle, setCustomBadgeTitle] = useState('');
   const [studentDisplayLimit, setStudentDisplayLimit] = useState<number>(50);
+  const [isPromotionWizardOpen, setIsPromotionWizardOpen] = useState<boolean>(false);
+  const [promotionTargetListId, setPromotionTargetListId] = useState<string | null>(null);
 
   useEffect(() => {
     setStudentDisplayLimit(50);
@@ -371,17 +378,24 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
     showToast(`تمت استعادة مادة ${subjectName}`);
   };
 
-  const handleUpdateGrade = (studentId: string, subjectId: string, value: number) => {
+  const handleUpdateGrade = (studentId: string, subjectId: string, value: any) => {
     const updatedList = {
       ...selectedList,
       students: selectedList.students.map((s: any) => {
-        if (s.id === studentId || s.student === studentId) {
+        if (s.id === studentId || s.student === studentId || s.name === studentId) {
           const currentGrades = s.grades || {};
           const currentPeriodGrades = currentGrades[selectedPeriod] || {};
           
+          const newPeriodGrades = { ...currentPeriodGrades };
+          if (value === undefined || value === null || value === '') {
+            delete newPeriodGrades[subjectId];
+          } else {
+            newPeriodGrades[subjectId] = value;
+          }
+
           const newGrades = { 
             ...currentGrades, 
-            [selectedPeriod]: { ...currentPeriodGrades, [subjectId]: value } 
+            [selectedPeriod]: newPeriodGrades 
           };
 
           const m1 = newGrades['month1']?.[subjectId];
@@ -499,9 +513,103 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
     return 'scientific';
   };
 
+  const uniqueSavedLists = useMemo(() => {
+    const map = new Map<string, any>();
+    (savedLists || []).forEach((l, idx) => {
+      const id = l?.id || `list_${idx}`;
+      if (!map.has(id)) {
+        map.set(id, l);
+      }
+    });
+    return Array.from(map.values());
+  }, [savedLists]);
+
+  const isArchivedList = (l: any) => {
+    if (!l) return false;
+    return Boolean(
+      l.isArchive || 
+      l.isArchived || 
+      (typeof l.name === 'string' && l.name.startsWith('[أرشيف')) || 
+      l.archiveYear
+    );
+  };
+
+  const activeSavedLists = useMemo(() => {
+    return uniqueSavedLists.filter(l => !isArchivedList(l));
+  }, [uniqueSavedLists]);
+
+  const archivedSavedLists = useMemo(() => {
+    return uniqueSavedLists.filter(l => isArchivedList(l));
+  }, [uniqueSavedLists]);
+
+  const archiveYears = useMemo(() => {
+    const set = new Set<string>();
+    archivedSavedLists.forEach(l => {
+      const year = l.archiveYear || (typeof l.name === 'string' ? l.name.match(/\[أرشيف\s*([0-9\u0660-\u0669-]+)\]/)?.[1] : null);
+      if (year) set.add(year);
+    });
+    return Array.from(set);
+  }, [archivedSavedLists]);
+
+  const displayedArchivedLists = useMemo(() => {
+    return archivedSavedLists.filter(l => {
+      const listStudents = Array.isArray(l.students) ? l.students : [];
+      const matchesSearch = (l.name || '').toLowerCase().includes(archiveSearch.toLowerCase()) ||
+        listStudents.some((s: any) => (s?.name || '').toLowerCase().includes(archiveSearch.toLowerCase()));
+      if (archiveSearch && !matchesSearch) return false;
+
+      if (archiveYearFilter !== 'all') {
+        const year = l.archiveYear || (typeof l.name === 'string' ? l.name.match(/\[أرشيف\s*([0-9\u0660-\u0669-]+)\]/)?.[1] : null);
+        if (year && !year.includes(archiveYearFilter)) return false;
+      }
+      return true;
+    }).sort((a, b) => (b.archivedAt || 0) - (a.archivedAt || 0));
+  }, [archivedSavedLists, archiveSearch, archiveYearFilter]);
+
   const allStudentsGlobal = useMemo(() => 
-    savedLists.flatMap(list => list.students.map((s: any) => ({ ...s, listId: list.id, listName: list.name }))),
-    [savedLists]
+    activeSavedLists.flatMap(list => (list.students || []).map((s: any) => ({ ...s, listId: list.id, listName: list.name }))),
+    [activeSavedLists]
+  );
+
+  const renderMainTabSelector = () => (
+    <div className="flex justify-center items-center pb-2 mb-2 px-3 sm:px-0">
+      <div className="flex bg-[#101935]/90 backdrop-blur-md p-1 rounded-2xl border border-white/10 shadow-2xl w-full max-w-3xl justify-stretch flex-col sm:flex-row gap-1.5">
+        <button
+          onClick={() => { setMainTab('academic'); setSelectedList(null); }}
+          className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
+            (mainTab as string) === 'academic'
+              ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg'
+              : 'text-white/40 hover:text-white/80 hover:bg-white/5'
+          }`}
+        >
+          <Users size={14} />
+          <span>شؤون ورصد الدرجات</span>
+        </button>
+        <button
+          onClick={() => { setMainTab('excellence'); setSelectedList(null); }}
+          className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
+            (mainTab as string) === 'excellence'
+              ? 'bg-gradient-to-r from-[#FFD600] to-amber-500 text-black shadow-lg border border-amber-400/20'
+              : 'text-white/40 hover:text-white/80 hover:bg-white/5'
+          }`}
+        >
+          <Star size={14} fill={(mainTab as string) === 'excellence' ? 'currentColor' : 'none'} />
+          <span>سجل التميز والأوسمة 🏅</span>
+        </button>
+        <button
+          onClick={() => { setMainTab('books'); setSelectedList(null); }}
+          className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
+            (mainTab as string) === 'books'
+              ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg border border-emerald-400/20'
+              : 'text-white/40 hover:text-white/80 hover:bg-white/5'
+          }`}
+        >
+          <BookOpen size={14} />
+          <span>جرد وتوزيع الكتب</span>
+        </button>
+
+      </div>
+    </div>
   );
   
   const handleGlobalUpdateStudent = async (studentCode: string, listId: string, updates: any) => {
@@ -997,44 +1105,8 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
           </div>
         )}
 
-        {/* Brand New Centered Modern Unified Tabs Selector */}
-        <div className="flex justify-center items-center pb-4 mb-6 border-b border-white/5">
-          <div className="flex bg-[#101935]/80 backdrop-blur-md p-1.5 rounded-[2rem] border border-white/5 shadow-2xl w-full max-w-2xl justify-stretch flex-col md:flex-row gap-2">
-            <button
-              onClick={() => { setMainTab('academic'); setSelectedList(null); }}
-              className={`flex-1 py-3 px-4 rounded-2xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
-                (mainTab as string) === 'academic'
-                  ? 'bg-gradient-to-b from-blue-500 to-indigo-600 text-white shadow-lg'
-                  : 'text-white/40 hover:text-white/80 hover:bg-white/5'
-              }`}
-            >
-              <Users size={14} />
-              شؤون ورصد الدرجات
-            </button>
-            <button
-              onClick={() => setMainTab('excellence')}
-              className={`flex-1 py-3 px-4 rounded-2xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
-                (mainTab as string) === 'excellence'
-                  ? 'bg-gradient-to-r from-[#FFD600] to-amber-500 text-black shadow-lg border border-amber-400/20'
-                  : 'text-white/40 hover:text-white/80 hover:bg-white/5'
-              }`}
-            >
-              <Star size={14} fill={(mainTab as string) === 'excellence' ? 'currentColor' : 'none'} />
-              سجل التميز والأوسمة 🏅
-            </button>
-            <button
-              onClick={() => { setMainTab('books'); setSelectedList(null); }}
-              className={`flex-1 py-3 px-4 rounded-2xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
-                (mainTab as string) === 'books'
-                  ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg border border-emerald-400/20'
-                  : 'text-white/40 hover:text-white/80 hover:bg-white/5'
-              }`}
-            >
-              <BookOpen size={14} />
-              جرد وتوزيع الكتب
-            </button>
-          </div>
-        </div>
+        {/* Centered Modern Unified Tabs Selector */}
+        {renderMainTabSelector()}
 
         {/* Quick Motivation Banner */}
         <div className="bg-[#050812] border border-[#FFD600]/30 shadow-[0_0_20px_rgba(255,214,0,0.15)] rounded-2xl p-4 md:p-5 relative overflow-hidden flex flex-col items-center justify-center text-center w-[90%] md:w-3/4 max-w-2xl mx-auto mb-8">
@@ -1764,46 +1836,10 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
   if ((mainTab as string) === "books") {
     return (
       <div className="space-y-4 animate-in fade-in slide-in-from-left-4 duration-300 -mx-3 sm:mx-0 w-[calc(100%+1.5rem)] sm:w-full">
-        <div className="flex justify-center items-center pb-2 mb-2 px-3 sm:px-0">
-          <div className="flex bg-[#101935]/90 backdrop-blur-md p-1 rounded-2xl border border-white/10 shadow-2xl w-full max-w-2xl justify-stretch flex-col md:flex-row gap-1.5">
-            <button
-              onClick={() => { setMainTab("academic"); setSelectedList(null); }}
-              className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
-                (mainTab as string) === "academic"
-                  ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg"
-                  : "text-white/40 hover:text-white/80 hover:bg-white/5"
-              }`}
-            >
-              <Users size={14} />
-              شؤون ورصد الدرجات
-            </button>
-            <button
-              onClick={() => setMainTab("excellence")}
-              className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
-                (mainTab as string) === "excellence"
-                  ? "bg-gradient-to-r from-[#FFD600] to-amber-500 text-black shadow-lg border border-amber-400/20"
-                  : "text-white/40 hover:text-white/80 hover:bg-white/5"
-              }`}
-            >
-              <Star size={14} fill={(mainTab as string) === "excellence" ? "currentColor" : "none"} />
-              سجل التميز والأوسمة 🏅
-            </button>
-            <button
-              onClick={() => { setMainTab("books"); setSelectedList(null); }}
-              className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
-                (mainTab as string) === "books"
-                  ? "bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg border border-emerald-400/20"
-                  : "text-white/40 hover:text-white/80 hover:bg-white/5"
-              }`}
-            >
-              <BookOpen size={14} />
-              جرد وتوزيع الكتب
-            </button>
-          </div>
-        </div>
+        {renderMainTabSelector()}
         
         <BookDistributionManager 
-          savedLists={savedLists}
+          savedLists={activeSavedLists}
           onUpdateList={async (list) => {
             if (onUpdateList) {
               await onUpdateList(list);
@@ -1821,43 +1857,7 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
     return (
       <div className="space-y-4 animate-in fade-in slide-in-from-left-4 duration-300 -mx-3 sm:mx-0 w-[calc(100%+1.5rem)] sm:w-full">
         {/* Top Centered Tabs Selector */}
-        <div className="flex justify-center items-center pb-2 mb-2 px-3 sm:px-0">
-          <div className="flex bg-[#101935]/90 backdrop-blur-md p-1 rounded-2xl border border-white/10 shadow-2xl w-full max-w-2xl justify-stretch flex-col md:flex-row gap-1.5">
-            <button
-              onClick={() => { setMainTab('academic'); setSelectedList(null); }}
-              className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
-                (mainTab as string) === 'academic'
-                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg'
-                  : 'text-white/40 hover:text-white/80 hover:bg-white/5'
-              }`}
-            >
-              <Users size={14} />
-              شؤون ورصد الدرجات
-            </button>
-            <button
-              onClick={() => setMainTab('excellence')}
-              className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
-                (mainTab as string) === 'excellence'
-                  ? 'bg-gradient-to-r from-[#FFD600] to-amber-500 text-black shadow-lg border border-amber-400/20'
-                  : 'text-white/40 hover:text-white/80 hover:bg-white/5'
-              }`}
-            >
-              <Star size={14} fill={(mainTab as string) === 'excellence' ? 'currentColor' : 'none'} />
-              سجل التميز والأوسمة 🏅
-            </button>
-            <button
-              onClick={() => { setMainTab('books'); setSelectedList(null); }}
-              className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
-                (mainTab as string) === 'books'
-                  ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg border border-emerald-400/20'
-                  : 'text-white/40 hover:text-white/80 hover:bg-white/5'
-              }`}
-            >
-              <BookOpen size={14} />
-              جرد وتوزيع الكتب
-            </button>
-          </div>
-        </div>
+        {renderMainTabSelector()}
 
         {/* Compact Edge-to-Edge Class Header & Live Status */}
         <div className="bg-[#0b1226]/95 border-y sm:border border-white/10 sm:rounded-2xl p-4 sm:p-5 relative overflow-hidden shadow-2xl space-y-4">
@@ -1866,11 +1866,13 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
               <motion.button 
                 whileHover={{ x: -2 }}
                 whileTap={{ scale: 0.95 }}
-                onClick={() => setSelectedList(null)}
+                onClick={() => {
+                  setSelectedList(null);
+                }}
                 className="h-10 px-3 rounded-xl bg-white/5 hover:bg-white/10 text-white/70 hover:text-white flex items-center gap-2 text-xs font-black transition-all border border-white/10 shrink-0"
               >
                 <ArrowRight size={16} />
-                <span>العودة للشعب</span>
+                <span>{isArchivedList(selectedList) ? 'العودة للأرشيف' : 'العودة للشعب'}</span>
               </motion.button>
               
               <div>
@@ -1879,6 +1881,12 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
                   <span className="bg-blue-500/10 text-blue-300 text-[10px] font-black px-2.5 py-0.5 rounded-full border border-blue-500/20">
                     {displaySchoolName}
                   </span>
+                  {isArchivedList(selectedList) && (
+                    <span className="bg-purple-500/20 text-purple-300 text-[10px] font-black px-2.5 py-0.5 rounded-full border border-purple-500/30 flex items-center gap-1">
+                      <FolderOpen size={11} />
+                      سجل أرشيفي مفتوح 📂
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 mt-1">
                   <span className="flex items-center gap-1.5 text-emerald-400 text-[10px] font-black bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
@@ -1891,7 +1899,21 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
             </div>
 
             {/* Action Buttons Toolbar */}
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <motion.button 
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                onClick={() => {
+                  setPromotionTargetListId(selectedList.id);
+                  setIsPromotionWizardOpen(true);
+                }}
+                className="flex-1 sm:flex-initial h-11 px-4 rounded-xl bg-purple-500/10 border border-purple-500/30 hover:border-purple-400/60 hover:bg-purple-500/20 text-purple-300 flex items-center justify-center gap-2 text-xs font-black transition-all shadow-md cursor-pointer"
+                title="ترحيل طلاب هذه الشعبة للعام القادم"
+              >
+                <GraduationCap size={16} className="text-purple-300" />
+                <span>ترحيل الشعبة 🎓</span>
+              </motion.button>
+
               <motion.button 
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
@@ -2080,7 +2102,6 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
                                 const periodName = periods.find(p => p.id === selectedPeriod)?.name || 'غير محدد';
                                 const schoolId = selectedList.schoolId;
                                 
-                                // 1. Sync with Firestore users collection
                                 const studentCode = stu.student || stu.code;
                                 const usersRef = collection(db, 'users');
                                 const safeStudentCode = studentCode || 'unassigned';
@@ -2097,7 +2118,6 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
                                   });
                                 }
 
-                                // 2. Sync with school_students collection (Global PostgreSQL)
                                 const studentDocId = `${schoolId}_${studentCode}`.replace(/\s+/g, '_');
                                 await academicService.updateStudentDirect(studentDocId, {
                                   name: stu.fullName || stu.name,
@@ -2108,7 +2128,6 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
                                   updatedAt: new Date().toISOString()
                                 }).catch(e => console.warn("Could not find student in school_students, skipping global sync"));
 
-                                // 3. Update local state
                                 const updatedList = {
                                   ...selectedList,
                                   students: selectedList.students.map((s: any) => 
@@ -2200,9 +2219,27 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
             </motion.div>
           )}
         </AnimatePresence>
+
+        <StudentPromotionWizard 
+          isOpen={isPromotionWizardOpen}
+          onClose={() => {
+            setIsPromotionWizardOpen(false);
+            setPromotionTargetListId(null);
+          }}
+          savedLists={savedLists}
+          setSavedLists={setSavedLists}
+          schoolId={schoolId || selectedList?.schoolId || schoolName || 'default_school'}
+          schoolName={schoolName || selectedList?.schoolName || 'المدرسة'}
+          showToast={showToast}
+          preSelectedListId={promotionTargetListId}
+        />
       </div>
     );
   }
+
+
+
+
 
   const getListStageName = (list: any): string => {
     const stage = getListStage(list);
@@ -2267,8 +2304,9 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
     return 99;
   };
 
-  const filteredLists = savedLists.filter(l => {
-    const matchesSearch = l.name.includes(searchQuery) || l.students.some((s: any) => s.name.includes(searchQuery));
+  const filteredLists = activeSavedLists.filter(l => {
+    const listStudents = Array.isArray(l.students) ? l.students : [];
+    const matchesSearch = (l.name || '').includes(searchQuery) || listStudents.some((s: any) => (s?.name || '').includes(searchQuery));
     if (!matchesSearch) return false;
     if (selectedStage === 'all') return true;
     return getListStage(l) === selectedStage;
@@ -2284,41 +2322,40 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
   return (
     <div className="space-y-4 animate-in fade-in slide-in-from-left-4 duration-300 -mx-3 sm:mx-0 w-[calc(100%+1.5rem)] sm:w-full">
       {/* Centered Modern Unified Tabs Selector */}
-      <div className="flex justify-center items-center pb-2 mb-2 px-3 sm:px-0">
-        <div className="flex bg-[#101935]/90 backdrop-blur-md p-1 rounded-2xl border border-white/10 shadow-2xl w-full max-w-2xl justify-stretch flex-col md:flex-row gap-1.5">
-          <button
-            onClick={() => { setMainTab('academic'); setSelectedList(null); }}
-            className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
-              (mainTab as string) === 'academic'
-                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg'
-                : 'text-white/40 hover:text-white/80 hover:bg-white/5'
-            }`}
+      {renderMainTabSelector()}
+
+      {/* Annual Student Promotion Feature Banner - Compact, Sleek & Elegant */}
+      <div className="px-3 sm:px-0">
+        <div className="relative overflow-hidden rounded-xl bg-[#0e1630]/90 border border-purple-500/20 hover:border-purple-500/40 px-3.5 py-2.5 sm:py-3 shadow-md transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center text-white shadow-sm shrink-0">
+              <GraduationCap size={16} />
+            </div>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h3 className="text-white font-black text-xs sm:text-sm">الترحيل السنوي للعام الدراسي الجديد</h3>
+                <span className="bg-purple-500/15 text-purple-300 border border-purple-500/25 text-[9px] font-bold px-2 py-0.5 rounded-full">
+                  ترقية ذكية وأرشفة 🎓
+                </span>
+              </div>
+              <p className="text-white/50 text-[11px] truncate max-w-xl mt-0.5">
+                ترقية الناجحين تلقائياً للصف التالي، فرز المعيدين، وأرشفة قوائم العام المنصرم بأمان.
+              </p>
+            </div>
+          </div>
+
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => {
+              setPromotionTargetListId(null);
+              setIsPromotionWizardOpen(true);
+            }}
+            className="h-8 px-3.5 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 hover:brightness-110 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-purple-900/30 border border-purple-400/30 shrink-0 cursor-pointer whitespace-nowrap self-stretch sm:self-auto"
           >
-            <Users size={14} />
-            شؤون ورصد الدرجات
-          </button>
-          <button
-            onClick={() => setMainTab('excellence')}
-            className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
-              (mainTab as string) === 'excellence'
-                ? 'bg-gradient-to-r from-[#FFD600] to-amber-500 text-black shadow-lg border border-amber-400/20'
-                : 'text-white/40 hover:text-white/80 hover:bg-white/5'
-            }`}
-          >
-            <Star size={14} fill={(mainTab as string) === 'excellence' ? 'currentColor' : 'none'} />
-            سجل التميز والأوسمة 🏅
-          </button>
-          <button
-            onClick={() => { setMainTab('books'); setSelectedList(null); }}
-            className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-2 ${
-              (mainTab as string) === 'books'
-                ? 'bg-gradient-to-r from-emerald-500 to-teal-600 text-white shadow-lg border border-emerald-400/20'
-                : 'text-white/40 hover:text-white/80 hover:bg-white/5'
-            }`}
-          >
-            <BookOpen size={14} />
-            جرد وتوزيع الكتب
-          </button>
+            <GraduationCap size={13} />
+            <span>بدء الترحيل 🚀</span>
+          </motion.button>
         </div>
       </div>
 
@@ -2384,18 +2421,41 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
              لا توجد قوائم طلاب مسجلة لهذه المرحلة
           </div>
         ) : (
-          filteredLists.map((list) => {
-            const totalStudents = list.students.length;
-            const topStudentsCount = list.students.filter((s: any) => s.isTopStudent).length;
-            const studentsWithGrades = list.students.filter((s: any) => {
-              if (!s.grades) return false;
-              return Object.values(s.grades).some((p: any) => p && Object.keys(p).length > 0);
-            }).length;
-            const gradeCompletion = totalStudents > 0 ? Math.round((studentsWithGrades / totalStudents) * 100) : 0;
+          filteredLists.map((list, listIdx) => {
+            const totalStudents = list.students?.length || 0;
+            const topStudentsCount = (list.students || []).filter((s: any) => s.isTopStudent).length;
+
+            // Calculate accurate grade completion across all active subjects and evaluation periods
+            const listGrade = list.grade || list.students?.[0]?.grade || '';
+            const listSubjects = getSubjectsForGrade(listGrade, list.removedSubjects || [], subjectMapping);
+            const evalPeriods = ['month1', 'month2', 'mid', 'month3', 'month4', 'final'];
+
+            let totalExpectedEntries = totalStudents * Math.max(1, listSubjects.length) * evalPeriods.length;
+            let actualEnteredEntries = 0;
+
+            if (totalStudents > 0 && listSubjects.length > 0) {
+              (list.students || []).forEach((s: any) => {
+                if (!s.grades) return;
+                evalPeriods.forEach((pKey) => {
+                  const pObj = s.grades[pKey];
+                  if (!pObj) return;
+                  listSubjects.forEach((sub) => {
+                    const v = pObj[sub.id];
+                    if (v !== undefined && v !== null && v !== "" && !isNaN(Number(v))) {
+                      actualEnteredEntries++;
+                    }
+                  });
+                });
+              });
+            }
+
+            const gradeCompletion = totalExpectedEntries > 0 
+              ? Math.min(100, Math.round((actualEnteredEntries / totalExpectedEntries) * 100)) 
+              : 0;
 
             return (
               <div 
-                key={list.id} 
+                key={`class_list_${list.id || listIdx}`} 
                 onClick={() => setSelectedList(list)}
                 className="bg-[#0b1226]/90 hover:bg-[#101938] p-4 rounded-2xl border border-white/10 hover:border-blue-500/40 transition-all cursor-pointer group relative overflow-hidden shadow-xl flex flex-col justify-between gap-3.5"
               >
@@ -2456,7 +2516,13 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
                     </div>
                     <div className="flex flex-col">
                       <span className="text-white/40 text-[8px] font-black">الحالة</span>
-                      <span className="text-emerald-400 text-[9px] font-black">
+                      <span className={`text-[9px] font-black ${
+                        gradeCompletion === 100 
+                          ? 'text-emerald-400' 
+                          : gradeCompletion > 0 
+                          ? 'text-amber-400' 
+                          : 'text-blue-300'
+                      }`}>
                         {gradeCompletion === 100 ? 'مكتمل' : gradeCompletion > 0 ? 'قيد الرصد' : 'جديد'}
                       </span>
                     </div>
@@ -2544,6 +2610,20 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
         }}
         title="تأكيد الحذف"
         message={`هل أنت متأكد من حذف ${confirmDelete?.type === 'list' ? 'القائمة ' + confirmDelete.name : 'الطالب ' + confirmDelete?.student?.name}؟`}
+      />
+
+      <StudentPromotionWizard 
+        isOpen={isPromotionWizardOpen}
+        onClose={() => {
+          setIsPromotionWizardOpen(false);
+          setPromotionTargetListId(null);
+        }}
+        savedLists={savedLists}
+        setSavedLists={setSavedLists}
+        schoolId={schoolId || schoolName || 'default_school'}
+        schoolName={schoolName || 'المدرسة'}
+        showToast={showToast}
+        preSelectedListId={promotionTargetListId}
       />
     </div>
   );

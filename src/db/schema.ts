@@ -7,6 +7,7 @@ export const schools = pgTable("schools", {
   governorate: varchar("governorate", { length: 100 }),
   activationCode: varchar("activation_code", { length: 50 }),
   status: varchar("status", { length: 50 }).default('active'),
+  disabledModules: jsonb("disabled_modules").default([]),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -22,6 +23,7 @@ export const users = pgTable("users", {
   canPost: boolean("can_post").default(true),
   canComment: boolean("can_comment").default(true),
   deviceId: varchar("device_id", { length: 255 }),
+  photo: text("photo"),
   lastLogin: timestamp("last_login"),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -31,6 +33,7 @@ export const teachers = pgTable("teachers", {
   id: varchar("id", { length: 128 }).primaryKey(),
   schoolId: varchar("school_id", { length: 128 }),
   name: text("name").notNull(),
+  photo: text("photo"),
   subject: varchar("subject", { length: 100 }),
   role: varchar("role", { length: 50 }).default('TEACHER'), // TEACHER, STAFF
   bio: text("bio"),
@@ -596,4 +599,15 @@ export const admin_outbox = pgTable("admin_outbox", {
   broadcastId: varchar("broadcast_id", { length: 128 }),
   timestamp: timestamp("timestamp").defaultNow(),
   createdAt: timestamp("created_at").defaultNow(),
+});
+export const security_bans = pgTable("security_bans", {
+  id: varchar("id", { length: 128 }).primaryKey(),
+  type: varchar("type", { length: 50 }).notNull(), // 'ip' | 'device' | 'account'
+  value: varchar("value", { length: 255 }).notNull(),
+  reason: text("reason").notNull(),
+  failed_attempts: integer("failed_attempts").default(0),
+  banned_at: timestamp("banned_at").defaultNow(),
+  expires_at: timestamp("expires_at"),
+  status: varchar("status", { length: 50 }).default('active_ban'),
+  created_at: timestamp("created_at").defaultNow(),
 });

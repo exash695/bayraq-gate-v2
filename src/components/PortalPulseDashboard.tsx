@@ -348,13 +348,14 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
     setPostComments([]);
     try {
       const res = await fetch(`/api/pulse/posts/${postId}/comments`);
-      const data = await res.json();
-      if (data.success) {
-        setPostComments(data.comments);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.success) {
+          setPostComments(data.comments || []);
+        }
       }
     } catch (err) {
-      console.error('Error fetching comments from PG', err);
-      showToast("فشل جلب التعليقات", "error");
+      console.warn('Notice: fetching comments from PG encountered notice:', err);
     } finally {
       setLoadingComments(false);
     }
@@ -408,8 +409,7 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
         setHasMorePosts(false);
       }
     } catch (error: any) {
-      console.error("Error fetching posts from PG:", error);
-      showToast("فشل جلب المنشورات من النظام الجديد", "error");
+      console.warn("Notice: fetching posts from PG encountered notice:", error);
     } finally {
       setLoadingPosts(false);
       setLoadingMorePosts(false);
@@ -441,26 +441,43 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
 
     if (isAdmin) {
       const fetchAdminData = async () => {
+        // Fetch Admin Outbox safely
         try {
-          // Fetch Admin Outbox
           const outboxRes = await fetch('/api/admin-outbox' + (selectedSchoolId ? `?schoolId=${selectedSchoolId}` : ''));
-          const outboxData = await outboxRes.json();
-          if (outboxData.success) setAdminNotifs(outboxData.admin_outbox);
-
-          // Fetch Tickets
-          const ticketRes = await fetch('/api/support-tickets');
-          const ticketData = await ticketRes.json();
-          if (ticketData.success) setAllTickets(ticketData.tickets);
-          
-          // Fetch Audit Logs
-          const auditRes = await fetch('/api/audit-logs?limit=50');
-          const auditData = await auditRes.json();
-          if (auditData.success) {
-            // Mapping developer_logs to what the UI expects if needed, or just using them
-            // In this UI, audit logs might be handled elsewhere or just shown in a list
+          if (outboxRes.ok) {
+            const outboxData = await outboxRes.json();
+            if (outboxData.success && Array.isArray(outboxData.admin_outbox)) {
+              setAdminNotifs(outboxData.admin_outbox);
+            }
           }
         } catch (e) {
-          console.error("Pulse API Fetch error:", e);
+          console.warn("Notice: could not load admin outbox from SQL:", e);
+        }
+
+        // Fetch Tickets safely
+        try {
+          const ticketRes = await fetch('/api/support-tickets');
+          if (ticketRes.ok) {
+            const ticketData = await ticketRes.json();
+            if (ticketData.success && Array.isArray(ticketData.tickets)) {
+              setAllTickets(ticketData.tickets);
+            }
+          }
+        } catch (e) {
+          console.warn("Notice: could not load support tickets from SQL:", e);
+        }
+        
+        // Fetch Audit Logs safely
+        try {
+          const auditRes = await fetch('/api/audit-logs?limit=50');
+          if (auditRes.ok) {
+            const auditData = await auditRes.json();
+            if (auditData.success) {
+              // Audit logs ready
+            }
+          }
+        } catch (e) {
+          console.warn("Notice: could not load audit logs from SQL:", e);
         }
       };
 

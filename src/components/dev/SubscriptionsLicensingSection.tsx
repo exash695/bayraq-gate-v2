@@ -28,15 +28,16 @@ import {
   Download,
   Share2,
   X,
-  Archive
+  Archive,
+  PlusCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { collection, getDocs, doc, updateDoc, serverTimestamp } from '@/src/lib/firebase';
-import { db } from '../../lib/firebase';
 import { logActivity } from '../../utils/auditLogger';
 import { generateQrDataUrl } from '../../utils/qrGenerator';
 import { SchoolArchiveManager } from './SchoolArchiveManager';
-import { schoolService } from '../../services/schoolService';
+import { schoolService, SchoolRecord } from '../../services/schoolService';
+import { db, collection, getDocs, doc, setDoc } from '@/src/lib/firebase';
+import { getOfficialSchoolLogoUrl } from '../../lib/constants';
 
 export type PlanTier = 'trial' | 'standard' | 'premium' | 'enterprise' | 'custom';
 export type LicenseStatus = 'active' | 'expiring_soon' | 'expired' | 'suspended' | 'archived';
@@ -113,6 +114,24 @@ export const SubscriptionsLicensingSection: React.FC = () => {
   const [editingLicense, setEditingLicense] = useState<SchoolLicense | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
+  // Grant New School License Modal
+  const [availableSchools, setAvailableSchools] = useState<SchoolRecord[]>([]);
+  const [isGrantLicenseModalOpen, setIsGrantLicenseModalOpen] = useState(false);
+  const [grantForm, setGrantForm] = useState({
+    schoolId: '',
+    schoolName: '',
+    governorate: '',
+    plan: 'standard' as PlanTier,
+    maxStudents: 600,
+    startDate: new Date().toISOString().split('T')[0],
+    expiryDate: new Date(Date.now() + 365 * 86400000).toISOString().split('T')[0],
+    subscriptionFee: 1500000,
+    paymentStatus: 'paid' as PaymentStatus,
+    contactPerson: '',
+    contactPhone: '',
+    notes: 'ترخيص سنوي معتمد لاستخدام منصة بوابة بيرق التعليمية.'
+  });
+
   // Official Receipt Modal
   const [selectedReceipt, setSelectedReceipt] = useState<SchoolLicense | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -141,6 +160,8 @@ export const SubscriptionsLicensingSection: React.FC = () => {
         getDocs(collection(db, 'activation_codes'))
       ]);
 
+      setAvailableSchools(schoolsList);
+
       const list: SchoolLicense[] = [];
       const now = new Date();
       const defaultExp = new Date(now.getTime() + 180 * 86400000).toISOString().split('T')[0];
@@ -164,7 +185,10 @@ export const SubscriptionsLicensingSection: React.FC = () => {
         const status = computeLicenseStatus(data.status, exp);
         const maxCapacity = data.maxStudents || (data.plan === 'enterprise' ? 3000 : data.plan === 'premium' ? 1500 : 600);
         const defaultFee = data.subscriptionFee || (data.plan === 'enterprise' ? 4500000 : data.plan === 'premium' ? 2500000 : 1500000);
-        const paymentStat: PaymentStatus = data.paymentStatus || 'paid';
+        const paymentStat: PaymentStatus = (data.paymentStatus as PaymentStatus) || 'paid';
+
+        const savedLocalLogo = typeof localStorage !== 'undefined' ? localStorage.getItem(`school_logo_${sId}`) : null;
+        const resolvedLogo = data.schoolLogoUrl || data.logoUrl || (data as any).schoolLogo || savedLocalLogo || getOfficialSchoolLogoUrl(sId, data.name);
 
         // Pre-generate verification QR code
         const verifyPayload = `https://bayraq-gate6.iq/verify?lic=${licenseNo}&rcpt=${receiptNo}&school=${encodeURIComponent(data.name || 'مدرسة')}&exp=${exp}&cap=${maxCapacity}&status=${status}`;
@@ -192,7 +216,7 @@ export const SubscriptionsLicensingSection: React.FC = () => {
           aiQuotaMonthly: data.plan === 'enterprise' ? 10000 : data.plan === 'premium' ? 5000 : 2000,
           qrCodeUrl: qrUrl,
           schoolStamp: data.stampUrl || data.schoolStamp || data.sealUrl || '',
-          schoolLogo: data.logoUrl || data.coverUrl || ''
+          schoolLogo: resolvedLogo
         });
       }
 
@@ -208,12 +232,84 @@ export const SubscriptionsLicensingSection: React.FC = () => {
     fetchLicensesAndSchools();
   }, []);
 
+  const handleSelectSchoolToGrant = (schoolId: string) => {
+    const sc = availableSchools.find(s => s.id === schoolId);
+    if (!sc) return;
+    const defaultExp = new Date(Date.now() + 365 * 86400000).toISOString().split('T')[0];
+    const defaultFee = sc.plan === 'enterprise' ? 4500000 : sc.plan === 'premium' ? 2500000 : 1500000;
+    const maxCapacity = sc.maxStudents || (sc.plan === 'enterprise' ? 3000 : sc.plan === 'premium' ? 1500 : 600);
+    
+    setGrantForm({
+      schoolId: sc.id,
+      schoolName: sc.name,
+      governorate: sc.governorate || 'الديوانية - غماس',
+      plan: (sc.plan as PlanTier) || 'standard',
+      maxStudents: maxCapacity,
+      startDate: new Date().toISOString().split('T')[0],
+      expiryDate: defaultExp,
+      subscriptionFee: defaultFee,
+      paymentStatus: (sc.paymentStatus as PaymentStatus) || 'paid',
+      contactPerson: sc.adminName || `إدارة ${sc.name}`,
+      contactPhone: sc.adminPhone || '07700000000',
+      notes: sc.licenseNotes || 'ترخيص سنوي معتمد لاستخدام منصة بوابة بيرق التعليمية.'
+    });
+  };
+
+  const handleGrantLicenseSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!grantForm.schoolId) {
+      showToast('يرجى اختيار المدرسة أولاً لمنحها الترخيص');
+      return;
+    }
+
+    const sc = availableSchools.find(s => s.id === grantForm.schoolId);
+    const sId = grantForm.schoolId;
+    const numericHash = Math.abs(
+      sId.split('').reduce((acc, char) => (acc << 5) - acc + char.charCodeAt(0), 0)
+    );
+    const receiptNo = sc?.receiptNumber || `RCPT-B6-2026-${String(numericHash % 9000 + 1000)}`;
+    const licenseNo = sc?.licenseNumber || `B6-LIC-${sId.slice(0, 3).toUpperCase()}-${String((numericHash * 7) % 90000 + 10000)}`;
+
+    const savedLocalLogo = typeof localStorage !== 'undefined' ? localStorage.getItem(`school_logo_${sId}`) : null;
+    const resolvedLogo = sc?.schoolLogoUrl || sc?.logoUrl || (sc as any)?.schoolLogo || savedLocalLogo || getOfficialSchoolLogoUrl(sId, grantForm.schoolName);
+
+    const newLicense: SchoolLicense = {
+      id: sId,
+      schoolId: sId,
+      schoolName: grantForm.schoolName,
+      governorate: grantForm.governorate,
+      receiptNumber: receiptNo,
+      licenseNumber: licenseNo,
+      plan: grantForm.plan,
+      status: computeLicenseStatus('active', grantForm.expiryDate),
+      maxStudents: Number(grantForm.maxStudents),
+      currentStudents: Number(sc?.studentsCount || sc?.students || 0),
+      startDate: grantForm.startDate,
+      expiryDate: grantForm.expiryDate,
+      issuedDate: new Date().toISOString().split('T')[0],
+      subscriptionFee: Number(grantForm.subscriptionFee),
+      paymentStatus: grantForm.paymentStatus,
+      contactPerson: grantForm.contactPerson,
+      contactPhone: grantForm.contactPhone,
+      notes: grantForm.notes,
+      aiQuotaMonthly: grantForm.plan === 'enterprise' ? 10000 : grantForm.plan === 'premium' ? 5000 : 2000,
+      qrCodeUrl: '',
+      schoolStamp: '',
+      schoolLogo: resolvedLogo
+    };
+
+    await handleUpdateLicense(newLicense);
+    setIsGrantLicenseModalOpen(false);
+    setSelectedReceipt(newLicense);
+    showToast(`تم منح وتفعيل الترخيص لمدرسة (${grantForm.schoolName}) بنجاح! 🏛️📜`);
+  };
+
   const handleUpdateLicense = async (updated: SchoolLicense) => {
     try {
       const computedStatus = computeLicenseStatus(updated.status, updated.expiryDate);
       const updatedWithStatus = { ...updated, status: computedStatus };
 
-      await updateDoc(doc(db, 'schools', updated.schoolId), {
+      const payload = {
         plan: updated.plan,
         maxStudents: Number(updated.maxStudents),
         subscriptionStart: updated.startDate,
@@ -227,9 +323,18 @@ export const SubscriptionsLicensingSection: React.FC = () => {
         adminName: updated.contactPerson || '',
         adminPhone: updated.contactPhone || '',
         licenseNotes: updated.notes || '',
-        status: updated.status === 'suspended' ? 'suspended' : 'active',
-        updatedAt: serverTimestamp()
-      });
+        status: updated.status === "suspended" ? "suspended" : "active"
+      };
+
+      try {
+        await fetch(`/api/schools/${updated.schoolId}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+      } catch(e) {}
+
+      await setDoc(doc(db, "schools", updated.schoolId), payload, { merge: true });
 
       await logActivity({
         action: 'تحديث بيانات ترخيص ووصل المدرسة',
@@ -974,6 +1079,19 @@ export const SubscriptionsLicensingSection: React.FC = () => {
           <div className="flex flex-wrap items-center gap-3">
             <button
               onClick={() => {
+                if (availableSchools.length > 0) {
+                  handleSelectSchoolToGrant(availableSchools[0].id);
+                }
+                setIsGrantLicenseModalOpen(true);
+              }}
+              className="px-5 py-3 bg-gradient-to-r from-emerald-500 via-teal-500 to-emerald-600 hover:from-emerald-400 hover:to-teal-400 text-slate-950 rounded-2xl font-black text-xs transition-all active:scale-95 shadow-xl shadow-emerald-500/25 flex items-center justify-center gap-2 cursor-pointer border border-emerald-300"
+            >
+              <PlusCircle size={18} />
+              منح ترخيص جديد لمدرسة 🏛️📜
+            </button>
+
+            <button
+              onClick={() => {
                 setArchiveTargetSchoolId(null);
                 setActiveTab('archives');
               }}
@@ -1215,13 +1333,26 @@ export const SubscriptionsLicensingSection: React.FC = () => {
 
                   return (
                     <tr key={lic.id} className="hover:bg-white/[0.02] transition-colors group">
-                      {/* School Name & Info */}
+                      {/* School Name & Info with Logo */}
                       <td className="py-4 pr-3">
-                        <div className="font-bold text-white text-sm">{lic.schoolName}</div>
-                        <div className="text-[10px] text-white/40 mt-0.5 flex items-center gap-1.5">
-                          <span>{lic.governorate}</span>
-                          <span>•</span>
-                          <span className="font-mono text-emerald-400/80">ID: {lic.schoolId}</span>
+                        <div className="flex items-center gap-3">
+                          <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 overflow-hidden shrink-0 flex items-center justify-center p-0.5">
+                            <img
+                              src={lic.schoolLogo || getOfficialSchoolLogoUrl(lic.schoolId, lic.schoolName)}
+                              alt={lic.schoolName}
+                              className="w-full h-full object-contain rounded-lg"
+                              referrerPolicy="no-referrer"
+                              onError={(e) => { (e.target as HTMLImageElement).src = '/logo.png'; }}
+                            />
+                          </div>
+                          <div>
+                            <div className="font-bold text-white text-sm">{lic.schoolName}</div>
+                            <div className="text-[10px] text-white/40 mt-0.5 flex items-center gap-1.5">
+                              <span>{lic.governorate}</span>
+                              <span>•</span>
+                              <span className="font-mono text-emerald-400/80">ID: {lic.schoolId}</span>
+                            </div>
+                          </div>
                         </div>
                       </td>
 
@@ -1342,13 +1473,14 @@ export const SubscriptionsLicensingSection: React.FC = () => {
                             <span>أرشفة</span>
                           </button>
 
-                          {/* Edit / Configure */}
+                          {/* Grant / Edit / Configure */}
                           <button
                             onClick={() => setEditingLicense(lic)}
-                            className="p-1.5 bg-white/5 hover:bg-white/10 text-white/70 hover:text-white rounded-xl transition-all border border-white/10 cursor-pointer"
-                            title="تعديل تفاصيل الترخيص"
+                            className="px-2.5 py-1.5 bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 rounded-xl text-[11px] font-bold transition-all border border-emerald-500/30 flex items-center gap-1 cursor-pointer active:scale-95"
+                            title="تعديل وتحديث تفاصيل وسعة الترخيص"
                           >
-                            <SlidersHorizontal size={15} />
+                            <ShieldCheck size={14} />
+                            <span>منح / تعديل</span>
                           </button>
                         </div>
                       </td>
@@ -1496,10 +1628,22 @@ export const SubscriptionsLicensingSection: React.FC = () => {
 
               {/* Core School & Subscription Details (Two-Column Layout) */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                {/* Column 1: School Details (With Contact Phone) */}
+                {/* Column 1: School Details (With Contact Phone & Logo) */}
                 <div className="bg-black/30 print:bg-white p-5 rounded-2xl border border-white/10 print:border-neutral-200 space-y-3">
-                  <div className="text-sm sm:text-base font-black text-amber-300 print:text-neutral-900 border-b border-white/10 print:border-neutral-200 pb-2.5 flex items-center gap-2">
-                    <Building size={18} /> بيانات الجهة والمدرسة المرخصة
+                  <div className="text-sm sm:text-base font-black text-amber-300 print:text-neutral-900 border-b border-white/10 print:border-neutral-200 pb-2.5 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Building size={18} /> بيانات الجهة والمدرسة المرخصة
+                    </div>
+                    {selectedReceipt.schoolLogo && (
+                      <div className="w-10 h-10 rounded-xl bg-white/5 border border-amber-400/30 overflow-hidden flex items-center justify-center p-1">
+                        <img
+                          src={selectedReceipt.schoolLogo}
+                          alt={selectedReceipt.schoolName}
+                          className="w-full h-full object-contain"
+                          onError={(e) => { (e.target as HTMLImageElement).src = '/logo.png'; }}
+                        />
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-2.5 text-xs sm:text-sm">
                     <div className="flex justify-between items-center">
@@ -1763,8 +1907,17 @@ export const SubscriptionsLicensingSection: React.FC = () => {
                   <label className="block text-[10px] font-bold text-white/50 mb-1">السعة المرخصة للطلاب:</label>
                   <input
                     type="number"
-                    value={editingLicense.maxStudents}
-                    onChange={(e) => setEditingLicense({ ...editingLicense, maxStudents: Number(e.target.value) })}
+                    min="0"
+                    placeholder="0"
+                    value={editingLicense.maxStudents === 0 ? '' : editingLicense.maxStudents}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setEditingLicense({
+                        ...editingLicense,
+                        maxStudents: val === '' ? 0 : Math.max(0, parseInt(val, 10) || 0)
+                      });
+                    }}
                     className="w-full bg-white/5 border border-white/10 rounded-xl p-2.5 text-white font-bold outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -1825,8 +1978,17 @@ export const SubscriptionsLicensingSection: React.FC = () => {
                   <label className="block text-[10px] font-bold text-white/50 mb-1">قيمة الاشتراك (د.ع):</label>
                   <input
                     type="number"
-                    value={editingLicense.subscriptionFee}
-                    onChange={(e) => setEditingLicense({ ...editingLicense, subscriptionFee: Number(e.target.value) })}
+                    min="0"
+                    placeholder="0"
+                    value={editingLicense.subscriptionFee === 0 ? '' : editingLicense.subscriptionFee}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setEditingLicense({
+                        ...editingLicense,
+                        subscriptionFee: val === '' ? 0 : Math.max(0, parseInt(val, 10) || 0)
+                      });
+                    }}
                     className="w-full bg-white/5 border border-white/10 rounded-xl p-2.5 text-white font-bold outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -1971,6 +2133,267 @@ export const SubscriptionsLicensingSection: React.FC = () => {
                 إغلاق نافذة التحقق
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Grant License to School Modal */}
+      {isGrantLicenseModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-[#0B1120] border-2 border-emerald-500/40 rounded-3xl max-w-2xl w-full p-6 sm:p-8 space-y-5 shadow-2xl relative">
+            <div className="flex items-center justify-between border-b border-white/10 pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-emerald-500/20 text-emerald-400 rounded-2xl border border-emerald-500/30">
+                  <PlusCircle size={24} />
+                </div>
+                <div>
+                  <h3 className="text-lg sm:text-xl font-black text-white">
+                    منح وتفعيل ترخيص لمدرسة من الميادين 🏛️📜
+                  </h3>
+                  <p className="text-xs text-white/60 font-bold mt-0.5">
+                    اختر أي مدرسة مسجلة لمنحها ترخيصاً رسمياً معتمداً وتحديد باقتها وسعتها.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsGrantLicenseModalOpen(false)}
+                className="p-2 bg-white/5 hover:bg-white/10 text-white/60 hover:text-white rounded-xl transition-all cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleGrantLicenseSubmit} className="space-y-4">
+              {/* School Selector */}
+              <div>
+                <label className="text-xs font-black text-white/80 block mb-1.5">
+                  اختيار المدرسة المراد منحها الترخيص (من قائمة المدارس في الميادين):
+                </label>
+                <select
+                  value={grantForm.schoolId}
+                  onChange={(e) => handleSelectSchoolToGrant(e.target.value)}
+                  className="w-full bg-[#151C2F] border border-emerald-500/40 text-white rounded-xl p-3 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                  required
+                >
+                  <option value="" disabled>-- اضغط لاختيار المدرسة من الميادين --</option>
+                  {availableSchools.map((sc) => {
+                    const hasActiveLic = licenses.some(l => l.schoolId === sc.id && l.status === 'active');
+                    return (
+                      <option key={sc.id} value={sc.id}>
+                        {sc.name} ({sc.governorate || 'غماس'}) {hasActiveLic ? '• [مرخصة حالياً]' : '• [بانتظار منح الترخيص]'}
+                      </option>
+                    );
+                  })}
+                </select>
+              </div>
+
+              {/* School Preview card if selected */}
+              {grantForm.schoolId && (
+                <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3.5 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-xl bg-black/40 border border-emerald-500/40 overflow-hidden flex items-center justify-center p-1 shrink-0">
+                      <img
+                        src={
+                          availableSchools.find(s => s.id === grantForm.schoolId)?.logoUrl ||
+                          (typeof localStorage !== 'undefined' ? localStorage.getItem(`school_logo_${grantForm.schoolId}`) : null) ||
+                          getOfficialSchoolLogoUrl(grantForm.schoolId, grantForm.schoolName)
+                        }
+                        alt={grantForm.schoolName}
+                        className="w-full h-full object-contain"
+                        onError={(e) => { (e.target as HTMLImageElement).src = '/logo.png'; }}
+                      />
+                    </div>
+                    <div>
+                      <div className="text-sm font-black text-emerald-300">{grantForm.schoolName}</div>
+                      <div className="text-xs text-white/60 font-mono">المعرف: {grantForm.schoolId} • {grantForm.governorate}</div>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <span className="text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-1 rounded-lg font-bold border border-emerald-500/30">
+                      جاهز لمنح الترخيص
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Grid 1: Plan Tier & Max Students */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-white/70 block mb-1">نوع باقة الترخيص:</label>
+                  <select
+                    value={grantForm.plan}
+                    onChange={(e) => {
+                      const p = e.target.value as PlanTier;
+                      const cap = p === 'enterprise' ? 3000 : p === 'premium' ? 1500 : 600;
+                      const fee = p === 'enterprise' ? 4500000 : p === 'premium' ? 2500000 : 1500000;
+                      setGrantForm(prev => ({ ...prev, plan: p, maxStudents: cap, subscriptionFee: fee }));
+                    }}
+                    className="w-full bg-[#151C2F] border border-white/10 text-white rounded-xl p-2.5 text-xs font-bold"
+                  >
+                    <option value="standard">الباقة الأساسية (Standard - حتى 600 طالب)</option>
+                    <option value="premium">الباقة المتقدمة (Premium - حتى 1500 طالب)</option>
+                    <option value="enterprise">الباقة المؤسسية الشاملة (Enterprise - حتى 3000 طالب)</option>
+                    <option value="trial">باقة تجريبية (Trial)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-white/70 block mb-1">سعة الطلاب المرخصة:</label>
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="0"
+                    value={grantForm.maxStudents === 0 ? '' : grantForm.maxStudents}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setGrantForm(prev => ({
+                        ...prev,
+                        maxStudents: val === '' ? 0 : Math.max(0, parseInt(val, 10) || 0)
+                      }));
+                    }}
+                    className="w-full bg-[#151C2F] border border-white/10 text-white rounded-xl p-2.5 text-xs font-mono font-bold"
+                  />
+                </div>
+              </div>
+
+              {/* Grid 2: Start Date & Expiry Date with quick buttons */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-white/70 block mb-1">تاريخ بدء الترخيص:</label>
+                  <input
+                    type="date"
+                    value={grantForm.startDate}
+                    onChange={(e) => setGrantForm(prev => ({ ...prev, startDate: e.target.value }))}
+                    className="w-full bg-[#151C2F] border border-white/10 text-white rounded-xl p-2.5 text-xs font-mono font-bold"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-xs font-bold text-white/70">تاريخ انتهاء الصلاحية:</label>
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const d = new Date(Date.now() + 180 * 86400000).toISOString().split('T')[0];
+                          setGrantForm(prev => ({ ...prev, expiryDate: d }));
+                        }}
+                        className="text-[10px] bg-white/5 hover:bg-white/10 text-white/80 px-1.5 py-0.5 rounded cursor-pointer"
+                      >
+                        +6 أشهر
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const d = new Date(Date.now() + 365 * 86400000).toISOString().split('T')[0];
+                          setGrantForm(prev => ({ ...prev, expiryDate: d }));
+                        }}
+                        className="text-[10px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.5 rounded cursor-pointer font-bold"
+                      >
+                        +1 سنة
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const d = new Date(Date.now() + 730 * 86400000).toISOString().split('T')[0];
+                          setGrantForm(prev => ({ ...prev, expiryDate: d }));
+                        }}
+                        className="text-[10px] bg-white/5 hover:bg-white/10 text-white/80 px-1.5 py-0.5 rounded cursor-pointer"
+                      >
+                        +2 سنتين
+                      </button>
+                    </div>
+                  </div>
+                  <input
+                    type="date"
+                    value={grantForm.expiryDate}
+                    onChange={(e) => setGrantForm(prev => ({ ...prev, expiryDate: e.target.value }))}
+                    className="w-full bg-[#151C2F] border border-white/10 text-white rounded-xl p-2.5 text-xs font-mono font-bold"
+                  />
+                </div>
+              </div>
+
+              {/* Grid 3: Fee & Payment Status */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-white/70 block mb-1">رسوم الاشتراك السنوي (د.ع):</label>
+                  <input
+                    type="number"
+                    min="0"
+                    placeholder="0"
+                    value={grantForm.subscriptionFee === 0 ? '' : grantForm.subscriptionFee}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setGrantForm(prev => ({
+                        ...prev,
+                        subscriptionFee: val === '' ? 0 : Math.max(0, parseInt(val, 10) || 0)
+                      }));
+                    }}
+                    className="w-full bg-[#151C2F] border border-white/10 text-white rounded-xl p-2.5 text-xs font-mono font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-white/70 block mb-1">حالة السداد والوصل:</label>
+                  <select
+                    value={grantForm.paymentStatus}
+                    onChange={(e) => setGrantForm(prev => ({ ...prev, paymentStatus: e.target.value as PaymentStatus }))}
+                    className="w-full bg-[#151C2F] border border-white/10 text-white rounded-xl p-2.5 text-xs font-bold"
+                  >
+                    <option value="paid">مدفوع بالكامل (Paid) ✓</option>
+                    <option value="partial">مسدد جزئياً (Partial)</option>
+                    <option value="pending">بانتظار السداد (Pending)</option>
+                    <option value="waived">إعفاء رسمي (Waived)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Grid 4: Contact Person & Phone */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-white/70 block mb-1">اسم المسؤول المفوض:</label>
+                  <input
+                    type="text"
+                    value={grantForm.contactPerson}
+                    onChange={(e) => setGrantForm(prev => ({ ...prev, contactPerson: e.target.value }))}
+                    className="w-full bg-[#151C2F] border border-white/10 text-white rounded-xl p-2.5 text-xs font-bold"
+                    placeholder="المدير المفوض"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-xs font-bold text-white/70 block mb-1">هاتف التواصل الرسمي:</label>
+                  <input
+                    type="text"
+                    value={grantForm.contactPhone}
+                    onChange={(e) => setGrantForm(prev => ({ ...prev, contactPhone: e.target.value }))}
+                    className="w-full bg-[#151C2F] border border-white/10 text-white rounded-xl p-2.5 text-xs font-mono font-bold"
+                    placeholder="07700000000"
+                    dir="ltr"
+                  />
+                </div>
+              </div>
+
+              {/* Submit Buttons */}
+              <div className="pt-2 flex items-center justify-end gap-3 border-t border-white/10">
+                <button
+                  type="button"
+                  onClick={() => setIsGrantLicenseModalOpen(false)}
+                  className="px-4 py-2.5 bg-white/5 hover:bg-white/10 text-white/70 hover:text-white rounded-xl text-xs font-bold transition-all cursor-pointer"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="submit"
+                  className="px-6 py-2.5 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-xs rounded-xl shadow-lg shadow-emerald-500/20 cursor-pointer active:scale-95 transition-all flex items-center gap-2"
+                >
+                  <ShieldCheck size={16} />
+                  <span>منح وتفعيل الترخيص فوراً وإصدار الوصل 📜⚡</span>
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
