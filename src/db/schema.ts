@@ -8,6 +8,10 @@ export const schools = pgTable("schools", {
   activationCode: varchar("activation_code", { length: 50 }),
   status: varchar("status", { length: 50 }).default('active'),
   disabledModules: jsonb("disabled_modules").default([]),
+  coverUrl: text("cover_url"),
+  logoUrl: text("logo_url"),
+  location: text("location"),
+  type: varchar("type", { length: 100 }),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

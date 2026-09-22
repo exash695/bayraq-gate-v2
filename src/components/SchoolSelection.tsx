@@ -445,8 +445,8 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
           status: st,
           isSuspended: (fs as any)?.isSuspended || st === 'suspended',
           students: fs?.students || 350,
-          schoolBairaqImageUrl: fs?.schoolBairaqImageUrl || sysSchool.schoolBairaqImageUrl,
-          schoolLogoUrl: fs?.schoolLogoUrl || sysSchool.schoolLogoUrl,
+          schoolBairaqImageUrl: fs?.coverUrl || fs?.schoolBairaqImageUrl || sysSchool.schoolBairaqImageUrl,
+          schoolLogoUrl: fs?.logoUrl || fs?.schoolLogoUrl || sysSchool.schoolLogoUrl,
         };
 
         seenIds.add(item.id);
@@ -470,8 +470,8 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
           status: fs.status || 'active',
           isSuspended: (fs as any)?.isSuspended || fs.status === 'suspended',
           students: fs.students || fs.studentsCount || 350,
-          schoolBairaqImageUrl: fs.schoolBairaqImageUrl || getSchoolBairaqImageUrl(fs.id, fs.name),
-          schoolLogoUrl: fs.schoolLogoUrl || getOfficialSchoolLogoUrl(fs.id, fs.name),
+          schoolBairaqImageUrl: fs.coverUrl || fs.schoolBairaqImageUrl || getSchoolBairaqImageUrl(fs.id, fs.name),
+          schoolLogoUrl: fs.logoUrl || fs.schoolLogoUrl || getOfficialSchoolLogoUrl(fs.id, fs.name),
         });
       }
     });

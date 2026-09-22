@@ -652,8 +652,8 @@ export default function App() {
       const item = {
         ...sysSchool,
         name: fs?.name || sysSchool.name,
-        schoolBairaqImageUrl: fs?.schoolBairaqImageUrl || sysSchool.schoolBairaqImageUrl,
-        schoolLogoUrl: fs?.schoolLogoUrl || sysSchool.schoolLogoUrl,
+        schoolBairaqImageUrl: fs?.coverUrl || fs?.schoolBairaqImageUrl || sysSchool.schoolBairaqImageUrl,
+        schoolLogoUrl: fs?.logoUrl || fs?.schoolLogoUrl || sysSchool.schoolLogoUrl,
       };
       seenIds.add(item.id);
       seenNames.add(normalize(item.name));
@@ -672,8 +672,8 @@ export default function App() {
           governorate: fs.governorate || "العراق",
           studentsCount: fs.studentsCount || 0,
           teachersCount: 0,
-          schoolBairaqImageUrl: fs.schoolBairaqImageUrl || '/schools/cover1.jpg',
-          schoolLogoUrl: fs.schoolLogoUrl || '/school-logos/logo1.jpg',
+          schoolBairaqImageUrl: fs.coverUrl || fs.schoolBairaqImageUrl || '/schools/cover1.jpg',
+          schoolLogoUrl: fs.logoUrl || fs.schoolLogoUrl || '/school-logos/logo1.jpg',
         } as any);
       }
     });

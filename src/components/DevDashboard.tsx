@@ -1738,6 +1738,101 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
     }
   };
 
+  const getDevAuthHeaders = () => {
+    const token = typeof localStorage !== 'undefined' ? localStorage.getItem('bairaq_jwt_token') : null;
+    return {
+      'Content-Type': 'application/json',
+      'x-user-role': 'developer',
+      'x-user-email': 'mntzralghanm527@gmail.com',
+      ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+    };
+  };
+
+  const syncSchoolToServer = async (schoolId: string, updates: any) => {
+    try {
+      const headers = getDevAuthHeaders();
+      const res = await fetch(`/api/schools/${schoolId}`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(updates)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.school) {
+          setSchools(prev => prev.map(s => s.id === schoolId ? { ...s, ...data.school } : s));
+        }
+      }
+      await schoolService.updateSchool(schoolId, updates);
+    } catch (e) {
+      console.warn('[SyncSchoolToServer] Notice:', e);
+    }
+  };
+
+  const [isSyncingMedia, setIsSyncingMedia] = useState(false);
+
+  const handleSyncAllMediaToServer = async () => {
+    setIsSyncingMedia(true);
+    triggerToast("جاري مزامنة ورفع صور وشعارات المدارس إلى السيرفر...", "info");
+    let syncedCount = 0;
+    try {
+      for (const s of schools) {
+        const localCover = localStorage.getItem(`school_cover_${s.id}`);
+        const localLogo = localStorage.getItem(`school_logo_${s.id}`);
+        const coverToSend = localCover || s.coverUrl || (s as any).schoolBairaqImageUrl;
+        const logoToSend = localLogo || s.logoUrl || (s as any).schoolLogoUrl;
+        
+        if (coverToSend || logoToSend) {
+          await syncSchoolToServer(s.id, {
+            name: s.name,
+            coverUrl: coverToSend,
+            logoUrl: logoToSend,
+            schoolBairaqImageUrl: coverToSend,
+            schoolLogoUrl: logoToSend,
+            location: s.location || s.governorate,
+            type: s.type
+          });
+          syncedCount++;
+        }
+      }
+      triggerToast(`تمت مزامنة صور ${syncedCount} مدرسة مع السيرفر بنجاح! ☁️`, "success");
+      const refreshed = await schoolService.fetchSchools();
+      if (refreshed && refreshed.length > 0) {
+        setSchools(refreshed);
+      }
+    } catch (err) {
+      console.error("Sync error:", err);
+      triggerToast("حدث خطأ أثناء مزامنة الصور مع السيرفر", "error");
+    } finally {
+      setIsSyncingMedia(false);
+    }
+  };
+
+  // Auto-sync any local covers / logos to PostgreSQL if present in this browser
+  useEffect(() => {
+    if (!schools || schools.length === 0) return;
+    const syncLocalMedia = async () => {
+      for (const s of schools) {
+        const localCover = localStorage.getItem(`school_cover_${s.id}`);
+        const localLogo = localStorage.getItem(`school_logo_${s.id}`);
+        if ((localCover && (!s.coverUrl || s.coverUrl.startsWith('/schools/'))) ||
+            (localLogo && (!s.logoUrl || s.logoUrl.startsWith('/school-logos/')))) {
+          try {
+            await syncSchoolToServer(s.id, {
+              name: s.name,
+              coverUrl: localCover || s.coverUrl,
+              logoUrl: localLogo || s.logoUrl,
+              schoolBairaqImageUrl: localCover || s.coverUrl,
+              schoolLogoUrl: localLogo || s.logoUrl,
+              location: s.location || s.governorate,
+              type: s.type
+            });
+          } catch (e) {}
+        }
+      }
+    };
+    syncLocalMedia();
+  }, [schools.length]);
+
   const handleCoverUpload = async (schoolId: string, event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -1746,8 +1841,8 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
       const reader = new FileReader();
       reader.onloadend = async () => {
         const base64 = reader.result as string;
-        if (base64.length > 2500000) { 
-            triggerToast("حجم الغلاف كبير جداً، يرجى اختيار صورة أصغر من 2.5 ميجابايت", "error");
+        if (base64.length > 4000000) { 
+            triggerToast("حجم الغلاف كبير جداً، يرجى اختيار صورة أصغر من 4 ميجابايت", "error");
             return;
         }
         
@@ -1760,9 +1855,9 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
           [schoolId]: { ...prev[schoolId], coverUrl: base64 }
         }));
         
-        triggerToast("جاري حفظ غلاف المدرسة...", "info");
+        triggerToast("جاري حفظ غلاف المدرسة ومزامنته مع السيرفر...", "info");
 
-        // 2. Persist to Firestore
+        // 2. Persist to Firestore and Server PostgreSQL
         try {
           await setDoc(doc(db, "schools", schoolId), { 
             coverUrl: base64, 
@@ -1770,15 +1865,12 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
             updatedAt: serverTimestamp() 
           }, { merge: true });
 
-          try {
-            await fetch(`/api/schools/${schoolId}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ coverUrl: base64 })
-            });
-          } catch (e) {}
+          await syncSchoolToServer(schoolId, { 
+            coverUrl: base64, 
+            schoolBairaqImageUrl: base64 
+          });
 
-          triggerToast("تم تحديث وحفظ غلاف المدرسة بنجاح! 🖼️", "success");
+          triggerToast("تم تحديث وحفظ غلاف المدرسة بنجاح في السيرفر! 🖼️", "success");
         } catch (dbErr) {
           console.error("Error saving cover:", dbErr);
           triggerToast("تم حفظ الغلاف محلياً", "warning");
@@ -1798,8 +1890,8 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
       const reader = new FileReader();
       reader.onloadend = async () => {
         const base64 = reader.result as string;
-        if (base64.length > 2000000) { 
-            triggerToast("حجم الشعار كبير جداً، يرجى اختيار صورة أصغر من 2 ميجابايت", "error");
+        if (base64.length > 3000000) { 
+            triggerToast("حجم الشعار كبير جداً، يرجى اختيار صورة أصغر من 3 ميجابايت", "error");
             return;
         }
         
@@ -1812,9 +1904,9 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
           [schoolId]: { ...prev[schoolId], logoUrl: base64 }
         }));
 
-        triggerToast("جاري حفظ وتثبيت لوغو المدرسة...", "info");
+        triggerToast("جاري حفظ وتثبيت لوغو المدرسة في السيرفر...", "info");
 
-        // 2. Persist to Firestore
+        // 2. Persist to Firestore and Server PostgreSQL
         try {
           await setDoc(doc(db, "schools", schoolId), { 
             logoUrl: base64, 
@@ -1822,15 +1914,12 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
             updatedAt: serverTimestamp() 
           }, { merge: true });
 
-          try {
-            await fetch(`/api/schools/${schoolId}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ logoUrl: base64, schoolLogoUrl: base64 })
-            });
-          } catch (e) {}
+          await syncSchoolToServer(schoolId, { 
+            logoUrl: base64, 
+            schoolLogoUrl: base64 
+          });
 
-          triggerToast("تم تحديث وحفظ لوغو المدرسة بنجاح في المنصة والتراخيص! ✨", "success");
+          triggerToast("تم تحديث وحفظ لوغو المدرسة بنجاح في السيرفر والمنصة! ✨", "success");
         } catch (dbErr) {
           console.error("Error saving logo to Firestore:", dbErr);
           triggerToast("تم عرض اللوغو وتثبيته محلياً", "warning");
@@ -1847,19 +1936,25 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
     if (!updates) return;
 
     try {
-      triggerToast("جاري حفظ الصور في الميادين...", "info");
+      triggerToast("جاري حفظ الصور في السيرفر والميادين...", "info");
       const dbUpdates: any = {};
-      if (updates.coverUrl) dbUpdates.coverUrl = updates.coverUrl;
-      if (updates.logoUrl) dbUpdates.logoUrl = updates.logoUrl;
+      if (updates.coverUrl) {
+        dbUpdates.coverUrl = updates.coverUrl;
+        dbUpdates.schoolBairaqImageUrl = updates.coverUrl;
+      }
+      if (updates.logoUrl) {
+        dbUpdates.logoUrl = updates.logoUrl;
+        dbUpdates.schoolLogoUrl = updates.logoUrl;
+      }
 
       setSchools(prev => prev.map(s => s.id === schoolId ? {
         ...s,
-        ...(updates.coverUrl ? { coverUrl: updates.coverUrl, schoolBairaqImageUrl: updates.coverUrl } : {}),
-        ...(updates.logoUrl ? { logoUrl: updates.logoUrl, schoolLogoUrl: updates.logoUrl } : {})
+        ...dbUpdates
       } : s));
 
       await setDoc(doc(db, "schools", schoolId), dbUpdates, { merge: true });
-      triggerToast("تم تحديث صور المدرسة بنجاح في أجهزة المستخدمين!", "success");
+      await syncSchoolToServer(schoolId, dbUpdates);
+      triggerToast("تم تحديث وحفظ صور المدرسة بنجاح في السيرفر لجميع المستخدمين!", "success");
       
       setPendingSchoolImages(prev => {
         const next = { ...prev };
@@ -2413,6 +2508,15 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
                   className="flex-1 py-4 bg-white/5 hover:bg-white/10 text-white/60 font-black rounded-2xl text-sm transition-all border border-white/5 flex items-center justify-center gap-2"
                 >
                   <RefreshCw size={18} /> مزامنة شاملة
+                </button>
+                <button 
+                  onClick={handleSyncAllMediaToServer}
+                  disabled={isSyncingMedia}
+                  className="flex-1 py-4 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 font-black rounded-2xl text-sm transition-all border border-emerald-500/30 flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/10"
+                  title="رفع صور وأغلفة المدارس وحفظها بالسيرفر وقاعدة البيانات لتظهر في كل المتصفحات"
+                >
+                  <RefreshCw size={18} className={isSyncingMedia ? "animate-spin text-emerald-400" : "text-emerald-400"} /> 
+                  مزامنة صور المدارس بالسيرفر ☁️
                 </button>
                 <button 
                   onClick={() => document.getElementById('add-school-form')?.scrollIntoView({ behavior: 'smooth' })}

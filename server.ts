@@ -1177,7 +1177,34 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
     };
   }
 
-  // Auto-seed default official schools in PostgreSQL
+  // Helper to persist base64 uploaded image to local file or return URL
+  const saveBase64Image = async (base64Data: string, prefix: string): Promise<string> => {
+    if (!base64Data || typeof base64Data !== 'string' || !base64Data.startsWith('data:image/')) {
+      return base64Data;
+    }
+    try {
+      const matches = base64Data.match(/^data:image\/([a-zA-Z0-9+]+);base64,(.+)$/);
+      if (!matches || matches.length < 3) return base64Data;
+      let ext = matches[1].toLowerCase();
+      if (ext === 'jpeg') ext = 'jpg';
+      if (ext === 'svg+xml') ext = 'svg';
+      const dataBuffer = Buffer.from(matches[2], 'base64');
+      
+      const uploadsDir = path.join(process.cwd(), 'public', 'uploads');
+      if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      }
+      const fileName = `${prefix}_${Date.now()}.${ext}`;
+      const filePath = path.join(uploadsDir, fileName);
+      await fsPromises.writeFile(filePath, dataBuffer);
+      return `/uploads/${fileName}`;
+    } catch (e) {
+      console.warn(`[SaveBase64Image] Failed to write file, returning raw string:`, e);
+      return base64Data;
+    }
+  };
+
+  // Auto-seed default official schools in PostgreSQL (preserves existing customized schools)
   const seedDefaultSchools = async () => {
     try {
       const defaultOfficialSchools = [
@@ -1188,7 +1215,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         { id: 'school5', name: 'مدارس ابن عقيل الأهلية', governorate: 'الديوانية - غماس', status: 'active' },
         { id: 'school6', name: 'مدرسة اليمامة الابتدائية', governorate: 'الديوانية - غماس', status: 'active' },
         { id: 'school7', name: 'مدارس الجواهري الاهلية', governorate: 'الديوانية - غماس', status: 'active' },
-        { id: 'school8', name: 'معهد ابداعنا للتعليم المطور', governorate: 'الديوانية - غماس', status: 'active' },
+        { id: 'school8', name: 'أكاديمية بيرق الرقمية', governorate: 'العراق - دورات نخبة الأساتذة', status: 'active' },
       ];
       for (const item of defaultOfficialSchools) {
         await db.insert(schools).values({
@@ -1196,14 +1223,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
           name: item.name,
           governorate: item.governorate,
           status: item.status,
-        }).onConflictDoUpdate({
-          target: schools.id,
-          set: {
-            name: item.name,
-            governorate: item.governorate,
-            status: item.status,
-          }
-        });
+        }).onConflictDoNothing();
       }
       console.log('[DB] Official Ghammas schools verified in PostgreSQL');
     } catch (e) {
@@ -1217,16 +1237,31 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
   // إضافة مدرسة جديدة (Sync) - Restricted to Platform Developer
   app.post('/api/schools', requireDeveloper, async (req, res) => {
     try {
-      const { id, name, governorate, activationCode, status, disabledModules, disabled_modules } = req.body;
+      const { id, name, governorate, location, city, type, activationCode, status, disabledModules, disabled_modules } = req.body;
+      let { coverUrl, logoUrl, schoolBairaqImageUrl, schoolLogoUrl } = req.body;
       const schoolId = id || `school_${Date.now()}`;
       const resolvedDisabled = Array.isArray(disabledModules)
         ? disabledModules
         : (Array.isArray(disabled_modules) ? disabled_modules : []);
 
+      let resolvedCover = coverUrl || schoolBairaqImageUrl;
+      let resolvedLogo = logoUrl || schoolLogoUrl;
+      if (resolvedCover && resolvedCover.startsWith('data:image/')) {
+        resolvedCover = await saveBase64Image(resolvedCover, `school_${schoolId}_cover`);
+      }
+      if (resolvedLogo && resolvedLogo.startsWith('data:image/')) {
+        resolvedLogo = await saveBase64Image(resolvedLogo, `school_${schoolId}_logo`);
+      }
+      const resolvedLocation = location || city || governorate || 'الديوانية - غماس';
+
       const newSchool = await db.insert(schools).values({
-        id: schoolId, // Using Firebase ID as primary key
+        id: schoolId,
         name: name || 'مدرسة جديدة',
-        governorate: governorate || 'غير محدد',
+        governorate: governorate || resolvedLocation,
+        location: resolvedLocation,
+        type: type || 'ميدان تعليمي',
+        coverUrl: resolvedCover || null,
+        logoUrl: resolvedLogo || null,
         activationCode: activationCode || '',
         status: status || 'active',
         disabledModules: resolvedDisabled,
@@ -1234,7 +1269,11 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         target: schools.id,
         set: {
           name: name || undefined,
-          governorate: governorate || undefined,
+          governorate: governorate || resolvedLocation || undefined,
+          location: resolvedLocation || undefined,
+          type: type || undefined,
+          coverUrl: resolvedCover || undefined,
+          logoUrl: resolvedLogo || undefined,
           activationCode: activationCode || undefined,
           status: status || undefined,
           disabledModules: resolvedDisabled
@@ -1243,6 +1282,12 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
       
       const returned = {
         ...newSchool[0],
+        coverUrl: newSchool[0]?.coverUrl || resolvedCover,
+        logoUrl: newSchool[0]?.logoUrl || resolvedLogo,
+        schoolBairaqImageUrl: newSchool[0]?.coverUrl || resolvedCover,
+        schoolLogoUrl: newSchool[0]?.logoUrl || resolvedLogo,
+        location: newSchool[0]?.location || resolvedLocation,
+        city: newSchool[0]?.location || resolvedLocation,
         disabledModules: Array.isArray(newSchool[0]?.disabledModules)
           ? newSchool[0]?.disabledModules
           : (Array.isArray((newSchool[0] as any)?.disabled_modules) ? (newSchool[0] as any).disabled_modules : resolvedDisabled)
@@ -1269,10 +1314,24 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         ? (Array.isArray(updates.disabledModules) ? updates.disabledModules : [])
         : (updates.disabled_modules !== undefined ? (Array.isArray(updates.disabled_modules) ? updates.disabled_modules : []) : undefined);
 
+      let resolvedCover = updates.coverUrl || updates.schoolBairaqImageUrl;
+      let resolvedLogo = updates.logoUrl || updates.schoolLogoUrl;
+      if (resolvedCover && resolvedCover.startsWith('data:image/')) {
+        resolvedCover = await saveBase64Image(resolvedCover, `school_${id}_cover`);
+      }
+      if (resolvedLogo && resolvedLogo.startsWith('data:image/')) {
+        resolvedLogo = await saveBase64Image(resolvedLogo, `school_${id}_logo`);
+      }
+      const resolvedLocation = updates.location || updates.city || updates.governorate;
+
       if (existing.length > 0) {
         const updatePayload: any = {};
         if (updates.name !== undefined) updatePayload.name = updates.name;
         if (updates.governorate !== undefined) updatePayload.governorate = updates.governorate;
+        if (resolvedLocation !== undefined) updatePayload.location = resolvedLocation;
+        if (updates.type !== undefined) updatePayload.type = updates.type;
+        if (resolvedCover !== undefined) updatePayload.coverUrl = resolvedCover;
+        if (resolvedLogo !== undefined) updatePayload.logoUrl = resolvedLogo;
         if (updates.activationCode !== undefined) updatePayload.activationCode = updates.activationCode;
         if (updates.status !== undefined) updatePayload.status = updates.status;
         if (disabledList !== undefined) updatePayload.disabledModules = disabledList;
@@ -1290,7 +1349,11 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         const resInserted = await db.insert(schools).values({
           id,
           name: updates.name,
-          governorate: updates.governorate || 'غير محدد',
+          governorate: updates.governorate || resolvedLocation || 'غير محدد',
+          location: resolvedLocation || updates.governorate || 'الديوانية - غماس',
+          type: updates.type || 'ميدان تعليمي',
+          coverUrl: resolvedCover || null,
+          logoUrl: resolvedLogo || null,
           activationCode: updates.activationCode || updates.code || id,
           status: updates.status || 'active',
           disabledModules: disabledList !== undefined ? disabledList : [],
@@ -1299,11 +1362,16 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         returnedSchool = resInserted[0] || { id, ...updates, disabledModules: disabledList || [] };
       }
 
-      // Ensure returnedSchool has disabledModules properly formatted
       if (returnedSchool) {
         returnedSchool.disabledModules = Array.isArray(returnedSchool.disabledModules)
           ? returnedSchool.disabledModules
           : (Array.isArray(returnedSchool.disabled_modules) ? returnedSchool.disabled_modules : (disabledList || []));
+        returnedSchool.coverUrl = returnedSchool.coverUrl || (returnedSchool as any).cover_url || resolvedCover;
+        returnedSchool.logoUrl = returnedSchool.logoUrl || (returnedSchool as any).logo_url || resolvedLogo;
+        returnedSchool.schoolBairaqImageUrl = returnedSchool.coverUrl;
+        returnedSchool.schoolLogoUrl = returnedSchool.logoUrl;
+        returnedSchool.location = returnedSchool.location || resolvedLocation || returnedSchool.governorate;
+        returnedSchool.city = returnedSchool.location;
       }
 
       realtimeServerInstance?.broadcastManual('schools', id, 'UPDATE', returnedSchool || { id, ...updates, disabledModules: disabledList || [] });
@@ -1328,10 +1396,24 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         ? (Array.isArray(updates.disabledModules) ? updates.disabledModules : [])
         : (updates.disabled_modules !== undefined ? (Array.isArray(updates.disabled_modules) ? updates.disabled_modules : []) : undefined);
 
+      let resolvedCover = updates.coverUrl || updates.schoolBairaqImageUrl;
+      let resolvedLogo = updates.logoUrl || updates.schoolLogoUrl;
+      if (resolvedCover && resolvedCover.startsWith('data:image/')) {
+        resolvedCover = await saveBase64Image(resolvedCover, `school_${id}_cover`);
+      }
+      if (resolvedLogo && resolvedLogo.startsWith('data:image/')) {
+        resolvedLogo = await saveBase64Image(resolvedLogo, `school_${id}_logo`);
+      }
+      const resolvedLocation = updates.location || updates.city || updates.governorate;
+
       if (existing.length > 0) {
         const updatePayload: any = {};
         if (updates.name !== undefined) updatePayload.name = updates.name;
         if (updates.governorate !== undefined) updatePayload.governorate = updates.governorate;
+        if (resolvedLocation !== undefined) updatePayload.location = resolvedLocation;
+        if (updates.type !== undefined) updatePayload.type = updates.type;
+        if (resolvedCover !== undefined) updatePayload.coverUrl = resolvedCover;
+        if (resolvedLogo !== undefined) updatePayload.logoUrl = resolvedLogo;
         if (updates.activationCode !== undefined) updatePayload.activationCode = updates.activationCode;
         if (updates.status !== undefined) updatePayload.status = updates.status;
         if (disabledList !== undefined) updatePayload.disabledModules = disabledList;
@@ -1349,7 +1431,11 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         const resInserted = await db.insert(schools).values({
           id,
           name: updates.name,
-          governorate: updates.governorate || 'غير محدد',
+          governorate: updates.governorate || resolvedLocation || 'غير محدد',
+          location: resolvedLocation || updates.governorate || 'الديوانية - غماس',
+          type: updates.type || 'ميدان تعليمي',
+          coverUrl: resolvedCover || null,
+          logoUrl: resolvedLogo || null,
           activationCode: updates.activationCode || updates.code || id,
           status: updates.status || 'active',
           disabledModules: disabledList !== undefined ? disabledList : [],
@@ -1362,6 +1448,12 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         returnedSchool.disabledModules = Array.isArray(returnedSchool.disabledModules)
           ? returnedSchool.disabledModules
           : (Array.isArray(returnedSchool.disabled_modules) ? returnedSchool.disabled_modules : (disabledList || []));
+        returnedSchool.coverUrl = returnedSchool.coverUrl || (returnedSchool as any).cover_url || resolvedCover;
+        returnedSchool.logoUrl = returnedSchool.logoUrl || (returnedSchool as any).logo_url || resolvedLogo;
+        returnedSchool.schoolBairaqImageUrl = returnedSchool.coverUrl;
+        returnedSchool.schoolLogoUrl = returnedSchool.logoUrl;
+        returnedSchool.location = returnedSchool.location || resolvedLocation || returnedSchool.governorate;
+        returnedSchool.city = returnedSchool.location;
       }
 
       realtimeServerInstance?.broadcastManual('schools', id, 'UPDATE', returnedSchool || { id, ...updates, disabledModules: disabledList || [] });
@@ -1382,10 +1474,24 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         ? updates.disabledModules
         : (Array.isArray(updates.disabled_modules) ? updates.disabled_modules : []);
       
+      let resolvedCover = updates.coverUrl || updates.schoolBairaqImageUrl;
+      let resolvedLogo = updates.logoUrl || updates.schoolLogoUrl;
+      if (resolvedCover && resolvedCover.startsWith('data:image/')) {
+        resolvedCover = await saveBase64Image(resolvedCover, `school_${id}_cover`);
+      }
+      if (resolvedLogo && resolvedLogo.startsWith('data:image/')) {
+        resolvedLogo = await saveBase64Image(resolvedLogo, `school_${id}_logo`);
+      }
+      const resolvedLocation = updates.location || updates.city || updates.governorate || 'الديوانية - غماس';
+
       const result = await db.insert(schools).values({
         id,
         name: updates.name || 'مدرسة جديدة',
-        governorate: updates.governorate || 'غير محدد',
+        governorate: updates.governorate || resolvedLocation,
+        location: resolvedLocation,
+        type: updates.type || 'ميدان تعليمي',
+        coverUrl: resolvedCover || null,
+        logoUrl: resolvedLogo || null,
         activationCode: updates.activationCode || updates.code || id,
         status: updates.status || 'active',
         disabledModules: resolvedDisabled,
@@ -1394,7 +1500,11 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         target: schools.id,
         set: {
           name: updates.name || undefined,
-          governorate: updates.governorate || undefined,
+          governorate: updates.governorate || resolvedLocation || undefined,
+          location: resolvedLocation || undefined,
+          type: updates.type || undefined,
+          coverUrl: resolvedCover || undefined,
+          logoUrl: resolvedLogo || undefined,
           activationCode: updates.activationCode || undefined,
           status: updates.status || undefined,
           disabledModules: resolvedDisabled
@@ -1403,6 +1513,12 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
 
       const returned = {
         ...result[0],
+        coverUrl: result[0]?.coverUrl || resolvedCover,
+        logoUrl: result[0]?.logoUrl || resolvedLogo,
+        schoolBairaqImageUrl: result[0]?.coverUrl || resolvedCover,
+        schoolLogoUrl: result[0]?.logoUrl || resolvedLogo,
+        location: result[0]?.location || resolvedLocation,
+        city: result[0]?.location || resolvedLocation,
         disabledModules: Array.isArray(result[0]?.disabledModules)
           ? result[0].disabledModules
           : (Array.isArray((result[0] as any)?.disabled_modules) ? (result[0] as any).disabled_modules : resolvedDisabled)
@@ -1420,12 +1536,24 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
   app.get('/api/schools', async (req, res) => {
     try {
       const allSchools = await db.select().from(schools);
-      const mappedSchools = allSchools.map(s => ({
-        ...s,
-        disabledModules: Array.isArray(s.disabledModules)
-          ? s.disabledModules
-          : (Array.isArray((s as any).disabled_modules) ? (s as any).disabled_modules : [])
-      }));
+      const mappedSchools = allSchools.map(s => {
+        const cover = s.coverUrl || (s as any).cover_url;
+        const logo = s.logoUrl || (s as any).logo_url;
+        const loc = s.location || s.governorate || 'الديوانية - غماس';
+        return {
+          ...s,
+          coverUrl: cover,
+          logoUrl: logo,
+          schoolBairaqImageUrl: cover,
+          schoolLogoUrl: logo,
+          location: loc,
+          city: loc,
+          governorate: s.governorate || loc,
+          disabledModules: Array.isArray(s.disabledModules)
+            ? s.disabledModules
+            : (Array.isArray((s as any).disabled_modules) ? (s as any).disabled_modules : [])
+        };
+      });
       res.json({ success: true, schools: mappedSchools, data: mappedSchools });
     } catch (error: any) {
       console.error('Error fetching schools:', error);
@@ -1442,8 +1570,18 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         return res.json({ success: true, school: null, data: null });
       }
       const school = schoolList[0];
+      const cover = school.coverUrl || (school as any).cover_url;
+      const logo = school.logoUrl || (school as any).logo_url;
+      const loc = school.location || school.governorate || 'الديوانية - غماس';
       const mappedSchool = {
         ...school,
+        coverUrl: cover,
+        logoUrl: logo,
+        schoolBairaqImageUrl: cover,
+        schoolLogoUrl: logo,
+        location: loc,
+        city: loc,
+        governorate: school.governorate || loc,
         disabledModules: Array.isArray(school.disabledModules)
           ? school.disabledModules
           : (Array.isArray((school as any).disabled_modules) ? (school as any).disabled_modules : [])
@@ -11805,6 +11943,16 @@ app.post('/api/admin/maintenance/purge-cache', async (req, res) => {
   const server = app.listen(3000, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:3000`);
   });
+
+  // Ensure schools table has cover_url, logo_url, location, and type columns
+  try {
+    await sqlRaw`ALTER TABLE schools ADD COLUMN IF NOT EXISTS "cover_url" text;`;
+    await sqlRaw`ALTER TABLE schools ADD COLUMN IF NOT EXISTS "logo_url" text;`;
+    await sqlRaw`ALTER TABLE schools ADD COLUMN IF NOT EXISTS "location" text;`;
+    await sqlRaw`ALTER TABLE schools ADD COLUMN IF NOT EXISTS "type" varchar(100);`;
+  } catch (schemaErr) {
+    // Non-blocking fallback
+  }
 
   // Ensure school_announcements table allows global/system-wide broadcasts ('all', 'general', etc.)
   try {
