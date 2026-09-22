@@ -437,6 +437,10 @@ export default function App() {
     () => {
       try {
         const saved = safeStorage.getItem("s6_activeSection");
+        if (saved === "gate-6") {
+          safeStorage.setItem("s6_activeSection", "hub");
+          return "hub";
+        }
         const validSections: AppSection[] = [
           "hub",
           "mayadeen",
@@ -462,9 +466,9 @@ export default function App() {
         ];
         return validSections.includes(saved as AppSection)
           ? (saved as AppSection)
-          : "gate-6";
+          : "hub";
       } catch {
-        return "gate-6";
+        return "hub";
       }
     },
   );
@@ -1969,11 +1973,11 @@ export default function App() {
       );
     }
 
+    if (!user) return <AuthPage onOpenPrivacy={() => setShowPrivacyPublic(true)} />;
+
     if (activeSection === "gate-6") {
       return <Gate6 onBack={() => setActiveSection('hub')} />;
     }
-
-    if (!user) return <AuthPage onOpenPrivacy={() => setShowPrivacyPublic(true)} />;
 
     if (activeSection === "privacy-policy") {
       return <PrivacyPolicy onBack={() => setActiveSection('control')} />;
