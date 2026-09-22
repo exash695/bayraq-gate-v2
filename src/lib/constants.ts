@@ -61,10 +61,17 @@ export const SCHOOLS_DATA: SchoolItem[] = [
   },
   { 
     id: 'school8', 
-    name: 'أكاديمية بيرق الرقمية', 
-    type: 'منصة الدورات الألكترونية لنخبة الأساتذة',
+    name: 'معهد ابداعنا للتعليم المطور', 
+    type: 'تعليم نوعي وتطوير مستمر',
     schoolBairaqImageUrl: '/schools/cover8.jpg',
     schoolLogoUrl: '/school-logos/logo8.jpg'
+  },
+  { 
+    id: 'general', 
+    name: 'أكاديمية بيرق الرقمية', 
+    type: 'منصة الدورات الألكترونية لنخبة الأساتذة',
+    schoolBairaqImageUrl: '/uploads/school_general_cover_1790088445960.png',
+    schoolLogoUrl: '/logo.png'
   },
 ];
 
@@ -75,6 +82,7 @@ export function getSchoolBairaqImageUrl(schoolId?: string, schoolName?: string):
   let relativePath = '/schools/cover1.jpg';
   if (schoolId) {
     const cleanId = String(schoolId).trim();
+    if (cleanId === 'general') return '/uploads/school_general_cover_1790088445960.png';
     const num = cleanId.replace(/\D/g, '');
     if (num && parseInt(num) >= 1 && parseInt(num) <= 8) {
       relativePath = `/schools/cover${num}.jpg`;
@@ -91,6 +99,7 @@ export function getSchoolBairaqImageUrl(schoolId?: string, schoolName?: string):
     else if (name.includes('اليمامة')) relativePath = '/schools/cover6.jpg';
     else if (name.includes('الجواهري')) relativePath = '/schools/cover7.jpg';
     else if (name.includes('إبداعنا') || name.includes('ابداعنا')) relativePath = '/schools/cover8.jpg';
+    else if (name.includes('بيرق') || name.includes('أكاديمية') || name.includes('اكاديمية')) relativePath = '/uploads/school_general_cover_1790088445960.png';
   }
   return relativePath;
 }
@@ -105,6 +114,7 @@ export function getOfficialSchoolLogoUrl(schoolId?: string, schoolName?: string,
   let relativePath = '/school-logos/logo1.jpg';
   if (schoolId) {
     const cleanId = String(schoolId).trim();
+    if (cleanId === 'general') return '/logo.png';
     const num = cleanId.replace(/\D/g, '');
     if (num && parseInt(num) >= 1 && parseInt(num) <= 8) {
       relativePath = `/school-logos/logo${num}.jpg`;
@@ -121,6 +131,7 @@ export function getOfficialSchoolLogoUrl(schoolId?: string, schoolName?: string,
     else if (name.includes('اليمامة')) relativePath = '/school-logos/logo6.jpg';
     else if (name.includes('الجواهري')) relativePath = '/school-logos/logo7.jpg';
     else if (name.includes('إبداعنا') || name.includes('ابداعنا')) relativePath = '/school-logos/logo8.jpg';
+    else if (name.includes('بيرق') || name.includes('أكاديمية') || name.includes('اكاديمية')) relativePath = '/logo.png';
   }
   return relativePath;
 }
@@ -148,7 +159,8 @@ export function getOfficialSchoolName(schoolId?: string, schoolName?: string): s
     if (name.includes('عقيل')) return 'مدارس ابن عقيل الأهلية';
     if (name.includes('اليمامة')) return 'مدرسة اليمامة الابتدائية';
     if (name.includes('الجواهري')) return 'مدارس الجواهري الاهلية';
-    if (name.includes('أكاديمية') || name.includes('اكاديمية') || name.includes('الرقمية') || name.includes('إبداعنا') || name.includes('ابداعنا')) return 'أكاديمية بيرق الرقمية';
+    if (name.includes('إبداعنا') || name.includes('ابداعنا')) return 'معهد ابداعنا للتعليم المطور';
+    if (name.includes('أكاديمية') || name.includes('اكاديمية') || name.includes('الرقمية') || name.includes('بيرق')) return 'أكاديمية بيرق الرقمية';
   }
 
   return 'ثانوية اوائل غماس الاهلية';

@@ -177,19 +177,19 @@ const SCHOOL_THEMES: Record<string, SchoolThemeConfig> = {
     icon: Landmark,
   },
   school8: {
-    bgGradient: 'from-[#381E02] via-[#200F01] to-[#0A0400]',
-    borderColor: 'rgba(245, 158, 11, 0.45)',
-    glowShadow: '0 4px 25px -2px rgba(245, 158, 11, 0.25)',
-    accentColor: '#F59E0B',
-    badgeBg: 'rgba(245, 158, 11, 0.18)',
-    badgeText: '#FCD34D',
-    tagColor: 'border-amber-500/40 text-amber-300 bg-amber-500/15',
-    city: 'العراق - دورات نخبة الأساتذة',
-    students: 1450,
-    buses: 0,
+    bgGradient: 'from-[#062c21] via-[#031c15] to-[#010e0a]',
+    borderColor: 'rgba(16, 185, 129, 0.45)',
+    glowShadow: '0 4px 25px -2px rgba(16, 185, 129, 0.25)',
+    accentColor: '#10B981',
+    badgeBg: 'rgba(16, 185, 129, 0.18)',
+    badgeText: '#6EE7B7',
+    tagColor: 'border-emerald-500/40 text-emerald-300 bg-emerald-500/15',
+    city: 'الديوانية - غماس',
+    students: 480,
+    buses: 8,
     category: 'institute',
-    slogan: 'منصة الدورات الألكترونية لنخبة الأساتذة',
-    desc: 'الملتقى الرقمي الأكاديمي لدورات نخبة الأساتذة، الملازم التفاعلية، تحديات الـ 60 ثانية وبنك الأفكار الذكية.',
+    slogan: 'تعليم نوعي وتطوير مستمر للأجيال',
+    desc: 'معهد إبداعنا للتعليم المطور يقدم بيئة تعليمية متقدمة تركز على بناء القدرات وتطوير المهارات العلمية بأحدث الوسائل.',
     icon: GraduationCap,
   },
   general: {
@@ -392,7 +392,6 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
     if (!school) return false;
     const norm = normalizeSchoolName(school.name);
     return (
-      school.id === 'school8' ||
       school.id === 'general' ||
       school.id === 'academy' ||
       norm.includes('اكاديميه') ||

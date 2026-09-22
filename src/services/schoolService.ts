@@ -90,11 +90,34 @@ export const schoolService = {
         }
       });
 
-      // Harmonize general / school8 for Berq Digital Academy
-      if (mergedMap['general'] && !mergedMap['school8']) {
-        mergedMap['school8'] = { ...mergedMap['general'], id: 'school8' };
-      } else if (mergedMap['school8'] && mergedMap['general']) {
-        mergedMap['school8'] = { ...mergedMap['school8'], status: mergedMap['general'].status || mergedMap['school8'].status };
+      // Ensure both school8 (معهد ابداعنا) and general (أكاديمية بيرق الرقمية) coexist independently
+      if (!mergedMap['school8']) {
+        const sys8 = SCHOOLS_DATA.find(s => s.id === 'school8');
+        if (sys8) {
+          mergedMap['school8'] = {
+            id: 'school8',
+            name: sys8.name,
+            type: sys8.type,
+            governorate: 'الديوانية - غماس',
+            status: 'active',
+            schoolBairaqImageUrl: sys8.schoolBairaqImageUrl,
+            schoolLogoUrl: sys8.schoolLogoUrl
+          };
+        }
+      }
+      if (!mergedMap['general']) {
+        const sysGen = SCHOOLS_DATA.find(s => s.id === 'general');
+        if (sysGen) {
+          mergedMap['general'] = {
+            id: 'general',
+            name: sysGen.name,
+            type: sysGen.type,
+            governorate: 'العراق - دورات نخبة الأساتذة',
+            status: 'active',
+            schoolBairaqImageUrl: sysGen.schoolBairaqImageUrl,
+            schoolLogoUrl: sysGen.schoolLogoUrl
+          };
+        }
       }
 
       // Ensure all standard system schools exist in the list unless explicitly deleted

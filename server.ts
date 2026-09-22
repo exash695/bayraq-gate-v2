@@ -7299,6 +7299,81 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         }
       }
 
+      // Universal Cross-Platform Fallback: If code not found in local SQL tables, check if verified Firestore doc is provided
+      const fsDoc = req.body?.firestoreCodeDoc;
+      if (teacherDirectList.length === 0 && activationList.length === 0 && studentList.length === 0 && parentList.length === 0 && driverList.length === 0) {
+        if (fsDoc && typeof fsDoc === 'object') {
+          const fsRole = (fsDoc.role || '').toLowerCase();
+          const fsSchool = fsDoc.schoolId || targetSchoolId || 'school1';
+          const fsCode = String(fsDoc.code || fsDoc.parentCode || fsDoc.studentCode || cleanCode).trim().toUpperCase();
+
+          // Auto-cache to PostgreSQL activation_codes
+          try {
+            await db.insert(activation_codes).values({
+              id: String(fsDoc.id || `act_${Date.now()}`),
+              code: fsCode,
+              schoolId: fsSchool,
+              role: fsRole || (isTeacherPrefix ? 'teacher' : isAdminPrefix ? 'admin' : 'student'),
+              used: fsDoc.used === true,
+              createdAt: new Date().toISOString()
+            }).onConflictDoNothing();
+          } catch (syncErr) {
+            console.warn('Auto-sync firestoreCodeDoc into PostgreSQL warning:', syncErr);
+          }
+
+          if (fsRole.includes('teacher') || isTeacherPrefix) {
+            try {
+              await db.insert(teachers).values({
+                id: String(fsDoc.id || `tch_${cleanCode}`),
+                code: fsCode,
+                name: fsDoc.name || fsDoc.teacherName || 'أستاذ المادة',
+                schoolId: fsSchool,
+                subject: fsDoc.subject || 'المادة الدراسية',
+                grade: fsDoc.grade || 'جميع المراحل',
+                isActive: true
+              }).onConflictDoNothing();
+            } catch (tchErr) {}
+
+            teacherDirectList = [{
+              id: String(fsDoc.id || `tch_${cleanCode}`),
+              name: fsDoc.name || fsDoc.teacherName || 'أستاذ المادة',
+              code: fsCode,
+              schoolId: fsSchool,
+              subject: fsDoc.subject || 'المادة الدراسية',
+              grade: fsDoc.grade || 'جميع المراحل',
+              isActive: fsDoc.isActive !== false,
+              isBanned: false
+            }];
+          } else if (fsRole.includes('admin') || isAdminPrefix) {
+            activationList = [{
+              id: String(fsDoc.id || `act_${cleanCode}`),
+              code: fsCode,
+              schoolId: fsSchool,
+              role: 'admin',
+              used: false
+            }];
+          } else if (fsRole.includes('parent') || isParentPrefix) {
+            parentList = [{
+              id: String(fsDoc.id || `par_${cleanCode}`),
+              name: fsDoc.name || 'ولي أمر الطالب',
+              code: fsDoc.studentCode || cleanCode,
+              parentCode: fsCode,
+              schoolId: fsSchool,
+              grade: fsDoc.grade || 'أول ابتدائي',
+              gender: 'male'
+            }];
+          } else {
+            activationList = [{
+              id: String(fsDoc.id || `act_${cleanCode}`),
+              code: fsCode,
+              schoolId: fsSchool,
+              role: fsDoc.role || 'student',
+              used: false
+            }];
+          }
+        }
+      }
+
       // 0. Defer targetSchoolId suspension check to specific role handlers to allow developer bypass via email
       // (Originally line 6548-6559)
 
