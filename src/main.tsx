@@ -9,33 +9,23 @@ import { getApiBaseUrl } from './lib/serverConfig';
 // Automatic Mobile / Native App API URL routing
 if (typeof window !== 'undefined') {
   try {
-    const isCapacitorOrLocal = 
-      window.location.protocol === 'capacitor:' || 
-      window.location.protocol === 'file:' || 
-      window.location.hostname === 'localhost' ||
-      window.location.hostname === '127.0.0.1' ||
-      Boolean((window as any).Capacitor?.isNativePlatform?.()) ||
-      Boolean((window as any).Capacitor);
-
-    if (isCapacitorOrLocal) {
-      const originalFetch = window.fetch.bind(window);
-      const customFetch = function (input: RequestInfo | URL, init?: RequestInit) {
-        if (typeof input === 'string' && input.startsWith('/api/')) {
-          const baseUrl = getApiBaseUrl();
-          input = baseUrl + input;
-        }
-        return originalFetch(input, init);
-      };
-
-      try {
-        window.fetch = customFetch;
-      } catch {
-        Object.defineProperty(window, 'fetch', {
-          value: customFetch,
-          writable: true,
-          configurable: true,
-        });
+    const originalFetch = window.fetch.bind(window);
+    const customFetch = function (input: RequestInfo | URL, init?: RequestInit) {
+      const baseUrl = getApiBaseUrl();
+      if (baseUrl && typeof input === 'string' && input.startsWith('/api/')) {
+        input = baseUrl + input;
       }
+      return originalFetch(input, init);
+    };
+
+    try {
+      window.fetch = customFetch;
+    } catch {
+      Object.defineProperty(window, 'fetch', {
+        value: customFetch,
+        writable: true,
+        configurable: true,
+      });
     }
   } catch (err) {
     // Non-blocking in strict browser environments

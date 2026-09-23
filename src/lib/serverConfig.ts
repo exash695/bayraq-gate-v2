@@ -23,21 +23,17 @@ export function getApiBaseUrl(): string {
     return String(import.meta.env.VITE_API_URL).trim().replace(/\/+$/, '');
   }
 
-  // 3. Native Capacitor or WebView environment detection
-  const isCapacitorOrLocal = 
-    window.location.protocol === 'capacitor:' || 
-    window.location.protocol === 'file:' || 
-    window.location.hostname === 'localhost' ||
-    window.location.hostname === '127.0.0.1' ||
-    Boolean((window as any).Capacitor?.isNativePlatform?.()) ||
-    Boolean((window as any).Capacitor);
+  // 3. Web environments check (Cloud Run / AI Studio dev & pre preview)
+  const host = (window.location.hostname || '').toLowerCase();
+  const isCloudRun = host.endsWith('.run.app') || host.endsWith('.aistudio.google.com') || host.includes('bairaq-iq.com');
 
-  if (isCapacitorOrLocal) {
-    return DEFAULT_PRODUCTION_API_URL;
+  // If we are strictly running in full-stack web hosting (same origin), relative URL is fine
+  if (isCloudRun && window.location.protocol.startsWith('http') && host !== 'localhost' && host !== '127.0.0.1') {
+    return '';
   }
 
-  // 4. Default for regular web browser: relative URL (empty prefix)
-  return '';
+  // 4. In all Mobile / Native Capacitor / WebView / Local builds, always target production backend!
+  return DEFAULT_PRODUCTION_API_URL;
 }
 
 /**
