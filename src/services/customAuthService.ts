@@ -98,7 +98,8 @@ class CustomAuthService {
       });
     } catch (networkErr: any) {
       console.error('[customAuth] loginWithEmail network error:', networkErr);
-      throw new Error('تعذر الاتصال بالخادم الرئيسي للمنظومة. يرجى التحقق من اتصال الإنترنت أو حالة السيرفر.');
+      const detail = networkErr?.message || String(networkErr || '');
+      throw new Error(`تعذر الاتصال بالخادم الرئيسي (${detail || 'Network Request Blocked'}). يرجى التحقق من اتصال الإنترنت.`);
     }
 
     let data: any;

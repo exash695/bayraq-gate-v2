@@ -4,7 +4,12 @@
 	"webDir": "dist",
 	"server": {
 		"androidScheme": "https",
-		"cleartext": true
+		"cleartext": true,
+		"allowNavigation": [
+			"bairaq-iq.com",
+			"*.bairaq-iq.com",
+			"api.bairaq-iq.com"
+		]
 	},
 	"android": {
 		"allowMixedContent": true,
