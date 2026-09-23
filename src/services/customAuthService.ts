@@ -1,3 +1,5 @@
+import { getApiBaseUrl } from '../lib/serverConfig';
+
 export interface CustomUser {
   uid: string;
   id?: string;
@@ -11,6 +13,15 @@ export interface CustomUser {
   grade?: string | null;
   stage?: string | null;
   studentCode?: string | null;
+}
+
+function resolveApiUrl(path: string): string {
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path;
+  }
+  const base = getApiBaseUrl();
+  const cleanPath = path.startsWith('/') ? path : '/' + path;
+  return base ? `${base}${cleanPath}` : cleanPath;
 }
 
 export function getOrCreateDeviceId(): string {
@@ -39,7 +50,7 @@ class CustomAuthService {
     const token = localStorage.getItem(this.tokenKey);
     if (token) {
       try {
-        const res = await fetch('/api/auth/me', {
+        const res = await fetch(resolveApiUrl('/api/auth/me'), {
           headers: { 
             'Authorization': `Bearer ${token}`,
             'x-device-id': getOrCreateDeviceId()
@@ -77,7 +88,7 @@ class CustomAuthService {
     const deviceId = getOrCreateDeviceId();
     let res: Response;
     try {
-      res = await fetch('/api/auth/login', {
+      res = await fetch(resolveApiUrl('/api/auth/login'), {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -138,7 +149,7 @@ class CustomAuthService {
       }
     } catch (e) {}
 
-    const res = await fetch('/api/auth/login-code', {
+    const res = await fetch(resolveApiUrl('/api/auth/login-code'), {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
@@ -176,7 +187,7 @@ class CustomAuthService {
   public async registerWithEmail(email: string, password: string, name: string, role: string, schoolId: string) {
     let res: Response;
     try {
-      res = await fetch('/api/auth/register', {
+      res = await fetch(resolveApiUrl('/api/auth/register'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password, name, role, schoolId })
@@ -203,7 +214,7 @@ class CustomAuthService {
   public async loginWithGoogle(email?: string, name?: string): Promise<CustomUser> {
     let res: Response;
     try {
-      res = await fetch('/api/auth/google-login', {
+      res = await fetch(resolveApiUrl('/api/auth/google-login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, name })
@@ -231,7 +242,7 @@ class CustomAuthService {
   public async forgotPassword(email: string): Promise<{ success: boolean; message: string }> {
     let res: Response;
     try {
-      res = await fetch('/api/auth/forgot-password', {
+      res = await fetch(resolveApiUrl('/api/auth/forgot-password'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim().toLowerCase() })
@@ -264,7 +275,7 @@ class CustomAuthService {
     gatewaySent?: boolean;
     expiresInSeconds?: number;
   }> {
-    const res = await fetch('/api/auth/whatsapp/request-otp', {
+    const res = await fetch(resolveApiUrl('/api/auth/whatsapp/request-otp'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ identifier: identifier.trim() })
@@ -277,7 +288,7 @@ class CustomAuthService {
   }
 
   public async verifyWhatsappOtp(identifier: string, otp: string, newPassword: string): Promise<{ success: boolean; message: string }> {
-    const res = await fetch('/api/auth/whatsapp/verify-otp', {
+    const res = await fetch(resolveApiUrl('/api/auth/whatsapp/verify-otp'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ identifier: identifier.trim(), otp: otp.trim(), newPassword })
@@ -290,7 +301,7 @@ class CustomAuthService {
   }
 
   public async resetPassword(email: string, token: string, newPassword: string): Promise<{ success: boolean; message: string }> {
-    const res = await fetch('/api/auth/reset-password', {
+    const res = await fetch(resolveApiUrl('/api/auth/reset-password'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: email.trim().toLowerCase(), token, newPassword })

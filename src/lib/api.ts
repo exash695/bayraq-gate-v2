@@ -1,4 +1,14 @@
 import { customAuth } from '../services/customAuthService';
+import { getApiBaseUrl } from './serverConfig';
+
+function resolveApiUrl(path: string): string {
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path;
+  }
+  const base = getApiBaseUrl();
+  const cleanPath = path.startsWith('/') ? path : '/' + path;
+  return base ? `${base}${cleanPath}` : cleanPath;
+}
 
 async function request(path: string, options: RequestInit = {}) {
   const isGet = !options.method || options.method === 'GET';
@@ -14,7 +24,7 @@ async function request(path: string, options: RequestInit = {}) {
 
     let response: Response;
     try {
-      response = await fetch(path, { ...options, headers });
+      response = await fetch(resolveApiUrl(path), { ...options, headers });
     } catch (networkErr: any) {
       if (attempt < maxRetries) {
         await new Promise(r => setTimeout(r, 250 * (attempt + 1)));
