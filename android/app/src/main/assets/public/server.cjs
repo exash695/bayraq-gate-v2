@@ -198,6 +198,7 @@ __export(schema_exports, {
   transport_fees: () => transport_fees,
   transport_routes: () => transport_routes,
   transport_students_status: () => transport_students_status,
+  user_device_tokens: () => user_device_tokens,
   users: () => users,
   video_comments: () => video_comments
 });
@@ -459,6 +460,18 @@ var notifications = (0, import_pg_core.pgTable)("notifications", {
   type: (0, import_pg_core.varchar)("type", { length: 50 }),
   // e.g. "alert", "message"
   read: (0, import_pg_core.boolean)("read").default(false),
+  createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow()
+});
+var user_device_tokens = (0, import_pg_core.pgTable)("user_device_tokens", {
+  id: (0, import_pg_core.varchar)("id", { length: 128 }).primaryKey(),
+  userId: (0, import_pg_core.varchar)("user_id", { length: 128 }).notNull(),
+  token: (0, import_pg_core.text)("token").notNull(),
+  platform: (0, import_pg_core.varchar)("platform", { length: 50 }).default("android"),
+  // android, ios, web
+  deviceModel: (0, import_pg_core.varchar)("device_model", { length: 128 }),
+  schoolId: (0, import_pg_core.varchar)("school_id", { length: 128 }),
+  role: (0, import_pg_core.varchar)("role", { length: 50 }).default("student"),
+  lastActive: (0, import_pg_core.timestamp)("last_active").defaultNow(),
   createdAt: (0, import_pg_core.timestamp)("created_at").defaultNow()
 });
 var payment_requests = (0, import_pg_core.pgTable)("payment_requests", {
@@ -6630,7 +6643,7 @@ ${extractedText}
         id,
         recipientId: targetRecipient,
         recipientRole: recipientRole || "student",
-        title: title || "\u0625\u0634\u0639\u0627\u0631 \u062C\u062F\u064A\u062F",
+        title: title || "\u0628\u0648\u0627\u0628\u0629 \u0628\u064A\u0631\u0642 - \u0625\u0634\u0639\u0627\u0631 \u062C\u062F\u064A\u062F",
         body: textBody,
         type: type || "alert",
         schoolId: schoolId || "",
@@ -6642,7 +6655,61 @@ ${extractedText}
       const finalId = inserted[0]?.id || id;
       const finalNotif = { ...newNotif, id: finalId };
       realtimeServerInstance?.broadcastManual("notifications", finalId, "INSERT", finalNotif);
+      (async () => {
+        try {
+          if (targetRecipient && targetRecipient !== "all") {
+            const tokens = await db.select().from(user_device_tokens).where((0, import_drizzle_orm.eq)(user_device_tokens.userId, targetRecipient));
+            if (tokens.length > 0) {
+              console.log(`[FCM External Push] Preparing push for user ${targetRecipient} on ${tokens.length} devices...`);
+            }
+          }
+        } catch (pushErr) {
+          console.warn("[FCM External Push Warning]", pushErr);
+        }
+      })();
       res.json({ success: true, id: finalId, notification: finalNotif, data: finalNotif });
+    } catch (error) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+  app.post("/api/notifications/register-device-token", async (req, res) => {
+    try {
+      const { userId, token, platform = "android", deviceModel, schoolId, role = "student" } = req.body || {};
+      if (!userId || !token) {
+        return res.status(400).json({ success: false, message: "userId and token are required" });
+      }
+      const existingToken = await db.select().from(user_device_tokens).where(
+        (0, import_drizzle_orm.and)((0, import_drizzle_orm.eq)(user_device_tokens.userId, String(userId)), (0, import_drizzle_orm.eq)(user_device_tokens.token, String(token)))
+      ).limit(1);
+      if (existingToken.length > 0) {
+        await db.update(user_device_tokens).set({ lastActive: /* @__PURE__ */ new Date(), deviceModel: deviceModel || existingToken[0].deviceModel }).where((0, import_drizzle_orm.eq)(user_device_tokens.id, existingToken[0].id));
+        return res.json({ success: true, message: "Device token refreshed", id: existingToken[0].id });
+      }
+      const id = `token_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+      await db.insert(user_device_tokens).values({
+        id,
+        userId: String(userId),
+        token: String(token),
+        platform: String(platform),
+        deviceModel: deviceModel || "Unknown Device",
+        schoolId: schoolId || "",
+        role: role || "student",
+        lastActive: /* @__PURE__ */ new Date(),
+        createdAt: /* @__PURE__ */ new Date()
+      });
+      console.log(`[FCM Registration] Device token registered successfully for user ${userId} (${platform})`);
+      res.json({ success: true, message: "Device token registered successfully", id });
+    } catch (error) {
+      console.error("[FCM Registration Error]", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+  app.post("/api/notifications/unregister-device-token", async (req, res) => {
+    try {
+      const { token } = req.body || {};
+      if (!token) return res.status(400).json({ success: false, message: "token required" });
+      await db.delete(user_device_tokens).where((0, import_drizzle_orm.eq)(user_device_tokens.token, String(token)));
+      res.json({ success: true, message: "Device token removed" });
     } catch (error) {
       res.status(500).json({ success: false, message: error.message });
     }
@@ -12600,6 +12667,22 @@ ${extractedText}
         "banned_at" timestamp DEFAULT now(),
         "expires_at" timestamp,
         "status" varchar(50) DEFAULT 'active_ban',
+        "created_at" timestamp DEFAULT now()
+      );
+    `;
+  } catch (schemaErr) {
+  }
+  try {
+    await sql`
+      CREATE TABLE IF NOT EXISTS "user_device_tokens" (
+        "id" varchar(128) PRIMARY KEY NOT NULL,
+        "user_id" varchar(128) NOT NULL,
+        "token" text NOT NULL,
+        "platform" varchar(50) DEFAULT 'android',
+        "device_model" varchar(128),
+        "school_id" varchar(128),
+        "role" varchar(50) DEFAULT 'student',
+        "last_active" timestamp DEFAULT now(),
         "created_at" timestamp DEFAULT now()
       );
     `;

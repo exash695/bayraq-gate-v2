@@ -3,9 +3,8 @@ const config = {
   appName: 'بوابة بيرق - Bayraq Gate',
   webDir: 'dist',
   server: {
-    url: 'https://bairaq-iq.com',
-    cleartext: true,
-    androidScheme: 'https'
+    androidScheme: 'https',
+    cleartext: true
   },
   android: {
     allowMixedContent: true,
