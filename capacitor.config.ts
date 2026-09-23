@@ -11,6 +11,11 @@ const config = {
       'api.bairaq-iq.com'
     ]
   },
+  plugins: {
+    CapacitorHttp: {
+      enabled: true
+    }
+  },
   android: {
     allowMixedContent: true,
     backgroundColor: '#020617'
