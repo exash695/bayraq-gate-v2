@@ -33,6 +33,7 @@ import { getStudentLevelInfo, getProfessionalAvatar } from "./lib/avatarLevel";
 import { updateDailyLogin, updatePoints } from "./lib/pointsEngine";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { AuthPage } from "./components/AuthPage";
+import { ResetPasswordModal } from "./components/ResetPasswordModal";
 import { ProfileDashboard } from "./components/ProfileDashboard";
 import { UnitDetail } from "./components/UnitDetail";
 import { AIBot } from "./components/AIBot";
@@ -50,6 +51,7 @@ import { SwipeDismissContainer } from "./components/SwipeDismissContainer";
 import { ComingSoonPlaceholder } from "./components/ComingSoonPlaceholder";
 import { sounds } from "./lib/sounds";
 import { preloadAllMascotAssets } from "./utils/mediaPreloader";
+import { pushNotificationManager } from "./services/pushNotificationManager";
 import {
   AppSection,
   UnitId,
@@ -265,12 +267,18 @@ export default function App() {
   const [verifyReceiptId, setVerifyReceiptId] = useState<string | null>(null);
   const [showPrivacyPublic, setShowPrivacyPublic] = useState(false);
   const [showGate6Demo, setShowGate6Demo] = useState(false);
+  const [resetPasswordData, setResetPasswordData] = useState<{ token: string; email: string } | null>(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const verifyId = params.get("verify");
     if (verifyId) {
       setVerifyReceiptId(verifyId);
+    }
+    const resetToken = params.get("reset_token");
+    const resetEmail = params.get("email");
+    if (resetToken && resetEmail) {
+      setResetPasswordData({ token: resetToken, email: resetEmail });
     }
     const isPrivacyParam = params.get("privacy") !== null || params.get("view") === "privacy" || params.get("policy") !== null;
     const isPrivacyPath = window.location.pathname.toLowerCase().includes("privacy");
@@ -860,13 +868,23 @@ export default function App() {
     safeStorage.setItem("app_notifications", JSON.stringify(notifications));
   }, [notifications]);
 
-  // Request Browser Notification Permission
-
+  // Request Browser Notification Permission & Register Push Tokens
   useEffect(() => {
-    if ("Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission();
+    // تسجيل Service Worker وتهيئة إشعارات الويب فور تحميل التطبيق
+    pushNotificationManager.initWebNotifications(userProfile?.id || userProfile?.studentId || 'guest_web').catch(() => {});
+  }, [userProfile?.id, userProfile?.studentId]);
+
+  // Register Device Push Token for current user / student / parent / teacher
+  useEffect(() => {
+    const activeId = userProfile?.studentId || userProfile?.id || user?.uid;
+    if (activeId) {
+      pushNotificationManager.initNativePush(
+        String(activeId),
+        userProfile?.role || portalType || 'student',
+        selectedSchoolId || userProfile?.schoolId || ''
+      ).catch(() => {});
     }
-  }, []);
+  }, [userProfile?.id, userProfile?.studentId, user?.uid, selectedSchoolId, portalType]);
 
   const [loggedInTeacher, setLoggedInTeacher] = useState<any>(null);
 
@@ -4679,6 +4697,22 @@ export default function App() {
 
           {/* Global Network Connectivity Status Listener */}
           <NetworkStatusListener />
+
+          {/* Reset Password Modal from recovery email link */}
+          {resetPasswordData && (
+            <ResetPasswordModal
+              token={resetPasswordData.token}
+              email={resetPasswordData.email}
+              onClose={() => {
+                setResetPasswordData(null);
+                window.history.replaceState({}, document.title, window.location.pathname);
+              }}
+              onSuccess={() => {
+                setResetPasswordData(null);
+                window.history.replaceState({}, document.title, window.location.pathname);
+              }}
+            />
+          )}
 
         </>
       )}

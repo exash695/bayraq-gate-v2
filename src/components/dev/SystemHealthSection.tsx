@@ -24,7 +24,8 @@ import {
   ShieldCheck,
   Wifi,
   Trash2,
-  Lock
+  Lock,
+  Send
 } from 'lucide-react';
 import {
   systemHealthService,
@@ -793,27 +794,58 @@ export const SystemHealthSection: React.FC<SystemHealthSectionProps> = ({
 
                     {/* Notifications Specific Actions */}
                     {svc.category === 'notifications' && (
-                      <button
-                        onClick={handleTriggerDeadlinesCheck}
-                        disabled={isRepairing}
-                        className={`w-full py-2 px-3 rounded-xl font-bold text-xs transition-all border flex items-center justify-center gap-1.5 disabled:opacity-50 ${
-                          isSucceeded
-                            ? 'bg-rose-500/20 border-rose-500/40 text-rose-300'
-                            : 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border-rose-500/20'
-                        }`}
-                      >
-                        {isSucceeded ? (
-                          <>
-                            <CheckCheck size={13} className="text-rose-400" />
-                            تم فحص المواعيد والتنبيهات!
-                          </>
-                        ) : (
-                          <>
-                            <Bell size={13} className={isRepairing ? 'animate-spin' : 'text-rose-400'} />
-                            {isRepairing ? 'جاري فحص المواعيد...' : 'تشغيل فحص المواعيد والتنبيهات'}
-                          </>
-                        )}
-                      </button>
+                      <div className="grid grid-cols-2 gap-2 w-full">
+                        <button
+                          onClick={handleTriggerDeadlinesCheck}
+                          disabled={isRepairing}
+                          className={`py-2 px-2 rounded-xl font-bold text-[11px] transition-all border flex items-center justify-center gap-1 disabled:opacity-50 ${
+                            isSucceeded
+                              ? 'bg-rose-500/20 border-rose-500/40 text-rose-300'
+                              : 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border-rose-500/20'
+                          }`}
+                        >
+                          {isSucceeded ? (
+                            <>
+                              <CheckCheck size={12} className="text-rose-400" />
+                              تم الفحص!
+                            </>
+                          ) : (
+                            <>
+                              <Bell size={12} className={isRepairing ? 'animate-spin' : 'text-rose-400'} />
+                              فحص المواعيد
+                            </>
+                          )}
+                        </button>
+
+                        <button
+                          onClick={async () => {
+                            try {
+                              const testPayload = {
+                                userId: 'all',
+                                title: 'بوابة بيرق - فحص الإشعارات الخارجية',
+                                message: 'تم إرسال إشعار تجريبي ناجح من منظومة بوابة بيرق للأجهزة المتصلة.',
+                                type: 'system_alert'
+                              };
+                              await fetch('/api/notifications', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(testPayload)
+                              });
+                              showNotification(
+                                'بوابة بيرق: اختبار الإشعارات الخارجية',
+                                'تم بث إشعار تجريبي ناجح لكافة الأجهزة والتوكنات المسجلة باسم بوابة بيرق',
+                                'success'
+                              );
+                            } catch (e) {
+                              showNotification('خطأ في الإرسال', 'تعذر إرسال الإشعار التجريبي', 'error');
+                            }
+                          }}
+                          className="py-2 px-2 rounded-xl font-bold text-[11px] transition-all border bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border-emerald-500/20 flex items-center justify-center gap-1"
+                        >
+                          <Send size={12} className="text-emerald-400" />
+                          إرسال إشعار تجريبي
+                        </button>
+                      </div>
                     )}
                   </div>
 

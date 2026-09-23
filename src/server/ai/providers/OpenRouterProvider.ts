@@ -3,8 +3,7 @@ import { IAIProvider, AIRequest } from './IAIProvider';
 export class OpenRouterProvider implements IAIProvider {
   name = 'openrouter-gemini';
   private fallbackModels = [
-    'google/gemini-2.0-flash-001',
-    'google/gemini-2.0-flash-lite-preview-02-05:free',
+    'google/gemini-2.5-flash',
     'meta-llama/llama-3.3-70b-instruct',
     'deepseek/deepseek-chat'
   ];

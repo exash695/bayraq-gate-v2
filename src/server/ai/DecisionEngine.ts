@@ -11,18 +11,21 @@ export class DecisionEngine {
   private secondaryProvider: IAIProvider | null = null;
 
   constructor() {
-    const preferOpenRouter = process.env.AI_PROVIDER === 'openrouter' || (!process.env.GEMINI_API_KEY && !!process.env.OPENROUTER_API_KEY);
-    
-    if (preferOpenRouter && process.env.OPENROUTER_API_KEY) {
-      console.log('[DecisionEngine] Setting OpenRouter as PRIMARY');
+    // If OPENROUTER_API_KEY is present, set it as primary (or secondary if AI_PROVIDER='gemini')
+    const preferGemini = process.env.AI_PROVIDER === 'gemini';
+    const hasOpenRouter = !!process.env.OPENROUTER_API_KEY;
+    const hasGemini = !!process.env.GEMINI_API_KEY;
+
+    if (hasOpenRouter && !preferGemini) {
+      console.log('[DecisionEngine] Setting OpenRouter as PRIMARY provider');
       this.primaryProvider = new OpenRouterProvider();
-      if (process.env.GEMINI_API_KEY) {
+      if (hasGemini) {
         this.secondaryProvider = new GeminiProvider();
       }
     } else {
-      console.log('[DecisionEngine] Setting Gemini as PRIMARY');
+      console.log('[DecisionEngine] Setting Gemini as PRIMARY provider');
       this.primaryProvider = new GeminiProvider();
-      if (process.env.OPENROUTER_API_KEY) {
+      if (hasOpenRouter) {
         this.secondaryProvider = new OpenRouterProvider();
       }
     }

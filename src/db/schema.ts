@@ -27,7 +27,12 @@ export const users = pgTable("users", {
   canPost: boolean("can_post").default(true),
   canComment: boolean("can_comment").default(true),
   deviceId: varchar("device_id", { length: 255 }),
+  phone: varchar("phone", { length: 50 }),
   photo: text("photo"),
+  resetToken: varchar("reset_token", { length: 255 }),
+  resetTokenExpires: timestamp("reset_token_expires"),
+  whatsappOtp: varchar("whatsapp_otp", { length: 20 }),
+  whatsappOtpExpires: timestamp("whatsapp_otp_expires"),
   lastLogin: timestamp("last_login"),
   createdAt: timestamp("created_at").defaultNow(),
 });
@@ -258,6 +263,19 @@ export const notifications = pgTable("notifications", {
   metadata: jsonb("metadata"),
   type: varchar("type", { length: 50 }), // e.g. "alert", "message"
   read: boolean("read").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// جدول توكنات أجهزة المستخدمين للإشعارات الخارجية (FCM Push Notification Tokens)
+export const user_device_tokens = pgTable("user_device_tokens", {
+  id: varchar("id", { length: 128 }).primaryKey(),
+  userId: varchar("user_id", { length: 128 }).notNull(),
+  token: text("token").notNull(),
+  platform: varchar("platform", { length: 50 }).default('android'), // android, ios, web
+  deviceModel: varchar("device_model", { length: 128 }),
+  schoolId: varchar("school_id", { length: 128 }),
+  role: varchar("role", { length: 50 }).default('student'),
+  lastActive: timestamp("last_active").defaultNow(),
   createdAt: timestamp("created_at").defaultNow(),
 });
 

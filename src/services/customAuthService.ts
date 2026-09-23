@@ -190,6 +190,67 @@ class CustomAuthService {
     return data.user;
   }
 
+  public async forgotPassword(email: string): Promise<{ success: boolean; message: string }> {
+    const res = await fetch('/api/auth/forgot-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email.trim().toLowerCase() })
+    });
+    const data = await res.json();
+    if (!data.success) {
+      throw new Error(data.message || 'حدث خطأ أثناء إرسال رابط استعادة كلمة المرور');
+    }
+    return data;
+  }
+
+  public async requestWhatsappOtp(identifier: string): Promise<{
+    success: boolean;
+    message: string;
+    phoneMasked?: string;
+    identifier?: string;
+    whatsappLink?: string;
+    supportWhatsapp?: string;
+    gatewaySent?: boolean;
+    expiresInSeconds?: number;
+  }> {
+    const res = await fetch('/api/auth/whatsapp/request-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier: identifier.trim() })
+    });
+    const data = await res.json();
+    if (!data.success) {
+      throw new Error(data.message || 'حدث خطأ أثناء طلب رمز التحقق عبر واتساب');
+    }
+    return data;
+  }
+
+  public async verifyWhatsappOtp(identifier: string, otp: string, newPassword: string): Promise<{ success: boolean; message: string }> {
+    const res = await fetch('/api/auth/whatsapp/verify-otp', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier: identifier.trim(), otp: otp.trim(), newPassword })
+    });
+    const data = await res.json();
+    if (!data.success) {
+      throw new Error(data.message || 'حدث خطأ أثناء حفظ كلمة المرور الجديدة');
+    }
+    return data;
+  }
+
+  public async resetPassword(email: string, token: string, newPassword: string): Promise<{ success: boolean; message: string }> {
+    const res = await fetch('/api/auth/reset-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: email.trim().toLowerCase(), token, newPassword })
+    });
+    const data = await res.json();
+    if (!data.success) {
+      throw new Error(data.message || 'حدث خطأ أثناء إعادة تعيين كلمة المرور');
+    }
+    return data;
+  }
+
   public async logout() {
     localStorage.removeItem(this.tokenKey);
     this.currentUser = null;

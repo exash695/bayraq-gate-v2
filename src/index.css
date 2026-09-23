@@ -491,6 +491,16 @@ body {
   height: auto !important;
 }
 
+/* Mobile Safe-Area & Touch Optimization */
+html, body {
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+}
+
 /* Custom Leaflet Filter to make standard OpenStreetMap dark but keep details */
 .map-tiles-dark-filter {
   filter: brightness(0.6) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.7);

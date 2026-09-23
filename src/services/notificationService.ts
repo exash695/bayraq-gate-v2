@@ -1,4 +1,5 @@
 import { realtimeManager } from '../lib/realtimeManager';
+import { pushNotificationManager } from './pushNotificationManager';
 
 export const notificationService = {
   sendNotification: async (payload: {
@@ -17,11 +18,18 @@ export const notificationService = {
     metadata?: any;
     data?: any;
   }) => {
+    // توحيد العنوان الرسمي للبوابة: بوابة بيرق
+    let rawTitle = payload.title || 'إشعار جديد';
+    if (!rawTitle.includes('بوابة بيرق') && !rawTitle.includes('بيرق')) {
+      rawTitle = `بوابة بيرق: ${rawTitle}`;
+    }
+
     const response = await fetch('/api/notifications', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         ...payload,
+        title: rawTitle,
         recipientId: payload.recipientId || payload.userId,
         body: payload.body || payload.message
       })
@@ -38,6 +46,9 @@ export const notificationService = {
   },
 
   subscribeToNotifications: (userId: string, callback: (notifications: any[]) => void) => {
+    // ربط تلقائي لتوكن الإشعارات الخارجية بمجرد الاشتراك
+    pushNotificationManager.initNativePush(userId).catch(() => {});
+
     const fetch = async () => {
       try {
         const notifs = await notificationService.fetchNotifications(userId);
@@ -45,8 +56,14 @@ export const notificationService = {
       } catch (e) {}
     };
     fetch();
-    const unsub = realtimeManager.subscribe('notifications', () => {
+    const unsub = realtimeManager.subscribe('notifications', (eventData: any) => {
       fetch();
+      // إذا ورد إشعار جديد في الويب، إظهار إشعار خارجي محلي
+      if (eventData?.data && eventData.data.recipientId === userId) {
+        pushNotificationManager.showLocalNotification(eventData.data.title || 'بوابة بيرق: إشعار جديد', {
+          body: eventData.data.body || ''
+        });
+      }
     });
     return () => unsub();
   },

@@ -4,6 +4,38 @@ import ErrorBoundary from './components/ErrorBoundary';
 import App from './App.tsx';
 import { errorMonitoringService } from './services/errorMonitoringService';
 
+// Automatic Mobile / Native App API URL routing
+if (typeof window !== 'undefined') {
+  try {
+    const isCapacitorOrLocal = 
+      window.location.protocol === 'capacitor:' || 
+      window.location.protocol === 'file:' || 
+      (window.location.hostname === 'localhost' && Boolean((window as any).Capacitor?.isNativePlatform?.()));
+
+    if (isCapacitorOrLocal) {
+      const originalFetch = window.fetch.bind(window);
+      const customFetch = function (input: RequestInfo | URL, init?: RequestInit) {
+        if (typeof input === 'string' && input.startsWith('/api/')) {
+          input = 'https://bairaq-iq.com' + input;
+        }
+        return originalFetch(input, init);
+      };
+
+      try {
+        window.fetch = customFetch;
+      } catch {
+        Object.defineProperty(window, 'fetch', {
+          value: customFetch,
+          writable: true,
+          configurable: true,
+        });
+      }
+    }
+  } catch (err) {
+    // Non-blocking in strict browser environments
+  }
+}
+
 // Initialize global error monitoring
 errorMonitoringService.init();
 

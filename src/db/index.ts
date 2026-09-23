@@ -64,18 +64,50 @@ function createMockSql(): any {
 let client: any;
 let dbInstance: any;
 
+export async function withDbRetry<T>(operation: () => Promise<T>, retries = 3, delayMs = 500): Promise<T> {
+  let lastError: any;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await operation();
+    } catch (err: any) {
+      lastError = err;
+      const msg = String(err?.message || err?.cause?.message || err || '').toLowerCase();
+      const isConnectionDrop = 
+        msg.includes('econnreset') ||
+        msg.includes('connection terminated') ||
+        msg.includes('connection closed') ||
+        msg.includes('connection reset') ||
+        msg.includes('etimedout') ||
+        msg.includes('econnrefused') ||
+        msg.includes('broken pipe') ||
+        err?.code === 'ECONNRESET' ||
+        err?.cause?.code === 'ECONNRESET';
+
+      if (isConnectionDrop && attempt < retries) {
+        console.warn(`[Database Retry] Transient connection error (${msg}), retrying attempt ${attempt + 1}/${retries}...`);
+        await new Promise(res => setTimeout(res, delayMs * attempt));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError;
+}
+
 if (connectionString) {
   try {
-    const maxConnections = process.env.DB_MAX_CONNECTIONS ? parseInt(process.env.DB_MAX_CONNECTIONS, 10) : 25;
-    const idleTimeout = process.env.DB_IDLE_TIMEOUT ? parseInt(process.env.DB_IDLE_TIMEOUT, 10) : 30;
-    const connectTimeout = process.env.DB_CONNECT_TIMEOUT ? parseInt(process.env.DB_CONNECT_TIMEOUT, 10) : 10;
+    const maxConnections = process.env.DB_MAX_CONNECTIONS ? parseInt(process.env.DB_MAX_CONNECTIONS, 10) : 15;
+    const idleTimeout = process.env.DB_IDLE_TIMEOUT ? parseInt(process.env.DB_IDLE_TIMEOUT, 10) : 20;
+    const connectTimeout = process.env.DB_CONNECT_TIMEOUT ? parseInt(process.env.DB_CONNECT_TIMEOUT, 10) : 15;
 
     client = postgres(connectionString, {
       prepare: false,
       max: maxConnections,
       idle_timeout: idleTimeout,
       connect_timeout: connectTimeout,
-      max_lifetime: 60 * 30,
+      max_lifetime: 60 * 15,
+      keep_alive: 10,
+      onnotice: () => {}, // suppress server notices
     });
     dbInstance = drizzle(client, { schema });
   } catch (err) {

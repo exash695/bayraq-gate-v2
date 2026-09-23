@@ -1,9 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Bell, Trash2, Clock, CheckCircle2, Unlock, MessageSquare, AlertTriangle, Swords, Shield, Crown, Megaphone } from 'lucide-react';
+import { 
+  X, Bell, Trash2, Clock, CheckCircle2, Unlock, MessageSquare, 
+  AlertTriangle, Swords, Shield, Crown, Megaphone, BellRing, 
+  Smartphone, Loader2, ExternalLink, Copy, Check 
+} from 'lucide-react';
 import { AppNotification } from '../types';
 import { ConfirmDialog } from './ConfirmDialog';
 import { BerqCharacter } from './BerqCharacterManager';
+import { pushNotificationManager } from '../services/pushNotificationManager';
 
 interface NotificationDrawerProps {
   isOpen: boolean;
@@ -36,6 +41,74 @@ export const NotificationDrawer = ({
   }, [isOpen, unreadCount, notifications, onMarkAsRead]);
 
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [isActivatingWebPush, setIsActivatingWebPush] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [permissionGranted, setPermissionGranted] = useState(() => {
+    return typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted';
+  });
+  const [pushFeedback, setPushFeedback] = useState<{
+    type: 'success' | 'warning' | 'info' | 'error';
+    text: string;
+    showDirect?: boolean;
+  } | null>(null);
+
+  const isInIframe = typeof window !== 'undefined' && pushNotificationManager.isInIframe();
+  const directAppUrl = typeof window !== 'undefined' ? window.location.href : '';
+
+  const handleActivateWebPush = async () => {
+    setIsActivatingWebPush(true);
+    setPushFeedback(null);
+
+    try {
+      const userId = localStorage.getItem('current_user_id') || localStorage.getItem('bayraq_student_id') || 'student_guest';
+      const result = await pushNotificationManager.requestWebPermission(userId);
+
+      setIsActivatingWebPush(false);
+
+      if (result.success || result.status === 'granted') {
+        setPermissionGranted(true);
+        setPushFeedback({
+          type: 'success',
+          text: isAr ? 'تم تفعيل إشعارات المتصفح بنجاح! ستصلك التنبيهات فوراً على جهازك.' : 'Notifications enabled successfully!'
+        });
+      } else if (result.status === 'iframe_restricted' || isInIframe) {
+        setPushFeedback({
+          type: 'warning',
+          text: isAr 
+            ? 'متصفح Chrome يمنع طلب الإذن من داخل إطار المعاينة. انقر على الزر أدناه لفتح الرابط المباشر وتفعيلها فوراً:' 
+            : 'Chrome restricts notifications inside iframes. Open the direct link below to enable:',
+          showDirect: true
+        });
+      } else if (result.status === 'denied') {
+        setPushFeedback({
+          type: 'error',
+          text: isAr
+            ? 'الإشعارات محظورة في إعدادات متصفحك. انقر على أيقونة الإعدادات 🔒 أو النقاط الثلاث بجانب الرابط واختر "سماح بالإشعارات".'
+            : 'Notifications blocked in browser settings. Please allow them from site settings.'
+        });
+      } else {
+        setPushFeedback({
+          type: 'info',
+          text: result.message || (isAr ? 'يرجى فتح الرابط المباشر لمنح إذن الإشعارات.' : 'Please open direct link to enable.')
+        });
+      }
+    } catch (e: any) {
+      setIsActivatingWebPush(false);
+      setPushFeedback({
+        type: 'warning',
+        text: isAr ? 'يرجى فتح المنصة في تبويب مباشر لتمكين المتصفح من إظهار طلب الإذن:' : 'Please open direct tab to allow notifications:',
+        showDirect: true
+      });
+    }
+  };
+
+  const handleCopyDirectLink = () => {
+    if (typeof navigator !== 'undefined' && navigator.clipboard) {
+      navigator.clipboard.writeText(directAppUrl);
+      setCopiedLink(true);
+      setTimeout(() => setCopiedLink(false), 2500);
+    }
+  };
 
   const getIcon = (type: AppNotification['type']) => {
     switch (type) {
@@ -107,6 +180,101 @@ export const NotificationDrawer = ({
                 <X size={24} />
               </button>
             </div>
+
+            {/* Web Push Notification Banner */}
+            {typeof window !== 'undefined' && 'Notification' in window && (
+              permissionGranted ? (
+                <div className="mx-4 mt-4 p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-between gap-3 animate-in fade-in duration-300">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="w-8 h-8 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                      <CheckCircle2 size={18} />
+                    </div>
+                    <div className="min-w-0 text-right">
+                      <p className="text-xs font-bold text-emerald-400 truncate">
+                        {isAr ? 'إشعارات المتصفح مفعلة بنجاح' : 'Web Notifications Active'}
+                      </p>
+                      <p className="text-[10px] text-emerald-300/70 truncate">
+                        {isAr ? 'تصلك تنبيهات الواجبات والدرجات تلقائياً' : 'Live alerts are active on this device'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="mx-4 mt-4 p-3.5 rounded-2xl bg-gradient-to-br from-amber-500/15 via-amber-500/5 to-transparent border border-amber-500/25 flex flex-col gap-2.5">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center shrink-0 shadow-inner">
+                        <BellRing size={18} className="animate-pulse" />
+                      </div>
+                      <div className="min-w-0 text-right">
+                        <p className="text-xs font-bold text-white truncate">
+                          {isAr ? 'تفعيل إشعارات المتصفح' : 'Enable Web Notifications'}
+                        </p>
+                        <p className="text-[10px] text-white/60 truncate">
+                          {isAr ? 'لتصلك تنبيهات الواجبات والدرجات مباشرة' : 'Get alerts even when tab is closed'}
+                        </p>
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={handleActivateWebPush}
+                      disabled={isActivatingWebPush}
+                      className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-black text-xs font-black shrink-0 transition-all shadow-lg shadow-amber-500/20 flex items-center gap-1.5 active:scale-95 disabled:opacity-50"
+                    >
+                      {isActivatingWebPush ? (
+                        <>
+                          <Loader2 size={13} className="animate-spin" />
+                          <span>{isAr ? 'جاري الفحص...' : 'Checking...'}</span>
+                        </>
+                      ) : (
+                        <>
+                          <BellRing size={13} />
+                          <span>{isAr ? 'تفعيل الآن' : 'Enable'}</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+
+                  {/* Diagnostic feedback or iframe solution */}
+                  {pushFeedback && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      className={`pt-2 mt-1 border-t border-white/10 text-[11px] leading-relaxed flex flex-col gap-2 ${
+                        pushFeedback.type === 'success' ? 'text-emerald-300' :
+                        pushFeedback.type === 'error' ? 'text-rose-300' :
+                        'text-amber-200/90'
+                      }`}
+                    >
+                      <p>{pushFeedback.text}</p>
+
+                      {pushFeedback.showDirect && (
+                        <div className="flex items-center gap-2 pt-1">
+                          <a
+                            href={directAppUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex-1 py-1.5 px-2.5 rounded-xl bg-amber-500 text-black font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-md hover:bg-amber-400 transition-colors"
+                          >
+                            <ExternalLink size={12} />
+                            <span>{isAr ? 'فتح في علامة تبويب مباشرة' : 'Open in Direct Tab'}</span>
+                          </a>
+
+                          <button
+                            onClick={handleCopyDirectLink}
+                            className="py-1.5 px-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-medium text-[11px] flex items-center justify-center gap-1 transition-colors border border-white/15"
+                            title={isAr ? 'نسخ الرابط' : 'Copy link'}
+                          >
+                            {copiedLink ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                            <span>{copiedLink ? (isAr ? 'تم النسخ!' : 'Copied!') : (isAr ? 'نسخ الرابط' : 'Copy')}</span>
+                          </button>
+                        </div>
+                      )}
+                    </motion.div>
+                  )}
+                </div>
+              )
+            )}
 
             {/* Content */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 custom-scrollbar">

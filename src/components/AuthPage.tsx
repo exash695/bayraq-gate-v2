@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { auth, db, sendPasswordResetEmail, GoogleAuthProvider as GAP, signInWithPopup as SIP, doc, setDoc } from '@/src/lib/firebase';
+import { auth, db, GoogleAuthProvider as GAP, signInWithPopup as SIP, doc, setDoc } from '@/src/lib/firebase';
 const GoogleAuthProvider = GAP as any;
 const signInWithPopup = SIP as any;
 import { customAuth } from '../services/customAuthService';
@@ -9,6 +9,7 @@ import { LoadingScreen } from './LoadingScreen';
 import { motion, AnimatePresence } from 'motion/react';
 import { useAppLogo } from './BerqCharacterManager';
 import { PrivacyPolicy } from './PrivacyPolicy';
+import { RecoveryModal } from './RecoveryModal';
 
 const iraqRegions: { [key: string]: string[] } = {
   "بغداد": ["مدرسة المتميزين", "إعدادية المركزية", "ثانوية كلية بغداد", "مدرسة العقيدة", "أخرى (كتابة يدوية)"],
@@ -39,6 +40,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onOpenPrivacy }) => {
   const appLogo = useAppLogo();
   const [isLogin, setIsLogin] = useState(true);
   const [showInternalPrivacy, setShowInternalPrivacy] = useState(false);
+  const [showRecoveryModal, setShowRecoveryModal] = useState(false);
   const [formData, setFormData] = useState({ email: '', password: '', fullName: '', governorate: '', school: '', phone: '' });
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -115,11 +117,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onOpenPrivacy }) => {
       setError('يرجى إدخال البريد الإلكتروني أولاً.');
       return;
     }
+    setError(null);
+    setMessage(null);
     try {
-      await sendPasswordResetEmail(auth, formData.email);
-      setMessage('تم إرسال رابط إعادة تعيين كلمة المرور إلى بريدك الإلكتروني.');
-    } catch (err) {
-      setError('حدث خطأ أثناء إرسال رابط إعادة التعيين.');
+      const res = await customAuth.forgotPassword(formData.email);
+      setMessage(res.message || 'تم إرسال رابط استعادة كلمة المرور إلى بريدك الإلكتروني.');
+    } catch (err: any) {
+      setError(err.message || 'حدث خطأ أثناء إرسال رابط استعادة كلمة المرور.');
     }
   };
 
@@ -316,9 +320,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onOpenPrivacy }) => {
           </AnimatePresence>
 
           {isLogin && (
-            <div className="flex justify-end px-2 mt-1 mb-2">
-              <button type="button" onClick={handleForgotPassword} className="text-sm text-white/50 hover:text-[#D4AF37] transition-colors font-medium">
-                نسيت كلمة المرور؟
+            <div className="flex justify-between items-center px-2 mt-1 mb-2">
+              <button 
+                type="button" 
+                onClick={() => setShowRecoveryModal(true)} 
+                className="text-sm text-amber-400/90 hover:text-amber-300 transition-colors font-medium flex items-center gap-1.5"
+              >
+                <span>نسيت كلمة المرور؟</span>
               </button>
             </div>
           )}
@@ -393,6 +401,17 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onOpenPrivacy }) => {
         </div>
 
       </motion.div>
+
+      {/* Recovery Modal (WhatsApp & Email) */}
+      <RecoveryModal
+        isOpen={showRecoveryModal}
+        onClose={() => setShowRecoveryModal(false)}
+        initialEmail={formData.email}
+        onSuccessLogin={() => {
+          setShowRecoveryModal(false);
+          setMessage('تم تحديث كلمة المرور بنجاح! يمكنك الآن تسجيل الدخول مباشرة.');
+        }}
+      />
     </div>
   );
 };

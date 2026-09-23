@@ -21,7 +21,7 @@ const DEVELOPER_EMAILS = [
 
 import express from "express";
 import { eq, ne, and, or, desc, asc, inArray, isNull, lt, ilike } from "drizzle-orm";
-import { db, sql as sqlRaw } from "./src/db";
+import { db, sql as sqlRaw, withDbRetry } from "./src/db";
 import { RealtimeServer } from "./src/server/realtimeServer";
 import { 
   schools, students, student_transactions, teachers, 
@@ -32,7 +32,7 @@ import {
   salaries, users, academic_lists, school_configs, school_announcements,
   attendance_logs, behavior_logs, audit_logs, council_polls, transport_drivers,
   transport_routes, transport_students_status, transport_fees, lounge_messages, admin_outbox,
-  firestore_docs, security_bans
+  firestore_docs, security_bans, user_device_tokens
 } from "./src/db/schema";
 import { sql } from "drizzle-orm";
 
@@ -40,6 +40,7 @@ import { sql } from "drizzle-orm";
 import path from "path";
 import { GoogleGenAI } from "@google/genai";
 
+import nodemailer from "nodemailer";
 import rateLimit from "express-rate-limit";
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -167,6 +168,48 @@ async function generateContentWithRetry(
           break; // Try next fallback model
         }
       }
+    }
+  }
+
+  // If Gemini failed or is not available, attempt OpenRouter as ultimate fallback if configured
+  if (process.env.OPENROUTER_API_KEY) {
+    try {
+      console.log('[Gemini Fallback] Falling back to OpenRouter for generateContent...');
+      const openRouterModel = process.env.OPENROUTER_MODEL || 'google/gemini-2.5-flash';
+      let promptText = '';
+      if (typeof params.contents === 'string') {
+        promptText = params.contents;
+      } else if (Array.isArray(params.contents)) {
+        promptText = params.contents.map((c: any) => typeof c === 'string' ? c : (c.text || c.parts?.map((p: any) => p.text).join('\n') || '')).join('\n');
+      } else if (params.contents?.parts) {
+        promptText = params.contents.parts.map((p: any) => p.text).join('\n');
+      }
+
+      const orRes = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${process.env.OPENROUTER_API_KEY}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://bairaq.app',
+          'X-Title': 'Bairaq Gate 6'
+        },
+        body: JSON.stringify({
+          model: openRouterModel,
+          messages: [{ role: 'user', content: promptText }],
+          max_tokens: 4096
+        })
+      });
+
+      if (orRes.ok) {
+        const orData: any = await orRes.json();
+        const outputText = orData.choices?.[0]?.message?.content || '';
+        return {
+          text: outputText,
+          candidates: [{ content: { parts: [{ text: outputText }] } }]
+        };
+      }
+    } catch (orErr) {
+      console.warn('[OpenRouter Fallback Error]', orErr);
     }
   }
   
@@ -1535,10 +1578,10 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
   // جلب جميع المدارس
   app.get('/api/schools', async (req, res) => {
     try {
-      const allSchools = await db.select().from(schools);
-      const mappedSchools = allSchools.map(s => {
-        const cover = s.coverUrl || (s as any).cover_url;
-        const logo = s.logoUrl || (s as any).logo_url;
+      const allSchools = await withDbRetry(() => db.select().from(schools));
+      const mappedSchools = allSchools.map((s: any) => {
+        const cover = s.coverUrl || s.cover_url;
+        const logo = s.logoUrl || s.logo_url;
         const loc = s.location || s.governorate || 'الديوانية - غماس';
         return {
           ...s,
@@ -1551,7 +1594,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
           governorate: s.governorate || loc,
           disabledModules: Array.isArray(s.disabledModules)
             ? s.disabledModules
-            : (Array.isArray((s as any).disabled_modules) ? (s as any).disabled_modules : [])
+            : (Array.isArray(s.disabled_modules) ? s.disabled_modules : [])
         };
       });
       res.json({ success: true, schools: mappedSchools, data: mappedSchools });
@@ -1565,13 +1608,13 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
   app.get('/api/schools/:id', async (req, res) => {
     try {
       const { id } = req.params;
-      const schoolList = await db.select().from(schools).where(eq(schools.id, id));
+      const schoolList = await withDbRetry(() => db.select().from(schools).where(eq(schools.id, id)));
       if (schoolList.length === 0) {
         return res.json({ success: true, school: null, data: null });
       }
-      const school = schoolList[0];
-      const cover = school.coverUrl || (school as any).cover_url;
-      const logo = school.logoUrl || (school as any).logo_url;
+      const school: any = schoolList[0];
+      const cover = school.coverUrl || school.cover_url;
+      const logo = school.logoUrl || school.logo_url;
       const loc = school.location || school.governorate || 'الديوانية - غماس';
       const mappedSchool = {
         ...school,
@@ -1584,7 +1627,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         governorate: school.governorate || loc,
         disabledModules: Array.isArray(school.disabledModules)
           ? school.disabledModules
-          : (Array.isArray((school as any).disabled_modules) ? (school as any).disabled_modules : [])
+          : (Array.isArray(school.disabled_modules) ? school.disabled_modules : [])
       };
       res.json({ success: true, school: mappedSchool, data: mappedSchool });
     } catch (error: any) {
@@ -4410,7 +4453,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
 
   app.get('/api/admin/dashboard-stats', async (req, res) => {
     try {
-      const dbSchools = await db.select().from(schools);
+      const dbSchools = await withDbRetry(() => db.select().from(schools));
       // For now we just return schools, but we can expand this
       res.json({
         success: true,
@@ -5645,7 +5688,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         id,
         recipientId: targetRecipient,
         recipientRole: recipientRole || 'student',
-        title: title || 'إشعار جديد',
+        title: title || 'بوابة بيرق - إشعار جديد',
         body: textBody,
         type: type || 'alert',
         schoolId: schoolId || '',
@@ -5659,7 +5702,74 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
       const finalNotif = { ...newNotif, id: finalId };
 
       realtimeServerInstance?.broadcastManual('notifications', finalId, 'INSERT', finalNotif);
+
+      // Async external push dispatch (FCM tokens)
+      (async () => {
+        try {
+          if (targetRecipient && targetRecipient !== 'all') {
+            const tokens = await db.select().from(user_device_tokens).where(eq(user_device_tokens.userId, targetRecipient));
+            if (tokens.length > 0) {
+              console.log(`[FCM External Push] Preparing push for user ${targetRecipient} on ${tokens.length} devices...`);
+            }
+          }
+        } catch (pushErr) {
+          console.warn("[FCM External Push Warning]", pushErr);
+        }
+      })();
+
       res.json({ success: true, id: finalId, notification: finalNotif, data: finalNotif });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // تسجيل رمز جهاز المستخدم للإشعارات الخارجية (FCM Device Token Registration)
+  app.post('/api/notifications/register-device-token', async (req, res) => {
+    try {
+      const { userId, token, platform = 'android', deviceModel, schoolId, role = 'student' } = req.body || {};
+      if (!userId || !token) {
+        return res.status(400).json({ success: false, message: 'userId and token are required' });
+      }
+
+      const existingToken = await db.select().from(user_device_tokens).where(
+        and(eq(user_device_tokens.userId, String(userId)), eq(user_device_tokens.token, String(token)))
+      ).limit(1);
+
+      if (existingToken.length > 0) {
+        await db.update(user_device_tokens)
+          .set({ lastActive: new Date(), deviceModel: deviceModel || existingToken[0].deviceModel })
+          .where(eq(user_device_tokens.id, existingToken[0].id));
+        return res.json({ success: true, message: 'Device token refreshed', id: existingToken[0].id });
+      }
+
+      const id = `token_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+      await db.insert(user_device_tokens).values({
+        id,
+        userId: String(userId),
+        token: String(token),
+        platform: String(platform),
+        deviceModel: deviceModel || 'Unknown Device',
+        schoolId: schoolId || '',
+        role: role || 'student',
+        lastActive: new Date(),
+        createdAt: new Date()
+      });
+
+      console.log(`[FCM Registration] Device token registered successfully for user ${userId} (${platform})`);
+      res.json({ success: true, message: 'Device token registered successfully', id });
+    } catch (error: any) {
+      console.error("[FCM Registration Error]", error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // فحص وإلغاء تسجيل توكن جهاز
+  app.post('/api/notifications/unregister-device-token', async (req, res) => {
+    try {
+      const { token } = req.body || {};
+      if (!token) return res.status(400).json({ success: false, message: 'token required' });
+      await db.delete(user_device_tokens).where(eq(user_device_tokens.token, String(token)));
+      res.json({ success: true, message: 'Device token removed' });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }
@@ -7912,6 +8022,385 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
     } catch (error: any) {
       console.error('Google login error:', error);
       res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // Helper function to create SMTP transporter lazily
+  const getMailTransporter = () => {
+    // Sanitize host and user in case of accidental spaces when entered in environment variables UI
+    const rawHost = (process.env.SMTP_HOST || 'smtp.gmail.com').replace(/\s+/g, '');
+    const host = rawHost || 'smtp.gmail.com';
+    const port = Number(process.env.SMTP_PORT) || 465;
+    const secure = process.env.SMTP_SECURE === 'true' || port === 465;
+    const user = (process.env.SMTP_USER || 'bairaq.system@gmail.com').replace(/\s+/g, '');
+    const rawPass = (process.env.SMTP_PASS || 'cckg fjlo wiad wtnm').replace(/\s+/g, '');
+
+    if (!user || !rawPass) {
+      return null;
+    }
+
+    return nodemailer.createTransport({
+      host,
+      port,
+      secure,
+      auth: { user, pass: rawPass },
+      tls: { rejectUnauthorized: false }
+    });
+  };
+
+  // POST /api/auth/forgot-password
+  app.post('/api/auth/forgot-password', async (req, res) => {
+    try {
+      const email = (req.body?.email || '').trim().toLowerCase();
+      if (!email) {
+        return res.status(400).json({ success: false, message: 'يرجى إدخال البريد الإلكتروني' });
+      }
+
+      // Check if user exists
+      const userList = await db.select().from(users).where(eq(users.email, email)).limit(1);
+      if (userList.length === 0) {
+        // Return a neutral friendly success message to prevent user enumeration
+        return res.json({ 
+          success: true, 
+          message: 'إذا كان البريد الإلكتروني مسجلاً لدينا، فستصلك رسالة تحتوي على تعليمات استعادة كلمة المرور.' 
+        });
+      }
+
+      const user = userList[0];
+      const resetToken = crypto.randomBytes(32).toString('hex');
+      const resetTokenExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour validity
+
+      await db.update(users).set({
+        resetToken,
+        resetTokenExpires
+      }).where(eq(users.id, user.id));
+
+      const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+      const host = req.headers['x-forwarded-host'] || req.get('host');
+      const appUrl = (req.headers['x-frontend-origin'] as string) || process.env.APP_URL || `${protocol}://${host}`;
+      const resetLink = `${appUrl}/?reset_token=${resetToken}&email=${encodeURIComponent(email)}`;
+
+      const transporter = getMailTransporter();
+      const fromAddress = process.env.SMTP_FROM || `"منظومة بيرق التعليمية" <${process.env.SMTP_USER || 'info@bairaq-iq.com'}>`;
+
+      if (transporter) {
+        try {
+          await transporter.sendMail({
+            from: fromAddress,
+            to: email,
+            subject: 'استعادة كلمة المرور - منظومة بيرق التعليمية',
+            html: `
+              <div dir="rtl" style="font-family: Arial, sans-serif; background-color: #f8fafc; padding: 30px; border-radius: 12px; color: #1e293b; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0;">
+                <div style="text-align: center; margin-bottom: 24px;">
+                  <h2 style="color: #0f172a; margin: 0; font-size: 22px;">منظومة بيرق التعليمية</h2>
+                  <p style="color: #64748b; font-size: 14px; margin-top: 4px;">طلب إعادة تعيين كلمة المرور</p>
+                </div>
+                <div style="background: #ffffff; padding: 24px; border-radius: 10px; border: 1px solid #f1f5f9; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+                  <p style="font-size: 16px; margin: 0 0 16px 0;">مرحباً <strong>${user.name || 'عزيزي المستخدم'}</strong>،</p>
+                  <p style="font-size: 14px; line-height: 1.6; color: #334155;">
+                    تلقينا طلباً لإعادة تعيين كلمة المرور الخاصة بحسابك في منظومة بيرق. يمكنك إعادة تعيينها مباشرة عبر النقر على الزر أدناه:
+                  </p>
+                  <div style="text-align: center; margin: 28px 0;">
+                    <a href="${resetLink}" style="background-color: #2563eb; color: #ffffff; text-decoration: none; padding: 12px 28px; border-radius: 8px; font-weight: bold; font-size: 15px; display: inline-block;">إعادة تعيين كلمة المرور</a>
+                  </div>
+                  <p style="font-size: 12px; color: #94a3b8; line-height: 1.5; margin-top: 20px;">
+                    صلاحية هذا الرابط هي ساعة واحدة فقط. إذا لم تكن أنت من طلب استعادة كلمة المرور، يرجى تجاهل هذه الرسالة فلن يتأثر حسابك بأي تغيير.
+                  </p>
+                </div>
+                <div style="text-align: center; margin-top: 20px; font-size: 12px; color: #94a3b8;">
+                  © ${new Date().getFullYear()} منظومة بيرق التعليمية. جميع الحقوق محفوظة.
+                </div>
+              </div>
+            `
+          });
+          console.log(`[SMTP] Reset email sent successfully to ${email}`);
+        } catch (mailErr: any) {
+          console.error('[SMTP Error] Failed to send reset email:', mailErr);
+          // If SMTP fails, log the token link on server for recovery/dev
+          console.log(`[RECOVERY_FALLBACK_LINK] ${resetLink}`);
+        }
+      } else {
+        console.warn('[SMTP] SMTP not configured. Fallback reset link:', resetLink);
+      }
+
+      res.json({
+        success: true,
+        message: 'تم إرسال رابط استعادة كلمة المرور إلى بريدك الإلكتروني بنجاح.'
+      });
+    } catch (error: any) {
+      console.error('Forgot password error:', error);
+      res.status(500).json({ success: false, message: 'حدث خطأ أثناء معالجة الطلب' });
+    }
+  });
+
+  // POST /api/auth/reset-password
+  app.post('/api/auth/reset-password', async (req, res) => {
+    try {
+      const { email, token, newPassword } = req.body;
+      if (!email || !token || !newPassword) {
+        return res.status(400).json({ success: false, message: 'جميع البيانات مطلوبة (البريد، الرمز، وكلمة المرور الجديدة)' });
+      }
+
+      if (String(newPassword).length < 6) {
+        return res.status(400).json({ success: false, message: 'يجب أن لا تقل كلمة المرور عن 6 أحرف' });
+      }
+
+      const targetEmail = String(email).trim().toLowerCase();
+      const userList = await db.select().from(users).where(eq(users.email, targetEmail)).limit(1);
+      if (userList.length === 0) {
+        return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
+      }
+
+      const user = userList[0];
+      if (!user.resetToken || user.resetToken !== token) {
+        return res.status(400).json({ success: false, message: 'رمز استعادة كلمة المرور غير صالح أو تم استخدامه مسبقاً' });
+      }
+
+      if (user.resetTokenExpires && new Date(user.resetTokenExpires) < new Date()) {
+        return res.status(400).json({ success: false, message: 'انتهت صلاحية رمز استعادة كلمة المرور. يرجى طلب رابط جديد' });
+      }
+
+      const newHash = await bcrypt.hash(newPassword, 10);
+      await db.update(users).set({
+        passwordHash: newHash,
+        resetToken: null,
+        resetTokenExpires: null
+      }).where(eq(users.id, user.id));
+
+      console.log(`[Auth] Password successfully reset for user: ${targetEmail}`);
+      res.json({ success: true, message: 'تم تغيير كلمة المرور بنجاح. يمكنك الآن تسجيل الدخول بكلمة المرور الجديدة.' });
+    } catch (error: any) {
+      console.error('Reset password error:', error);
+      res.status(500).json({ success: false, message: error.message || 'حدث خطأ أثناء إعادة تعيين كلمة المرور' });
+    }
+  });
+
+  // ==========================================
+  // 📲 استعادة كلمة المرور عبر واتساب (WhatsApp OTP Recovery)
+  // ==========================================
+
+  function formatPhoneForWhatsApp(inputPhone: string): string {
+    let cleaned = (inputPhone || '').replace(/[^0-9+]/g, '');
+    if (cleaned.startsWith('00')) {
+      cleaned = '+' + cleaned.substring(2);
+    } else if (cleaned.startsWith('07')) {
+      cleaned = '+964' + cleaned.substring(1);
+    } else if (cleaned.startsWith('7') && cleaned.length === 10) {
+      cleaned = '+964' + cleaned;
+    } else if (!cleaned.startsWith('+') && cleaned.length >= 10) {
+      cleaned = '+' + cleaned;
+    }
+    return cleaned;
+  }
+
+  function maskPhoneNumber(phone: string): string {
+    if (!phone || phone.length < 7) return phone || 'رقم هاتفك';
+    const start = phone.slice(0, 4);
+    const end = phone.slice(-3);
+    return `${start}****${end}`;
+  }
+
+  // POST /api/auth/whatsapp/request-otp
+  app.post('/api/auth/whatsapp/request-otp', async (req, res) => {
+    try {
+      const identifier = (req.body?.identifier || '').trim();
+      if (!identifier) {
+        return res.status(400).json({ success: false, message: 'يرجى إدخال رقم الهاتف أو البريد الإلكتروني' });
+      }
+
+      // 1. Locate user in users table by email, phone, or id
+      let targetUser: any = null;
+      const cleanPhone = formatPhoneForWhatsApp(identifier);
+      
+      const byEmail = await db.select().from(users).where(eq(users.email, identifier.toLowerCase())).limit(1);
+      if (byEmail.length > 0) {
+        targetUser = byEmail[0];
+      } else {
+        const byPhone = await db.select().from(users).where(or(
+          eq(users.phone, identifier),
+          eq(users.phone, cleanPhone)
+        )).limit(1);
+        if (byPhone.length > 0) {
+          targetUser = byPhone[0];
+        } else {
+          // Check teachers table
+          const teacherList = await db.select().from(teachers).where(or(
+            eq(teachers.phone, identifier),
+            eq(teachers.phone, cleanPhone),
+            eq(teachers.email, identifier.toLowerCase()),
+            eq(teachers.code, identifier)
+          )).limit(1);
+          if (teacherList.length > 0) {
+            const t = teacherList[0];
+            const linkedUsers = await db.select().from(users).where(eq(users.email, t.email || '')).limit(1);
+            if (linkedUsers.length > 0) {
+              targetUser = linkedUsers[0];
+            }
+          }
+
+          // Check students table
+          if (!targetUser) {
+            const studentList = await db.select().from(students).where(or(
+              eq(students.parentPhone, identifier),
+              eq(students.parentPhone, cleanPhone),
+              eq(students.code, identifier),
+              eq(students.id, identifier)
+            )).limit(1);
+            if (studentList.length > 0) {
+              const s = studentList[0];
+              const linkedUsers = await db.select().from(users).where(eq(users.id, s.id)).limit(1);
+              if (linkedUsers.length > 0) {
+                targetUser = linkedUsers[0];
+              }
+            }
+          }
+        }
+      }
+
+      if (!targetUser) {
+        return res.status(404).json({
+          success: false,
+          message: 'لم يتم العثور على حساب مرتبط برقم الهاتف أو البريد المدخل. يرجى التحقق من صحة البيانات.'
+        });
+      }
+
+      // 2. Generate 6-digit OTP
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const otpExpires = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+
+      // 3. Save OTP in DB
+      await db.update(users).set({
+        whatsappOtp: otp,
+        whatsappOtpExpires: otpExpires,
+        resetToken: otp,
+        resetTokenExpires: otpExpires
+      }).where(eq(users.id, targetUser.id));
+
+      // 4. Determine destination phone number
+      const recipientPhone = formatPhoneForWhatsApp(targetUser.phone || identifier);
+
+      // 5. Retrieve support WhatsApp number from settings
+      let supportWhatsapp = '+9647700000000';
+      try {
+        if (fs.existsSync(SETTINGS_FILE_PATH)) {
+          const raw = fs.readFileSync(SETTINGS_FILE_PATH, 'utf8');
+          const parsed = JSON.parse(raw);
+          if (parsed?.app_updates?.supportWhatsapp) {
+            supportWhatsapp = parsed.app_updates.supportWhatsapp;
+          } else if (parsed?.school_info?.adminWhatsapp) {
+            supportWhatsapp = parsed.school_info.adminWhatsapp;
+          }
+        }
+      } catch (e) {}
+
+      const cleanSupportPhone = formatPhoneForWhatsApp(supportWhatsapp).replace(/[^0-9]/g, '');
+
+      // 6. Direct WhatsApp Chat Link (Click to Chat wa.me)
+      const waMessage = `طلب استعادة كلمة المرور - منظومة بيرق التعليمية\nالحساب: ${targetUser.email || targetUser.name || identifier}\nرمز التحقق: ${otp}\n(صالح لمدة 15 دقيقة)`;
+      const whatsappDirectLink = `https://wa.me/${cleanSupportPhone}?text=${encodeURIComponent(waMessage)}`;
+
+      // 7. If automated WhatsApp Gateway is configured (UltraMsg / Wablas / Custom Webhook), send message
+      let gatewaySent = false;
+      const waApiUrl = process.env.WHATSAPP_API_URL || process.env.ULTRAMSG_API_URL;
+      const waToken = process.env.WHATSAPP_TOKEN || process.env.ULTRAMSG_TOKEN;
+      const waInstanceId = process.env.WHATSAPP_INSTANCE_ID || process.env.ULTRAMSG_INSTANCE_ID;
+
+      if (waApiUrl || (waInstanceId && waToken)) {
+        try {
+          const endpoint = waApiUrl || `https://api.ultramsg.com/${waInstanceId}/messages/chat`;
+          const payload = {
+            token: waToken,
+            to: recipientPhone,
+            body: `منظومة بيرق التعليمية 🛡️\nرمز التحقق لاستعادة كلمة المرور هو: *${otp}*\n(صالح لمدة 15 دقيقة. لا تشارك هذا الرمز مع أي شخص).`
+          };
+
+          await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              ...(waToken ? { 'Authorization': `Bearer ${waToken}` } : {})
+            },
+            body: JSON.stringify(payload)
+          });
+          gatewaySent = true;
+          console.log(`[WhatsApp Gateway] Sent OTP successfully to ${recipientPhone}`);
+        } catch (apiErr) {
+          console.warn('[WhatsApp Gateway] Failed to send via API:', apiErr);
+        }
+      }
+
+      console.log(`[WhatsApp Recovery] Generated OTP for ${identifier}: ${otp} (Destination: ${recipientPhone})`);
+
+      return res.json({
+        success: true,
+        message: 'تم توليد كود التحقق بنجاح.',
+        phoneMasked: maskPhoneNumber(recipientPhone),
+        identifier: identifier,
+        gatewaySent,
+        whatsappLink: whatsappDirectLink,
+        expiresInSeconds: 900
+      });
+    } catch (error: any) {
+      console.error('WhatsApp request OTP error:', error);
+      res.status(500).json({ success: false, message: 'حدث خطأ أثناء معالجة طلب استعادة كلمة المرور عبر واتساب' });
+    }
+  });
+
+  // POST /api/auth/whatsapp/verify-otp
+  app.post('/api/auth/whatsapp/verify-otp', async (req, res) => {
+    try {
+      const { identifier, otp, newPassword } = req.body;
+      if (!identifier || !otp || !newPassword) {
+        return res.status(400).json({ success: false, message: 'جميع الحقول مطلوبة (البيانات، رمز التحقق، وكلمة المرور الجديدة)' });
+      }
+
+      if (String(newPassword).length < 6) {
+        return res.status(400).json({ success: false, message: 'يجب ألا تقل كلمة المرور الجديدة عن 6 أحرف' });
+      }
+
+      const cleanOtp = String(otp).trim();
+      const cleanPhone = formatPhoneForWhatsApp(identifier);
+
+      // Find user
+      const userList = await db.select().from(users).where(or(
+        eq(users.email, identifier.toLowerCase().trim()),
+        eq(users.phone, identifier),
+        eq(users.phone, cleanPhone)
+      )).limit(1);
+
+      if (userList.length === 0) {
+        return res.status(404).json({ success: false, message: 'المستخدم غير موجود' });
+      }
+
+      const user = userList[0];
+      const validOtp = (user.whatsappOtp && user.whatsappOtp === cleanOtp) || (user.resetToken && user.resetToken === cleanOtp);
+      if (!validOtp) {
+        return res.status(400).json({ success: false, message: 'رمز التحقق (OTP) غير صحيح أو تم استخدامه مسبقاً' });
+      }
+
+      const expires = user.whatsappOtpExpires || user.resetTokenExpires;
+      if (expires && new Date(expires) < new Date()) {
+        return res.status(400).json({ success: false, message: 'انتهت صلاحية رمز التحقق. يرجى طلب رمز جديد.' });
+      }
+
+      // Hash and update
+      const newHash = await bcrypt.hash(newPassword, 10);
+      await db.update(users).set({
+        passwordHash: newHash,
+        whatsappOtp: null,
+        whatsappOtpExpires: null,
+        resetToken: null,
+        resetTokenExpires: null
+      }).where(eq(users.id, user.id));
+
+      console.log(`[WhatsApp Recovery] Password successfully updated for user: ${user.email || user.id}`);
+      return res.json({
+        success: true,
+        message: 'تم تغيير كلمة المرور بنجاح! يمكنك الآن تسجيل الدخول مباشرة بكلمة المرور الجديدة.'
+      });
+    } catch (error: any) {
+      console.error('WhatsApp verify OTP error:', error);
+      res.status(500).json({ success: false, message: 'حدث خطأ أثناء حفظ كلمة المرور الجديدة' });
     }
   });
 
@@ -12051,6 +12540,36 @@ app.post('/api/admin/maintenance/purge-cache', async (req, res) => {
         "created_at" timestamp DEFAULT now()
       );
     `;
+  } catch (schemaErr) {
+    // Non-blocking fallback
+  }
+
+  // Ensure user_device_tokens table exists for FCM push notifications
+  try {
+    await sqlRaw`
+      CREATE TABLE IF NOT EXISTS "user_device_tokens" (
+        "id" varchar(128) PRIMARY KEY NOT NULL,
+        "user_id" varchar(128) NOT NULL,
+        "token" text NOT NULL,
+        "platform" varchar(50) DEFAULT 'android',
+        "device_model" varchar(128),
+        "school_id" varchar(128),
+        "role" varchar(50) DEFAULT 'student',
+        "last_active" timestamp DEFAULT now(),
+        "created_at" timestamp DEFAULT now()
+      );
+    `;
+  } catch (schemaErr) {
+    // Non-blocking fallback
+  }
+
+  // Ensure users table has reset_token, phone, and whatsapp_otp columns
+  try {
+    await sqlRaw`ALTER TABLE users ADD COLUMN IF NOT EXISTS "phone" varchar(50);`;
+    await sqlRaw`ALTER TABLE users ADD COLUMN IF NOT EXISTS "reset_token" varchar(255);`;
+    await sqlRaw`ALTER TABLE users ADD COLUMN IF NOT EXISTS "reset_token_expires" timestamp;`;
+    await sqlRaw`ALTER TABLE users ADD COLUMN IF NOT EXISTS "whatsapp_otp" varchar(20);`;
+    await sqlRaw`ALTER TABLE users ADD COLUMN IF NOT EXISTS "whatsapp_otp_expires" timestamp;`;
   } catch (schemaErr) {
     // Non-blocking fallback
   }
