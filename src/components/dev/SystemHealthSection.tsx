@@ -25,8 +25,10 @@ import {
   Wifi,
   Trash2,
   Lock,
-  Send
+  Send,
+  Globe
 } from 'lucide-react';
+import { getApiBaseUrl, setApiBaseUrl, DEFAULT_PRODUCTION_API_URL } from '../../lib/serverConfig';
 import {
   systemHealthService,
   SystemHealthReport,
@@ -83,6 +85,11 @@ export const SystemHealthSection: React.FC<SystemHealthSectionProps> = ({
   const [simStudents, setSimStudents] = useState(1000);
   const [simSubscription, setSimSubscription] = useState(1500);
   const [simAiRequests, setSimAiRequests] = useState(10);
+
+  // Backend API URL Configuration
+  const [currentApiUrl, setCurrentApiUrl] = useState<string>(() => getApiBaseUrl());
+  const [customUrlInput, setCustomUrlInput] = useState<string>(() => getApiBaseUrl() || DEFAULT_PRODUCTION_API_URL);
+  const [isSavingUrl, setIsSavingUrl] = useState(false);
 
   const showNotification = (title: string, message: string, type: 'success' | 'error' = 'success', latencyMs?: number) => {
     setToastNotification({ title, message, type, latencyMs });
@@ -567,6 +574,64 @@ export const SystemHealthSection: React.FC<SystemHealthSectionProps> = ({
               </>
             )}
           </button>
+        </div>
+      </div>
+
+      {/* Backend API Routing & Mobile Endpoint Configuration */}
+      <div className="bg-gradient-to-r from-indigo-950/40 via-purple-950/30 to-black/40 border border-indigo-500/20 rounded-3xl p-5 backdrop-blur-md space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 rounded-2xl bg-indigo-500/20 text-indigo-400 border border-indigo-500/30">
+              <Globe size={22} />
+            </div>
+            <div>
+              <h4 className="text-sm font-black text-white flex items-center gap-2">
+                <span>توجيه خادم الـ API لتطبيق الهاتف والويب (API Gateway Route)</span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-mono border border-indigo-500/30">
+                  {currentApiUrl ? currentApiUrl : 'نطاق المتصفح المحلي (Same Origin)'}
+                </span>
+              </h4>
+              <p className="text-xs text-white/50">
+                هذا العنوان هو الرابط المركزي الذي تستهدفه عمليات تسجيل الدخول، إنشاء الحساب، وطلبات التطبيق من أجهزة أندرويد.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-col sm:flex-row items-center gap-3">
+          <input
+            type="text"
+            value={customUrlInput}
+            onChange={(e) => setCustomUrlInput(e.target.value)}
+            placeholder="مثال: https://bairaq-iq.com أو رابط السيرفر الخاص بك"
+            className="flex-1 w-full bg-black/50 border border-white/10 rounded-2xl px-4 py-2.5 text-xs text-white placeholder-white/30 font-mono outline-none focus:border-indigo-500 transition-all"
+            dir="ltr"
+          />
+          <div className="flex items-center gap-2 w-full sm:w-auto">
+            <button
+              onClick={() => {
+                const target = customUrlInput.trim().replace(/\/+$/, '');
+                setApiBaseUrl(target);
+                setCurrentApiUrl(target);
+                showNotification('تم تحديث رابط الخادم', `تم اعتماد الرابط: ${target || 'الافتراضي'}`);
+              }}
+              className="flex-1 sm:flex-none px-4 py-2.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs shadow-lg shadow-indigo-600/20 transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+            >
+              <CheckCheck size={14} />
+              <span>حفظ وتطبيق الرابط</span>
+            </button>
+            <button
+              onClick={() => {
+                setCustomUrlInput(DEFAULT_PRODUCTION_API_URL);
+                setApiBaseUrl(DEFAULT_PRODUCTION_API_URL);
+                setCurrentApiUrl(DEFAULT_PRODUCTION_API_URL);
+                showNotification('تمت الاستعادة', 'تمت استعادة رابط الإنتاج الرسمي');
+              }}
+              className="px-3 py-2.5 rounded-2xl bg-white/5 hover:bg-white/10 text-white/70 text-xs font-bold border border-white/10 transition-all"
+            >
+              الافتراضي
+            </button>
+          </div>
         </div>
       </div>
 

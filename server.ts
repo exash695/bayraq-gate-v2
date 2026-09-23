@@ -232,8 +232,16 @@ app.use(statusRouter);
   app.use(express.json({ limit: '500mb' }));
   app.use(express.urlencoded({ limit: '500mb', extended: true }));
 
-  // 1. Security Headers Middleware (OWASP recommended)
+  // 1. Security Headers & Full CORS Middleware (Supports Web and Capacitor Mobile Apps)
   app.use((req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-device-id, x-auth-token, x-jwt-token, x-user-email, x-developer-email, x-user-role, x-school-id');
+    
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(200);
+    }
+
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.setHeader('X-XSS-Protection', '1; mode=block');

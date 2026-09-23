@@ -57,27 +57,34 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onOpenPrivacy }) => {
         await customAuth.loginWithEmail(formData.email, formData.password);
         safeStorage.setItem('s6_activeSection', 'hub');
       } else {
-        const user = await customAuth.registerWithEmail(formData.email, formData.password, 'مستخدم جديد', 'student', 'general');
+        const user = await customAuth.registerWithEmail(formData.email, formData.password, formData.fullName || 'مستخدم جديد', 'student', 'general');
         safeStorage.setItem('s6_activeSection', 'hub');
-        await setDoc(doc(db, 'users', user.uid), {
-          fullName: formData.fullName,
-          governorate: formData.governorate,
-          schoolName: formData.school,
-          phoneNumber: '+964' + formData.phone,
-          rank: 'طالب جديد',
-          xp: 0,
-          status: 'online'
-        });
+        try {
+          await setDoc(doc(db, 'users', user.uid), {
+            fullName: formData.fullName,
+            governorate: formData.governorate,
+            schoolName: formData.school,
+            phoneNumber: formData.phone ? '+964' + formData.phone : '',
+            rank: 'طالب جديد',
+            xp: 0,
+            status: 'online'
+          });
+        } catch (docErr) {
+          console.warn('User registered in SQL, Firestore sync warning:', docErr);
+        }
       }
     } catch (err: any) {
-      if (err.code === 'auth/email-already-in-use') {
-        setError('هذا البريد الإلكتروني مستخدم بالفعل. يرجى تسجيل الدخول.');
-      } else if (err.code === 'auth/invalid-credential') {
+      const msg = err.message || err.error || '';
+      if (err.code === 'auth/email-already-in-use' || msg.includes('موجود بالفعل') || msg.includes('مسجل مسبقاً')) {
+        setError('هذا البريد الإلكتروني مسجل بالفعل. يرجى تسجيل الدخول أو استعادة كلمة المرور.');
+      } else if (err.code === 'auth/invalid-credential' || msg.includes('غير صحيحة') || msg.includes('Invalid credentials')) {
         setError('البريد الإلكتروني أو كلمة السر غير صحيحة.');
+      } else if (msg) {
+        setError(msg);
       } else {
-        setError(`حدث خطأ غير متوقع: ${err.message || 'يرجى المحاولة لاحقاً.'}`);
-        console.error("Auth Error details:", err);
+        setError('حدث خطأ أثناء الاتصال بالخادم. يرجى التحقق من اتصال الإنترنت.');
       }
+      console.error("Auth Error details:", err);
     } finally {
       setAuthLoading(false);
     }

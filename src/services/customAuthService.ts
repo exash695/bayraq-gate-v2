@@ -75,15 +75,28 @@ class CustomAuthService {
 
   public async loginWithEmail(email: string, password: string): Promise<CustomUser> {
     const deviceId = getOrCreateDeviceId();
-    const res = await fetch('/api/auth/login', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'x-device-id': deviceId
-      },
-      body: JSON.stringify({ email, password, deviceId })
-    });
-    const data = await res.json();
+    let res: Response;
+    try {
+      res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'x-device-id': deviceId
+        },
+        body: JSON.stringify({ email, password, deviceId })
+      });
+    } catch (networkErr: any) {
+      console.error('[customAuth] loginWithEmail network error:', networkErr);
+      throw new Error('تعذر الاتصال بالخادم الرئيسي للمنظومة. يرجى التحقق من اتصال الإنترنت أو حالة السيرفر.');
+    }
+
+    let data: any;
+    try {
+      data = await res.json();
+    } catch (jsonErr) {
+      throw new Error(`استجابة غير صالحة من السيرفر (${res.status}). يرجى التأكد من تشغيل الخادم.`);
+    }
+
     if (!data.success) {
       if (data.message === 'SCHOOL_SUSPENDED' || data.isSchoolSuspended) {
         const err = new Error(data.error || data.message || 'تم تعطيل وتجميد حساب وخدمات هذه المدرسة من قبل إدارة المنظومة (المطور)');
@@ -161,26 +174,51 @@ class CustomAuthService {
   }
 
   public async registerWithEmail(email: string, password: string, name: string, role: string, schoolId: string) {
-    const res = await fetch('/api/auth/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password, name, role, schoolId })
-    });
-    const data = await res.json();
+    let res: Response;
+    try {
+      res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, name, role, schoolId })
+      });
+    } catch (networkErr: any) {
+      console.error('[customAuth] registerWithEmail network error:', networkErr);
+      throw new Error('تعذر الاتصال بالخادم لإنشاء الحساب. يرجى التحقق من اتصال الإنترنت أو حالة السيرفر.');
+    }
+
+    let data: any;
+    try {
+      data = await res.json();
+    } catch (jsonErr) {
+      throw new Error(`استجابة غير صالحة من السيرفر (${res.status}). يرجى التحقق من تشغيل الخادم.`);
+    }
+
     if (!data.success) {
-      throw new Error(data.message || 'Registration failed');
+      throw new Error(data.message || data.error || 'فشل إنشاء الحساب الجديد');
     }
     // Auto login after register
     return this.loginWithEmail(email, password);
   }
 
   public async loginWithGoogle(email?: string, name?: string): Promise<CustomUser> {
-    const res = await fetch('/api/auth/google-login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, name })
-    });
-    const data = await res.json();
+    let res: Response;
+    try {
+      res = await fetch('/api/auth/google-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, name })
+      });
+    } catch (networkErr: any) {
+      throw new Error('تعذر الاتصال بالسيرفر لتسجيل الدخول عبر Google.');
+    }
+
+    let data: any;
+    try {
+      data = await res.json();
+    } catch (e) {
+      throw new Error(`استجابة غير صالحة (${res.status})`);
+    }
+
     if (!data.success) {
       throw new Error(data.message || 'فشل تسجيل الدخول عبر Google');
     }
@@ -191,12 +229,25 @@ class CustomAuthService {
   }
 
   public async forgotPassword(email: string): Promise<{ success: boolean; message: string }> {
-    const res = await fetch('/api/auth/forgot-password', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email: email.trim().toLowerCase() })
-    });
-    const data = await res.json();
+    let res: Response;
+    try {
+      res = await fetch('/api/auth/forgot-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: email.trim().toLowerCase() })
+      });
+    } catch (networkErr: any) {
+      console.error('[customAuth] forgotPassword network error:', networkErr);
+      throw new Error('تعذر الاتصال بالخادم لإرسال رابط الاستعادة. يرجى التحقق من الاتصال بالإنترنت.');
+    }
+
+    let data: any;
+    try {
+      data = await res.json();
+    } catch (e) {
+      throw new Error(`استجابة غير صالحة من الخادم (${res.status})`);
+    }
+
     if (!data.success) {
       throw new Error(data.message || 'حدث خطأ أثناء إرسال رابط استعادة كلمة المرور');
     }

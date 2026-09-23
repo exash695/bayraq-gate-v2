@@ -2106,6 +2106,12 @@ async function startServer() {
   app.use(import_express2.default.json({ limit: "500mb" }));
   app.use(import_express2.default.urlencoded({ limit: "500mb", extended: true }));
   app.use((req, res, next) => {
+    res.setHeader("Access-Control-Allow-Origin", "*");
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-device-id, x-auth-token, x-jwt-token, x-user-email, x-developer-email, x-user-role, x-school-id");
+    if (req.method === "OPTIONS") {
+      return res.sendStatus(200);
+    }
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("X-Frame-Options", "SAMEORIGIN");
     res.setHeader("X-XSS-Protection", "1; mode=block");

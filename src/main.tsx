@@ -4,19 +4,25 @@ import ErrorBoundary from './components/ErrorBoundary';
 import App from './App.tsx';
 import { errorMonitoringService } from './services/errorMonitoringService';
 
+import { getApiBaseUrl } from './lib/serverConfig';
+
 // Automatic Mobile / Native App API URL routing
 if (typeof window !== 'undefined') {
   try {
     const isCapacitorOrLocal = 
       window.location.protocol === 'capacitor:' || 
       window.location.protocol === 'file:' || 
-      (window.location.hostname === 'localhost' && Boolean((window as any).Capacitor?.isNativePlatform?.()));
+      window.location.hostname === 'localhost' ||
+      window.location.hostname === '127.0.0.1' ||
+      Boolean((window as any).Capacitor?.isNativePlatform?.()) ||
+      Boolean((window as any).Capacitor);
 
     if (isCapacitorOrLocal) {
       const originalFetch = window.fetch.bind(window);
       const customFetch = function (input: RequestInfo | URL, init?: RequestInit) {
         if (typeof input === 'string' && input.startsWith('/api/')) {
-          input = 'https://bairaq-iq.com' + input;
+          const baseUrl = getApiBaseUrl();
+          input = baseUrl + input;
         }
         return originalFetch(input, init);
       };
