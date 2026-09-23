@@ -6,3 +6,7 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Android wrapper & gradlew must be committed
+!android/gradle/wrapper/gradle-wrapper.jar
+!android/gradlew
