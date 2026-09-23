@@ -2052,12 +2052,13 @@ export default function App() {
 
         if (!isSchoolVerified) {
           const isAcademy =
-            selectedSchoolId === "school8" ||
             selectedSchoolId === "general" ||
             selectedSchoolId === "academy" ||
             (institutionName &&
               (institutionName.includes("أكاديمية") ||
-                institutionName.includes("اكاديمية")));
+                institutionName.includes("اكاديمية")) &&
+              !institutionName.includes("إبداعنا") &&
+              !institutionName.includes("ابداعنا"));
 
           const handleAccessVerify = async (code: string, isParent: boolean) => {
             setIsVerifying(true);
@@ -3753,6 +3754,7 @@ export default function App() {
               settings={settings}
               setSettings={setSettings}
               progress={progress}
+              userProfile={userProfile}
               onResetProgress={resetProgress}
               onClearNotes={clearNotes}
               onResetSettings={resetSettings}

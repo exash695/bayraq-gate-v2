@@ -405,15 +405,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
               </>
             )}
 
-            {(userProfile?.role && userProfile.role !== 'student') && (
-              <MenuItem 
-                label={language === 'ar' ? 'غرفة التحكم' : 'Control Room'}
-                icon={Settings}
-                colorClass="sky"
-                isActive={activeSection === 'control'}
-                onClick={() => { onSelectSection('control'); setIsOpen(false); }}
-              />
-            )}
+            {/* غرفة التحكم - ظاهرة لكافة الأدوار (طالب، أستاذ، ولي أمر، إدارة، مطور) */}
+            <MenuItem 
+              label={language === 'ar' ? 'غرفة التحكم' : 'Control Room'}
+              icon={Settings}
+              colorClass="sky"
+              isActive={activeSection === 'control'}
+              onClick={() => { onSelectSection('control'); setIsOpen(false); }}
+            />
 
             {isDev && (
               <MenuItem 

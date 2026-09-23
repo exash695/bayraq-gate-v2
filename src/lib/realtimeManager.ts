@@ -1,4 +1,5 @@
 import { customAuth } from '../services/customAuthService';
+import { getApiBaseUrl } from './serverConfig';
 
 export interface RealtimeEvent {
   type: string;
@@ -71,9 +72,16 @@ class RealtimeManager {
     }
 
     try {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const host = window.location.host;
-      const wsUrl = `${protocol}//${host}/api/realtime?token=${encodeURIComponent(token)}`;
+      const apiBase = getApiBaseUrl();
+      let wsUrl = '';
+      if (apiBase) {
+        const cleanBase = apiBase.replace(/^http/, 'ws');
+        wsUrl = `${cleanBase}/api/realtime?token=${encodeURIComponent(token)}`;
+      } else {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.host;
+        wsUrl = `${protocol}//${host}/api/realtime?token=${encodeURIComponent(token)}`;
+      }
 
       this.ws = new WebSocket(wsUrl);
 

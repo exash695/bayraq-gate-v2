@@ -1,6 +1,16 @@
 import { useState, useEffect, useMemo } from "react";
 import { realtimeManager } from "../lib/realtimeManager";
 import { THEME_PRESETS, ACCENT_STYLES, ThemePresetInfo, AccentStyleConfig } from "../utils/themePresets";
+import { getApiBaseUrl } from "../lib/serverConfig";
+
+function resolveApiUrl(path: string): string {
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path;
+  }
+  const base = getApiBaseUrl();
+  const cleanPath = path.startsWith('/') ? path : '/' + path;
+  return base ? `${base}${cleanPath}` : cleanPath;
+}
 
 export type SeasonalThemeType =
   | "default"
@@ -126,8 +136,8 @@ export const DEFAULT_REMOTE_CONFIG: RemoteConfig = {
 export async function fetchRemoteConfigFromServer(): Promise<RemoteConfig> {
   try {
     const [resRemote, resTheme] = await Promise.allSettled([
-      fetch('/api/system_config/remote_control'),
-      fetch('/api/system_config/seasonal_theme')
+      fetch(resolveApiUrl('/api/system_config/remote_control')),
+      fetch(resolveApiUrl('/api/system_config/seasonal_theme'))
     ]);
 
     let remoteData: any = {};
@@ -217,12 +227,12 @@ export async function saveRemoteConfigToServer(config: Partial<RemoteConfig>): P
 
     // 3. Post to backend server API
     await Promise.allSettled([
-      fetch('/api/system_config/remote_control', {
+      fetch(resolveApiUrl('/api/system_config/remote_control'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(remotePayload)
       }),
-      fetch('/api/system_config/seasonal_theme', {
+      fetch(resolveApiUrl('/api/system_config/seasonal_theme'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(themePayload)

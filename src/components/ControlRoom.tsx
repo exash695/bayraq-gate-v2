@@ -28,6 +28,7 @@ import { AppSettings, ThemeColor, FontFamily, UserProgress } from '../types';
 import { translations } from '../lib/translations';
 import { clearMediaCache } from '../utils/imageCacher';
 import { PrivacyPolicy } from './PrivacyPolicy';
+import { auth } from '../lib/firebase';
 
 interface ControlRoomProps {
   settings: AppSettings;
@@ -38,6 +39,7 @@ interface ControlRoomProps {
   onResetSettings: () => void;
   onResetOnboarding?: () => void;
   onOpenPrivacy?: () => void;
+  userProfile?: any;
 }
 
 export const ControlRoom = ({ 
@@ -48,13 +50,20 @@ export const ControlRoom = ({
   onClearNotes,
   onResetSettings,
   onResetOnboarding,
-  onOpenPrivacy
+  onOpenPrivacy,
+  userProfile
 }: ControlRoomProps) => {
   const t = translations[settings.language];
   const [showPrivacyModal, setShowPrivacyModal] = useState(false);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [flashingButtonId, setFlashingButtonId] = useState<string | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{ type: 'clear' | 'reset' | null; isOpen: boolean }>({ type: null, isOpen: false });
+
+  const isDev = 
+    auth.currentUser?.email === "mntzralghanm527@gmail.com" || 
+    userProfile?.email === "mntzralghanm527@gmail.com" ||
+    userProfile?.role === "dev" ||
+    userProfile?.isAdmin === true;
 
   const handleButtonClick = (name: string, id: string, action: () => void) => {
     setToastMessage(`${name} Pressed!`);
@@ -344,18 +353,18 @@ export const ControlRoom = ({
             {settings.language === 'ar' ? '⚡ تفريغ ذاكرة التخزين المؤقت للوسائط (Clear Media Cache)' : '⚡ Clear Media Cache & Refresh'}
           </motion.button>
           
-          {onResetOnboarding && (
+          {onResetOnboarding && isDev && (
             <motion.button
               whileTap={{ scale: 0.95 }}
               onClick={() => {
                 onResetOnboarding();
-                setToastMessage(settings.language === 'ar' ? 'تمت إعادة ضبط الجولة التعريفية' : 'Onboarding reset successfully');
+                setToastMessage(settings.language === 'ar' ? 'تمت إعادة ضبط الجولة التعريفية (خاص بالمطور)' : 'Onboarding reset successfully');
                 setTimeout(() => setToastMessage(null), 2000);
               }}
               className="p-4 rounded-xl bg-[#D4AF37]/10 border border-[#D4AF37]/30 text-[#D4AF37] font-bold flex items-center justify-center gap-3 hover:bg-[#D4AF37]/20 transition-all"
             >
               <RefreshCcw size={20} />
-              {settings.language === 'ar' ? 'إعادة عرض اللوحات التعريفية' : 'Reset Onboarding Tour'}
+              {settings.language === 'ar' ? 'إعادة عرض اللوحات التعريفية (خاص بالمطور 👑)' : 'Reset Onboarding Tour (Dev Only)'}
             </motion.button>
           )}
         </div>

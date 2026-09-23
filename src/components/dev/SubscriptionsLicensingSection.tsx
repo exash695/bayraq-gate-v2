@@ -29,7 +29,9 @@ import {
   Share2,
   X,
   Archive,
-  PlusCircle
+  PlusCircle,
+  Pencil,
+  Save
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { logActivity } from '../../utils/auditLogger';
@@ -139,6 +141,10 @@ export const SubscriptionsLicensingSection: React.FC = () => {
 
   // QR Verification Preview Modal
   const [verifyingLicense, setVerifyingLicense] = useState<SchoolLicense | null>(null);
+
+  // Edit School Name Modal State
+  const [editingSchool, setEditingSchool] = useState<{ id: string; currentName: string; newName: string } | null>(null);
+  const [isUpdatingSchoolName, setIsUpdatingSchoolName] = useState(false);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -359,6 +365,55 @@ export const SubscriptionsLicensingSection: React.FC = () => {
       showToast('تم تحديث البيانات في الذاكرة الحالية');
       setLicenses(prev => prev.map(l => l.schoolId === updated.schoolId ? updated : l));
       setEditingLicense(null);
+    }
+  };
+
+  const handleUpdateSchoolName = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingSchool || !editingSchool.newName.trim()) {
+      showToast('يرجى كتابة اسم المدرسة الجديد');
+      return;
+    }
+
+    const schoolId = editingSchool.id;
+    const newName = editingSchool.newName.trim();
+    setIsUpdatingSchoolName(true);
+
+    try {
+      // 1. Update via schoolService (updates Postgres API and Firestore collection 'schools')
+      await schoolService.updateSchool(schoolId, { name: newName });
+
+      // 2. Also update in local licenses state
+      setLicenses(prev => prev.map(l => {
+        if (l.schoolId === schoolId) {
+          return { ...l, schoolName: newName };
+        }
+        return l;
+      }));
+
+      // 3. Update available schools list
+      setAvailableSchools(prev => prev.map(s => {
+        if (s.id === schoolId) {
+          return { ...s, name: newName };
+        }
+        return s;
+      }));
+
+      // 4. Log the audit activity
+      await logActivity({
+        action: 'تعديل اسم المدرسة في النظام',
+        details: `تم تعديل اسم المدرسة (معرف: ${schoolId}) من "${editingSchool.currentName}" إلى "${newName}"`,
+        targetId: schoolId,
+        targetType: 'schools'
+      });
+
+      showToast(`تم تعديل اسم المدرسة إلى (${newName}) بنجاح وتزامنه مع كافة المستخدمين! ✨🏛️`);
+      setEditingSchool(null);
+    } catch (err) {
+      console.error('Failed to update school name:', err);
+      showToast('حدث خطأ أثناء تعديل اسم المدرسة');
+    } finally {
+      setIsUpdatingSchoolName(false);
     }
   };
 
@@ -1346,7 +1401,17 @@ export const SubscriptionsLicensingSection: React.FC = () => {
                             />
                           </div>
                           <div>
-                            <div className="font-bold text-white text-sm">{lic.schoolName}</div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-white text-sm">{lic.schoolName}</span>
+                              <button
+                                type="button"
+                                onClick={() => setEditingSchool({ id: lic.schoolId, currentName: lic.schoolName, newName: lic.schoolName })}
+                                className="p-1 text-amber-400/80 hover:text-amber-300 hover:bg-amber-400/10 rounded-lg transition-all cursor-pointer"
+                                title="تعديل اسم المدرسة وتزامنه مع كافة المستخدمين"
+                              >
+                                <Pencil size={12} />
+                              </button>
+                            </div>
                             <div className="text-[10px] text-white/40 mt-0.5 flex items-center gap-1.5">
                               <span>{lic.governorate}</span>
                               <span>•</span>
@@ -1471,6 +1536,16 @@ export const SubscriptionsLicensingSection: React.FC = () => {
                           >
                             <Archive size={13} />
                             <span>أرشفة</span>
+                          </button>
+
+                          {/* Edit School Name */}
+                          <button
+                            onClick={() => setEditingSchool({ id: lic.schoolId, currentName: lic.schoolName, newName: lic.schoolName })}
+                            className="px-2.5 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 rounded-xl text-[11px] font-bold transition-all border border-blue-500/30 active:scale-95 flex items-center gap-1 cursor-pointer"
+                            title="تعديل اسم المدرسة وتزامنه مع كافة المستخدمين"
+                          >
+                            <Pencil size={13} />
+                            <span>تعديل الاسم</span>
                           </button>
 
                           {/* Grant / Edit / Configure */}
@@ -2081,6 +2156,104 @@ export const SubscriptionsLicensingSection: React.FC = () => {
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* ✏️ EDIT SCHOOL NAME MODAL (تعديل اسم المدرسة والتزامن السحابي) */}
+      {/* ========================================================================= */}
+      {editingSchool && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md overflow-y-auto">
+          <div className="bg-[#0B0D1B] border border-blue-500/30 rounded-3xl p-6 max-w-md w-full shadow-2xl text-right my-auto animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-3 mb-4 border-b border-white/10">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center">
+                  <Pencil size={16} />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white">تعديل اسم المدرسة / الميدان</h3>
+                  <p className="text-[10px] text-white/40">تزامن فوري ومباشر مع جميع مستخدمي المنصة</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setEditingSchool(null)} 
+                className="text-white/40 hover:text-white transition-colors cursor-pointer text-base"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateSchoolName} className="space-y-4">
+              <div>
+                <label className="block text-[11px] font-bold text-white/60 mb-1.5">
+                  معرف المدرسة (ID):
+                </label>
+                <div className="font-mono text-xs font-bold text-emerald-400 bg-black/40 border border-white/10 rounded-xl px-3 py-2">
+                  {editingSchool.id}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-white/60 mb-1.5">
+                  الاسم الحالي:
+                </label>
+                <div className="text-xs font-bold text-white/80 bg-white/5 border border-white/10 rounded-xl px-3 py-2">
+                  {editingSchool.currentName}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-bold text-blue-300 mb-1.5">
+                  الاسم الجديد للمدرسة / المعهد:
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editingSchool.newName}
+                  onChange={(e) => setEditingSchool({ ...editingSchool, newName: e.target.value })}
+                  placeholder="أدخل الاسم الجديد للمدرسة..."
+                  className="w-full bg-blue-950/30 border border-blue-500/50 rounded-xl p-3 text-white text-xs font-bold outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition-all text-right placeholder-white/30"
+                  autoFocus
+                />
+              </div>
+
+              <div className="p-3 bg-blue-500/10 border border-blue-500/20 rounded-2xl flex items-start gap-2 text-[11px] text-blue-200">
+                <Sparkles size={16} className="text-blue-400 shrink-0 mt-0.5" />
+                <p>
+                  عند الحفظ، سيتم تحديث وتزامن اسم المدرسة في قاعدة البيانات والفايرستور ليظهر الاسم الجديد لكافة الطلبة والأساتذة وأولياء الأمور فوراً.
+                </p>
+              </div>
+
+              {/* Submit Buttons */}
+              <div className="pt-3 border-t border-white/10 flex gap-2">
+                <button
+                  type="submit"
+                  disabled={isUpdatingSchoolName || !editingSchool.newName.trim()}
+                  className="flex-1 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 active:scale-95 disabled:opacity-50 text-white font-black rounded-xl shadow-lg shadow-blue-500/20 transition-all cursor-pointer flex items-center justify-center gap-2"
+                >
+                  {isUpdatingSchoolName ? (
+                    <>
+                      <RefreshCw size={14} className="animate-spin" />
+                      <span>جاري الحفظ والتزامن...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Save size={14} />
+                      <span>حفظ وتزامن الاسم الآن ⚡</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingSchool(null)}
+                  disabled={isUpdatingSchoolName}
+                  className="py-3 px-5 bg-white/5 hover:bg-white/10 text-white/70 rounded-xl cursor-pointer"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -390,7 +390,9 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
 
   const isAcademySchool = (school: any) => {
     if (!school) return false;
+    if (school.id === 'school8') return false;
     const norm = normalizeSchoolName(school.name);
+    if (norm.includes('ابداعنا') || norm.includes('ابداع')) return false;
     return (
       school.id === 'general' ||
       school.id === 'academy' ||
@@ -615,7 +617,7 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
             </div>
           </div>
 
-          {/* Left side: Notifications Icon & Back Button */}
+          {/* Left side: Notifications Icon */}
           <div className="flex items-center gap-2">
             <button
               onClick={() => {
@@ -633,17 +635,6 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
               {/* Notification indicator dot */}
               <span className="absolute top-2.5 left-2.5 w-2 h-2 rounded-full bg-[#FFD600] shadow-[0_0_8px_#FFD600]" />
             </button>
-
-            {onBack && (
-              <button
-                onClick={onBack}
-                className="h-10 px-3.5 rounded-full bg-white/[0.03] hover:bg-white/[0.08] active:scale-95 border border-white/10 text-xs font-bold text-white/80 hover:text-white transition-all flex items-center gap-1.5 shadow-sm"
-                id="btn-mayadeen-back"
-              >
-                <ArrowRight size={14} className="text-[#FFD600]" />
-                <span className="hidden sm:inline">الرجوع</span>
-              </button>
-            )}
           </div>
 
         </div>

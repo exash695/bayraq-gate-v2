@@ -1,5 +1,15 @@
 import { SCHOOLS_DATA, SchoolItem, getSchoolBairaqImageUrl, getOfficialSchoolLogoUrl } from '../lib/constants';
-import { db, collection, getDocs } from '../lib/firebase';
+import { db, collection, getDocs, doc, setDoc } from '../lib/firebase';
+import { getApiBaseUrl } from '../lib/serverConfig';
+
+function resolveApiUrl(path: string): string {
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path;
+  }
+  const base = getApiBaseUrl();
+  const cleanPath = path.startsWith('/') ? path : '/' + path;
+  return base ? `${base}${cleanPath}` : cleanPath;
+}
 
 export interface SchoolRecord {
   id: string;
@@ -40,7 +50,7 @@ export const schoolService = {
     try {
       let rawSchools: any[] = [];
       try {
-        const response = await fetch('/api/schools', {
+        const response = await fetch(resolveApiUrl('/api/schools'), {
           headers: { 'Cache-Control': 'no-cache' }
         });
         if (response.ok) {
@@ -262,12 +272,13 @@ export const schoolService = {
   },
 
   /**
-   * تحديث بيانات مدرسة
+   * تحديث بيانات مدرسة (وتزامنها عبر قاعدة البيانات والفايرستور)
    */
   updateSchool: async (id: string, updates: Partial<SchoolRecord>): Promise<boolean> => {
+    let success = false;
     try {
       const token = typeof localStorage !== 'undefined' ? localStorage.getItem('bairaq_jwt_token') : null;
-      const response = await fetch(`/api/schools/${id}`, {
+      const response = await fetch(resolveApiUrl(`/api/schools/${id}`), {
         method: 'PATCH',
         headers: { 
           'Content-Type': 'application/json',
@@ -276,11 +287,30 @@ export const schoolService = {
         },
         body: JSON.stringify(updates),
       });
-      return response.ok;
+      if (response.ok) {
+        success = true;
+      }
     } catch (err) {
-      console.error(`[SchoolService] Failed to update school ${id}:`, err);
-      return false;
+      console.warn(`[SchoolService] API update for school ${id} warning:`, err);
     }
+
+    // Always sync with Firestore document
+    try {
+      await setDoc(doc(db, "schools", id), {
+        id,
+        ...updates,
+        updatedAt: new Date().toISOString()
+      }, { merge: true });
+      success = true;
+    } catch (fsErr) {
+      console.warn(`[SchoolService] Firestore sync for school ${id}:`, fsErr);
+    }
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('school_updated', { detail: { id, updates } }));
+    }
+
+    return success;
   },
 
   /**
