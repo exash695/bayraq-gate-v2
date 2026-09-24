@@ -19,7 +19,7 @@ import {
 } from "@/src/lib/firebase";
 import { db } from "../lib/firebase";
 import { handleFirestoreError, OperationType } from "../lib/firestoreUtils";
-import { BerqCharacter, getBerqImageUrl, isVideoUrl, POSE_ALIASES_MAP, updateGlobalPoses, subscribeToPoseOverrides, initPoseOverrides } from "./BerqCharacterManager";
+import { BerqCharacter, getBerqImageUrl, isVideoUrl, POSE_ALIASES_MAP, updateGlobalPoses, subscribeToPoseOverrides, initPoseOverrides, resolveMediaUrl } from "./BerqCharacterManager";
 import { resolveApiUrl } from "../lib/serverConfig";
 import { SCHOOLS_DATA, getOfficialSchoolLogoUrl, getOfficialSchoolName, getSchoolBairaqImageUrl } from "../lib/constants";
 import { copyToClipboard } from "../utils/clipboard";
@@ -479,6 +479,14 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
   const [newSchoolCoverPreview, setNewSchoolCoverPreview] = useState<string | null>(null);
   const [newSchoolLogoPreview, setNewSchoolLogoPreview] = useState<string | null>(null);
   const [isCreatingSchool, setIsCreatingSchool] = useState(false);
+
+  // School Comprehensive Editing State (اسم المدرسة، الموقع، المحافظة)
+  const [editingSchool, setEditingSchool] = useState<SchoolRecord | null>(null);
+  const [editSchoolName, setEditSchoolName] = useState("");
+  const [editSchoolGov, setEditSchoolGov] = useState("بغداد");
+  const [editSchoolLocation, setEditSchoolLocation] = useState("");
+  const [editSchoolType, setEditSchoolType] = useState<string>("standard");
+  const [isSavingSchoolEdit, setIsSavingSchoolEdit] = useState(false);
 
   // School Location Editing State (الميادين)
   const [editingSchoolLocation, setEditingSchoolLocation] = useState<SchoolRecord | null>(null);
@@ -1752,7 +1760,7 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
   const syncSchoolToServer = async (schoolId: string, updates: any) => {
     try {
       const headers = getDevAuthHeaders();
-      const res = await fetch(`/api/schools/${schoolId}`, {
+      const res = await fetch(resolveApiUrl(`/api/schools/${schoolId}`), {
         method: 'POST',
         headers,
         body: JSON.stringify(updates)
@@ -1766,6 +1774,51 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
       await schoolService.updateSchool(schoolId, updates);
     } catch (e) {
       console.warn('[SyncSchoolToServer] Notice:', e);
+    }
+  };
+
+  const handleSaveSchoolEdit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!editingSchool) return;
+    const trimmedName = editSchoolName.trim();
+    if (!trimmedName) {
+      triggerToast("يرجى كتابة اسم المدرسة", "error");
+      return;
+    }
+
+    setIsSavingSchoolEdit(true);
+    try {
+      const schoolId = editingSchool.id;
+      const updates = {
+        name: trimmedName,
+        governorate: editSchoolGov,
+        location: editSchoolLocation.trim(),
+        type: editSchoolType,
+        updatedAt: serverTimestamp()
+      };
+
+      // 1. Update Firestore
+      await setDoc(doc(db, "schools", schoolId), updates, { merge: true });
+
+      // 2. Update Server PostgreSQL & Broadcast
+      await syncSchoolToServer(schoolId, updates);
+
+      // 3. Update local state
+      setSchools(prev => prev.map(s => s.id === schoolId ? {
+        ...s,
+        name: trimmedName,
+        governorate: editSchoolGov,
+        location: editSchoolLocation.trim(),
+        type: editSchoolType
+      } : s));
+
+      triggerToast("تم تعديل اسم المدرسة ومزامنته بنجاح مع جميع المستخدمين والمنصات! 🎉", "success");
+      setEditingSchool(null);
+    } catch (err: any) {
+      console.error("Error saving school edits:", err);
+      triggerToast("حدث خطأ أثناء حفظ تعديل المدرسة: " + (err.message || ""), "error");
+    } finally {
+      setIsSavingSchoolEdit(false);
     }
   };
 
@@ -1839,47 +1892,38 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
     if (!file) return;
     
     try {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64 = reader.result as string;
-        if (base64.length > 4000000) { 
-            triggerToast("حجم الغلاف كبير جداً، يرجى اختيار صورة أصغر من 4 ميجابايت", "error");
-            return;
-        }
-        
-        // 1. Immediately reflect in local state and cache
-        setSchools(prev => prev.map(s => s.id === schoolId ? { ...s, coverUrl: base64, schoolBairaqImageUrl: base64 } : s));
-        try { localStorage.setItem(`school_cover_${schoolId}`, base64); } catch(e) {}
+      triggerToast("جاري ضغط ورفع غلاف المدرسة إلى السيرفر...", "info");
+      const uploadedUrl = await uploadFileToR2(file, 'schools');
+      
+      if (!uploadedUrl) {
+        throw new Error("لم يتم استرجاع رابط صالح للغلاف");
+      }
 
-        setPendingSchoolImages(prev => ({
-          ...prev,
-          [schoolId]: { ...prev[schoolId], coverUrl: base64 }
-        }));
-        
-        triggerToast("جاري حفظ غلاف المدرسة ومزامنته مع السيرفر...", "info");
+      // 1. Immediately reflect in local state and cache
+      setSchools(prev => prev.map(s => s.id === schoolId ? { ...s, coverUrl: uploadedUrl, schoolBairaqImageUrl: uploadedUrl } : s));
+      try { localStorage.setItem(`school_cover_${schoolId}`, uploadedUrl); } catch(e) {}
 
-        // 2. Persist to Firestore and Server PostgreSQL
-        try {
-          await setDoc(doc(db, "schools", schoolId), { 
-            coverUrl: base64, 
-            schoolBairaqImageUrl: base64,
-            updatedAt: serverTimestamp() 
-          }, { merge: true });
+      setPendingSchoolImages(prev => ({
+        ...prev,
+        [schoolId]: { ...prev[schoolId], coverUrl: uploadedUrl }
+      }));
 
-          await syncSchoolToServer(schoolId, { 
-            coverUrl: base64, 
-            schoolBairaqImageUrl: base64 
-          });
+      // 2. Persist to Firestore and Server PostgreSQL
+      await setDoc(doc(db, "schools", schoolId), { 
+        coverUrl: uploadedUrl, 
+        schoolBairaqImageUrl: uploadedUrl,
+        updatedAt: serverTimestamp() 
+      }, { merge: true });
 
-          triggerToast("تم تحديث وحفظ غلاف المدرسة بنجاح في السيرفر! 🖼️", "success");
-        } catch (dbErr) {
-          console.error("Error saving cover:", dbErr);
-          triggerToast("تم حفظ الغلاف محلياً", "warning");
-        }
-      };
-      reader.readAsDataURL(file);
-    } catch (err) {
-      triggerToast("فشل في قراءة ملف الغلاف", "error");
+      await syncSchoolToServer(schoolId, { 
+        coverUrl: uploadedUrl, 
+        schoolBairaqImageUrl: uploadedUrl 
+      });
+
+      triggerToast("تم تحديث وحفظ غلاف المدرسة بنجاح في السيرفر! 🖼️", "success");
+    } catch (err: any) {
+      console.error("Error saving cover:", err);
+      triggerToast(err.message || "فشل في رفع غلاف المدرسة", "error");
     }
   };
 
@@ -1888,47 +1932,38 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
     if (!file) return;
     
     try {
-      const reader = new FileReader();
-      reader.onloadend = async () => {
-        const base64 = reader.result as string;
-        if (base64.length > 3000000) { 
-            triggerToast("حجم الشعار كبير جداً، يرجى اختيار صورة أصغر من 3 ميجابايت", "error");
-            return;
-        }
-        
-        // 1. Immediately reflect in local state and cache so it shows instantly!
-        setSchools(prev => prev.map(s => s.id === schoolId ? { ...s, logoUrl: base64, schoolLogoUrl: base64 } : s));
-        try { localStorage.setItem(`school_logo_${schoolId}`, base64); } catch(e) {}
+      triggerToast("جاري ضغط ورفع لوغو المدرسة إلى السيرفر...", "info");
+      const uploadedUrl = await uploadFileToR2(file, 'schools');
+      
+      if (!uploadedUrl) {
+        throw new Error("لم يتم استرجاع رابط صالح للوغو");
+      }
 
-        setPendingSchoolImages(prev => ({
-          ...prev,
-          [schoolId]: { ...prev[schoolId], logoUrl: base64 }
-        }));
+      // 1. Immediately reflect in local state and cache so it shows instantly!
+      setSchools(prev => prev.map(s => s.id === schoolId ? { ...s, logoUrl: uploadedUrl, schoolLogoUrl: uploadedUrl } : s));
+      try { localStorage.setItem(`school_logo_${schoolId}`, uploadedUrl); } catch(e) {}
 
-        triggerToast("جاري حفظ وتثبيت لوغو المدرسة في السيرفر...", "info");
+      setPendingSchoolImages(prev => ({
+        ...prev,
+        [schoolId]: { ...prev[schoolId], logoUrl: uploadedUrl }
+      }));
 
-        // 2. Persist to Firestore and Server PostgreSQL
-        try {
-          await setDoc(doc(db, "schools", schoolId), { 
-            logoUrl: base64, 
-            schoolLogoUrl: base64,
-            updatedAt: serverTimestamp() 
-          }, { merge: true });
+      // 2. Persist to Firestore and Server PostgreSQL
+      await setDoc(doc(db, "schools", schoolId), { 
+        logoUrl: uploadedUrl, 
+        schoolLogoUrl: uploadedUrl,
+        updatedAt: serverTimestamp() 
+      }, { merge: true });
 
-          await syncSchoolToServer(schoolId, { 
-            logoUrl: base64, 
-            schoolLogoUrl: base64 
-          });
+      await syncSchoolToServer(schoolId, { 
+        logoUrl: uploadedUrl, 
+        schoolLogoUrl: uploadedUrl 
+      });
 
-          triggerToast("تم تحديث وحفظ لوغو المدرسة بنجاح في السيرفر والمنصة! ✨", "success");
-        } catch (dbErr) {
-          console.error("Error saving logo to Firestore:", dbErr);
-          triggerToast("تم عرض اللوغو وتثبيته محلياً", "warning");
-        }
-      };
-      reader.readAsDataURL(file);
-    } catch (err) {
-      triggerToast("فشل في قراءة ملف الشعار", "error");
+      triggerToast("تم تحديث وحفظ لوغو المدرسة بنجاح في السيرفر والمنصة! ✨", "success");
+    } catch (dbErr: any) {
+      console.error("Error saving logo:", dbErr);
+      triggerToast(dbErr.message || "فشل في رفع لوغو المدرسة", "error");
     }
   };
 
@@ -2637,7 +2672,15 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
                         {/* Cover Image Badge */}
                         <div className="w-16 h-11 rounded-xl bg-black/40 border border-indigo-500/20 overflow-hidden relative group" title="صورة غلاف المدرسة (الميادين)">
                           {(pendingCover || school.coverUrl) ? (
-                            <img src={pendingCover || school.coverUrl} alt="Cover" className="w-full h-full object-cover" referrerPolicy="no-referrer" />
+                            <img 
+                              src={resolveMediaUrl(pendingCover || school.coverUrl)} 
+                              alt="Cover" 
+                              className="w-full h-full object-cover" 
+                              referrerPolicy="no-referrer"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).src = '/logo.png';
+                              }}
+                            />
                           ) : (
                             <div className="w-full h-full flex flex-col items-center justify-center bg-indigo-500/10 text-indigo-400 text-[8px] font-bold">
                               <span>الكڤر</span>
@@ -2653,7 +2696,15 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
                         {/* Logo Image Badge */}
                         <div className="w-16 h-11 rounded-xl bg-black/40 border border-amber-500/20 overflow-hidden relative group" title="لوغو/شعار المدرسة (الوصولات والشهادات)">
                           {(pendingLogo || school.logoUrl) ? (
-                            <img src={pendingLogo || school.logoUrl} alt="Logo" className="w-full h-full object-contain p-0.5" referrerPolicy="no-referrer" />
+                            <img 
+                              src={resolveMediaUrl(pendingLogo || school.logoUrl)} 
+                              alt="Logo" 
+                              className="w-full h-full object-contain p-0.5" 
+                              referrerPolicy="no-referrer"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).src = '/logo.png';
+                              }}
+                            />
                           ) : (
                             <div className="w-full h-full flex flex-col items-center justify-center bg-amber-500/10 text-amber-400 text-[8px] font-bold">
                               <span>اللوغو</span>
@@ -2678,7 +2729,23 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
 
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2 mb-1">
-                          <h3 className="text-base font-black text-white truncate leading-tight">{school.name}</h3>
+                          <div className="flex items-center gap-2 min-w-0 flex-wrap">
+                            <h3 className="text-base font-black text-white truncate leading-tight">{school.name}</h3>
+                            <button
+                              onClick={() => {
+                                setEditingSchool(school);
+                                setEditSchoolName(school.name || '');
+                                setEditSchoolGov(school.governorate || 'بغداد');
+                                setEditSchoolLocation(school.location || '');
+                                setEditSchoolType(school.type || 'standard');
+                              }}
+                              className="px-2 py-1 rounded-lg bg-indigo-500/15 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/30 flex items-center gap-1.5 text-[11px] font-bold transition-all active:scale-95 shadow-sm"
+                              title="تعديل اسم المدرسة وبياناتها والمزامنة العامة"
+                            >
+                              <Wrench size={12} className="text-indigo-400" />
+                              <span>تعديل الاسم</span>
+                            </button>
+                          </div>
                           <div className={`w-2 h-2 rounded-full shrink-0 ${school.status === 'active' ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]' : 'bg-rose-500'}`} />
                         </div>
                         <div className="flex flex-wrap gap-x-3 gap-y-1 items-center text-[10px] text-white/40 font-bold mb-4">
@@ -3555,6 +3622,107 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
         {activeTab === "maintenance" && (
           <div className="p-6">
             <MaintenanceArchiveSection />
+          </div>
+        )}
+
+        {/* Modal for Editing School Name, Location and Info */}
+        {editingSchool && (
+          <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md animate-in fade-in duration-200">
+            <div className="bg-[#0B0D1B] border border-indigo-500/30 rounded-3xl p-6 max-w-md w-full shadow-[0_0_50px_rgba(99,102,241,0.25)] text-right">
+              <div className="flex items-center justify-between pb-4 border-b border-white/10 mb-5">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-indigo-500/10 text-indigo-400 flex items-center justify-center border border-indigo-500/20">
+                    <Building size={20} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-white">تعديل بيانات المدرسة</h3>
+                    <p className="text-[10px] text-white/40 font-mono">ID: {editingSchool.id}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setEditingSchool(null)}
+                  className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 text-white/60 flex items-center justify-center transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveSchoolEdit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-white/70 mb-1.5">
+                    اسم المدرسة <span className="text-rose-400">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editSchoolName}
+                    onChange={(e) => setEditSchoolName(e.target.value)}
+                    placeholder="مثال: مدرسة الأوائل الأهلية النموذجية"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-white placeholder-white/20 outline-none focus:border-indigo-500 font-bold transition-all"
+                  />
+                  <p className="text-[10px] text-indigo-300/70 mt-1">هذا الاسم سيتم تعميمه ومزامنته فورياً لدى جميع الطلاب والأساتذة والإداريين.</p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-white/70 mb-1.5">المحافظة</label>
+                    <select
+                      value={editSchoolGov}
+                      onChange={(e) => setEditSchoolGov(e.target.value)}
+                      className="w-full bg-[#12162B] border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white outline-none focus:border-indigo-500 font-bold"
+                    >
+                      {Object.keys(iraqRegions).map((gov) => (
+                        <option key={gov} value={gov}>{gov}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-white/70 mb-1.5">النوع / الخطة</label>
+                    <select
+                      value={editSchoolType}
+                      onChange={(e) => setEditSchoolType(e.target.value)}
+                      className="w-full bg-[#12162B] border border-white/10 rounded-xl px-3 py-2.5 text-xs text-white outline-none focus:border-indigo-500 font-bold"
+                    >
+                      <option value="standard">مدرسة قياسية</option>
+                      <option value="premium">مدرسة متقدمة (VIP)</option>
+                      <option value="trial">مدرسة تجريبية</option>
+                      <option value="academy">أكاديمية رقمية</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-white/70 mb-1.5">الموقع / العنوان التفصيلي</label>
+                  <input
+                    type="text"
+                    value={editSchoolLocation}
+                    onChange={(e) => setEditSchoolLocation(e.target.value)}
+                    placeholder="مثال: حي الجامعة - قرب المركز الصحي"
+                    className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-2.5 text-xs text-white placeholder-white/20 outline-none focus:border-indigo-500 font-bold transition-all"
+                  />
+                </div>
+
+                <div className="flex gap-3 pt-3">
+                  <button
+                    type="submit"
+                    disabled={isSavingSchoolEdit}
+                    className="flex-1 py-3 bg-indigo-600 hover:bg-indigo-500 active:scale-95 text-white rounded-xl text-xs font-black transition-all shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    {isSavingSchoolEdit ? <RefreshCw size={16} className="animate-spin" /> : <Check size={16} />}
+                    حفظ وتعميم التعديلات 🚀
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSavingSchoolEdit}
+                    onClick={() => setEditingSchool(null)}
+                    className="py-3 px-5 bg-white/5 hover:bg-white/10 active:scale-95 text-white/70 rounded-xl text-xs font-bold transition-all border border-white/10"
+                  >
+                    إلغاء
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         )}
 

@@ -3,6 +3,7 @@ import { auth, db, GoogleAuthProvider as GAP, signInWithPopup as SIP, doc, setDo
 const GoogleAuthProvider = GAP as any;
 const signInWithPopup = SIP as any;
 import { customAuth } from '../services/customAuthService';
+import { promptGoogleAccountPicker } from '../lib/googleAuthHelper';
 import { safeStorage } from '../lib/storage';
 import { Eye, EyeOff, Shield, Zap, Sparkles, Mail, Lock, User, Phone, MapPin, Building, ChevronRight, Layers, BrainCircuit, ShieldCheck } from 'lucide-react';
 import { LoadingScreen } from './LoadingScreen';
@@ -93,16 +94,37 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onOpenPrivacy }) => {
   const handleGoogleSignIn = async () => {
     setError(null);
     setMessage(null);
-    const emailToUse = (formData.email || '').trim().toLowerCase();
-    
-    if (!emailToUse || !emailToUse.includes('@')) {
-      setError('يرجى كتابة بريدك الإلكتروني في الحقل أعلاه للمتابعة عبر Google.');
-      return;
-    }
-    
     setAuthLoading(true);
+    
     try {
-      await customAuth.loginWithGoogle(emailToUse, formData.fullName || undefined);
+      // 1. Trigger the official Google Account Picker modal (select_account prompt)
+      let googleUser: { email: string; name?: string; photoURL?: string } | null = null;
+      try {
+        googleUser = await promptGoogleAccountPicker();
+      } catch (pickerErr: any) {
+        const msg = String(pickerErr?.message || pickerErr || '');
+        if (msg.includes('تم إلغاء') || pickerErr?.code === 'auth/popup-closed-by-user' || pickerErr?.code === 'auth/cancelled-popup-request') {
+          setAuthLoading(false);
+          return; // User cancelled account selector cleanly
+        }
+        
+        // Fallback: If user already entered email in the form and popup had issue
+        if (formData.email && formData.email.trim().includes('@')) {
+          googleUser = {
+            email: formData.email.trim().toLowerCase(),
+            name: formData.fullName || undefined
+          };
+        } else {
+          throw pickerErr;
+        }
+      }
+
+      if (!googleUser || !googleUser.email) {
+        throw new Error('لم يتم تحديد أي حساب Google');
+      }
+
+      // 2. Perform secure backend authentication with the chosen Gmail account
+      await customAuth.loginWithGoogle(googleUser.email, googleUser.name, googleUser.photoURL);
       safeStorage.setItem('s6_activeSection', 'hub');
     } catch (err: any) {
       console.error("Google Auth Error:", err);

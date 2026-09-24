@@ -4694,6 +4694,99 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
     }
   });
 
+  app.get('/api/schools', async (req, res) => {
+    try {
+      const allSchools = await db.select().from(schools).orderBy(asc(schools.name));
+      res.json({ success: true, schools: allSchools, data: allSchools });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.get('/api/schools/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const schoolList = await db.select().from(schools).where(eq(schools.id, id)).limit(1);
+      if (schoolList.length === 0) {
+        return res.status(404).json({ success: false, message: 'School not found' });
+      }
+      res.json({ success: true, school: schoolList[0], data: schoolList[0] });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  const handleUpdateSchool = async (req: express.Request, res: express.Response) => {
+    try {
+      const { id } = req.params;
+      const body = req.body || {};
+      
+      const mapped: any = {};
+      if (body.name !== undefined) mapped.name = body.name.trim();
+      if (body.governorate !== undefined) mapped.governorate = body.governorate;
+      if (body.location !== undefined) mapped.location = body.location;
+      if (body.coverUrl !== undefined || body.schoolBairaqImageUrl !== undefined) {
+        mapped.coverUrl = body.coverUrl || body.schoolBairaqImageUrl;
+      }
+      if (body.logoUrl !== undefined || body.schoolLogoUrl !== undefined) {
+        mapped.logoUrl = body.logoUrl || body.schoolLogoUrl;
+      }
+      if (body.status !== undefined) mapped.status = body.status;
+      if (body.type !== undefined) mapped.type = body.type;
+      if (body.disabledModules !== undefined) mapped.disabledModules = body.disabledModules;
+
+      const existing = await db.select().from(schools).where(eq(schools.id, id)).limit(1);
+      let resultSchool: any;
+
+      if (existing.length > 0) {
+        if (Object.keys(mapped).length > 0) {
+          const updated = await db.update(schools).set(mapped).where(eq(schools.id, id)).returning();
+          resultSchool = updated[0];
+        } else {
+          resultSchool = existing[0];
+        }
+      } else {
+        const newSchool = {
+          id,
+          name: mapped.name || body.name || 'مدرسة جديدة',
+          governorate: mapped.governorate || body.governorate || 'بغداد',
+          location: mapped.location || body.location || null,
+          coverUrl: mapped.coverUrl || null,
+          logoUrl: mapped.logoUrl || null,
+          type: mapped.type || 'standard',
+          status: mapped.status || 'active',
+          disabledModules: mapped.disabledModules || []
+        };
+        const inserted = await db.insert(schools).values(newSchool).returning();
+        resultSchool = inserted[0];
+      }
+
+      // Realtime multi-client broadcast
+      realtimeServerInstance?.broadcastManual('schools', id, 'UPDATE', resultSchool);
+      realtimeServerInstance?.broadcastManual('school_updated', id, 'UPDATE', resultSchool);
+
+      res.json({ success: true, school: resultSchool, data: resultSchool });
+    } catch (error: any) {
+      console.error('Error updating school:', error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  };
+
+  app.post('/api/schools/:id', handleUpdateSchool);
+  app.patch('/api/schools/:id', handleUpdateSchool);
+  app.put('/api/schools/:id', handleUpdateSchool);
+
+  app.delete('/api/schools/:id', requireDeveloper, async (req, res) => {
+    try {
+      const { id } = req.params;
+      await db.delete(schools).where(eq(schools.id, id));
+      realtimeServerInstance?.broadcastManual('schools', id, 'DELETE', { id });
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   app.post('/api/admin/sync-schools', requireDeveloper, async (req, res) => {
     try {
       const { schoolsList } = req.body;

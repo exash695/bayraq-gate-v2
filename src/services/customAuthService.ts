@@ -212,13 +212,13 @@ class CustomAuthService {
     return this.loginWithEmail(email, password);
   }
 
-  public async loginWithGoogle(email?: string, name?: string): Promise<CustomUser> {
+  public async loginWithGoogle(email?: string, name?: string, photoURL?: string): Promise<CustomUser> {
     let res: Response;
     try {
       res = await fetch(resolveApiUrl('/api/auth/google-login'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, name })
+        body: JSON.stringify({ email, name, photoURL })
       });
     } catch (networkErr: any) {
       throw new Error('تعذر الاتصال بالسيرفر لتسجيل الدخول عبر Google.');
