@@ -3,7 +3,7 @@ import {
   ImageIcon, ChevronDown, FileUp, Sparkles, Megaphone,
   Trash2, X, RefreshCw
 } from "lucide-react";
-import { isVideoUrl, POSE_ALIASES_MAP, updateGlobalPoses, subscribeToPoseOverrides } from "../BerqCharacterManager";
+import { isVideoUrl, POSE_ALIASES_MAP, updateGlobalPoses, subscribeToPoseOverrides, resolveMediaUrl } from "../BerqCharacterManager";
 import { uploadFileToR2 } from "../../services/uploadService";
 import { resolveApiUrl } from "../../lib/serverConfig";
 import { BairaqAssetHistoryModal } from "../BairaqAssetHistoryModal";
@@ -127,7 +127,8 @@ const MediaPreviewCard: React.FC<MediaPreviewCardProps> = ({
     setLoadError(false);
   }, [currentPose]);
 
-  const activeSrc = loadError ? header.defaultSrc : (currentPose || header.defaultSrc);
+  const rawSrc = loadError ? header.defaultSrc : (currentPose || header.defaultSrc);
+  const activeSrc = resolveMediaUrl(rawSrc);
   const isVideo = isVideoUrl(activeSrc);
 
   return (

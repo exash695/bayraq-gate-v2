@@ -91,30 +91,23 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onOpenPrivacy }) => {
   };
 
   const handleGoogleSignIn = async () => {
+    setError(null);
+    setMessage(null);
+    const emailToUse = (formData.email || '').trim().toLowerCase();
+    
+    if (!emailToUse || !emailToUse.includes('@')) {
+      setError('يرجى كتابة بريدك الإلكتروني في الحقل أعلاه للمتابعة عبر Google.');
+      return;
+    }
+    
+    setAuthLoading(true);
     try {
-      const provider = new GoogleAuthProvider();
-      if (typeof provider?.setCustomParameters === 'function') {
-        provider.setCustomParameters({
-          prompt: 'select_account',
-        });
-      }
-      
-      setAuthLoading(true);
-      if (formData.email && formData.email.includes('@')) {
-        await customAuth.loginWithGoogle(formData.email);
-      } else {
-        await signInWithPopup(auth, provider);
-      }
+      await customAuth.loginWithGoogle(emailToUse, formData.fullName || undefined);
       safeStorage.setItem('s6_activeSection', 'hub');
     } catch (err: any) {
-      if (err.code === 'auth/popup-closed-by-user' || err.code === 'auth/cancelled-popup-request') {
-        console.warn("Google sign-in popup was closed/cancelled by the user.");
-      } else if (err.code === 'auth/unauthorized-domain') {
-        setError(`فشل الدخول: النطاق (${window.location.hostname}) غير مصرح به. يرجى إضافته في إعدادات Firebase (Authentication > Settings > Authorized domains).`);
-      } else {
-        console.error("Full Google Auth Error:", err);
-        setError(`فشل الدخول عبر جوجل: ${err.message || err.code}`);
-      }
+      console.error("Google Auth Error:", err);
+      setError(err.message || 'فشل تسجيل الدخول عبر Google');
+    } finally {
       setAuthLoading(false);
     }
   };

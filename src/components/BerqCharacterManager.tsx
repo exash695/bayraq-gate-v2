@@ -150,13 +150,24 @@ export const useBerqPoses = () => {
   return poses;
 };
 
+export function resolveMediaUrl(url: string | null | undefined): string {
+  if (!url || typeof url !== 'string') return '';
+  const trimmed = url.trim();
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('data:') || trimmed.startsWith('blob:')) {
+    return trimmed;
+  }
+  return resolveApiUrl(trimmed);
+}
+
 export const getAppLogoUrl = (): string => {
-  return globalPoseOverrides['app_logo'] || globalPoseOverrides['logo'] || globalPoseOverrides['bairaq_logo'] || '/logo.png';
+  const logo = globalPoseOverrides['app_logo'] || globalPoseOverrides['logo'] || globalPoseOverrides['bairaq_logo'] || '/logo.png';
+  return resolveMediaUrl(logo);
 };
 
 export const useAppLogo = (): string => {
   const poses = useBerqPoses();
-  return poses['app_logo'] || poses['logo'] || poses['bairaq_logo'] || '/logo.png';
+  const logo = poses['app_logo'] || poses['logo'] || poses['bairaq_logo'] || '/logo.png';
+  return resolveMediaUrl(logo);
 };
 
 export function initPoseOverrides() {
@@ -535,7 +546,8 @@ export const BerqCharacter: React.FC<BerqCharacterProps> = ({
     });
   }, [pose]);
 
-  const imageUrl = customImageUrl || defaultImageUrl;
+  const rawImageUrl = customImageUrl || defaultImageUrl;
+  const imageUrl = resolveMediaUrl(rawImageUrl);
   const { url: cachedUrl } = useCachedMedia(imageUrl);
   const videoRef = React.useRef<HTMLVideoElement>(null);
   const [videoError, setVideoError] = useState(false);
@@ -548,8 +560,8 @@ export const BerqCharacter: React.FC<BerqCharacterProps> = ({
     setIsVideoPlaying(false);
   }, [pose, imageUrl]);
 
-  const effectiveVideoSrc = isVideoFile ? (getInMemoryCachedUrl(imageUrl) || cachedUrl || imageUrl) : '';
-  const fallbackImageSrc = getBerqFallbackImage(pose);
+  const effectiveVideoSrc = isVideoFile ? resolveMediaUrl(getInMemoryCachedUrl(imageUrl) || cachedUrl || imageUrl) : '';
+  const fallbackImageSrc = resolveMediaUrl(getBerqFallbackImage(pose));
   const finalImageSrc = videoError ? fallbackImageSrc : imageUrl;
 
   // Robust Autoplay Effect

@@ -84,23 +84,10 @@ export class GoogleAuthProvider {
 }
 
 export const signInWithPopup: any = async (...args: any[]) => {
-  try {
-    const user = await customAuth.loginWithGoogle();
-    return {
-      user: {
-        uid: user.uid,
-        id: user.uid,
-        email: user.email,
-        displayName: user.displayName || user.name,
-        name: user.name || user.displayName,
-        role: user.role,
-        schoolId: user.schoolId
-      }
-    };
-  } catch (e) {
-    console.error('signInWithPopup error:', e);
+  if (auth.currentUser) {
     return { user: auth.currentUser };
   }
+  throw new Error('يرجى إدخال البريد الإلكتروني لتسجيل الدخول.');
 };
 export const signOut: any = async (authInstance?: any) => { 
   customAuth.logout();

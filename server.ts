@@ -8187,7 +8187,12 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
   app.post('/api/auth/google-login', async (req, res) => {
     try {
       const { email, name, photoURL } = req.body;
-      const targetEmail = (email || 'mntzralghanm527@gmail.com').trim().toLowerCase();
+      const targetEmail = (email || '').trim().toLowerCase();
+
+      if (!targetEmail || !targetEmail.includes('@')) {
+        return res.status(400).json({ success: false, message: 'يرجى إدخال بريد إلكتروني صالح' });
+      }
+
       const isDevEmail = DEVELOPER_EMAILS.includes(targetEmail);
       
       let userList: any[] = [];
@@ -8212,7 +8217,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
           id: userId,
           email: targetEmail,
           name: name || (isDevEmail ? 'المهندس منتظر (المطور العام)' : targetEmail.split('@')[0]),
-          role: isDevEmail ? 'developer' : 'admin',
+          role: isDevEmail ? 'developer' : 'student',
           schoolId: 'general',
           photo: photoURL || null,
           status: 'نشط'
