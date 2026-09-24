@@ -157,6 +157,7 @@ import {
 } from "lucide-react";
 import { SchoolContent } from "./SchoolContent";
 import { BroadcastTicker } from "./BroadcastTicker";
+import { extractGradeBase, extractSectionLetter } from "../utils/gradeMatcher";
 import { StudentLounge } from "./StudentLounge";
 import { StudentSupportForm } from "./StudentSupportForm";
 import { StudentSchedule } from "./StudentSchedule";
@@ -316,27 +317,101 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
   useEffect(() => {
     if (!isTeacher || !resolvedSchoolId) return;
 
-    const q = query(collection(db, 'broadcasts'));
+    const currentTeacherName = teacherData?.name || "أستاذ المادة";
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const currentTeacherName = teacherData?.name || "أستاذ المادة";
-      const list = snapshot.docs
-        .map(doc => {
-          const data = doc.data() as any;
-          return {
-            id: doc.id,
-            ...data,
-            timestampMs: data.timestampMs || (data.timestamp?.toMillis ? data.timestamp.toMillis() : (data.timestamp || Date.now()))
-          };
-        })
-        .filter(b => b.schoolId === resolvedSchoolId && b.author === currentTeacherName)
-        .sort((a, b) => b.timestampMs - a.timestampMs);
-      setTeacherBroadcasts(list);
-    }, (error) => {
-      console.error("Teacher Broadcasts Listener Error:", error);
-    });
+    const normalizeBroadcastItem = (item: any) => {
+      let expiryMs = 0;
+      if (typeof item.expiryDate === 'number') {
+        expiryMs = item.expiryDate;
+      } else if (item.expiryDate) {
+        const parsed = new Date(item.expiryDate).getTime();
+        expiryMs = isNaN(parsed) ? 0 : parsed;
+      } else if (item.timestampMs && item.durationHours) {
+        expiryMs = item.timestampMs + item.durationHours * 3600 * 1000;
+      }
 
-    return () => unsubscribe();
+      return {
+        ...item,
+        timestampMs: item.timestampMs || (item.timestamp?.toMillis ? item.timestamp.toMillis() : (typeof item.timestamp === 'number' ? item.timestamp : Date.now())),
+        expiryDate: expiryMs || (Date.now() + 24 * 3600 * 1000)
+      };
+    };
+
+    const deduplicateItems = (items: any[]) => {
+      const map = new Map<string, any>();
+      const seenMessages = new Set<string>();
+
+      items.forEach(raw => {
+        const item = normalizeBroadcastItem(raw);
+        const msgKey = `${item.schoolId || ''}:::${(item.message || '').trim()}`;
+        if (!seenMessages.has(msgKey) && !map.has(item.id)) {
+          seenMessages.add(msgKey);
+          map.set(item.id, item);
+        }
+      });
+
+      return Array.from(map.values()).sort((a, b) => (b.timestampMs || 0) - (a.timestampMs || 0));
+    };
+
+    // 1. Fast load from API / PostgreSQL
+    const loadFromApi = async () => {
+      try {
+        const apiList = await broadcastService.getBroadcasts(resolvedSchoolId);
+        const myBroadcasts = (apiList || []).filter((b: any) => {
+          const authorNorm = (b.author || '').trim();
+          return b.schoolId === resolvedSchoolId && (authorNorm === currentTeacherName || authorNorm.includes(currentTeacherName) || currentTeacherName.includes(authorNorm));
+        });
+        setTeacherBroadcasts(prev => {
+          // If apiList is empty or has changed, merge only active non-deleted items
+          const combined = [...myBroadcasts, ...(prev || []).filter(p => p && !p.id.startsWith('br_'))];
+          return deduplicateItems(combined);
+        });
+      } catch (err) {}
+    };
+
+    loadFromApi();
+
+    const handleBroadcastEvent = (e: any) => {
+      const detail = e?.detail;
+      if (detail?.action === 'DELETE') {
+        const deletedId = detail.id;
+        const deletedMsg = detail.message;
+        setTeacherBroadcasts(prev => (prev || []).filter(b => b.id !== deletedId && (!deletedMsg || b.message !== deletedMsg)));
+        return;
+      }
+      loadFromApi();
+    };
+    window.addEventListener('app_broadcast_event', handleBroadcastEvent);
+
+    // 2. Also listen to Firestore collection
+    let unsubscribe = () => {};
+    try {
+      const q = query(collection(db, 'broadcasts'));
+      unsubscribe = onSnapshot(q, (snapshot) => {
+        const list = snapshot.docs
+          .map(doc => {
+            const data = doc.data() as any;
+            return normalizeBroadcastItem({
+              id: doc.id,
+              ...data
+            });
+          })
+          .filter(b => b.schoolId === resolvedSchoolId && (b.author === currentTeacherName || (b.author && currentTeacherName && (b.author.includes(currentTeacherName) || currentTeacherName.includes(b.author)))))
+          .sort((a, b) => b.timestampMs - a.timestampMs);
+
+        setTeacherBroadcasts(prev => {
+          const apiItems = (prev || []).filter(p => p && p.id && p.id.startsWith('br_'));
+          return deduplicateItems([...list, ...apiItems]);
+        });
+      }, (error) => {
+        console.warn("Teacher Broadcasts Listener Warning:", error);
+      });
+    } catch (e) {}
+
+    return () => {
+      window.removeEventListener('app_broadcast_event', handleBroadcastEvent);
+      unsubscribe();
+    };
   }, [isTeacher, resolvedSchoolId, teacherData?.name]);
 
   const getTeacherSubjectId = (teacherSubject: string, studentGrade: string): string => {
@@ -994,6 +1069,35 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     });
     return () => unsub();
   }, [resolvedSchoolId]);
+
+  // Resolves the exact section name for student from academic_lists if not already present in userProfile
+  const resolvedStudentSection = useMemo(() => {
+    if (isTeacher) return null;
+    if (userProfile?.section) return userProfile.section;
+    if ((userProfile as any)?.studentSection) return (userProfile as any).studentSection;
+    if (userProfile?.class) return userProfile.class;
+    if (userProfile?.className) return userProfile.className;
+
+    // Search academic lists by student ID or student code
+    const studentId = userProfile?.id || (userProfile as any)?.uid || (userProfile as any)?.studentId;
+    const studentCode = (userProfile as any)?.studentCode || (userProfile as any)?.code;
+    if (studentId || studentCode) {
+      const cleanId = String(studentId || '').trim().toLowerCase();
+      const cleanCode = String(studentCode || '').trim().toLowerCase();
+      const matchedList = (academicLists || []).find((list: any) => {
+        const listStudents = Array.isArray(list.students) ? list.students : [];
+        return listStudents.some((s: any) => {
+          const sid = String(s.id || '').trim().toLowerCase();
+          const scode = String(s.student || s.code || '').trim().toLowerCase();
+          return (cleanId && sid === cleanId) || (cleanCode && scode === cleanCode);
+        });
+      });
+      if (matchedList?.name) {
+        return matchedList.name;
+      }
+    }
+    return null;
+  }, [isTeacher, userProfile, academicLists]);
 
   const [schoolTeachersList, setSchoolTeachersList] = useState<any[]>(() => {
     try {
@@ -7862,9 +7966,12 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
                         <span className="shrink-0 text-xs">🏛️</span>
                         <span className="truncate">{schoolName || "ثانوية أوائل غماس الأهلية"}</span>
                       </div>
-                      <div className="flex items-center gap-1 text-white/80 font-semibold text-[11px] sm:text-xs tracking-wide drop-shadow-sm mt-0.5 min-w-0">
+                      <div className="flex items-center gap-1.5 text-white/80 font-semibold text-[11px] sm:text-xs tracking-wide drop-shadow-sm mt-0.5 min-w-0">
                         <span className="shrink-0 text-[10px]">👨‍🏫</span>
                         <span className="truncate">بوابة الكادر التعليمي • {teacherData?.name || "أستاذ"}</span>
+                        <span className="px-1.5 py-0.5 bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 rounded-md text-[10px] font-black shrink-0">
+                          {selectedTeacherClass === "ALL" || !selectedTeacherClass ? "كافة الشُعب الموكلة" : selectedTeacherClass}
+                        </span>
                       </div>
                     </div>
                   ) : (
@@ -7878,7 +7985,9 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
                       </div>
                       <div className="flex items-center gap-1 text-white/80 font-semibold text-[11px] sm:text-xs tracking-wide drop-shadow-sm mt-0.5 min-w-0">
                         <span className="shrink-0 text-[10px]">🎓</span>
-                        <span className="truncate">{gradeName || grade || userProfile?.grade || userProfile?.academicLevel || "سادس علمي"}</span>
+                        <span className="truncate">
+                          {resolvedStudentSection || userProfile?.section || (userProfile as any)?.studentSection || userProfile?.class || (userProfile?.grade && extractSectionLetter(userProfile.grade) ? userProfile.grade : "") || gradeName || grade || userProfile?.grade || userProfile?.academicLevel || "سادس علمي"}
+                        </span>
                       </div>
                     </div>
                   )}
@@ -7945,10 +8054,20 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
                 <div className="flex-1 overflow-hidden h-full">
                   <BroadcastTicker
                     schoolId={resolvedSchoolId}
-                    grade={grade}
-                    section={userProfile?.section || userProfile?.class || (userProfile as any)?.studentSection}
+                    grade={
+                      isTeacher && selectedTeacherClass && selectedTeacherClass !== "ALL" && selectedTeacherClass !== "كافة الشُعب"
+                        ? (extractGradeBase(selectedTeacherClass) || selectedTeacherClass)
+                        : (gradeName || grade || "")
+                    }
+                    section={
+                      isTeacher
+                        ? (selectedTeacherClass && selectedTeacherClass !== "ALL" && selectedTeacherClass !== "كافة الشُعب"
+                            ? selectedTeacherClass
+                            : "ALL")
+                        : (resolvedStudentSection || userProfile?.section || (userProfile as any)?.studentSection || userProfile?.class || (userProfile?.grade && extractSectionLetter(userProfile.grade) ? userProfile.grade : "") || gradeName || grade || "")
+                    }
                     isVisible={true}
-                    isTeacher={isTeacher}
+                    isTeacher={isTeacher && (!selectedTeacherClass || selectedTeacherClass === "ALL" || selectedTeacherClass === "كافة الشُعب")}
                   />
                 </div>
               </div>

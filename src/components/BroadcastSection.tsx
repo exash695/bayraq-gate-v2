@@ -1,9 +1,11 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Megaphone, Bell, History, AlertCircle, Trash2 } from 'lucide-react';
+import { Megaphone, Bell, History, AlertCircle, Trash2, Radio, CheckCircle, Target, Sparkles } from 'lucide-react';
 import { ConfirmDialog } from './ConfirmDialog';
 import { broadcastService } from '../services/broadcastService';
 import { logActivity } from '../utils/auditLogger';
+import { academicService } from '../services/academicService';
+import { doc, deleteDoc, db } from '../lib/firebase';
 
 interface VerticalScrollPickerProps {
   value: number;
@@ -157,11 +159,12 @@ const VerticalScrollPicker: React.FC<VerticalScrollPickerProps> = ({ value, onCh
 };
 
 interface BroadcastSectionProps {
-  onSendMessage: (message: string, targetGrades: string[], duration: number) => void;
+  onSendMessage?: (message: string, targetGrades: string[], duration: number, targetSection?: string, targetSections?: string[]) => void;
   onUpdateMessage?: (broadcastId: string, newMessage: string) => void;
   onDeleteMessage?: (id: string) => void;
   showToast: (message: string, type?: 'success' | 'error') => void;
   schoolId?: string;
+  savedLists?: any[];
 }
 
 export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
@@ -169,18 +172,36 @@ export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
   onUpdateMessage,
   onDeleteMessage,
   showToast,
-  schoolId
+  schoolId,
+  savedLists
 }) => {
   const [message, setMessage] = React.useState('');
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [editValue, setEditValue] = React.useState('');
-  const [level, setLevel] = React.useState<'primary' | 'intermediate' | 'preparatory'>('preparatory');
-  const [selectedGrades, setSelectedGrades] = React.useState<string[]>(['الجميع']);
+  const [level, setLevel] = React.useState<'primary' | 'intermediate' | 'preparatory'>('primary');
+  const [selectedGrades, setSelectedGrades] = React.useState<string[]>(['أول']);
   const [selectedBranches, setSelectedBranches] = React.useState<string[]>(['علمي', 'أدبي']);
+  const [selectedSection, setSelectedSection] = React.useState<string>('ALL');
+  const [internalLists, setInternalLists] = React.useState<any[]>(savedLists || []);
   const [durationHours, setDurationHours] = React.useState<number>(0);
   const [durationDays, setDurationDays] = React.useState<number>(1);
   const [history, setHistory] = React.useState<any[]>([]);
   const [confirmDelete, setConfirmDelete] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (savedLists && savedLists.length > 0) {
+      setInternalLists(savedLists);
+    }
+  }, [savedLists]);
+
+  React.useEffect(() => {
+    const unsubLists = academicService.subscribeToLists(schoolId || 'school1', (lists) => {
+      if (lists && Array.isArray(lists) && lists.length > 0) {
+        setInternalLists(lists);
+      }
+    });
+    return () => unsubLists();
+  }, [schoolId]);
 
   React.useEffect(() => {
     const unsub = broadcastService.subscribeToBroadcasts(schoolId, (data) => {
@@ -204,6 +225,7 @@ export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
   const branches = ['علمي', 'أدبي'];
 
   const toggleGrade = (grade: string) => {
+    setSelectedSection('ALL');
     if (grade === 'الجميع') {
       setSelectedGrades(['الجميع']);
       return;
@@ -215,11 +237,12 @@ export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
         const next = filtered.filter(g => g !== grade);
         return next.length === 0 ? ['الجميع'] : next;
       }
-      return [...filtered, grade];
+      return [grade];
     });
   };
 
   const toggleBranch = (branch: string) => {
+    setSelectedSection('ALL');
     setSelectedBranches(prev => 
       prev.includes(branch) 
         ? prev.filter(b => b !== branch) 
@@ -227,9 +250,79 @@ export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
     );
   };
 
+  const isSingleGradeSelected = selectedGrades.length === 1 && !selectedGrades.includes('الجميع');
+  const selectedGradeName = isSingleGradeSelected ? selectedGrades[0] : null;
+
+  const selectedGradeFullName = React.useMemo(() => {
+    if (!selectedGradeName) return null;
+    if (level === 'primary') return `${selectedGradeName} ابتدائي`;
+    if (level === 'intermediate') return `${selectedGradeName} متوسط`;
+    if (level === 'preparatory') {
+      if (selectedBranches.length === 1) return `${selectedGradeName} ${selectedBranches[0]}`;
+      return `${selectedGradeName} إعدادي`;
+    }
+    return selectedGradeName;
+  }, [selectedGradeName, level, selectedBranches]);
+
+  const availableSections = React.useMemo(() => {
+    if (!selectedGradeFullName) return [];
+
+    const norm = (s: string) => (s || '')
+      .trim()
+      .replace(/[أإآٱ]/g, 'ا')
+      .replace(/ة/g, 'ه')
+      .replace(/\s+/g, '')
+      .replace(/^(الصف|صف)/g, '')
+      .replace(/^ال/, '')
+      .toLowerCase();
+
+    const targetGradeNorm = norm(selectedGradeFullName);
+
+    // 1. Search matching lists from academicLists / savedLists
+    const matchedLists = (internalLists || []).filter((l: any) => {
+      if (!l || !l.name) return false;
+      const lNorm = norm(l.name);
+      return lNorm.includes(targetGradeNorm) || targetGradeNorm.includes(lNorm);
+    });
+
+    if (matchedLists.length > 0) {
+      return matchedLists.map((l: any) => {
+        const trimmed = (l.name || '').trim();
+        const match = trimmed.match(/[\s\-_–—]+([\u0621-\u064Aa-zA-Z0-9])$|\(([\u0621-\u064Aa-zA-Z0-9]+)\)|شعبة\s*([\u0621-\u064Aa-zA-Z0-9]+)/);
+        const letter = match ? (match[1] || match[2] || match[3]) : '';
+        const label = letter ? `شعبة ${letter}` : l.name;
+        return {
+          id: l.id,
+          fullName: l.name,
+          label: label,
+          letter: letter || label
+        };
+      });
+    }
+
+    // 2. Default fallback sections for any grade without registered lists yet
+    return [
+      { id: `${selectedGradeFullName}_A`, fullName: `${selectedGradeFullName} أ`, label: 'شعبة أ', letter: 'أ' },
+      { id: `${selectedGradeFullName}_B`, fullName: `${selectedGradeFullName} ب`, label: 'شعبة ب', letter: 'ب' },
+      { id: `${selectedGradeFullName}_C`, fullName: `${selectedGradeFullName} ج`, label: 'شعبة ج', letter: 'ج' },
+    ];
+  }, [selectedGradeFullName, internalLists]);
+
+  const activeTargetLabel = React.useMemo(() => {
+    if (!isSingleGradeSelected || !selectedGradeFullName) {
+      return selectedGrades.includes('الجميع') ? 'كل المرحلة' : `صفوف (${selectedGrades.join('، ')})`;
+    }
+    if (!selectedSection || selectedSection === 'ALL') {
+      return `كافة شُعب (${selectedGradeFullName})`;
+    }
+    const matchedSec = availableSections.find(s => s.fullName === selectedSection);
+    return `${selectedGradeFullName} (${matchedSec ? matchedSec.label : selectedSection})`;
+  }, [isSingleGradeSelected, selectedGradeFullName, selectedGrades, selectedSection, availableSections]);
+
   const handleDelete = async () => {
     if (!confirmDelete) return;
     const targetId = confirmDelete;
+    const itemToDelete = history.find(h => h.id === targetId);
     const previousHistory = [...history];
     setConfirmDelete(null);
 
@@ -237,8 +330,14 @@ export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
     setHistory(prev => prev.filter(br => br.id !== targetId));
 
     try {
-      // 2. Perform deletion in backend
-      await broadcastService.deleteBroadcast(targetId);
+      // 2. Perform deletion in backend (PostgreSQL + realtime)
+      await broadcastService.deleteBroadcast(targetId, itemToDelete?.message);
+
+      // 3. Delete from Firestore if exists
+      try {
+        await deleteDoc(doc(db, "broadcasts", targetId));
+      } catch (_) {}
+
       showToast('تم حذف البث الإذاعي بنجاح', 'success');
 
       logActivity({
@@ -288,13 +387,31 @@ export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
     const durationInHours = (durationDays * 24) + durationHours || 1;
     const msg = message.trim();
 
+    // Determine section targeting
+    const isSpecificSection = isSingleGradeSelected && selectedSection && selectedSection !== 'ALL';
+    const targetSectionVal = isSpecificSection ? selectedSection : 'ALL';
+    const targetSectionsVal = isSpecificSection 
+      ? [selectedSection] 
+      : (availableSections.length > 0 ? availableSections.map(s => s.fullName) : []);
+    const targetGradesVal = isSpecificSection ? [selectedSection] : finalSelection;
+    const targetSectionLabelVal = isSpecificSection
+      ? (availableSections.find(s => s.fullName === selectedSection)?.label ? `${selectedGradeFullName} (${availableSections.find(s => s.fullName === selectedSection)?.label})` : selectedSection)
+      : (isSingleGradeSelected ? `كافة شُعب (${selectedGradeFullName})` : 'كافة الشُعب');
+
+    const expiryMs = Date.now() + durationInHours * 3600 * 1000;
+    const broadcastId = `br_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
     // Optimistic UI update in Smart Broadcast Log (سجل البث الذكي)
     const optimisticBroadcast = {
-      id: `br_${Date.now()}`,
+      id: broadcastId,
       schoolId: schoolId || 'school1',
       message: msg,
-      targetGrades: finalSelection,
+      targetGrades: targetGradesVal,
+      targetSection: targetSectionVal,
+      targetSections: targetSectionsVal,
+      targetSectionLabel: targetSectionLabelVal,
       durationHours: durationInHours,
+      expiryDate: expiryMs,
       author: 'الإدارة المدرسية',
       subject: 'الإذاعة المدرسية',
       targetLocation: 'ticker',
@@ -306,13 +423,17 @@ export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
 
     try {
       if (onSendMessage) {
-        onSendMessage(msg, finalSelection, durationInHours);
+        onSendMessage(msg, targetGradesVal, durationInHours, targetSectionVal, targetSectionsVal);
       } else {
         await broadcastService.sendBroadcast({
+          id: broadcastId,
           schoolId: schoolId || 'school1',
           message: msg,
-          targetGrades: finalSelection,
+          targetGrades: targetGradesVal,
+          targetSection: targetSectionVal,
+          targetSections: targetSectionsVal,
           durationHours: durationInHours,
+          expiryDate: expiryMs,
           author: 'الإدارة المدرسية',
           subject: 'الإذاعة المدرسية',
           targetLocation: 'ticker'
@@ -321,11 +442,11 @@ export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
 
       logActivity({
         action: 'إطلاق بث إذاعي',
-        details: `تم إرسال رسالة إذاعية للفئات: ${finalSelection.join(', ')}`,
+        details: `تم إرسال رسالة إذاعية للفئات: ${targetGradesVal.join(', ')} (${targetSectionLabelVal})`,
         targetType: 'broadcast'
       });
 
-      showToast('تم إرسال ونشر البث في شاشات الطلاب وسجل البث فوراً 📡', 'success');
+      showToast(`تم إرسال ونشر البث في شاشات الطلاب وسجل البث فوراً (${targetSectionLabelVal}) 📡`, 'success');
 
       // Re-sync with backend
       const latest = await broadcastService.getBroadcasts(schoolId);
@@ -356,7 +477,7 @@ export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
          <div>
            <h3 className="text-white font-black text-xl mb-2">رادار الذكاء الإذاعي</h3>
            <p className="text-white/40 text-xs leading-relaxed max-w-sm mx-auto font-bold px-4">
-              أرسل تنبيهات ذكية، استنتاجات من الملازم، أو إعلانات عاجلة لطلابك بكل احترافية.
+              أرسل تنبيهات ذكية، استنتاجات من الملازم، أو إعلانات عاجلة لطلابك بكل احترافية، مع توجيه دقيق للشُعب المحددة.
            </p>
          </div>
 
@@ -367,9 +488,10 @@ export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
                 key={l.id}
                 onClick={() => {
                   setLevel(l.id as any);
-                  setSelectedGrades(['الجميع']);
+                  setSelectedGrades(l.id === 'primary' ? ['أول'] : ['الجميع']);
+                  setSelectedSection('ALL');
                 }}
-                className={`px-5 py-2.5 rounded-xl font-black text-[10px] transition-all ${
+                className={`px-5 py-2.5 rounded-xl font-black text-[10px] transition-all cursor-pointer ${
                   level === l.id ? 'bg-white text-black shadow-lg scale-105' : 'text-white/40 hover:text-white/60'
                 }`}
               >
@@ -384,7 +506,7 @@ export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
               <div className="flex flex-wrap justify-center gap-2">
                 <button 
                   onClick={() => toggleGrade('الجميع')}
-                  className={`px-5 py-2.5 rounded-xl font-black text-[10px] transition-all border ${
+                  className={`px-5 py-2.5 rounded-xl font-black text-[10px] transition-all border cursor-pointer ${
                     selectedGrades.includes('الجميع') 
                     ? 'bg-rose-500 border-rose-400 text-white shadow-lg shadow-rose-500/20' 
                     : 'bg-white/5 border-transparent text-white/40 hover:bg-white/10 hover:text-white/60'
@@ -396,7 +518,7 @@ export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
                   <button 
                     key={grade}
                     onClick={() => toggleGrade(grade)}
-                    className={`px-5 py-2.5 rounded-xl font-black text-[10px] transition-all border ${
+                    className={`px-5 py-2.5 rounded-xl font-black text-[10px] transition-all border cursor-pointer ${
                       selectedGrades.includes(grade) 
                       ? 'bg-rose-500 border-rose-400 text-white shadow-lg shadow-rose-500/20' 
                       : 'bg-white/5 border-transparent text-white/40 hover:bg-white/10 hover:text-white/60'
@@ -424,7 +546,7 @@ export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
                     <button 
                       key={branch}
                       onClick={() => toggleBranch(branch)}
-                      className={`px-10 py-3 rounded-2xl font-black text-[11px] transition-all border-2 ${
+                      className={`px-10 py-3 rounded-2xl font-black text-[11px] transition-all border-2 cursor-pointer ${
                         selectedBranches.includes(branch) 
                         ? 'bg-rose-500 border-rose-400 text-white shadow-lg shadow-rose-500/30' 
                         : 'bg-white/5 border-transparent text-white/20 hover:text-white/40'
@@ -434,6 +556,67 @@ export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
                     </button>
                   ))}
                 </div>
+              </motion.div>
+            )}
+
+            {/* Available sections selector when a specific grade is chosen (e.g. الأول ابتدائي) */}
+            {isSingleGradeSelected && selectedGradeFullName && (
+              <motion.div 
+                initial={{ opacity: 0, y: -8 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="pt-4 border-t border-rose-500/20 text-right space-y-3" 
+                dir="rtl"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-rose-400 animate-pulse" />
+                    <span className="text-[11px] font-black text-rose-300">
+                      الشُعب المتاحة لصف ({selectedGradeFullName}):
+                    </span>
+                  </div>
+                  <span className="text-[9px] text-white/50 font-bold px-2 py-0.5 rounded-full bg-white/5 border border-white/5">
+                    {selectedSection === 'ALL' ? 'بث جماعي لكافة الشُعب' : `موجه حصرياً: ${activeTargetLabel}`}
+                  </span>
+                </div>
+
+                {/* Section interactive pills */}
+                <div className="flex flex-wrap items-center justify-start gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedSection('ALL')}
+                    className={`px-4 py-2 rounded-xl text-[11px] font-black transition-all cursor-pointer flex items-center gap-1.5 border ${
+                      selectedSection === 'ALL'
+                        ? 'bg-rose-600 text-white shadow-[0_0_15px_rgba(244,63,94,0.5)] border-rose-400 scale-105'
+                        : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white border-white/5'
+                    }`}
+                  >
+                    <span>🌟 كافة شُعب الصف</span>
+                  </button>
+
+                  {availableSections.map((sec) => {
+                    const isCurrent = selectedSection === sec.fullName;
+                    return (
+                      <button
+                        key={sec.id || sec.fullName}
+                        type="button"
+                        onClick={() => setSelectedSection(sec.fullName)}
+                        className={`px-4 py-2 rounded-xl text-[11px] font-black transition-all cursor-pointer flex items-center gap-1.5 border ${
+                          isCurrent
+                            ? 'bg-cyan-500 text-black shadow-[0_0_15px_rgba(6,182,212,0.5)] border-cyan-300 scale-105 font-extrabold'
+                            : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white border-white/5'
+                        }`}
+                      >
+                        <span>📌 {sec.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <p className="text-[9px] text-white/40 font-bold px-1">
+                  {selectedSection === 'ALL'
+                    ? `💡 سيتم بث هذا الإعلان لكافة طلاب جميع شُعب صف (${selectedGradeFullName}).`
+                    : `💡 سيصل هذا الإعلان حصرياً لشاشة طلاب (${activeTargetLabel}) في شريط التنبيهات ولن يظهر للشُعب الأخرى.`}
+                </p>
               </motion.div>
             )}
             
@@ -456,7 +639,7 @@ export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
                     label="أيام" 
                   />
                 </div>
-                <p className="text-[9px] text-white/40 text-center font-bold leading-normal">
+                <p className="text-[9px] text-white/40 text-center font-bold">
                   💡 متبقي البث: 
                   <span className="text-rose-400 mx-1 font-extrabold">
                     {durationDays > 0 ? `${durationDays} يوم ` : ""}
@@ -478,10 +661,14 @@ export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
             <button 
               disabled={!message.trim() || (level === 'preparatory' && !selectedGrades.includes('الجميع') && selectedBranches.length === 0)}
               onClick={handleSend}
-              className="w-full h-20 bg-rose-500 rounded-[30px] text-white font-black text-lg shadow-2xl shadow-rose-900/60 active:scale-[0.98] transition-all flex items-center justify-center gap-4 disabled:opacity-50 disabled:grayscale disabled:scale-100 group"
+              className="w-full h-20 bg-rose-500 rounded-[30px] text-white font-black text-lg shadow-2xl shadow-rose-900/60 active:scale-[0.98] transition-all flex items-center justify-center gap-4 disabled:opacity-50 disabled:grayscale disabled:scale-100 group cursor-pointer"
             >
                <Bell size={28} className="group-hover:rotate-12 transition-transform" />
-               {selectedGrades.includes('الجميع') ? 'إطلاق بث لكافة صفوف المرحلة' : `إرسال لـ (${selectedGrades.length}) صفوف مخصصة`}
+               <span>
+                 {selectedGrades.includes('الجميع')
+                   ? 'إطلاق بث لكافة صفوف المرحلة'
+                   : (selectedSection !== 'ALL' ? `إطلاق البث لشعبة (${activeTargetLabel})` : `إطلاق البث لـ (${activeTargetLabel})`)}
+               </span>
             </button>
          </div>
       </div>
@@ -492,91 +679,112 @@ export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
            <History className="text-white/20" size={18} />
          </div>
          <div className="space-y-4">
-           {history.map((br) => (
-             <div key={br.id} className="p-5 bg-white/[0.03] rounded-3xl md:rounded-[2rem] border border-white/5 flex flex-col md:flex-row items-start md:items-center justify-between group hover:border-rose-500/30 transition-all cursor-default relative overflow-hidden">
-                <div className="flex gap-4 w-full">
-                   <div className="w-12 h-12 rounded-2xl bg-rose-500/10 text-rose-500 flex items-center justify-center border border-rose-500/10 shrink-0">
-                      <Bell size={20} />
-                   </div>
-                   <div className="text-right w-full">
-                      {editingId === br.id ? (
-                        <div className="flex flex-col gap-2">
-                            <textarea 
-                              value={editValue}
-                              onChange={(e) => setEditValue(e.target.value)}
-                              className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white font-bold text-sm outline-none focus:border-rose-500 transition-all resize-none text-right"
-                              rows={3}
-                            />
-                            <div className="flex gap-2">
-                                <button 
-                                  onClick={async () => {
-                                    try {
-                                      if (onUpdateMessage) {
-                                        onUpdateMessage(br.id, editValue);
+           {history.map((br) => {
+             const expiryMs = typeof br.expiryDate === 'number'
+               ? br.expiryDate
+               : (br.expiryDate ? new Date(br.expiryDate).getTime() : 0);
+             const diffMs = expiryMs ? expiryMs - Date.now() : 0;
+             let remainingBadgeText = '';
+             if (diffMs > 0) {
+               const diffMins = Math.round(diffMs / 60000);
+               const diffHours = Math.floor(diffMins / 60);
+               const remMins = diffMins % 60;
+               remainingBadgeText = diffHours < 24
+                 ? `متبقي ${diffHours} س ${remMins > 0 ? `${remMins} د` : ""} ⏱️`
+                 : `متبقي ${Math.floor(diffHours / 24)} يوم ⏱️`;
+             }
+
+             return (
+               <div key={br.id} className="p-5 bg-white/[0.03] rounded-3xl md:rounded-[2rem] border border-white/5 flex flex-col md:flex-row items-start md:items-center justify-between group hover:border-rose-500/30 transition-all cursor-default relative overflow-hidden">
+                  <div className="flex gap-4 w-full">
+                     <div className="w-12 h-12 rounded-2xl bg-rose-500/10 text-rose-500 flex items-center justify-center border border-rose-500/10 shrink-0">
+                        <Bell size={20} />
+                     </div>
+                     <div className="text-right w-full">
+                        {editingId === br.id ? (
+                          <div className="flex flex-col gap-2">
+                              <textarea 
+                                value={editValue}
+                                onChange={(e) => setEditValue(e.target.value)}
+                                className="w-full bg-black/40 border border-white/10 rounded-xl p-4 text-white font-bold text-sm outline-none focus:border-rose-500 transition-all resize-none text-right"
+                                rows={3}
+                              />
+                              <div className="flex gap-2">
+                                  <button 
+                                    onClick={async () => {
+                                      try {
+                                        if (onUpdateMessage) {
+                                          onUpdateMessage(br.id, editValue);
+                                        }
+                                        await broadcastService.updateBroadcast(br.id, editValue);
+                                        setHistory(prev => prev.map(p => p.id === br.id ? { ...p, message: editValue } : p));
+                                        showToast('تم تعديل البث بنجاح', 'success');
+                                      } catch (e: any) {
+                                        showToast('خطأ في تعديل البث', 'error');
                                       }
-                                      await broadcastService.updateBroadcast(br.id, editValue);
-                                      setHistory(prev => prev.map(p => p.id === br.id ? { ...p, message: editValue } : p));
-                                      showToast('تم تعديل البث بنجاح', 'success');
-                                    } catch (e: any) {
-                                      showToast('خطأ في تعديل البث', 'error');
-                                    }
-                                    setEditingId(null);
-                                  }}
-                                  className="px-6 py-2 bg-rose-500 text-white rounded-xl text-xs font-black shadow-lg shadow-rose-900/20 cursor-pointer"
-                                >حفظ التعديل</button>
-                                <button 
-                                  onClick={() => setEditingId(null)}
-                                  className="px-6 py-2 bg-white/10 text-white/50 rounded-xl text-xs font-black hover:bg-white/20 cursor-pointer"
-                                >إلغاء</button>
-                            </div>
-                        </div>
-                      ) : (
-                        <div className="space-y-2">
-                            <p className="text-white text-base font-black leading-snug">{br.message}</p>
-                            <div className="flex items-center gap-3 flex-wrap">
-                                <span className="text-[10px] bg-rose-500/10 text-rose-300 px-3 py-1 rounded-full font-black uppercase tracking-widest border border-rose-500/20">
-                                    {br.targetGrades?.includes('الجميع') ? 'لكافة الصفوف' : (Array.isArray(br.targetGrades) ? br.targetGrades.join(', ') : 'للجميع')}
-                                </span>
-                                <span className="text-[10px] text-white/40 font-bold">
-                                    {(() => {
-                                      const ts = br.timestampMs || (br.createdAt ? new Date(br.createdAt).getTime() : (br.timestamp ? (typeof br.timestamp.toDate === 'function' ? br.timestamp.toDate().getTime() : new Date(br.timestamp).getTime()) : Date.now()));
-                                      const date = new Date(ts);
-                                      return isNaN(date.getTime()) ? 'الآن' : new Intl.DateTimeFormat('ar-EG', { hour: 'numeric', minute: 'numeric', day: 'numeric', month: 'short' }).format(date);
-                                    })()}
-                                </span>
-                            </div>
-                        </div>
-                      )}
-                   </div>
-                </div>
-                
-                {/* Actions Section - Only show when NOT editing */}
-                {editingId !== br.id && (
-                  <div className="flex items-center gap-3 mt-4 md:mt-0 w-full md:w-auto justify-end border-t md:border-0 border-white/5 pt-3 md:pt-0">               
-                      <div className="flex items-center gap-2">
-                          <button 
-                              onClick={() => {
-                                  setEditingId(br.id);
-                                  setEditValue(br.message);
-                              }}
-                              className="h-10 px-6 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center border border-blue-500/10 hover:bg-blue-500 hover:text-white transition-all text-[11px] font-black cursor-pointer"
-                          >
-                              تعديل
-                          </button>
-                          <button 
-                              onClick={(e) => {
-                                  e.stopPropagation();
-                                  setConfirmDelete(br.id);
-                              }}
-                              className="w-10 h-10 bg-rose-500/10 text-rose-500 rounded-xl hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center border border-rose-500/10 cursor-pointer"
-                          >
-                              <Trash2 size={20} />
-                          </button>
-                      </div>
+                                      setEditingId(null);
+                                    }}
+                                    className="px-6 py-2 bg-rose-500 text-white rounded-xl text-xs font-black shadow-lg shadow-rose-900/20 cursor-pointer"
+                                  >حفظ التعديل</button>
+                                  <button 
+                                    onClick={() => setEditingId(null)}
+                                    className="px-6 py-2 bg-white/10 text-white/50 rounded-xl text-xs font-black hover:bg-white/20 cursor-pointer"
+                                  >إلغاء</button>
+                              </div>
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                              <p className="text-white text-base font-black leading-snug">{br.message}</p>
+                              <div className="flex items-center gap-3 flex-wrap">
+                                  <span className="text-[10px] bg-rose-500/10 text-rose-300 px-3 py-1 rounded-full font-black uppercase tracking-widest border border-rose-500/20">
+                                      🎯 {br.targetSectionLabel || (br.targetSection && br.targetSection !== 'ALL' ? br.targetSection : (br.targetGrades?.includes('الجميع') ? 'لكافة الصفوف' : (Array.isArray(br.targetGrades) ? br.targetGrades.join(', ') : 'للجميع')))}
+                                  </span>
+                                  {remainingBadgeText && (
+                                    <span className="text-[10px] text-rose-400 bg-rose-500/10 border border-rose-500/20 px-2.5 py-0.5 rounded-full font-bold">
+                                      {remainingBadgeText}
+                                    </span>
+                                  )}
+                                  <span className="text-[10px] text-white/40 font-bold">
+                                      {(() => {
+                                        const ts = br.timestampMs || (br.createdAt ? new Date(br.createdAt).getTime() : (br.timestamp ? (typeof br.timestamp.toDate === 'function' ? br.timestamp.toDate().getTime() : new Date(br.timestamp).getTime()) : Date.now()));
+                                        const date = new Date(ts);
+                                        return isNaN(date.getTime()) ? 'الآن' : new Intl.DateTimeFormat('ar-EG', { hour: 'numeric', minute: 'numeric', day: 'numeric', month: 'short' }).format(date);
+                                      })()}
+                                  </span>
+                              </div>
+                          </div>
+                        )}
+                     </div>
                   </div>
-                )}
-             </div>
-           ))}
+                  
+                  {/* Actions Section - Only show when NOT editing */}
+                  {editingId !== br.id && (
+                    <div className="flex items-center gap-3 mt-4 md:mt-0 w-full md:w-auto justify-end border-t md:border-0 border-white/5 pt-3 md:pt-0">               
+                        <div className="flex items-center gap-2">
+                            <button 
+                                onClick={() => {
+                                    setEditingId(br.id);
+                                    setEditValue(br.message);
+                                }}
+                                className="h-10 px-6 rounded-xl bg-blue-500/10 text-blue-400 flex items-center justify-center border border-blue-500/10 hover:bg-blue-500 hover:text-white transition-all text-[11px] font-black cursor-pointer"
+                            >
+                                تعديل
+                            </button>
+                            <button 
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setConfirmDelete(br.id);
+                                }}
+                                className="w-10 h-10 bg-rose-500/10 text-rose-500 rounded-xl hover:bg-rose-500 hover:text-white transition-all flex items-center justify-center border border-rose-500/10 cursor-pointer"
+                            >
+                                <Trash2 size={20} />
+                            </button>
+                        </div>
+                    </div>
+                  )}
+               </div>
+             );
+           })}
            {history.length === 0 && (
              <div className="py-20 text-center text-white/5 font-black text-xs italic">
                لا يوجد سجل بث حالياً..

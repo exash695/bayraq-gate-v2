@@ -6,7 +6,7 @@ import { academicService } from '../services/academicService';
 import { supportService } from '../services/supportService';
 import { ideaService } from '../services/ideaService';
 import { notificationService } from '../services/notificationService';
-import { subscribeToPoseOverrides } from './BerqCharacterManager';
+import { subscribeToPoseOverrides, resolveMediaUrl, isVideoUrl, POSE_ALIASES_MAP } from './BerqCharacterManager';
 import { generateSingleStudentPDF, isArchivedList } from '../utils/studentUtils';
 import { printAttendanceReport } from '../utils/attendancePrint';
 import { useAdminData } from '../hooks/useAdminData';
@@ -2662,13 +2662,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             >
               <BroadcastSection 
                 schoolId={selectedSchoolId || undefined}
-                onSendMessage={(msg, targetGrades, duration) => {
+                savedLists={activeSavedLists || savedLists}
+                onSendMessage={(msg, targetGrades, duration, targetSection, targetSections) => {
                   if (onSendMessage) {
-                    onSendMessage(msg, targetGrades, duration);
+                    onSendMessage(msg, targetGrades, duration, targetSection, targetSections);
                   }
-                  const targetText = targetGrades.includes('الجميع') 
-                    ? 'لجميع الطلاب' 
-                    : `لمراحل (${targetGrades.join('، ')})`;
+                  const targetText = targetSection && targetSection !== 'ALL'
+                    ? `لشعبة (${targetSection})`
+                    : (targetGrades.includes('الجميع') ? 'لجميع الطلاب' : `لمراحل (${targetGrades.join('، ')})`);
                   showToast(`🚀 تم نشر الرسالة ${targetText} بنجاح`);
                 }}
                 onUpdateMessage={onUpdateMessage}
@@ -2736,7 +2737,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           {!isTabDisabled('resources') && activeTab === 'resources' && (
             <motion.div key="resources-tab-fixed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <ResourceManager />
+              <ResourceManager 
+                schoolId={selectedSchoolId || undefined} 
+                schoolName={schoolName} 
+                showToast={showToast} 
+              />
             </motion.div>
           )}
 

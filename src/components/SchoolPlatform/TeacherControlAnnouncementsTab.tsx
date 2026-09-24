@@ -95,6 +95,8 @@ import {
 } from "./utils";
 import type { Teacher, MaterialField, Post, SchoolPlatformProps, PlatformTab, HandRaiseRequest, LiveQuestion } from "./types";
 import { useSchoolPlatform } from "./SchoolPlatformContext";
+import { broadcastService } from "../../services/broadcastService";
+import { extractGradeBase, matchesBroadcastAudience } from "../../utils/gradeMatcher";
 
 export const TeacherControlAnnouncementsTab: React.FC = () => {
   const { 
@@ -104,6 +106,7 @@ export const TeacherControlAnnouncementsTab: React.FC = () => {
     resolvedSchoolId, 
     schoolId, 
     selectedTeacherClass,
+    setSelectedTeacherClass,
     setAnnouncementDays, 
     setAnnouncementHours, 
     setAnnouncementText, 
@@ -111,22 +114,35 @@ export const TeacherControlAnnouncementsTab: React.FC = () => {
     targetBroadcastGrade, 
     teacherAssignedSections,
     teacherBroadcasts, 
+    setTeacherBroadcasts,
     teacherData 
   } = useSchoolPlatform();
 
   const isAllSections = !selectedTeacherClass || selectedTeacherClass === 'ALL' || selectedTeacherClass === 'كافة الشُعب';
   const targetLabel = isAllSections ? "كافة الشُعب الموكلة" : selectedTeacherClass;
 
-  const displayedBroadcasts = (teacherBroadcasts || []).filter((item: any) => {
-    if (isAllSections) return true;
-    if (item.targetSection && item.targetSection !== 'ALL') {
-      return item.targetSection === selectedTeacherClass;
-    }
-    if (item.targetSections && Array.isArray(item.targetSections)) {
-      return item.targetSections.includes(selectedTeacherClass) || item.targetSections.includes('ALL');
-    }
-    return true;
-  });
+  const displayedBroadcasts = useMemo(() => {
+    const seen = new Set<string>();
+    const filtered = (teacherBroadcasts || []).filter((item: any) => {
+      const msgKey = `${item.schoolId || ''}:::${(item.message || '').trim()}`;
+      if (seen.has(msgKey)) return false;
+      seen.add(msgKey);
+
+      if (isAllSections) {
+        if (!item.targetSection || item.targetSection === 'ALL' || item.targetSection === 'الكل') return true;
+        const assignedNames = (teacherAssignedSections || []).map((s: any) => s.name);
+        return assignedNames.includes(item.targetSection) || 
+               (Array.isArray(item.targetSections) && item.targetSections.some((s: string) => assignedNames.includes(s)));
+      }
+      return matchesBroadcastAudience(item, {
+        grade: extractGradeBase(selectedTeacherClass) || selectedTeacherClass,
+        section: selectedTeacherClass,
+        className: selectedTeacherClass,
+        isTeacher: false
+      });
+    });
+    return filtered;
+  }, [teacherBroadcasts, isAllSections, selectedTeacherClass, teacherAssignedSections]);
 
   return (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -143,21 +159,60 @@ export const TeacherControlAnnouncementsTab: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Active target banner */}
-                      <div className="bg-purple-950/30 border border-purple-500/20 rounded-xl p-3 flex items-center justify-between text-right" dir="rtl">
-                        <div className="space-y-0.5">
-                          <span className="text-[11px] font-black text-purple-300 block">
-                            📡 نطاق الإرسال المتزامن: {targetLabel}
-                          </span>
-                          <span className="text-[9px] text-white/50 font-bold block">
-                            {isAllSections 
-                              ? `سيظهر هذا الإعلان في أشرطة شاشات جميع الطلاب في كل شُعبك الموكلة (${teacherAssignedSections?.length || 0} شُعب)` 
-                              : `سيظهر هذا الإعلان فقط لطلاب (${selectedTeacherClass}) في شريطهم اللحظي`}
+                      {/* Active target banner with direct section switcher chips */}
+                      <div className="bg-purple-950/30 border border-purple-500/20 rounded-xl p-3 space-y-2.5 text-right" dir="rtl">
+                        <div className="flex items-center justify-between">
+                          <div className="space-y-0.5">
+                            <span className="text-[11px] font-black text-purple-300 block">
+                              📡 نطاق الإرسال المتزامن: {targetLabel}
+                            </span>
+                            <span className="text-[9px] text-white/50 font-bold block">
+                              {isAllSections 
+                                ? `سيظهر هذا الإعلان في أشرطة شاشات جميع الطلاب في كل شُعبك الموكلة (${teacherAssignedSections?.length || 0} شُعب)` 
+                                : `سيظهر هذا الإعلان فقط وحصرياً لطلاب (${selectedTeacherClass}) في شريطهم اللحظي`}
+                            </span>
+                          </div>
+                          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/5 text-purple-300 border border-white/5">
+                            {isAllSections ? 'بث جماعي' : 'بث شعبة محددة'}
                           </span>
                         </div>
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/5 text-purple-300 border border-white/5">
-                          {isAllSections ? 'بث جماعي' : 'بث شعبة'}
-                        </span>
+
+                        {/* Interactive section selector pills right on the broadcasting box */}
+                        {teacherAssignedSections && teacherAssignedSections.length > 0 && (
+                          <div className="pt-2 border-t border-purple-500/10 flex items-center gap-1.5 flex-wrap">
+                            <span className="text-[10px] font-bold text-white/40 ml-1">توجيه الإعلان إلى:</span>
+                            {teacherAssignedSections.length > 1 && (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedTeacherClass && setSelectedTeacherClass("ALL")}
+                                className={`px-2.5 py-1 rounded-lg text-[10px] font-black transition-all cursor-pointer flex items-center gap-1 ${
+                                  isAllSections
+                                    ? "bg-purple-600 text-white shadow-[0_0_10px_rgba(168,85,247,0.4)] border border-purple-400"
+                                    : "bg-white/5 text-white/60 hover:bg-white/10 border border-white/5"
+                                }`}
+                              >
+                                <span>🌟 كافة الشُعب الموكلة</span>
+                              </button>
+                            )}
+                            {teacherAssignedSections.map((sec: any) => {
+                              const isCurrent = selectedTeacherClass === sec.name;
+                              return (
+                                <button
+                                  key={sec.name}
+                                  type="button"
+                                  onClick={() => setSelectedTeacherClass && setSelectedTeacherClass(sec.name)}
+                                  className={`px-2.5 py-1 rounded-lg text-[10px] font-black transition-all cursor-pointer flex items-center gap-1 ${
+                                    isCurrent
+                                      ? "bg-cyan-500 text-black shadow-[0_0_10px_rgba(6,182,212,0.4)] border border-cyan-300"
+                                      : "bg-white/5 text-white/60 hover:bg-white/10 border border-white/5"
+                                  }`}
+                                >
+                                  <span>📌 {sec.name}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
 
                       <div className="space-y-1.5">
@@ -237,17 +292,28 @@ export const TeacherControlAnnouncementsTab: React.FC = () => {
                             const formattedMessage = `📢 [الأستاذ ${tName} - مادة ${tSubject}]: ${announcementText}`;
 
                             const durationHours = (announcementDays * 24) + announcementHours || 1;
+                            const expiryDateMs = Date.now() + durationHours * 3600 * 1000;
+
+                            // Find the section object if teacher selected a specific section from the top switcher
+                            const secObj = (teacherAssignedSections || []).find((s: any) => s.name === selectedTeacherClass);
 
                             const targetSectionsList = isAllSections
                               ? (teacherAssignedSections || []).map((s: any) => s.name).filter(Boolean)
                               : [selectedTeacherClass];
+
+                            const specificGrade = isAllSections
+                              ? null
+                              : (secObj?.grade || extractGradeBase(selectedTeacherClass) || targetBroadcastGrade || selectedTeacherClass);
+
                             const targetGradesList = isAllSections
-                              ? Array.from(new Set((teacherAssignedSections || []).map((s: any) => s.grade || s.name).filter(Boolean)))
-                              : [targetBroadcastGrade || selectedTeacherClass];
+                              ? Array.from(new Set((teacherAssignedSections || []).map((s: any) => s.name).filter(Boolean)))
+                              : [selectedTeacherClass];
 
                             const handlePost = async () => {
                               try {
-                                await addDoc(collection(db, "broadcasts"), {
+                                const broadcastId = `br_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+                                const broadcastPayload = {
+                                  id: broadcastId,
                                   message: formattedMessage,
                                   rawText: announcementText,
                                   author: tName,
@@ -261,10 +327,41 @@ export const TeacherControlAnnouncementsTab: React.FC = () => {
                                   isSchoolBroadcast: true,
                                   targetLocation: 'ticker',
                                   isCentralPlatform: false,
-                                  expiryDate: Date.now() + durationHours * 3600 * 1000,
+                                  expiryDate: expiryDateMs,
                                   timestamp: serverTimestamp(),
                                   timestampMs: Date.now()
-                                });
+                                };
+
+                                // 1. Save to Firestore broadcasts collection with shared unique ID
+                                await setDoc(doc(db, "broadcasts", broadcastId), broadcastPayload);
+
+                                // 2. Also send via REST API and PostgreSQL with the same unique ID and expiryDate
+                                try {
+                                  await broadcastService.sendBroadcast({
+                                    id: broadcastId,
+                                    schoolId: resolvedSchoolId,
+                                    message: formattedMessage,
+                                    targetGrades: targetGradesList,
+                                    targetSection: isAllSections ? "ALL" : selectedTeacherClass,
+                                    targetSections: targetSectionsList,
+                                    author: tName,
+                                    subject: tSubject,
+                                    durationHours: durationHours,
+                                    expiryDate: expiryDateMs,
+                                    targetLocation: 'ticker'
+                                  } as any);
+                                } catch (apiErr) {
+                                  console.warn("broadcastService send fallback notice:", apiErr);
+                                }
+
+                                // 3. Optimistic local update to guarantee instant single entry
+                                if (setTeacherBroadcasts) {
+                                  setTeacherBroadcasts(prev => [
+                                    broadcastPayload,
+                                    ...(prev || []).filter(b => b.id !== broadcastId && b.message !== formattedMessage)
+                                  ]);
+                                }
+
                                 showToast(
                                   `تم بث ونشر الإعلان فوراً إلى (${targetLabel})! 📡`,
                                   "success",
@@ -301,8 +398,11 @@ export const TeacherControlAnnouncementsTab: React.FC = () => {
                           </div>
                         ) : (
                           displayedBroadcasts.map((item) => {
-                            // Calculate remaining time
-                            const diffMs = (item.expiryDate || 0) - Date.now();
+                            // Calculate remaining time with accurate parsing of number or ISO string
+                            const expiryMs = typeof item.expiryDate === 'number'
+                              ? item.expiryDate
+                              : (item.expiryDate ? new Date(item.expiryDate).getTime() : (item.timestampMs ? item.timestampMs + 24 * 3600 * 1000 : 0));
+                            const diffMs = (expiryMs || 0) - Date.now();
                             let remainingText = "منتهي";
                             if (diffMs > 0) {
                               const diffMins = Math.round(diffMs / 60000);
@@ -340,7 +440,7 @@ export const TeacherControlAnnouncementsTab: React.FC = () => {
                                       الكاتب: {item.author || "أستاذ"} • مادة {item.subject || "عامة"}
                                     </span>
                                     <span className="text-white/10">•</span>
-                                    <span className="text-purple-400 bg-purple-500/10 px-1.5 py-0.5 rounded">
+                                    <span className={`px-1.5 py-0.5 rounded ${diffMs > 0 ? 'text-purple-400 bg-purple-500/10' : 'text-red-400 bg-red-500/10 font-black'}`}>
                                       {remainingText}
                                     </span>
                                   </div>
@@ -349,14 +449,36 @@ export const TeacherControlAnnouncementsTab: React.FC = () => {
                                 <button
                                   onClick={async () => {
                                     try {
-                                      await deleteDoc(doc(db, "broadcasts", item.id));
+                                      // 1. Instant optimistic removal from teacher broadcasts list
+                                      if (setTeacherBroadcasts) {
+                                        setTeacherBroadcasts(prev => (prev || []).filter(b => b.id !== item.id && b.message !== item.message));
+                                      }
+
+                                      // 2. Delete from Firestore
+                                      await deleteDoc(doc(db, "broadcasts", item.id)).catch(() => {});
+                                      try {
+                                        const qSnap = await getDocs(query(collection(db, "broadcasts"), where("schoolId", "==", resolvedSchoolId)));
+                                        qSnap.forEach(async (d) => {
+                                          if (d.data().message === item.message || d.id === item.id) {
+                                            await deleteDoc(doc(db, "broadcasts", d.id)).catch(() => {});
+                                          }
+                                        });
+                                      } catch (err) {}
+
+                                      // 3. Delete from PostgreSQL and trigger realtime event
+                                      try {
+                                        await broadcastService.deleteBroadcast(item.id, item.message);
+                                      } catch (apiErr) {
+                                        console.warn("broadcastService delete broadcast error:", apiErr);
+                                      }
+
                                       showToast(
-                                        "تمت أرشفة الإشعار وإزالته بنجاح من شريط الطلاب",
+                                        "تم حذف الإعلان فوراً وإزالته بنجاح من شريط الطلاب ولوحة الإعلانات",
                                         "success",
                                       );
                                     } catch (e) {
                                       console.error("Error deleting broadcast:", e);
-                                      showToast("حدث خطأ أثناء الأرشفة", "error");
+                                      showToast("حدث خطأ أثناء الحذف", "error");
                                     }
                                   }}
                                   className="px-2.5 py-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 text-[9px] font-bold rounded-lg border border-red-500/20 cursor-pointer shrink-0 transition-all"

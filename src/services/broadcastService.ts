@@ -53,10 +53,14 @@ export const broadcastService = {
   },
 
   sendBroadcast: async (broadcastData: {
+    id?: string;
     schoolId: string;
     message: string;
     targetGrades: string[];
     durationHours: number;
+    expiryDate?: number | string;
+    targetSection?: string;
+    targetSections?: string[];
     author?: string;
     subject?: string;
     targetLocation?: string;
@@ -110,16 +114,19 @@ export const broadcastService = {
     return result;
   },
 
-  deleteBroadcast: async (id: string) => {
-    const response = await fetch(`/api/broadcasts/${id}`, {
+  deleteBroadcast: async (id: string, message?: string) => {
+    const url = message 
+      ? `/api/broadcasts/${encodeURIComponent(id)}?message=${encodeURIComponent(message)}`
+      : `/api/broadcasts/${encodeURIComponent(id)}`;
+    const response = await fetch(url, {
       method: 'DELETE'
     });
     if (!response.ok) throw new Error('Failed to delete broadcast');
     const result = await response.json();
     try {
-      realtimeManager?.trigger?.('broadcasts', { id, action: 'DELETE' });
-      realtimeManager?.trigger?.('school_announcements', { id, action: 'DELETE' });
-      window.dispatchEvent(new CustomEvent('app_broadcast_event', { detail: { action: 'DELETE', id } }));
+      realtimeManager?.trigger?.('broadcasts', { id, message, action: 'DELETE' });
+      realtimeManager?.trigger?.('school_announcements', { id, message, action: 'DELETE' });
+      window.dispatchEvent(new CustomEvent('app_broadcast_event', { detail: { action: 'DELETE', id, message } }));
     } catch (err) {
       console.warn('[BroadcastService] realtime trigger warning:', err);
     }

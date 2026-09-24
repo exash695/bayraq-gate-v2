@@ -1,6 +1,6 @@
 import { Gate6 } from './components/Gate6.tsx';
 import { Gate6Demo } from './components/Gate6/Gate6Demo';
-import { matchesTargetGrades, isSchoolMatch } from './utils/gradeMatcher';
+import { matchesTargetGrades, isSchoolMatch, matchesBroadcastAudience } from './utils/gradeMatcher';
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { customAuth } from "./services/customAuthService";
 import { auth, db, purgeFirestore } from "./lib/firebase";
@@ -814,21 +814,15 @@ export default function App() {
               return false;
             }
 
-            // Target roles check
-            let gradesArr: string[] = [];
-            if (Array.isArray(b.targetGrades)) {
-              gradesArr = b.targetGrades;
-            } else if (typeof b.targetGrades === "string") {
-              gradesArr = [b.targetGrades];
-            }
-            if (gradesArr.includes("parent_only")) return false;
+            const currentSection = userProfile?.section || userProfile?.class || (userProfile as any)?.studentSection || (verifiedStudentInfo as any)?.section || "";
 
-            // Grade / stage check
-            if (!matchesTargetGrades(currentGrade, gradesArr)) {
-              return false;
-            }
-
-            return true;
+            // Strict Audience & Section Matching
+            return matchesBroadcastAudience(b, {
+              grade: currentGrade,
+              section: currentSection,
+              className: currentSection || currentGrade,
+              isTeacher: false
+            });
           })
           .sort((a, b) => b.timestampMs - a.timestampMs);
 
@@ -842,7 +836,10 @@ export default function App() {
     return () => unsubscribe();
   }, [
     userProfile?.grade,
+    userProfile?.section,
+    userProfile?.class,
     verifiedStudentInfo?.grade,
+    (verifiedStudentInfo as any)?.section,
     selectedStudentGrade,
     selectedSchoolId,
     userProfile?.schoolId,
@@ -922,6 +919,8 @@ export default function App() {
     message: string,
     targetGrades: string[],
     duration: number,
+    targetSection?: string,
+    targetSections?: string[],
   ) => {
     if (!user) return;
 
@@ -930,6 +929,8 @@ export default function App() {
         schoolId: userProfile?.schoolId || selectedSchoolId || "school1",
         message,
         targetGrades,
+        targetSection: targetSection || (targetGrades.length === 1 && targetGrades[0] !== 'الجميع' ? targetGrades[0] : 'ALL'),
+        targetSections: targetSections || (targetSection ? [targetSection] : []),
         durationHours: duration,
         author: userProfile?.name || "الإدارة المدرسية",
         subject: 'الإذاعة المدرسية',
@@ -2149,6 +2150,7 @@ export default function App() {
                     "",
                   role: "parent",
                   grade: studentGrade,
+                  section: (user as any).section || (user as any).studentSection || (user as any).class || "",
                   schoolId: user.schoolId || selectedSchoolId,
                   gender: (user as any).gender,
                 });
@@ -2181,6 +2183,8 @@ export default function App() {
                     "طالب الأكاديمية",
                   role: "student",
                   grade: studentGrade || "سادس علمي",
+                  section: (user as any).section || (user as any).studentSection || (user as any).class || "",
+                  class: (user as any).class || (user as any).className || (user as any).section || "",
                   schoolId:
                     user.schoolId || selectedSchoolId || "school8",
                   gender: (user as any).gender,

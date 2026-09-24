@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { broadcastService } from '../services/broadcastService';
 import { Megaphone } from 'lucide-react';
 import { useRemoteConfig } from '../services/remoteConfig';
-import { matchesTargetGrades, isSchoolMatch } from '../utils/gradeMatcher';
+import { matchesTargetGrades, isSchoolMatch, matchesBroadcastAudience } from '../utils/gradeMatcher';
 
 interface BroadcastTickerProps {
   schoolId: string;
@@ -36,31 +36,26 @@ export const BroadcastTicker: React.FC<BroadcastTickerProps> = ({ schoolId, grad
               return false;
             }
 
-            // Target audience check
-            const rawGrades = b.targetGrades || b.target_grades;
-            let grades: string[] = [];
-            if (Array.isArray(rawGrades)) grades = rawGrades;
-            else if (typeof rawGrades === 'string') grades = [rawGrades];
-            
-            if (grades.includes('parent_only')) return false; // Handled by ParentPortal
-            if (grades.includes('teacher_only') && !isTeacher) return false;
-            if (isTeacher) return true;
-
-            // Section check for students
-            if (section) {
-              const targetSec = b.targetSection;
-              const targetSecs = b.targetSections;
-              if (targetSec && targetSec !== 'ALL' && targetSec !== 'all' && targetSec !== 'الكل') {
-                const matchPrimary = targetSec === section || targetSec.includes(section) || section.includes(targetSec);
-                const matchArray = Array.isArray(targetSecs) && targetSecs.some((s: string) => s === section || s.includes(section) || section.includes(s));
-                if (!matchPrimary && !matchArray) {
-                  return false;
-                }
-              }
+            // Expiry check
+            const now = Date.now();
+            let expMs = 0;
+            const expField = b.expiryDate || b.expiry_date;
+            if (typeof expField === 'number') expMs = expField;
+            else if (expField?.toMillis) expMs = expField.toMillis();
+            else if (expField instanceof Date) expMs = expField.getTime();
+            else if (typeof expField === 'string') {
+              const parsed = new Date(expField).getTime();
+              expMs = isNaN(parsed) ? (Number(expField) || 0) : parsed;
             }
+            if (expMs > 0 && expMs < now) return false;
 
-            // Grade / stage matching
-            return matchesTargetGrades(grade, grades);
+            // Strict Audience & Section Matching
+            return matchesBroadcastAudience(b, {
+              grade,
+              section,
+              className: section || grade,
+              isTeacher
+            });
           })
           .sort((a: any, b: any) => {
             const timeA = a.timestampMs || a.timestamp_ms || (a.createdAt ? new Date(a.createdAt).getTime() : 0);
@@ -75,7 +70,7 @@ export const BroadcastTicker: React.FC<BroadcastTickerProps> = ({ schoolId, grad
     });
 
     return () => unsub();
-  }, [schoolId, grade, isVisible, isTeacher]);
+  }, [schoolId, grade, section, isVisible, isTeacher]);
 
   if (!remoteConfig.tickerEnabled) {
     return null;

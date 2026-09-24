@@ -5268,11 +5268,21 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
       let queryBuilder = db.select().from(school_announcements).where(and(...conditions));
       const results = await queryBuilder.orderBy(desc(school_announcements.timestampMs)).limit(Number(limitParam) || 50);
 
+      const enhancedResults = results.map((r: any) => {
+        const rawGrades = Array.isArray(r.targetGrades) ? r.targetGrades : [];
+        const detectedSections = rawGrades.filter((g: any) => typeof g === 'string' && /[\s\-_–—]+[\u0621-\u064Aa-zA-Z0-9]$|\([\u0621-\u064Aa-zA-Z0-9]+\)|شعبة\s*[\u0621-\u064Aa-zA-Z0-9]+/.test(g));
+        return {
+          ...r,
+          targetSection: (r as any).targetSection || (detectedSections.length === 1 ? detectedSections[0] : null),
+          targetSections: (r as any).targetSections || (detectedSections.length > 0 ? detectedSections : [])
+        };
+      });
+
       // Optional grade filter if passed in query
-      let filteredResults = results;
+      let filteredResults = enhancedResults;
       if (grade && typeof grade === 'string' && grade.trim() !== '') {
         const { matchesTargetGrades } = await import('./src/utils/gradeMatcher');
-        filteredResults = results.filter((b: any) => matchesTargetGrades(grade, b.targetGrades));
+        filteredResults = enhancedResults.filter((b: any) => matchesTargetGrades(grade, b.targetGrades));
       }
 
       res.json({ success: true, broadcasts: filteredResults, data: filteredResults });
@@ -5284,7 +5294,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
   // إضافة إعلان جديد
   app.post('/api/broadcasts', async (req, res) => {
     try {
-      const { id, schoolId, message, targetGrades, author, subject, targetLocation, durationHours, expiryDate: customExpiry } = req.body;
+      const { id, schoolId, message, targetGrades, targetSection, targetSections, author, subject, targetLocation, durationHours, expiryDate: customExpiry } = req.body;
       
       if (!message || (typeof message === 'string' && !message.trim())) {
         return res.status(400).json({ success: false, message: "محتوى الرسالة مطلوب" });
@@ -5307,11 +5317,22 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
 
       let cleanTargetGrades: string[] = [];
       if (Array.isArray(targetGrades)) {
-        cleanTargetGrades = targetGrades;
+        cleanTargetGrades = [...targetGrades];
       } else if (typeof targetGrades === 'string') {
         cleanTargetGrades = [targetGrades];
       } else {
         cleanTargetGrades = ['الجميع'];
+      }
+
+      if (targetSection && targetSection !== 'ALL' && !cleanTargetGrades.includes(targetSection)) {
+        cleanTargetGrades.push(targetSection);
+      }
+      if (Array.isArray(targetSections)) {
+        targetSections.forEach(sec => {
+          if (sec && typeof sec === 'string' && !cleanTargetGrades.includes(sec)) {
+            cleanTargetGrades.push(sec);
+          }
+        });
       }
 
       const result = await db.insert(school_announcements).values({
@@ -5327,7 +5348,11 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         createdAt: new Date()
       }).returning();
 
-      const created = result[0];
+      const created = {
+        ...result[0],
+        targetSection: targetSection || null,
+        targetSections: targetSections || (targetSection ? [targetSection] : [])
+      };
       realtimeServerInstance?.broadcastManual('school_announcements', broadcastId, 'INSERT', created);
       realtimeServerInstance?.broadcastManual('broadcasts', broadcastId, 'INSERT', created);
 
@@ -5375,9 +5400,19 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
   app.delete('/api/broadcasts/:id', async (req, res) => {
     try {
       const { id } = req.params;
-      await db.delete(school_announcements).where(eq(school_announcements.id, id));
-      realtimeServerInstance?.broadcastManual('school_announcements', id, 'DELETE', { id });
-      realtimeServerInstance?.broadcastManual('broadcasts', id, 'DELETE', { id });
+      const messageQuery = (req.query.message as string) || '';
+      if (messageQuery && messageQuery.trim()) {
+        await db.delete(school_announcements).where(
+          or(
+            eq(school_announcements.id, id),
+            eq(school_announcements.message, messageQuery.trim())
+          )
+        );
+      } else {
+        await db.delete(school_announcements).where(eq(school_announcements.id, id));
+      }
+      realtimeServerInstance?.broadcastManual('school_announcements', id, 'DELETE', { id, message: messageQuery });
+      realtimeServerInstance?.broadcastManual('broadcasts', id, 'DELETE', { id, message: messageQuery });
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
@@ -7714,6 +7749,9 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
                 schoolId: aList.schoolId || targetSchoolId || 'school1',
                 name: foundStu.name || 'طالب الأكاديمية',
                 grade: resolvedGrade,
+                section: aList.name || (foundStu as any).section || '',
+                class: aList.name || (foundStu as any).class || '',
+                className: aList.name || (foundStu as any).className || '',
                 code: foundStu.student || foundStu.code || cleanCode,
                 parentCode: foundStu.parent || foundStu.parentCode || `PAR-${cleanCode}`,
                 status: 'نشط',
@@ -8006,8 +8044,35 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         const prefixGrade = getGradeFromCodePrefix(stu.code || cleanCode);
         const effectiveGrade = prefixGrade || stu.grade || 'أول ابتدائي';
 
+        // Source of truth section lookup from academic_lists
+        let studentSection = (stu as any).section || '';
+        let studentClassName = (stu as any).className || (stu as any).class || '';
+        try {
+          const effectiveSchool = stu.schoolId || targetSchoolId || 'school1';
+          const schoolLists = await db
+            .select({ id: academic_lists.id, name: academic_lists.name, students: academic_lists.students })
+            .from(academic_lists)
+            .where(eq(academic_lists.schoolId, effectiveSchool));
+          
+          for (const aList of schoolLists) {
+            const listStudents = Array.isArray(aList.students) ? aList.students : [];
+            const foundInList = listStudents.some((s: any) => {
+              const scode = String(s.student || s.code || '').trim().toUpperCase();
+              const sid = String(s.id || '').trim().toUpperCase();
+              return scode === cleanCode || sid === String(stu.id).toUpperCase() || scode === String(stu.code || '').trim().toUpperCase();
+            });
+            if (foundInList) {
+              studentSection = aList.name;
+              studentClassName = aList.name;
+              break;
+            }
+          }
+        } catch (secErr) {
+          console.warn('[login-code] Error finding student section in academic_lists:', secErr);
+        }
+
         const token = jwt.sign(
-          { uid: stu.id, name: stu.name, role: 'student', schoolId: stu.schoolId, grade: effectiveGrade },
+          { uid: stu.id, name: stu.name, role: 'student', schoolId: stu.schoolId, grade: effectiveGrade, section: studentSection },
           JWT_SECRET,
           { expiresIn: '30d' }
         );
@@ -8024,6 +8089,9 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
             role: 'student', 
             schoolId: stu.schoolId || targetSchoolId,
             grade: effectiveGrade,
+            section: studentSection || (stu as any).section || '',
+            class: studentClassName || studentSection || (stu as any).class || '',
+            className: studentClassName || studentSection || (stu as any).className || '',
             gender: (stu as any).gender || 'male'
           } 
         });
@@ -9820,10 +9888,20 @@ app.delete('/api/system_errors/:id', async (req, res) => {
       let queryBuilder = db.select().from(school_announcements).where(and(...conditions));
       const results = await queryBuilder.orderBy(desc(school_announcements.timestampMs)).limit(Number(limitParam) || 50);
 
-      let filteredResults = results;
+      const enhancedResults = results.map((r: any) => {
+        const rawGrades = Array.isArray(r.targetGrades) ? r.targetGrades : [];
+        const detectedSections = rawGrades.filter((g: any) => typeof g === 'string' && /[\s\-_–—]+[\u0621-\u064Aa-zA-Z0-9]$|\([\u0621-\u064Aa-zA-Z0-9]+\)|شعبة\s*[\u0621-\u064Aa-zA-Z0-9]+/.test(g));
+        return {
+          ...r,
+          targetSection: (r as any).targetSection || (detectedSections.length === 1 ? detectedSections[0] : null),
+          targetSections: (r as any).targetSections || (detectedSections.length > 0 ? detectedSections : [])
+        };
+      });
+
+      let filteredResults = enhancedResults;
       if (grade && typeof grade === 'string' && grade.trim() !== '') {
         const { matchesTargetGrades } = await import('./src/utils/gradeMatcher');
-        filteredResults = results.filter((b: any) => matchesTargetGrades(grade, b.targetGrades));
+        filteredResults = enhancedResults.filter((b: any) => matchesTargetGrades(grade, b.targetGrades));
       }
 
       res.json({ success: true, broadcasts: filteredResults, data: filteredResults });
