@@ -4,14 +4,14 @@ import { resolveApiUrl } from '../lib/serverConfig';
  * Utility to compress large images on client side before upload
  * Prevents HTTP 413 Payload Too Large and enhances speed across mobile networks
  */
-export async function compressImageIfNeeded(file: File, maxDimension = 1920, quality = 0.85): Promise<File> {
+export async function compressImageIfNeeded(file: File, maxDimension = 1400, quality = 0.82): Promise<File> {
   // Only compress images (exclude SVG, GIFs which might have animations, and videos)
   if (!file.type.startsWith('image/') || file.type.includes('svg') || file.type.includes('gif')) {
     return file;
   }
 
-  // If already under 1.5MB, no mandatory compression needed
-  if (file.size <= 1.5 * 1024 * 1024) {
+  // If already under 300KB, no compression needed
+  if (file.size <= 300 * 1024) {
     return file;
   }
 
@@ -53,7 +53,7 @@ export async function compressImageIfNeeded(file: File, maxDimension = 1920, qua
                   type: mimeType,
                   lastModified: Date.now()
                 });
-                console.log(`[Image Compression] Compressed from ${(file.size / (1024 * 1024)).toFixed(2)}MB to ${(compressedFile.size / (1024 * 1024)).toFixed(2)}MB`);
+                console.log(`[Image Compression] Compressed from ${(file.size / 1024).toFixed(1)}KB to ${(compressedFile.size / 1024).toFixed(1)}KB (Preventing 413 error)`);
                 resolve(compressedFile);
               } else {
                 resolve(file);
