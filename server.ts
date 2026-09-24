@@ -2675,83 +2675,101 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
   };
 
   // --- Centralized Production PostgreSQL Tables Bootstrapping & Single Source of Truth ---
+  let isSystemTablesInitialized = false;
+  let initSystemTablesPromise: Promise<void> | null = null;
+
   const initSystemTablesAndPoses = async () => {
-    try {
-      // 1. Ensure tables exist in PostgreSQL database (Idempotent DDL)
-      await withDbRetry(async () => {
-        await db.execute(sqlRaw`
-          CREATE TABLE IF NOT EXISTS system_poses (
-            id VARCHAR(128) PRIMARY KEY,
-            public_url TEXT NOT NULL,
-            category VARCHAR(50) DEFAULT 'pose',
-            aliases JSONB DEFAULT '[]'::jsonb,
-            updated_by VARCHAR(255),
-            created_at TIMESTAMP DEFAULT NOW(),
-            updated_at TIMESTAMP DEFAULT NOW()
-          );
+    if (isSystemTablesInitialized) return;
+    if (initSystemTablesPromise) return initSystemTablesPromise;
 
-          CREATE TABLE IF NOT EXISTS system_pose_history (
-            id VARCHAR(128) PRIMARY KEY,
-            asset_id VARCHAR(128) NOT NULL,
-            file_name TEXT,
-            download_url TEXT NOT NULL,
-            asset_type VARCHAR(50),
-            file_size INTEGER DEFAULT 0,
-            uploaded_by VARCHAR(255),
-            status VARCHAR(50) DEFAULT 'active',
-            uploaded_at TIMESTAMP DEFAULT NOW()
-          );
-
-          CREATE TABLE IF NOT EXISTS system_settings (
-            key VARCHAR(128) PRIMARY KEY,
-            value JSONB NOT NULL,
-            description TEXT,
-            updated_by VARCHAR(255),
-            updated_at TIMESTAMP DEFAULT NOW()
-          );
-        `);
-      });
-      console.log('[PostgreSQL Boot] Successfully verified system_poses, system_pose_history, and system_settings tables.');
-
-      // 2. Auto-seed/migrate existing data from local backup file if database table is currently empty
+    initSystemTablesPromise = (async () => {
       try {
-        const existingRows = await withDbRetry(() => db.select().from(system_poses).limit(1));
-        if (existingRows.length === 0) {
-          const DATA_DIR = path.join(process.cwd(), 'data');
-          const POSES_FILE = path.join(DATA_DIR, 'bairaq_poses.json');
-          if (fs.existsSync(POSES_FILE)) {
-            const raw = fs.readFileSync(POSES_FILE, 'utf-8');
-            const filePoses: Record<string, string> = JSON.parse(raw) || {};
-            for (const [key, url] of Object.entries(filePoses)) {
-              if (url && typeof url === 'string') {
-                const aliases = POSE_ALIASES_MAP[key] || [];
-                await withDbRetry(() => db.insert(system_poses).values({
-                  id: key,
-                  publicUrl: url,
-                  category: 'pose',
-                  aliases: aliases,
-                  updatedBy: 'system_migration',
-                  updatedAt: new Date()
-                }).onConflictDoNothing());
+        // 1. Ensure tables exist in PostgreSQL database (Idempotent DDL)
+        await withDbRetry(async () => {
+          await db.execute(sql`
+            CREATE TABLE IF NOT EXISTS system_poses (
+              id VARCHAR(128) PRIMARY KEY,
+              public_url TEXT NOT NULL,
+              category VARCHAR(50) DEFAULT 'pose',
+              aliases JSONB DEFAULT '[]'::jsonb,
+              updated_by VARCHAR(255),
+              created_at TIMESTAMP DEFAULT NOW(),
+              updated_at TIMESTAMP DEFAULT NOW()
+            )
+          `);
+          await db.execute(sql`
+            CREATE TABLE IF NOT EXISTS system_pose_history (
+              id VARCHAR(128) PRIMARY KEY,
+              asset_id VARCHAR(128) NOT NULL,
+              file_name TEXT,
+              download_url TEXT NOT NULL,
+              asset_type VARCHAR(50),
+              file_size INTEGER DEFAULT 0,
+              uploaded_by VARCHAR(255),
+              status VARCHAR(50) DEFAULT 'active',
+              uploaded_at TIMESTAMP DEFAULT NOW()
+            )
+          `);
+          await db.execute(sql`
+            CREATE TABLE IF NOT EXISTS system_settings (
+              key VARCHAR(128) PRIMARY KEY,
+              value JSONB NOT NULL,
+              description TEXT,
+              updated_by VARCHAR(255),
+              updated_at TIMESTAMP DEFAULT NOW()
+            )
+          `);
+        });
+        isSystemTablesInitialized = true;
+        console.log('[PostgreSQL Boot] Successfully verified system_poses, system_pose_history, and system_settings tables.');
+
+        // 2. Auto-seed/migrate existing data from local backup file if database table is currently empty
+        try {
+          const existingRows = await withDbRetry(() => db.select().from(system_poses).limit(1));
+          if (existingRows.length === 0) {
+            const DATA_DIR = path.join(process.cwd(), 'data');
+            const POSES_FILE = path.join(DATA_DIR, 'bairaq_poses.json');
+            if (fs.existsSync(POSES_FILE)) {
+              const raw = fs.readFileSync(POSES_FILE, 'utf-8');
+              const filePoses: Record<string, string> = JSON.parse(raw) || {};
+              for (const [key, url] of Object.entries(filePoses)) {
+                if (url && typeof url === 'string') {
+                  const aliases = POSE_ALIASES_MAP[key] || [];
+                  await withDbRetry(() => db.insert(system_poses).values({
+                    id: key,
+                    publicUrl: url,
+                    category: 'pose',
+                    aliases: aliases,
+                    updatedBy: 'system_migration',
+                    updatedAt: new Date()
+                  }).onConflictDoNothing());
+                }
               }
+              console.log(`[PostgreSQL Migration] Migrated ${Object.keys(filePoses).length} initial poses from local JSON to PostgreSQL.`);
             }
-            console.log(`[PostgreSQL Migration] Migrated ${Object.keys(filePoses).length} initial poses from local JSON to PostgreSQL.`);
           }
+        } catch (seedErr) {
+          console.warn('[PostgreSQL Migration Notice]', seedErr);
         }
-      } catch (seedErr) {
-        console.warn('[PostgreSQL Migration Notice]', seedErr);
+      } catch (e: any) {
+        console.error('[PostgreSQL Boot Error] Failed to initialize system tables:', e?.message || e);
+      } finally {
+        initSystemTablesPromise = null;
       }
-    } catch (e: any) {
-      console.error('[PostgreSQL Boot Error] Failed to initialize system tables:', e?.message || e);
-    }
+    })();
+
+    return initSystemTablesPromise;
   };
 
-  // Run startup migration
+  // Run startup migration immediately
   initSystemTablesAndPoses().catch(console.error);
 
   // Helper to fetch all poses from PostgreSQL and expand aliases
   const fetchAllSystemPoses = async (): Promise<Record<string, string>> => {
     try {
+      if (!isSystemTablesInitialized) {
+        await initSystemTablesAndPoses();
+      }
       const rows = await withDbRetry(() => db.select().from(system_poses));
       const posesMap: Record<string, string> = {};
 
@@ -2767,6 +2785,11 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
       return posesMap;
     } catch (err: any) {
       console.error('[DATABASE READ ERROR] Failed to fetch system_poses from PostgreSQL:', err);
+      // If table did not exist, trigger initialization
+      if (String(err?.message || '').includes('does not exist') || String(err?.cause?.message || '').includes('does not exist')) {
+        isSystemTablesInitialized = false;
+        initSystemTablesAndPoses().catch(console.error);
+      }
       // Fallback to local cache file if DB is temporarily unreachable
       try {
         const POSES_FILE = path.join(process.cwd(), 'data', 'bairaq_poses.json');
@@ -2992,6 +3015,9 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
   // GET /api/system_config/:id - Read system configuration from PostgreSQL
   app.get(["/api/system_config/:id", "/api/system_config"], async (req, res) => {
     try {
+      if (!isSystemTablesInitialized) {
+        await initSystemTablesAndPoses();
+      }
       const id = req.params.id || req.query.id as string || 'remote_control';
       const rows = await withDbRetry(() => 
         db.select().from(system_settings).where(eq(system_settings.key, id)).limit(1)
@@ -3002,13 +3028,20 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
       return res.json({ success: true, id, data: {}, config: {} });
     } catch (err: any) {
       console.error("[SYSTEM CONFIG READ ERROR]", err);
-      return res.status(500).json({ error: err.message || "Failed to read system config from PostgreSQL" });
+      if (String(err?.message || '').includes('does not exist') || String(err?.cause?.message || '').includes('does not exist')) {
+        isSystemTablesInitialized = false;
+        initSystemTablesAndPoses().catch(console.error);
+      }
+      return res.json({ success: true, id: req.params.id || 'remote_control', data: {}, config: {} });
     }
   });
 
   // POST /api/system_config - Save system configuration to PostgreSQL
   app.post(["/api/system_config/:id", "/api/system_config"], async (req, res) => {
     try {
+      if (!isSystemTablesInitialized) {
+        await initSystemTablesAndPoses();
+      }
       const id = req.params.id || req.body.id || req.body.key || 'remote_control';
       const configData = req.body.data || req.body.config || req.body;
       const userEmail = (req as any).user?.email || 'developer';

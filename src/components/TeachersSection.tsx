@@ -36,9 +36,11 @@ import {
   Layers,
   Camera,
   UploadCloud,
-  ImageIcon
+  ImageIcon,
+  Printer
 } from 'lucide-react';
 import { ConfirmDialog } from './ConfirmDialog';
+import { StaffPrintModal } from './StaffPrintModal';
 import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, where } from '@/src/lib/firebase';
 import { db } from '../lib/firebase';
 import { useSubjectDistributor } from '../hooks/useSubjectDistributor';
@@ -115,6 +117,7 @@ export const TeachersSection: React.FC<TeachersSectionProps> = ({ showToast, sch
   });
   const [activeSubTab, setActiveSubTab] = useState<'teachers' | 'staff' | 'schedule'>('teachers');
   const [confirmDelete, setConfirmDelete] = useState<Teacher | null>(null);
+  const [showPrintModal, setShowPrintModal] = useState(false);
 
   useEffect(() => {
     if (onSubViewChange) {
@@ -805,6 +808,15 @@ ${!className && isMultiClass ? `✨ *ميزة الدخول الموحد:*
         </div>
 
         <div className="flex items-center gap-3">
+          <button 
+            onClick={() => setShowPrintModal(true)}
+            className="bg-emerald-600/90 hover:bg-emerald-500 text-white px-5 py-3 rounded-xl font-black text-xs flex items-center gap-2 transition-all shadow-lg hover:shadow-emerald-500/20 border border-emerald-400/20"
+            title="طباعة وتصدير قوائم الكادر والموظفين"
+          >
+            <Printer size={16} />
+            <span>طباعة القوائم</span>
+          </button>
+
           {activeSubTab === 'teachers' && (
             <button 
                 onClick={() => handleOpenAdd('TEACHER')}
@@ -1762,6 +1774,19 @@ ${!className && isMultiClass ? `✨ *ميزة الدخول الموحد:*
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Staff & Teachers Printable List Modal */}
+      <StaffPrintModal
+        isOpen={showPrintModal}
+        onClose={() => setShowPrintModal(false)}
+        teachers={teachers}
+        currentFilteredTeachers={filteredTeachers}
+        currentFilteredStaff={filteredStaff}
+        activeSubTab={activeSubTab}
+        schoolName={schoolName}
+        schoolId={schoolId}
+        getTeacherSections={getTeacherSections}
+      />
     </div>
   );
 };
