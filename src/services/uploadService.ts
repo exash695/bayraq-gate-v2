@@ -1,5 +1,79 @@
+import { resolveApiUrl } from '../lib/serverConfig';
+
+/**
+ * Utility to compress large images on client side before upload
+ * Prevents HTTP 413 Payload Too Large and enhances speed across mobile networks
+ */
+export async function compressImageIfNeeded(file: File, maxDimension = 1920, quality = 0.85): Promise<File> {
+  // Only compress images (exclude SVG, GIFs which might have animations, and videos)
+  if (!file.type.startsWith('image/') || file.type.includes('svg') || file.type.includes('gif')) {
+    return file;
+  }
+
+  // If already under 1.5MB, no mandatory compression needed
+  if (file.size <= 1.5 * 1024 * 1024) {
+    return file;
+  }
+
+  return new Promise((resolve) => {
+    try {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (e) => {
+        const img = new Image();
+        img.src = e.target?.result as string;
+        img.onload = () => {
+          let width = img.width;
+          let height = img.height;
+
+          if (width > maxDimension || height > maxDimension) {
+            if (width > height) {
+              height = Math.round((height * maxDimension) / width);
+              width = maxDimension;
+            } else {
+              width = Math.round((width * maxDimension) / height);
+              height = maxDimension;
+            }
+          }
+
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            return resolve(file);
+          }
+
+          ctx.drawImage(img, 0, 0, width, height);
+          const mimeType = file.type === 'image/png' ? 'image/png' : 'image/jpeg';
+          canvas.toBlob(
+            (blob) => {
+              if (blob && blob.size < file.size) {
+                const compressedFile = new File([blob], file.name, {
+                  type: mimeType,
+                  lastModified: Date.now()
+                });
+                console.log(`[Image Compression] Compressed from ${(file.size / (1024 * 1024)).toFixed(2)}MB to ${(compressedFile.size / (1024 * 1024)).toFixed(2)}MB`);
+                resolve(compressedFile);
+              } else {
+                resolve(file);
+              }
+            },
+            mimeType,
+            quality
+          );
+        };
+        img.onerror = () => resolve(file);
+      };
+      reader.onerror = () => resolve(file);
+    } catch {
+      resolve(file);
+    }
+  });
+}
+
 export const uploadFileToR2 = async (
-  file: File, 
+  rawFile: File, 
   onProgressOrCategory?: ((progress: number) => void) | string,
   onProgressOrXhr?: ((progress: number) => void) | ((xhr: XMLHttpRequest) => void),
   onXhrCreated?: (xhr: XMLHttpRequest) => void
@@ -19,11 +93,14 @@ export const uploadFileToR2 = async (
         ? (onProgressOrXhr as (xhr: XMLHttpRequest) => void)
         : undefined;
 
+  // Auto-compress high-resolution images to avoid 413 Payload Too Large
+  const file = await compressImageIfNeeded(rawFile);
+
   try {
     // 1. First Priority: Check if Cloudflare R2 presigned URL is available
     let presignData: any = null;
     try {
-      const presignRes = await fetch('/api/upload-url', {
+      const presignRes = await fetch(resolveApiUrl('/api/upload-url'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -105,7 +182,11 @@ export const uploadFileToR2 = async (
             const errorResponse = JSON.parse(fallbackXhr.responseText);
             reject(new Error(errorResponse.error || `فشل الرفع: رمز الخطأ ${fallbackXhr.status}`));
           } catch (e) {
-            reject(new Error(`فشل رفع الملف إلى السحابة: رمز ${fallbackXhr.status}`));
+            if (fallbackXhr.status === 413) {
+              reject(new Error('حجم الملف كبير جداً (رمز 413). تم تقليله، يرجى إعادة المحاولة.'));
+            } else {
+              reject(new Error(`فشل رفع الملف إلى السحابة: رمز ${fallbackXhr.status}`));
+            }
           }
         }
       });
@@ -115,7 +196,7 @@ export const uploadFileToR2 = async (
 
       const formData = new FormData();
       formData.append('file', file);
-      fallbackXhr.open('POST', '/api/upload', true);
+      fallbackXhr.open('POST', resolveApiUrl('/api/upload'), true);
       fallbackXhr.setRequestHeader('X-Frontend-Origin', window.location.origin);
       fallbackXhr.send(formData);
     });

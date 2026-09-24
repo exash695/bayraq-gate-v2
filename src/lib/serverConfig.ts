@@ -51,6 +51,18 @@ export function setApiBaseUrl(url: string | null): void {
 }
 
 /**
+ * Resolves any API path relative to the active backend base URL
+ */
+export function resolveApiUrl(path: string): string {
+  if (path.startsWith('http://') || path.startsWith('https://')) {
+    return path;
+  }
+  const base = getApiBaseUrl();
+  const cleanPath = path.startsWith('/') ? path : '/' + path;
+  return base ? `${base}${cleanPath}` : cleanPath;
+}
+
+/**
  * Check if running inside native Capacitor
  */
 export function isNativeMobilePlatform(): boolean {

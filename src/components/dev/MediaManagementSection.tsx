@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { isVideoUrl, POSE_ALIASES_MAP, updateGlobalPoses, subscribeToPoseOverrides } from "../BerqCharacterManager";
 import { uploadFileToR2 } from "../../services/uploadService";
+import { resolveApiUrl } from "../../lib/serverConfig";
 import { BairaqAssetHistoryModal } from "../BairaqAssetHistoryModal";
 import { GlobalAnnouncementsBanner } from "../GlobalAnnouncementsBanner";
 import { GlobalAnnouncementsPopup } from "../GlobalAnnouncementsPopup";
@@ -313,7 +314,7 @@ export const MediaManagementSection: React.FC<MediaManagementSectionProps> = ({ 
 
       // 1. Authoritative Backend PostgreSQL API persistence
       try {
-        const response = await fetch('/api/bairaq/poses', {
+        const response = await fetch(resolveApiUrl('/api/bairaq/poses'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -376,7 +377,7 @@ export const MediaManagementSection: React.FC<MediaManagementSectionProps> = ({ 
       const keysToReset = Array.from(new Set([headerId, ...aliases]));
 
       // 1. Server-side API reset in PostgreSQL backend
-      await fetch('/api/bairaq/reset', {
+      await fetch(resolveApiUrl('/api/bairaq/reset'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ assetId: headerId })

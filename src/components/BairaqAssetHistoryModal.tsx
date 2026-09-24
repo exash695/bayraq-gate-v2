@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { History, RotateCcw, AlertCircle, CheckCircle } from 'lucide-react';
 import { POSE_ALIASES_MAP, updateGlobalPoses } from '../components/BerqCharacterManager';
+import { resolveApiUrl } from '../lib/serverConfig';
 
 interface HistoryRecord {
   id: string;
@@ -32,7 +33,7 @@ export const BairaqAssetHistoryModal: React.FC<BairaqAssetHistoryModalProps> = (
       setLoading(true);
       try {
         // Authoritative Server-side PostgreSQL/File-backed API
-        const res = await fetch(`/api/bairaq/history/${encodeURIComponent(assetId)}`);
+        const res = await fetch(resolveApiUrl(`/api/bairaq/history/${encodeURIComponent(assetId)}`));
         if (res.ok) {
           const json = await res.json();
           if (json.records && Array.isArray(json.records)) {
@@ -91,7 +92,7 @@ export const BairaqAssetHistoryModal: React.FC<BairaqAssetHistoryModalProps> = (
       // 2. Perform Atomic Server-side Restore
       console.log(`[ASSET OVERRIDE] Restoring asset ${assetId} to version ${record.downloadUrl}`);
       try {
-        const restoreRes = await fetch('/api/bairaq/restore', {
+        const restoreRes = await fetch(resolveApiUrl('/api/bairaq/restore'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

@@ -32,7 +32,8 @@ import {
   salaries, users, academic_lists, school_configs, school_announcements,
   attendance_logs, behavior_logs, audit_logs, council_polls, transport_drivers,
   transport_routes, transport_students_status, transport_fees, lounge_messages, admin_outbox,
-  firestore_docs, security_bans, user_device_tokens
+  firestore_docs, security_bans, user_device_tokens,
+  system_poses, system_pose_history, system_settings
 } from "./src/db/schema";
 import { sql } from "drizzle-orm";
 
@@ -2673,102 +2674,123 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
     launch: ['welcome_card_launch'],
   };
 
-  // Persistent File Store paths for Bairaq Assets & History (Atomic & Single Source of Truth)
-  const DATA_DIR = path.join(process.cwd(), 'data');
-  if (!fs.existsSync(DATA_DIR)) {
-    try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {}
-  }
-  const POSES_FILE = path.join(DATA_DIR, 'bairaq_poses.json');
-  const HISTORY_FILE = path.join(DATA_DIR, 'bairaq_history.json');
-
-  const readLocalPoses = (): Record<string, string> => {
+  // --- Centralized Production PostgreSQL Tables Bootstrapping & Single Source of Truth ---
+  const initSystemTablesAndPoses = async () => {
     try {
-      if (fs.existsSync(POSES_FILE)) {
-        const raw = fs.readFileSync(POSES_FILE, 'utf-8');
-        const poses: Record<string, string> = JSON.parse(raw) || {};
-        let isDirty = false;
+      // 1. Ensure tables exist in PostgreSQL database (Idempotent DDL)
+      await withDbRetry(async () => {
+        await db.execute(sqlRaw`
+          CREATE TABLE IF NOT EXISTS system_poses (
+            id VARCHAR(128) PRIMARY KEY,
+            public_url TEXT NOT NULL,
+            category VARCHAR(50) DEFAULT 'pose',
+            aliases JSONB DEFAULT '[]'::jsonb,
+            updated_by VARCHAR(255),
+            created_at TIMESTAMP DEFAULT NOW(),
+            updated_at TIMESTAMP DEFAULT NOW()
+          );
 
-        // Auto-sanitize orphaned local uploads or missing files
-        for (const [key, val] of Object.entries(poses)) {
-          if (typeof val === 'string' && val.startsWith('/uploads/')) {
-            const fileName = val.replace('/uploads/', '').split('?')[0].split('#')[0];
-            const diskPath = path.join(process.cwd(), 'public', 'uploads', fileName);
-            if (!fs.existsSync(diskPath)) {
-              console.warn(`[ORPHAN ASSET DETECTED] File ${val} missing on disk for pose ${key}. Pruning.`);
-              delete poses[key];
-              isDirty = true;
+          CREATE TABLE IF NOT EXISTS system_pose_history (
+            id VARCHAR(128) PRIMARY KEY,
+            asset_id VARCHAR(128) NOT NULL,
+            file_name TEXT,
+            download_url TEXT NOT NULL,
+            asset_type VARCHAR(50),
+            file_size INTEGER DEFAULT 0,
+            uploaded_by VARCHAR(255),
+            status VARCHAR(50) DEFAULT 'active',
+            uploaded_at TIMESTAMP DEFAULT NOW()
+          );
+
+          CREATE TABLE IF NOT EXISTS system_settings (
+            key VARCHAR(128) PRIMARY KEY,
+            value JSONB NOT NULL,
+            description TEXT,
+            updated_by VARCHAR(255),
+            updated_at TIMESTAMP DEFAULT NOW()
+          );
+        `);
+      });
+      console.log('[PostgreSQL Boot] Successfully verified system_poses, system_pose_history, and system_settings tables.');
+
+      // 2. Auto-seed/migrate existing data from local backup file if database table is currently empty
+      try {
+        const existingRows = await withDbRetry(() => db.select().from(system_poses).limit(1));
+        if (existingRows.length === 0) {
+          const DATA_DIR = path.join(process.cwd(), 'data');
+          const POSES_FILE = path.join(DATA_DIR, 'bairaq_poses.json');
+          if (fs.existsSync(POSES_FILE)) {
+            const raw = fs.readFileSync(POSES_FILE, 'utf-8');
+            const filePoses: Record<string, string> = JSON.parse(raw) || {};
+            for (const [key, url] of Object.entries(filePoses)) {
+              if (url && typeof url === 'string') {
+                const aliases = POSE_ALIASES_MAP[key] || [];
+                await withDbRetry(() => db.insert(system_poses).values({
+                  id: key,
+                  publicUrl: url,
+                  category: 'pose',
+                  aliases: aliases,
+                  updatedBy: 'system_migration',
+                  updatedAt: new Date()
+                }).onConflictDoNothing());
+              }
             }
+            console.log(`[PostgreSQL Migration] Migrated ${Object.keys(filePoses).length} initial poses from local JSON to PostgreSQL.`);
           }
         }
+      } catch (seedErr) {
+        console.warn('[PostgreSQL Migration Notice]', seedErr);
+      }
+    } catch (e: any) {
+      console.error('[PostgreSQL Boot Error] Failed to initialize system tables:', e?.message || e);
+    }
+  };
 
-        if (isDirty) {
-          writeLocalPoses(poses);
+  // Run startup migration
+  initSystemTablesAndPoses().catch(console.error);
+
+  // Helper to fetch all poses from PostgreSQL and expand aliases
+  const fetchAllSystemPoses = async (): Promise<Record<string, string>> => {
+    try {
+      const rows = await withDbRetry(() => db.select().from(system_poses));
+      const posesMap: Record<string, string> = {};
+
+      for (const row of rows) {
+        if (row.id && row.publicUrl) {
+          posesMap[row.id] = row.publicUrl;
+          const aliases = POSE_ALIASES_MAP[row.id] || (Array.isArray(row.aliases) ? row.aliases : []);
+          for (const alias of aliases) {
+            posesMap[alias] = row.publicUrl;
+          }
         }
-
-        return poses;
       }
-    } catch (e) {
-      console.error("[DATABASE READ ERROR] Could not read local poses file:", e);
-    }
-    return {};
-  };
-
-  const writeLocalPoses = (poses: Record<string, string>): void => {
-    try {
-      const tempPath = `${POSES_FILE}.tmp_${Date.now()}`;
-      fs.writeFileSync(tempPath, JSON.stringify(poses, null, 2), 'utf-8');
-      fs.renameSync(tempPath, POSES_FILE);
-    } catch (e) {
-      console.error("[DATABASE WRITE ERROR] Could not write local poses file:", e);
+      return posesMap;
+    } catch (err: any) {
+      console.error('[DATABASE READ ERROR] Failed to fetch system_poses from PostgreSQL:', err);
+      // Fallback to local cache file if DB is temporarily unreachable
+      try {
+        const POSES_FILE = path.join(process.cwd(), 'data', 'bairaq_poses.json');
+        if (fs.existsSync(POSES_FILE)) {
+          return JSON.parse(fs.readFileSync(POSES_FILE, 'utf-8')) || {};
+        }
+      } catch (e) {}
+      return {};
     }
   };
 
-  const readLocalHistory = (): any[] => {
-    try {
-      if (fs.existsSync(HISTORY_FILE)) {
-        const raw = fs.readFileSync(HISTORY_FILE, 'utf-8');
-        return JSON.parse(raw) || [];
-      }
-    } catch (e) {
-      console.error("[DATABASE READ ERROR] Could not read local history file:", e);
-    }
-    return [];
-  };
-
-  const writeLocalHistory = (records: any[]): void => {
-    try {
-      const tempPath = `${HISTORY_FILE}.tmp_${Date.now()}`;
-      fs.writeFileSync(tempPath, JSON.stringify(records, null, 2), 'utf-8');
-      fs.renameSync(tempPath, HISTORY_FILE);
-    } catch (e) {
-      console.error("[DATABASE WRITE ERROR] Could not write local history file:", e);
-    }
-  };
-
-  // GET /api/bairaq/poses - Fetch all current overrides from persistent storage
+  // GET /api/bairaq/poses - Fetch all current overrides directly from Production PostgreSQL
   app.get("/api/bairaq/poses", async (req, res) => {
     try {
-      const poses = readLocalPoses();
-      
-      // Expand all aliases
-      for (const [key, val] of Object.entries(poses)) {
-        if (typeof val === 'string' && val) {
-          const aliases = POSE_ALIASES_MAP[key] || [];
-          for (const alias of aliases) {
-            poses[alias] = val;
-          }
-        }
-      }
-
-      console.log(`[DATABASE READ] [GET /api/bairaq/poses] Retrieved ${Object.keys(poses).length} active poses`);
+      const poses = await fetchAllSystemPoses();
+      console.log(`[DATABASE READ] [GET /api/bairaq/poses] Retrieved ${Object.keys(poses).length} active poses from PostgreSQL`);
       return res.json({ success: true, poses });
     } catch (err: any) {
       console.error("[DATABASE READ ERROR] Error in GET /api/bairaq/poses:", err);
-      return res.status(500).json({ error: err.message || "Failed to fetch poses" });
+      return res.status(500).json({ error: err.message || "Failed to fetch poses from PostgreSQL" });
     }
   });
 
-  // POST /api/bairaq/poses - Atomic and persistent update with versioning history
+  // POST /api/bairaq/poses - Atomic and persistent update into PostgreSQL with version history
   app.post("/api/bairaq/poses", async (req, res) => {
     try {
       const { headerId, publicUrl, fileName, fileSize, fileType } = req.body;
@@ -2776,86 +2798,109 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         return res.status(400).json({ error: "Missing headerId or publicUrl" });
       }
 
-      console.log(`[UPLOAD SUCCESS] [ACTIVE ASSET ID] ${headerId} [STORAGE PATH] ${publicUrl}`);
+      console.log(`[DATABASE WRITE] [POST /api/bairaq/poses] Writing asset ${headerId} -> ${publicUrl} to PostgreSQL`);
 
       const aliases = POSE_ALIASES_MAP[headerId] || [];
       const keysToSave = Array.from(new Set([headerId, ...aliases]));
-      
-      // 1. Update Persistent Local Poses File (Atomic)
-      const currentPoses = readLocalPoses();
-      const oldAssetUrl = currentPoses[headerId] || null;
-      if (oldAssetUrl) {
-        console.log(`[OLD ASSET DETECTED] Previous URL for ${headerId}: ${oldAssetUrl}`);
+      const userEmail = (req as any).user?.email || 'developer';
+
+      // 1. Atomic Upsert in PostgreSQL system_poses
+      for (const k of keysToSave) {
+        await withDbRetry(() => db.insert(system_poses).values({
+          id: k,
+          publicUrl: publicUrl,
+          category: fileType?.startsWith('video/') ? 'video' : 'image',
+          aliases: aliases,
+          updatedBy: userEmail,
+          updatedAt: new Date()
+        }).onConflictDoUpdate({
+          target: system_poses.id,
+          set: {
+            publicUrl: publicUrl,
+            category: fileType?.startsWith('video/') ? 'video' : 'image',
+            aliases: aliases,
+            updatedBy: userEmail,
+            updatedAt: new Date()
+          }
+        }));
       }
 
-      keysToSave.forEach(k => {
-        currentPoses[k] = publicUrl;
-      });
-      writeLocalPoses(currentPoses);
-      console.log(`[DATABASE WRITE] [ASSET OVERRIDE] Stored new active version for ${headerId} and aliases [${keysToSave.join(', ')}]`);
-
-      // 2. Append to Persistent History File (Atomic)
+      // 2. Insert record in PostgreSQL system_pose_history
+      const historyId = `${headerId}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       const historyRecord = {
-        id: `${headerId}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        id: historyId,
         assetId: headerId,
-        fileName: fileName || "file",
+        fileName: fileName || "asset_file",
         downloadUrl: publicUrl,
         assetType: fileType || "image/jpeg",
-        fileSize: fileSize || 0,
-        uploadedAt: new Date().toISOString(),
-        status: "active"
+        fileSize: typeof fileSize === 'number' ? fileSize : 0,
+        uploadedBy: userEmail,
+        status: "active",
+        uploadedAt: new Date()
       };
 
-      const historyRecords = readLocalHistory();
-      // Keep up to 200 records
-      historyRecords.unshift(historyRecord);
-      writeLocalHistory(historyRecords.slice(0, 200));
-      console.log(`[ACTIVE VERSION] Logged new history version ID: ${historyRecord.id}`);
+      try {
+        await withDbRetry(() => db.insert(system_pose_history).values(historyRecord));
+      } catch (histErr) {
+        console.warn('[PostgreSQL History Notice] Could not log history record:', histErr);
+      }
 
-      // Broadcast update to all connected clients via websocket
+      // 3. Fetch full fresh map from PostgreSQL
+      const currentPoses = await fetchAllSystemPoses();
+
+      // 4. Also keep local data folder synchronized as offline mirror
+      try {
+        const DATA_DIR = path.join(process.cwd(), 'data');
+        if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+        fs.writeFileSync(path.join(DATA_DIR, 'bairaq_poses.json'), JSON.stringify(currentPoses, null, 2), 'utf-8');
+      } catch (e) {}
+
+      // 5. Broadcast update to all connected web and Android mobile clients via WebSocket
       if (realtimeServerInstance) {
         realtimeServerInstance.broadcastManual('bairaq_poses', headerId, 'UPDATE', currentPoses);
       }
 
-      // 3. (Firebase sync removed)
-      
       return res.json({ success: true, poses: currentPoses, historyRecord });
     } catch (err: any) {
       console.error("[DATABASE WRITE ERROR] Error in POST /api/bairaq/poses:", err);
-      return res.status(500).json({ error: err.message || "Failed to save pose" });
+      return res.status(500).json({ error: err.message || "Failed to save pose to PostgreSQL" });
     }
   });
 
-  // GET /api/bairaq/history/:assetId - Retrieve full version history
+  // GET /api/bairaq/history/:assetId - Retrieve version history from PostgreSQL
   app.get("/api/bairaq/history/:assetId", async (req, res) => {
     try {
       const { assetId } = req.params;
       const aliases = POSE_ALIASES_MAP[assetId] || [];
-      const matchKeys = new Set([assetId, ...aliases]);
+      const matchKeys = Array.from(new Set([assetId, ...aliases]));
 
-      const allHistory = readLocalHistory();
+      const rows = await withDbRetry(() => 
+        db.select()
+          .from(system_pose_history)
+          .where(inArray(system_pose_history.assetId, matchKeys))
+          .orderBy(desc(system_pose_history.uploadedAt))
+          .limit(100)
+      );
+
       const records: any[] = [];
       const seenUrls = new Set<string>();
 
-      for (const r of allHistory) {
-        if (matchKeys.has(r.assetId) && r.downloadUrl && !seenUrls.has(r.downloadUrl)) {
+      for (const r of rows) {
+        if (r.downloadUrl && !seenUrls.has(r.downloadUrl)) {
           seenUrls.add(r.downloadUrl);
           records.push(r);
         }
       }
 
-      // Sort descending by uploadedAt
-      records.sort((a, b) => new Date(b.uploadedAt || 0).getTime() - new Date(a.uploadedAt || 0).getTime());
-
-      console.log(`[DATABASE READ] [GET /api/bairaq/history/${assetId}] Found ${records.length} history records`);
+      console.log(`[DATABASE READ] [GET /api/bairaq/history/${assetId}] Found ${records.length} history records from PostgreSQL`);
       return res.json({ success: true, records });
     } catch (err: any) {
       console.error("[DATABASE READ ERROR] Error in GET /api/bairaq/history/:assetId:", err);
-      return res.status(500).json({ error: err.message || "Failed to fetch history" });
+      return res.status(500).json({ error: err.message || "Failed to fetch history from PostgreSQL" });
     }
   });
 
-  // POST /api/bairaq/restore - Restore a version
+  // POST /api/bairaq/restore - Restore a version in PostgreSQL
   app.post("/api/bairaq/restore", async (req, res) => {
     try {
       const { assetId, downloadUrl } = req.body;
@@ -2863,43 +2908,58 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         return res.status(400).json({ error: "Missing assetId or downloadUrl" });
       }
 
-      console.log(`[ASSET OVERRIDE] Restoring asset ${assetId} to URL: ${downloadUrl}`);
-
+      console.log(`[DATABASE RESTORE] Restoring asset ${assetId} -> ${downloadUrl} in PostgreSQL`);
+      const userEmail = (req as any).user?.email || 'developer';
       const aliases = POSE_ALIASES_MAP[assetId] || [];
       const keysToSave = Array.from(new Set([assetId, ...aliases]));
-      
-      const currentPoses = readLocalPoses();
-      keysToSave.forEach(k => { currentPoses[k] = downloadUrl; });
-      writeLocalPoses(currentPoses);
 
-      // Broadcast update to all connected clients via websocket
+      for (const k of keysToSave) {
+        await withDbRetry(() => db.insert(system_poses).values({
+          id: k,
+          publicUrl: downloadUrl,
+          aliases: aliases,
+          updatedBy: userEmail,
+          updatedAt: new Date()
+        }).onConflictDoUpdate({
+          target: system_poses.id,
+          set: {
+            publicUrl: downloadUrl,
+            updatedBy: userEmail,
+            updatedAt: new Date()
+          }
+        }));
+      }
+
+      // Record restore event in history
+      const restoreRecordId = `${assetId}_restored_${Date.now()}`;
+      try {
+        await withDbRetry(() => db.insert(system_pose_history).values({
+          id: restoreRecordId,
+          assetId: assetId,
+          fileName: "Restored Version",
+          downloadUrl: downloadUrl,
+          assetType: "image/jpeg",
+          fileSize: 0,
+          uploadedBy: userEmail,
+          status: "restored",
+          uploadedAt: new Date()
+        }));
+      } catch (e) {}
+
+      const currentPoses = await fetchAllSystemPoses();
+
       if (realtimeServerInstance) {
         realtimeServerInstance.broadcastManual('bairaq_poses', assetId, 'UPDATE', currentPoses);
       }
 
-      // Append restore action to history
-      const restoreRecord = {
-        id: `${assetId}_restored_${Date.now()}`,
-        assetId: assetId,
-        fileName: "Restored Version",
-        downloadUrl: downloadUrl,
-        assetType: "image/jpeg",
-        fileSize: 0,
-        uploadedAt: new Date().toISOString(),
-        status: "restored"
-      };
-      const allHistory = readLocalHistory();
-      allHistory.unshift(restoreRecord);
-      writeLocalHistory(allHistory.slice(0, 200));
-
       return res.json({ success: true, activeUrl: downloadUrl, poses: currentPoses });
     } catch (err: any) {
-      console.error("[ASSET OVERRIDE ERROR] Error in POST /api/bairaq/restore:", err);
-      return res.status(500).json({ error: err.message || "Failed to restore pose" });
+      console.error("[DATABASE RESTORE ERROR] Error in POST /api/bairaq/restore:", err);
+      return res.status(500).json({ error: err.message || "Failed to restore pose in PostgreSQL" });
     }
   });
 
-  // POST /api/bairaq/reset - Reset a pose to default
+  // POST /api/bairaq/reset - Reset a pose in PostgreSQL
   app.post("/api/bairaq/reset", async (req, res) => {
     try {
       const { assetId } = req.body;
@@ -2907,26 +2967,76 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         return res.status(400).json({ error: "Missing assetId" });
       }
 
-      console.log(`[ASSET OVERRIDE] Resetting asset ${assetId} to default`);
-
+      console.log(`[DATABASE RESET] Resetting asset ${assetId} in PostgreSQL`);
       const aliases = POSE_ALIASES_MAP[assetId] || [];
       const keysToReset = Array.from(new Set([assetId, ...aliases]));
-      
-      const currentPoses = readLocalPoses();
-      keysToReset.forEach(k => {
-        delete currentPoses[k];
-      });
-      writeLocalPoses(currentPoses);
 
-      // Broadcast update to all connected clients via websocket
+      await withDbRetry(() => 
+        db.delete(system_poses)
+          .where(inArray(system_poses.id, keysToReset))
+      );
+
+      const currentPoses = await fetchAllSystemPoses();
+
       if (realtimeServerInstance) {
         realtimeServerInstance.broadcastManual('bairaq_poses', assetId, 'UPDATE', currentPoses);
       }
 
       return res.json({ success: true, poses: currentPoses });
     } catch (err: any) {
-      console.error("[ASSET OVERRIDE ERROR] Error in POST /api/bairaq/reset:", err);
-      return res.status(500).json({ error: err.message || "Failed to reset pose" });
+      console.error("[DATABASE RESET ERROR] Error in POST /api/bairaq/reset:", err);
+      return res.status(500).json({ error: err.message || "Failed to reset pose in PostgreSQL" });
+    }
+  });
+
+  // GET /api/system_config/:id - Read system configuration from PostgreSQL
+  app.get(["/api/system_config/:id", "/api/system_config"], async (req, res) => {
+    try {
+      const id = req.params.id || req.query.id as string || 'remote_control';
+      const rows = await withDbRetry(() => 
+        db.select().from(system_settings).where(eq(system_settings.key, id)).limit(1)
+      );
+      if (rows.length > 0) {
+        return res.json({ success: true, id, data: rows[0].value, config: rows[0].value });
+      }
+      return res.json({ success: true, id, data: {}, config: {} });
+    } catch (err: any) {
+      console.error("[SYSTEM CONFIG READ ERROR]", err);
+      return res.status(500).json({ error: err.message || "Failed to read system config from PostgreSQL" });
+    }
+  });
+
+  // POST /api/system_config - Save system configuration to PostgreSQL
+  app.post(["/api/system_config/:id", "/api/system_config"], async (req, res) => {
+    try {
+      const id = req.params.id || req.body.id || req.body.key || 'remote_control';
+      const configData = req.body.data || req.body.config || req.body;
+      const userEmail = (req as any).user?.email || 'developer';
+
+      await withDbRetry(() => 
+        db.insert(system_settings).values({
+          key: id,
+          value: configData,
+          updatedBy: userEmail,
+          updatedAt: new Date()
+        }).onConflictDoUpdate({
+          target: system_settings.key,
+          set: {
+            value: configData,
+            updatedBy: userEmail,
+            updatedAt: new Date()
+          }
+        })
+      );
+
+      if (realtimeServerInstance) {
+        realtimeServerInstance.broadcastManual('system_settings', id, 'UPDATE', configData);
+      }
+
+      return res.json({ success: true, id, data: configData, config: configData });
+    } catch (err: any) {
+      console.error("[SYSTEM CONFIG WRITE ERROR]", err);
+      return res.status(500).json({ error: err.message || "Failed to save system config to PostgreSQL" });
     }
   });
 

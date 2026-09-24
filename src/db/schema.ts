@@ -633,3 +633,38 @@ export const security_bans = pgTable("security_bans", {
   status: varchar("status", { length: 50 }).default('active_ban'),
   created_at: timestamp("created_at").defaultNow(),
 });
+
+// --- لوحة المطور والنظام المركزي (Single Source of Truth) ---
+// جدول وضعيات بيرق والهيدرات والشعارات في قاعدة البيانات الإنتاجية
+export const system_poses = pgTable("system_poses", {
+  id: varchar("id", { length: 128 }).primaryKey(),
+  publicUrl: text("public_url").notNull(),
+  category: varchar("category", { length: 50 }).default("pose"),
+  aliases: jsonb("aliases").default([]),
+  updatedBy: varchar("updated_by", { length: 255 }),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// جدول سجل إصدارات الوضعيات والهيدرات للاسترجاع الفوري
+export const system_pose_history = pgTable("system_pose_history", {
+  id: varchar("id", { length: 128 }).primaryKey(),
+  assetId: varchar("asset_id", { length: 128 }).notNull(),
+  fileName: text("file_name"),
+  downloadUrl: text("download_url").notNull(),
+  assetType: varchar("asset_type", { length: 50 }),
+  fileSize: integer("file_size").default(0),
+  uploadedBy: varchar("uploaded_by", { length: 255 }),
+  status: varchar("status", { length: 50 }).default("active"),
+  uploadedAt: timestamp("uploaded_at").defaultNow(),
+});
+
+// جدول الإعدادات العامة للوحة المطور والنظام
+export const system_settings = pgTable("system_settings", {
+  key: varchar("key", { length: 128 }).primaryKey(),
+  value: jsonb("value").notNull(),
+  description: text("description"),
+  updatedBy: varchar("updated_by", { length: 255 }),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+

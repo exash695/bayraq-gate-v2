@@ -5,6 +5,7 @@ import { useCachedMedia } from '../hooks/useCachedMedia';
 import { getInMemoryCachedUrl } from '../utils/imageCacher';
 import { db } from '../lib/firebase';
 import { doc, getDoc, onSnapshot } from '@/src/lib/firebase';
+import { resolveApiUrl } from '../lib/serverConfig';
 
 // Berq Debug Store for UI Inspection
 export type BerqDebugLog = {
@@ -54,9 +55,9 @@ const loadCachedLocalPoses = (): Record<string, string> => {
 let globalPoseOverrides: Record<string, string> = loadCachedLocalPoses();
 let poseSubscribers: ((poses: Record<string, string>) => void)[] = [];
 
-export const updateGlobalPoses = (newPoses: Record<string, string>) => {
+export const updateGlobalPoses = (newPoses: Record<string, string>, isAuthoritativeFullSync = false) => {
   if (!newPoses || typeof newPoses !== 'object') return;
-  const updated = { ...globalPoseOverrides, ...newPoses };
+  const updated = isAuthoritativeFullSync ? { ...newPoses } : { ...globalPoseOverrides, ...newPoses };
   // Expand aliases
   for (const [key, value] of Object.entries(updated)) {
     if (typeof value === 'string' && value) {
@@ -72,7 +73,7 @@ export const updateGlobalPoses = (newPoses: Record<string, string>) => {
       localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(globalPoseOverrides));
     } catch (e) {}
   }
-  console.log(`[STATE UPDATE] globalPoseOverrides updated (${Object.keys(globalPoseOverrides).length} keys)`);
+  console.log(`[STATE UPDATE] globalPoseOverrides updated (${Object.keys(globalPoseOverrides).length} keys, authoritative: ${isAuthoritativeFullSync})`);
   poseSubscribers.forEach(cb => cb(globalPoseOverrides));
 };
 
@@ -161,14 +162,14 @@ export const useAppLogo = (): string => {
 export function initPoseOverrides() {
   console.log(`[RELOAD] Initializing Berq Character Manager and Pose Overrides...`);
 
-  // Fast initial fetch from backend admin API
+  // Fast initial fetch from backend admin API (PostgreSQL Single Source of Truth)
   try {
-    fetch('/api/bairaq/poses')
+    fetch(resolveApiUrl('/api/bairaq/poses'))
       .then(res => res.json())
       .then(data => {
         if (data.poses && typeof data.poses === 'object') {
-          console.log(`[DATABASE READ] [AUTHORITATIVE SERVER SYNC] Loaded ${Object.keys(data.poses).length} poses from server`);
-          updateGlobalPoses(data.poses);
+          console.log(`[DATABASE READ] [AUTHORITATIVE SERVER SYNC] Loaded ${Object.keys(data.poses).length} poses from PostgreSQL`);
+          updateGlobalPoses(data.poses, true);
         }
       })
       .catch((err) => {
