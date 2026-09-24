@@ -318,6 +318,7 @@ export const MediaManagementSection: React.FC<MediaManagementSectionProps> = ({ 
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            headerId,
             assetId: headerId,
             publicUrl,
             aliases,
@@ -328,12 +329,14 @@ export const MediaManagementSection: React.FC<MediaManagementSectionProps> = ({ 
         });
 
         if (!response.ok) {
-          throw new Error(`خطأ في استجابة الخادم: ${response.statusText}`);
+          const errJson = await response.json().catch(() => ({}));
+          throw new Error(errJson.error || `خطأ في استجابة الخادم: ${response.statusText}`);
         }
         const resData = await response.json();
         console.log(`[DATABASE WRITE] [POSTGRESQL] Server confirmed pose update:`, resData);
       } catch (backendErr: any) {
-        console.warn("Backend API pose save warning:", backendErr);
+        console.error("Backend API pose save error:", backendErr);
+        throw backendErr;
       }
 
       // 2. Update Global Singleton State immediately

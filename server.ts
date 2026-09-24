@@ -2816,9 +2816,14 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
   // POST /api/bairaq/poses - Atomic and persistent update into PostgreSQL with version history
   app.post("/api/bairaq/poses", async (req, res) => {
     try {
-      const { headerId, publicUrl, fileName, fileSize, fileType } = req.body;
+      const headerId = req.body.headerId || req.body.assetId || req.body.id;
+      const publicUrl = req.body.publicUrl || req.body.url;
+      const fileName = req.body.fileName || req.body.name;
+      const fileSize = req.body.fileSize || req.body.size;
+      const fileType = req.body.fileType || req.body.type || req.body.assetType;
+
       if (!headerId || !publicUrl) {
-        return res.status(400).json({ error: "Missing headerId or publicUrl" });
+        return res.status(400).json({ error: "Missing headerId/assetId or publicUrl" });
       }
 
       console.log(`[DATABASE WRITE] [POST /api/bairaq/poses] Writing asset ${headerId} -> ${publicUrl} to PostgreSQL`);
