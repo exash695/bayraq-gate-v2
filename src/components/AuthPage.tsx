@@ -10,7 +10,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useAppLogo } from './BerqCharacterManager';
 import { PrivacyPolicy } from './PrivacyPolicy';
 import { RecoveryModal } from './RecoveryModal';
-import { GoogleAccountPickerModal } from './GoogleAccountPickerModal';
 
 const iraqRegions: { [key: string]: string[] } = {
   "بغداد": ["مدرسة المتميزين", "إعدادية المركزية", "ثانوية كلية بغداد", "مدرسة العقيدة", "أخرى (كتابة يدوية)"],
@@ -42,7 +41,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onOpenPrivacy }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [showInternalPrivacy, setShowInternalPrivacy] = useState(false);
   const [showRecoveryModal, setShowRecoveryModal] = useState(false);
-  const [showGooglePickerModal, setShowGooglePickerModal] = useState(false);
   const [formData, setFormData] = useState({ email: '', password: '', fullName: '', governorate: '', school: '', phone: '' });
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -401,14 +399,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onOpenPrivacy }) => {
         </div>
 
       </motion.div>
-
-      {/* Google Account Picker Modal */}
-      <GoogleAccountPickerModal
-        isOpen={showGooglePickerModal}
-        onClose={() => setShowGooglePickerModal(false)}
-        initialEmail={formData.email}
-        onSelectAccount={handleSelectGoogleAccount}
-      />
 
       {/* Recovery Modal (WhatsApp & Email) */}
       <RecoveryModal

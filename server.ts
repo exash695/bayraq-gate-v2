@@ -8417,6 +8417,66 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
     }
   });
 
+  // POST /api/auth/delete-account
+  app.post('/api/auth/delete-account', async (req, res) => {
+    try {
+      const userId = req.body?.userId || (req as any).user?.uid || (req as any).user?.id;
+      const userEmail = (req.body?.email || (req as any).user?.email || '').trim().toLowerCase();
+      const userCode = req.body?.code || (req as any).user?.studentCode;
+      const schoolId = req.body?.schoolId || (req as any).user?.schoolId;
+
+      if (!userId && !userEmail && !userCode) {
+        return res.status(400).json({ success: false, message: 'معرف الحساب غير موجود' });
+      }
+
+      // 1. Delete by userId from all related tables
+      if (userId) {
+        await db.delete(users).where(eq(users.id, userId));
+        await db.delete(students).where(eq(students.id, userId));
+        await db.delete(teachers).where(eq(teachers.id, userId));
+        await db.delete(activation_codes).where(eq(activation_codes.id, userId));
+        await db.delete(attendance_logs).where(eq(attendance_logs.studentId, userId));
+        await db.delete(behavior_logs).where(eq(behavior_logs.studentId, userId));
+        await db.delete(student_transactions).where(eq(student_transactions.studentId, userId));
+        await db.delete(user_device_tokens).where(eq(user_device_tokens.userId, userId));
+        await db.delete(firestore_docs).where(and(eq(firestore_docs.collection, 'users'), eq(firestore_docs.docId, userId)));
+      }
+
+      // 2. Delete by email
+      if (userEmail) {
+        await db.delete(users).where(eq(users.email, userEmail));
+      }
+
+      // 3. Delete by code
+      if (userCode) {
+        const c = String(userCode);
+        await db.delete(students).where(eq(students.code, c));
+        await db.delete(students).where(eq(students.parentCode, c));
+        await db.delete(teachers).where(eq(teachers.code, c));
+        await db.delete(activation_codes).where(eq(activation_codes.code, c));
+      }
+
+      // 4. Delete composite student ID if applicable
+      if (schoolId && userCode) {
+        const compId = `${schoolId}_${userCode}`;
+        await db.delete(students).where(eq(students.id, compId));
+        await db.delete(attendance_logs).where(eq(attendance_logs.studentId, compId));
+        await db.delete(behavior_logs).where(eq(behavior_logs.studentId, compId));
+        await db.delete(student_transactions).where(eq(student_transactions.studentId, compId));
+      }
+
+      // Broadcast realtime event
+      if (userId) {
+        realtimeServerInstance?.broadcastManual('users', userId, 'DELETE', { id: userId });
+      }
+
+      res.json({ success: true, message: 'تم حذف الحساب وجميع البيانات المرتبطة به بنجاح' });
+    } catch (error: any) {
+      console.error('Error in /api/auth/delete-account:', error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   // Helper function to create SMTP transporter lazily
   const getMailTransporter = () => {
     // Sanitize host and user in case of accidental spaces when entered in environment variables UI

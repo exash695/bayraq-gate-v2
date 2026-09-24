@@ -320,6 +320,42 @@ class CustomAuthService {
     this.notifyListeners();
   }
 
+  public async deleteAccount(userId?: string): Promise<{ success: boolean; message: string }> {
+    const user = this.currentUser;
+    const targetId = userId || user?.uid || user?.id;
+    const token = this.getToken();
+    
+    let res: Response | null = null;
+    try {
+      res = await fetch(resolveApiUrl('/api/auth/delete-account'), {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          ...(token ? { 'Authorization': `Bearer ${token}` } : {})
+        },
+        body: JSON.stringify({ 
+          userId: targetId,
+          email: user?.email,
+          code: user?.studentCode,
+          schoolId: user?.schoolId
+        })
+      });
+    } catch (networkErr: any) {
+      console.warn('Network error on /api/auth/delete-account:', networkErr);
+    }
+
+    if (!res || !res.ok) {
+      if (targetId) {
+        try {
+          await fetch(resolveApiUrl(`/api/users/${targetId}`), { method: 'DELETE' });
+        } catch (e) {}
+      }
+    }
+
+    await this.logout();
+    return { success: true, message: 'تم حذف الحساب بنجاح' };
+  }
+
   public getToken() {
     return localStorage.getItem(this.tokenKey);
   }

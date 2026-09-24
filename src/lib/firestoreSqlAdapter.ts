@@ -93,7 +93,9 @@ export const signOut: any = async (authInstance?: any) => {
   customAuth.logout();
 };
 export const sendPasswordResetEmail: any = async (auth: any, email: string) => {};
-export const deleteUser: any = async () => {};
+export const deleteUser: any = async (user?: any) => {
+  return await customAuth.deleteAccount(user?.uid || user?.id);
+};
 export const ref: any = (storage: any, path: string) => ({ type: 'storageRef', path });
 export const uploadBytes: any = async (ref: any, bytes: any) => ({ ref });
 export const getDownloadURL: any = async (ref: any) => "";

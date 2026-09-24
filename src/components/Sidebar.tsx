@@ -25,8 +25,7 @@ import {
 } from 'lucide-react';
 import { UnitId, AppSection, UserProgress } from '../types';
 import { translations } from '../lib/translations';
-import { auth } from '../lib/firebase';
-import { deleteUser } from '@/src/lib/firebase';
+import { auth, db, doc, deleteDoc } from '../lib/firebase';
 import { customAuth } from '../services/customAuthService';
 import { safeStorage } from '../lib/storage';
 
@@ -159,6 +158,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const t = translations[language];
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
 
   // Rank display
   const rankDisplay = {
@@ -178,13 +178,39 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const handleDeleteAccount = async () => {
+    if (isDeletingAccount) return;
+    setIsDeletingAccount(true);
     try {
-      if (auth.currentUser) {
-        await deleteUser(auth.currentUser);
+      const currentCustomUser = customAuth.getCurrentUser();
+      const targetUid = currentCustomUser?.uid || currentCustomUser?.id || userProfile?.uid || userProfile?.id || auth.currentUser?.uid;
+
+      // 1. Delete from Firestore if exists
+      if (targetUid) {
+        try {
+          await deleteDoc(doc(db, 'users', targetUid));
+        } catch (e) {
+          console.warn("Firestore delete doc warning:", e);
+        }
       }
+
+      // 2. Perform backend deletion via customAuth
+      await customAuth.deleteAccount(targetUid);
+
+      // 3. Clear session storage
+      safeStorage.setItem('s6_user_logged_out', 'true');
+      setShowDeleteConfirm(false);
+      setIsOpen(false);
     } catch (error) {
       console.error("Delete account error:", error);
-      alert("يرجى تسجيل الدخول مجدداً قبل حذف الحساب.");
+      // Guarantee user is logged out even if an error occurred
+      try {
+        await customAuth.logout();
+        safeStorage.setItem('s6_user_logged_out', 'true');
+        setShowDeleteConfirm(false);
+        setIsOpen(false);
+      } catch (e) {}
+    } finally {
+      setIsDeletingAccount(false);
     }
   };
 
@@ -271,14 +297,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
               <div className="grid grid-cols-2 gap-4 pt-2">
                 <button
+                  disabled={isDeletingAccount}
                   onClick={handleDeleteAccount}
-                  className="py-3 bg-rose-500/20 text-rose-400 border border-rose-500/50 rounded-xl font-bold hover:bg-rose-500/30 transition-all shadow-[0_0_15px_rgba(225,29,72,0.2)]"
+                  className="py-3 bg-rose-500/20 text-rose-400 border border-rose-500/50 rounded-xl font-bold hover:bg-rose-500/30 transition-all shadow-[0_0_15px_rgba(225,29,72,0.2)] disabled:opacity-50 flex items-center justify-center gap-2"
                 >
-                  نعم، احذف حسابي
+                  {isDeletingAccount ? (
+                    <div className="w-5 h-5 border-2 border-rose-400 border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    'نعم، احذف حسابي'
+                  )}
                 </button>
                 <button
+                  disabled={isDeletingAccount}
                   onClick={() => setShowDeleteConfirm(false)}
-                  className="py-3 bg-white/5 text-white border border-white/10 rounded-xl font-bold hover:bg-white/10 transition-all"
+                  className="py-3 bg-white/5 text-white border border-white/10 rounded-xl font-bold hover:bg-white/10 transition-all disabled:opacity-50"
                 >
                   تراجع
                 </button>
