@@ -31,18 +31,42 @@ export const GoogleAccountPickerModal: React.FC<GoogleAccountPickerModalProps> =
   const [loadingEmail, setLoadingEmail] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Load saved accounts from localStorage on open
+  // Load saved accounts from localStorage and system storage on open
   useEffect(() => {
     if (isOpen) {
+      let accounts: SavedGoogleAccount[] = [];
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (raw) {
           const list: SavedGoogleAccount[] = JSON.parse(raw);
-          setSavedAccounts(Array.isArray(list) ? list : []);
+          if (Array.isArray(list)) accounts = list;
         }
-      } catch (e) {
-        setSavedAccounts([]);
+      } catch (e) {}
+
+      // Collect any other cached user accounts from the browser
+      try {
+        const cachedUserRaw = localStorage.getItem('bairaq_custom_user') || localStorage.getItem('bairaq_user');
+        if (cachedUserRaw) {
+          const u = JSON.parse(cachedUserRaw);
+          if (u?.email && !accounts.some(a => a.email.toLowerCase() === u.email.toLowerCase())) {
+            accounts.push({
+              email: u.email,
+              name: u.displayName || u.name || u.email.split('@')[0],
+              photoURL: u.photoURL || undefined
+            });
+          }
+        }
+      } catch (e) {}
+
+      if (initialEmail && initialEmail.includes('@') && !accounts.some(a => a.email.toLowerCase() === initialEmail.toLowerCase())) {
+        accounts.push({
+          email: initialEmail.trim().toLowerCase(),
+          name: initialEmail.split('@')[0]
+        });
       }
+
+      setSavedAccounts(accounts);
+      setIsAddingNew(false);
       setError(null);
       setLoadingEmail(null);
       if (initialEmail && initialEmail.includes('@')) {

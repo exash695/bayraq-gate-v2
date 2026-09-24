@@ -93,10 +93,30 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onOpenPrivacy }) => {
     }
   };
 
-  const handleOpenGooglePicker = () => {
+  const handleOpenGooglePicker = async () => {
     setError(null);
     setMessage(null);
-    setShowGooglePickerModal(true);
+    setAuthLoading(true);
+
+    try {
+      // 1. Attempt official Google Account Picker modal (select_account prompt)
+      const googleUser = await promptGoogleAccountPicker();
+      if (googleUser && googleUser.email) {
+        await customAuth.loginWithGoogle(googleUser.email, googleUser.name, googleUser.photoURL);
+        safeStorage.setItem('s6_activeSection', 'hub');
+        return;
+      }
+    } catch (pickerErr: any) {
+      const msg = String(pickerErr?.message || pickerErr || '');
+      if (msg.includes('تم إلغاء') || pickerErr?.code === 'auth/popup-closed-by-user' || pickerErr?.code === 'auth/cancelled-popup-request') {
+        setAuthLoading(false);
+        return;
+      }
+      console.warn("Google native picker fallback:", msg);
+      setShowGooglePickerModal(true);
+    } finally {
+      setAuthLoading(false);
+    }
   };
 
   const handleSelectGoogleAccount = async (account: { email: string; name?: string; photoURL?: string }) => {

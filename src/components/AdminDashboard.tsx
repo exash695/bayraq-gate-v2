@@ -170,25 +170,54 @@ const mascotVideos: Record<string, { src: string; title: string; tip: string }> 
 
 const MascotHeaderVideo: React.FC<{ activeTab: string }> = ({ activeTab }) => {
   const [customSrc, setCustomSrc] = useState<string | null>(null);
+  const [hasError, setHasError] = useState(false);
 
   useEffect(() => {
     return subscribeToPoseOverrides((poses) => {
-      setCustomSrc(poses[activeTab] || null);
+      let resolved = poses[activeTab] || null;
+      if (!resolved) {
+        const aliases = POSE_ALIASES_MAP[activeTab] || [];
+        for (const alias of aliases) {
+          if (poses[alias]) {
+            resolved = poses[alias];
+            break;
+          }
+        }
+      }
+      setCustomSrc(resolved);
     });
   }, [activeTab]);
 
-  const originalUrl = customSrc || mascotVideos[activeTab]?.src || mascotVideos.pulse.src;
-  const { url: cachedUrl } = useCachedMedia(originalUrl);
-  if (!cachedUrl) return null;
+  const rawUrl = customSrc || mascotVideos[activeTab]?.src || mascotVideos.pulse.src;
+  const resolvedUrl = resolveMediaUrl(rawUrl);
+  const isVideo = isVideoUrl(resolvedUrl);
 
-  const isImage = cachedUrl.startsWith('data:image/') || cachedUrl.match(/\.(jpeg|jpg|gif|png|webp|svg)$/i);
+  useEffect(() => {
+    setHasError(false);
+  }, [resolvedUrl]);
 
-  if (isImage) {
+  if (hasError || !resolvedUrl) {
+    const fallbackSrc = resolveMediaUrl(mascotVideos[activeTab]?.src || '/mascot/connect.jpg');
     return (
       <img
-        key={`mascot-bg-${activeTab}`}
-        src={cachedUrl}
+        key={`mascot-bg-fallback-${activeTab}`}
+        src={fallbackSrc}
         alt="Header Pose"
+        className="h-full w-full object-cover select-none opacity-100"
+      />
+    );
+  }
+
+  if (!isVideo) {
+    return (
+      <img
+        key={`mascot-bg-img-${activeTab}-${resolvedUrl}`}
+        src={resolvedUrl}
+        alt="Header Pose"
+        onError={() => {
+          console.warn(`[MASCOT HEADER] Image failed to load for ${activeTab}: ${resolvedUrl}`);
+          setHasError(true);
+        }}
         className="h-full w-full object-cover select-none opacity-100"
       />
     );
@@ -196,13 +225,16 @@ const MascotHeaderVideo: React.FC<{ activeTab: string }> = ({ activeTab }) => {
 
   return (
     <video
-      key={`mascot-bg-${activeTab}`}
-      src={cachedUrl}
+      key={`mascot-bg-video-${activeTab}-${resolvedUrl}`}
+      src={resolvedUrl}
       autoPlay
       loop
       muted
       playsInline
-      onError={() => {}}
+      onError={() => {
+        console.warn(`[MASCOT HEADER] Video failed to play for ${activeTab}: ${resolvedUrl}`);
+        setHasError(true);
+      }}
       className="h-full w-full object-cover select-none opacity-100"
     />
   );
@@ -2677,18 +2709,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           )}
 
           {!isTabDisabled('transport') && activeTab === "transport" && (
-            <motion.div 
-              key="transport-tab-fixed" 
-              initial={{ opacity: 0 }} 
-              animate={{ opacity: 1 }} 
-              exit={{ opacity: 0 }}
-              className={`transition-all duration-500 ${glowingTab === 'transport' ? 'ring-4 ring-blue-400 ring-offset-4 ring-offset-[#050B14] rounded-2xl p-2' : ''}`}
-            >
-              <TransportAdmin 
-                schoolId={selectedSchoolId || 'school1'} 
-                schoolName={schoolName} 
-                savedLists={savedLists} 
-              />
+            <motion.div key="transport-tab-fixed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <ComingSoonPlaceholder title="إدارة النقل المدرسي" />
             </motion.div>
           )}
 
