@@ -2677,8 +2677,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           )}
 
           {!isTabDisabled('transport') && activeTab === "transport" && (
-            <motion.div key="transport-tab-fixed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <ComingSoonPlaceholder title="إدارة النقل المدرسي" />
+            <motion.div 
+              key="transport-tab-fixed" 
+              initial={{ opacity: 0 }} 
+              animate={{ opacity: 1 }} 
+              exit={{ opacity: 0 }}
+              className={`transition-all duration-500 ${glowingTab === 'transport' ? 'ring-4 ring-blue-400 ring-offset-4 ring-offset-[#050B14] rounded-2xl p-2' : ''}`}
+            >
+              <TransportAdmin 
+                schoolId={selectedSchoolId || 'school1'} 
+                schoolName={schoolName} 
+                savedLists={savedLists} 
+              />
             </motion.div>
           )}
 

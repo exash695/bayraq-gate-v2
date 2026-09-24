@@ -2280,3 +2280,8 @@ const mockDrivers: BusDriver[] = [
   { id: 'd1', name: 'أبو أحمد الكناني', phone: '+964 770 123 4567', routeId: 'خط المنصور السريع', schoolId: 's1' },
   { id: 'd2', name: 'عمر عبد الله الجبوري', phone: '+964 780 987 6543', routeId: 'خط الكرخ والوزيرية', schoolId: 's1' },
 ];
+
+export const AdminTransportManager = TransportAdmin;
+export default TransportAdmin;
+
+

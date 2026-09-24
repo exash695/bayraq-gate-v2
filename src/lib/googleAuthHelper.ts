@@ -1,7 +1,8 @@
 // Google Identity Services (GIS) Account Selector Helper
 // Opens Google's native account chooser with select_account prompt
+// Pure Google Identity Services without Firebase dependency
 
-const GOOGLE_CLIENT_ID = "728285579998-v257r50u150j1a67t8v245q87rflt427.apps.googleusercontent.com";
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "728585268376-hf25klmd55cjomn0cuhso6qno10gn977.apps.googleusercontent.com";
 
 function loadGoogleGsiScript(): Promise<void> {
   return new Promise((resolve, reject) => {
