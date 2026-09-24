@@ -161,6 +161,7 @@ import { AIEnhancedRadar } from "./components/AIEnhancedRadar";
 import { StudentLounge } from "./components/StudentLounge";
 import { SchoolContent } from "./components/SchoolContent";
 import { SchoolAccessGate } from "./components/SchoolAccessGate";
+import { saveAccessCode } from "./lib/savedAccessCodes";
 import { BayraqAcademyHub } from "./components/BayraqAcademyHub";
 import { ParentPortal } from "./components/ParentPortal";
 import { AdminDashboard } from "./components/AdminDashboard";
@@ -2068,6 +2069,17 @@ export default function App() {
                 selectedSchoolId || undefined,
               );
               setIsSchoolVerified(true);
+              
+              // Save to device Keychain/Local Storage for instant auto-fill
+              try {
+                saveAccessCode({
+                  code: code.trim().toUpperCase(),
+                  role: user.role,
+                  schoolId: selectedSchoolId || user.schoolId,
+                  schoolName: institutionName,
+                  studentName: user.displayName || (user as any).name || (user as any).studentName
+                });
+              } catch (saveErr) {}
               if (
                 user.role === "teacher" ||
                 (user as any).role === "TEACHER"
