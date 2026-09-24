@@ -19,7 +19,8 @@ import {
 } from "@/src/lib/firebase";
 import { db } from "../lib/firebase";
 import { handleFirestoreError, OperationType } from "../lib/firestoreUtils";
-import { BerqCharacter, getBerqImageUrl, isVideoUrl, POSE_ALIASES_MAP, updateGlobalPoses, subscribeToPoseOverrides } from "./BerqCharacterManager";
+import { BerqCharacter, getBerqImageUrl, isVideoUrl, POSE_ALIASES_MAP, updateGlobalPoses, subscribeToPoseOverrides, initPoseOverrides } from "./BerqCharacterManager";
+import { resolveApiUrl } from "../lib/serverConfig";
 import { SCHOOLS_DATA, getOfficialSchoolLogoUrl, getOfficialSchoolName, getSchoolBairaqImageUrl } from "../lib/constants";
 import { copyToClipboard } from "../utils/clipboard";
 import { GlobalAnnouncementsBanner } from "./GlobalAnnouncementsBanner";
