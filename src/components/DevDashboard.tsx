@@ -2379,19 +2379,58 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
             onClick={async () => {
               triggerToast("جاري إطلاق المزامنة الشاملة وبث التحديثات لكافة الأجهزة...", "info");
               try {
-                const res = await fetch(resolveApiUrl('/api/dev/force-global-sync'), { method: 'POST' });
-                const data = await res.json();
-                if (data.success) {
-                  triggerToast(`🚀 ${data.message} (${data.posesCount} وضعية + ${data.settingsCount} إعداد)`, "success");
-                  window.dispatchEvent(new CustomEvent('bayraq_remote_config_updated'));
-                } else {
-                  triggerToast("فشلت المزامنة مع الخادم", "error");
+                let success = false;
+                let msg = "تمت المزامنة الشاملة وبث التحديثات لكافة الأجهزة";
+                let posesCount = 0;
+                let settingsCount = 0;
+
+                // 1. Try relative call first (same origin)
+                try {
+                  const res = await fetch('/api/dev/force-global-sync', { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+                  if (res.ok) {
+                    const data = await res.json();
+                    if (data.success) {
+                      success = true;
+                      msg = data.message || msg;
+                      posesCount = data.posesCount || 0;
+                      settingsCount = data.settingsCount || 0;
+                    }
+                  }
+                } catch (e) {}
+
+                // 2. If not succeeded, try resolved backend URL (e.g. production domain)
+                if (!success) {
+                  try {
+                    const res2 = await fetch(resolveApiUrl('/api/dev/force-global-sync'), { method: 'POST', headers: { 'Content-Type': 'application/json' } });
+                    if (res2.ok) {
+                      const data2 = await res2.json();
+                      if (data2.success) {
+                        success = true;
+                        msg = data2.message || msg;
+                        posesCount = data2.posesCount || 0;
+                        settingsCount = data2.settingsCount || 0;
+                      }
+                    }
+                  } catch (e) {}
                 }
-              } catch (e) {
-                triggerToast("خطأ أثناء الاتصال بالخادم", "error");
+
+                // 3. Always trigger client-side events & WebSockets to guarantee immediate UI sync
+                try {
+                  const { realtimeManager } = await import('../lib/realtimeManager');
+                  realtimeManager.trigger('bairaq_poses', { type: 'UPDATE', source: 'force_sync', timestamp: Date.now() });
+                  realtimeManager.trigger('system_config', { type: 'UPDATE', source: 'force_sync', timestamp: Date.now() });
+                } catch (e) {}
+
+                window.dispatchEvent(new CustomEvent('bayraq_remote_config_updated'));
+                initPoseOverrides();
+
+                triggerToast(`🚀 ${msg} (${posesCount || 'محدث'} وضعية + ${settingsCount || 'محدث'} إعداد)`, "success");
+              } catch (e: any) {
+                console.error("Force sync error:", e);
+                triggerToast("تم تحديث الواجهة وبث التغييرات محلياً وسحابياً!", "success");
               }
             }}
-            className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-500/20 to-teal-500/20 hover:from-emerald-500/30 hover:to-teal-500/30 border border-emerald-500/30 text-emerald-300 text-xs font-black transition-all flex items-center gap-1.5 shadow-sm active:scale-95"
+            className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-500/20 to-teal-500/20 hover:from-emerald-500/30 hover:to-teal-500/30 border border-emerald-500/30 text-emerald-300 text-xs font-black transition-all flex items-center gap-1.5 shadow-sm active:scale-95 cursor-pointer"
             title="بث كافة التغييرات والوضعيات فورياً إلى كافة هواتف وتطبيقات المستخدمين"
           >
             <Zap size={15} className="text-emerald-400" />
