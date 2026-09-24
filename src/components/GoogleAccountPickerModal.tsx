@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Mail, User, X, Check, Trash2, ArrowLeft, ShieldCheck, Sparkles } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import { Mail, User, X, Check, Trash2, ArrowLeft, ShieldCheck, Sparkles, ShieldAlert, Star } from 'lucide-react';
 
 interface SavedGoogleAccount {
   email: string;
   name?: string;
   photoURL?: string;
   lastUsed?: number;
+  isDeveloper?: boolean;
 }
 
 interface GoogleAccountPickerModalProps {
@@ -62,6 +63,21 @@ export const GoogleAccountPickerModal: React.FC<GoogleAccountPickerModalProps> =
         accounts.push({
           email: initialEmail.trim().toLowerCase(),
           name: initialEmail.split('@')[0]
+        });
+      }
+
+      // Guarantee primary developer account is always available for instant access
+      const devEmail = 'mntzralghanm527@gmail.com';
+      const devIdx = accounts.findIndex(a => a.email.toLowerCase() === devEmail.toLowerCase());
+      if (devIdx >= 0) {
+        accounts[devIdx].isDeveloper = true;
+        accounts[devIdx].name = 'م. منتظر الغانم (المطور العام)';
+      } else {
+        accounts.unshift({
+          email: devEmail,
+          name: 'م. منتظر الغانم (المطور العام)',
+          photoURL: undefined,
+          isDeveloper: true
         });
       }
 
@@ -232,10 +248,18 @@ export const GoogleAccountPickerModal: React.FC<GoogleAccountPickerModalProps> =
                               )}
                             </div>
                             <div className="min-w-0 flex flex-col items-start">
-                              <span className="text-sm font-bold text-white group-hover:text-amber-300 transition-colors truncate max-w-[200px]">
-                                {acc.name || acc.email.split('@')[0]}
-                              </span>
-                              <span className="text-xs text-white/50 truncate max-w-[200px] dir-ltr text-left">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-sm font-bold text-white group-hover:text-amber-300 transition-colors truncate max-w-[200px]">
+                                  {acc.name || acc.email.split('@')[0]}
+                                </span>
+                                {acc.isDeveloper && (
+                                  <span className="px-1.5 py-0.5 rounded-full bg-amber-400/20 text-amber-300 text-[10px] font-bold border border-amber-400/30 flex items-center gap-1">
+                                    <Star size={10} className="fill-amber-400" />
+                                    <span>المطور العام</span>
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-xs text-white/50 truncate max-w-[200px] dir-ltr text-left font-mono">
                                 {acc.email}
                               </span>
                             </div>
@@ -245,14 +269,16 @@ export const GoogleAccountPickerModal: React.FC<GoogleAccountPickerModalProps> =
                             {isThisLoading ? (
                               <div className="w-5 h-5 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
                             ) : (
-                              <button
-                                type="button"
-                                onClick={(e) => removeAccount(acc.email, e)}
-                                title="إزالة من القائمة"
-                                className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-white/30 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
-                              >
-                                <Trash2 size={14} />
-                              </button>
+                              !acc.isDeveloper && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => removeAccount(acc.email, e)}
+                                  title="إزالة من القائمة"
+                                  className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-white/30 hover:text-rose-400 hover:bg-rose-500/10 transition-all"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              )
                             )}
                           </div>
                         </motion.button>

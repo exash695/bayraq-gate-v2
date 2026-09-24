@@ -3,7 +3,6 @@ import { auth, db, GoogleAuthProvider as GAP, signInWithPopup as SIP, doc, setDo
 const GoogleAuthProvider = GAP as any;
 const signInWithPopup = SIP as any;
 import { customAuth } from '../services/customAuthService';
-import { promptGoogleAccountPicker } from '../lib/googleAuthHelper';
 import { safeStorage } from '../lib/storage';
 import { Eye, EyeOff, Shield, Zap, Sparkles, Mail, Lock, User, Phone, MapPin, Building, ChevronRight, Layers, BrainCircuit, ShieldCheck } from 'lucide-react';
 import { LoadingScreen } from './LoadingScreen';
@@ -93,36 +92,15 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onOpenPrivacy }) => {
     }
   };
 
-  const handleOpenGooglePicker = async () => {
+  const handleOpenGooglePicker = () => {
     setError(null);
     setMessage(null);
-    setAuthLoading(true);
-
-    try {
-      // 1. Attempt official Google Account Picker modal (select_account prompt)
-      const googleUser = await promptGoogleAccountPicker();
-      if (googleUser && googleUser.email) {
-        await customAuth.loginWithGoogle(googleUser.email, googleUser.name, googleUser.photoURL);
-        safeStorage.setItem('s6_activeSection', 'hub');
-        return;
-      }
-    } catch (pickerErr: any) {
-      const msg = String(pickerErr?.message || pickerErr || '');
-      if (msg.includes('تم إلغاء') || pickerErr?.code === 'auth/popup-closed-by-user' || pickerErr?.code === 'auth/cancelled-popup-request') {
-        setAuthLoading(false);
-        return;
-      }
-      console.warn("Google native picker fallback:", msg);
-      setShowGooglePickerModal(true);
-    } finally {
-      setAuthLoading(false);
-    }
+    setShowGooglePickerModal(true);
   };
 
   const handleSelectGoogleAccount = async (account: { email: string; name?: string; photoURL?: string }) => {
     setError(null);
     setMessage(null);
-    setAuthLoading(true);
     try {
       await customAuth.loginWithGoogle(account.email, account.name, account.photoURL);
       safeStorage.setItem('s6_activeSection', 'hub');
@@ -131,8 +109,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onOpenPrivacy }) => {
       const msg = err.message || 'فشل تسجيل الدخول عبر Google';
       setError(msg);
       throw err;
-    } finally {
-      setAuthLoading(false);
     }
   };
 
