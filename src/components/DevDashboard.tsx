@@ -2360,7 +2360,7 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
       </div>
 
       {/* Edge-to-Edge Header */}
-      <header className="sticky top-0 z-50 bg-[#080A1A]/90 backdrop-blur-xl border-b border-white/10 px-4 py-3 flex items-center justify-between">
+      <header className="sticky top-0 z-50 bg-[#080A1A]/90 backdrop-blur-xl border-b border-white/10 px-4 py-3 flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/20">
             <Shield size={20} className="text-white" />
@@ -2373,12 +2373,40 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
             </div>
           </div>
         </div>
-        <button 
-          onClick={() => window.location.reload()}
-          className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 transition-all active:scale-95"
-        >
-          <RefreshCw size={18} className="text-white/60" />
-        </button>
+        
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={async () => {
+              triggerToast("جاري إطلاق المزامنة الشاملة وبث التحديثات لكافة الأجهزة...", "info");
+              try {
+                const res = await fetch(resolveApiUrl('/api/dev/force-global-sync'), { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                  triggerToast(`🚀 ${data.message} (${data.posesCount} وضعية + ${data.settingsCount} إعداد)`, "success");
+                  window.dispatchEvent(new CustomEvent('bayraq_remote_config_updated'));
+                } else {
+                  triggerToast("فشلت المزامنة مع الخادم", "error");
+                }
+              } catch (e) {
+                triggerToast("خطأ أثناء الاتصال بالخادم", "error");
+              }
+            }}
+            className="px-3.5 py-2 rounded-xl bg-gradient-to-r from-emerald-500/20 to-teal-500/20 hover:from-emerald-500/30 hover:to-teal-500/30 border border-emerald-500/30 text-emerald-300 text-xs font-black transition-all flex items-center gap-1.5 shadow-sm active:scale-95"
+            title="بث كافة التغييرات والوضعيات فورياً إلى كافة هواتف وتطبيقات المستخدمين"
+          >
+            <Zap size={15} className="text-emerald-400" />
+            <span className="hidden sm:inline">بث ومزامنة شاملة للتطبيقات</span>
+            <span className="sm:hidden">بث ومزامنة</span>
+          </button>
+
+          <button 
+            onClick={() => window.location.reload()}
+            className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 transition-all active:scale-95"
+            title="تحديث الواجهة"
+          >
+            <RefreshCw size={18} className="text-white/60" />
+          </button>
+        </div>
       </header>
 
       {/* Horizontal Fast Switcher Tabs Bar */}

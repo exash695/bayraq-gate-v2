@@ -162,20 +162,33 @@ export const useAppLogo = (): string => {
 export function initPoseOverrides() {
   console.log(`[RELOAD] Initializing Berq Character Manager and Pose Overrides...`);
 
-  // Fast initial fetch from backend admin API (PostgreSQL Single Source of Truth)
-  try {
-    fetch(resolveApiUrl('/api/bairaq/poses'))
-      .then(res => res.json())
-      .then(data => {
-        if (data.poses && typeof data.poses === 'object') {
-          console.log(`[DATABASE READ] [AUTHORITATIVE SERVER SYNC] Loaded ${Object.keys(data.poses).length} poses from PostgreSQL`);
-          updateGlobalPoses(data.poses, true);
-        }
-      })
-      .catch((err) => {
-        console.warn("[DATABASE READ] Server fetch notice (using cache):", err?.message || err);
+  const fetchPoses = async (attempt = 1) => {
+    try {
+      const res = await fetch(resolveApiUrl('/api/bairaq/poses'), {
+        cache: 'no-store'
       });
-  } catch(e) {}
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (data.poses && typeof data.poses === 'object' && Object.keys(data.poses).length > 0) {
+        console.log(`[DATABASE READ] [AUTHORITATIVE SERVER SYNC] Loaded ${Object.keys(data.poses).length} poses from PostgreSQL`);
+        updateGlobalPoses(data.poses, true);
+        return;
+      }
+    } catch (err: any) {
+      if (attempt <= 3) {
+        setTimeout(() => fetchPoses(attempt + 1), attempt * 1500);
+      }
+    }
+  };
+
+  fetchPoses();
+
+  // Re-fetch when device comes back online or window gains focus
+  if (typeof window !== 'undefined') {
+    window.addEventListener('online', () => fetchPoses(1));
+    window.addEventListener('focus', () => fetchPoses(1));
+  }
+
   // Listen to realtime socket for bairaq_poses
   import("../lib/realtimeManager").then(({ realtimeManager }) => {
     realtimeManager.subscribe("bairaq_poses", null, (event) => {

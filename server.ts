@@ -3078,6 +3078,44 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
     }
   });
 
+  // POST /api/dev/force-global-sync - Universal Force Sync for all App Clients and PostgreSQL
+  app.post("/api/dev/force-global-sync", async (req, res) => {
+    try {
+      if (!isSystemTablesInitialized) {
+        await initSystemTablesAndPoses();
+      }
+
+      const poses = await fetchAllSystemPoses();
+      
+      // Fetch all system settings
+      const settingsRows = await withDbRetry(() => db.select().from(system_settings));
+      const settingsMap: Record<string, any> = {};
+      settingsRows.forEach(r => {
+        settingsMap[r.key] = r.value;
+      });
+
+      // Broadcast to all connected clients
+      if (realtimeServerInstance) {
+        realtimeServerInstance.broadcastManual('bairaq_poses', 'global', 'UPDATE', poses);
+        Object.entries(settingsMap).forEach(([k, v]) => {
+          realtimeServerInstance?.broadcastManual('system_settings', k, 'UPDATE', v);
+        });
+      }
+
+      console.log(`[GLOBAL SYNC SUCCESS] Broadcasted ${Object.keys(poses).length} poses and ${Object.keys(settingsMap).length} settings to all clients.`);
+      return res.json({
+        success: true,
+        message: "تمت المزامنة الشاملة بنجاح وبث التحديثات لكافة الأجهزة والتطبيقات",
+        posesCount: Object.keys(poses).length,
+        settingsCount: Object.keys(settingsMap).length,
+        timestamp: new Date().toISOString()
+      });
+    } catch (err: any) {
+      console.error("[GLOBAL SYNC ERROR]", err);
+      return res.status(500).json({ success: false, error: err.message || "Failed to execute global sync" });
+    }
+  });
+
   app.post("/api/upload-url", async (req, res) => {
     try {
       const { fileName, contentType } = req.body;
