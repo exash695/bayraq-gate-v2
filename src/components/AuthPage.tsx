@@ -11,6 +11,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { useAppLogo } from './BerqCharacterManager';
 import { PrivacyPolicy } from './PrivacyPolicy';
 import { RecoveryModal } from './RecoveryModal';
+import { GoogleAccountPickerModal } from './GoogleAccountPickerModal';
 
 const iraqRegions: { [key: string]: string[] } = {
   "بغداد": ["مدرسة المتميزين", "إعدادية المركزية", "ثانوية كلية بغداد", "مدرسة العقيدة", "أخرى (كتابة يدوية)"],
@@ -42,6 +43,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onOpenPrivacy }) => {
   const [isLogin, setIsLogin] = useState(true);
   const [showInternalPrivacy, setShowInternalPrivacy] = useState(false);
   const [showRecoveryModal, setShowRecoveryModal] = useState(false);
+  const [showGooglePickerModal, setShowGooglePickerModal] = useState(false);
   const [formData, setFormData] = useState({ email: '', password: '', fullName: '', governorate: '', school: '', phone: '' });
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -91,44 +93,24 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onOpenPrivacy }) => {
     }
   };
 
-  const handleGoogleSignIn = async () => {
+  const handleOpenGooglePicker = () => {
+    setError(null);
+    setMessage(null);
+    setShowGooglePickerModal(true);
+  };
+
+  const handleSelectGoogleAccount = async (account: { email: string; name?: string; photoURL?: string }) => {
     setError(null);
     setMessage(null);
     setAuthLoading(true);
-    
     try {
-      // 1. Trigger the official Google Account Picker modal (select_account prompt)
-      let googleUser: { email: string; name?: string; photoURL?: string } | null = null;
-      try {
-        googleUser = await promptGoogleAccountPicker();
-      } catch (pickerErr: any) {
-        const msg = String(pickerErr?.message || pickerErr || '');
-        if (msg.includes('تم إلغاء') || pickerErr?.code === 'auth/popup-closed-by-user' || pickerErr?.code === 'auth/cancelled-popup-request') {
-          setAuthLoading(false);
-          return; // User cancelled account selector cleanly
-        }
-        
-        // Fallback: If user already entered email in the form and popup had issue
-        if (formData.email && formData.email.trim().includes('@')) {
-          googleUser = {
-            email: formData.email.trim().toLowerCase(),
-            name: formData.fullName || undefined
-          };
-        } else {
-          throw pickerErr;
-        }
-      }
-
-      if (!googleUser || !googleUser.email) {
-        throw new Error('لم يتم تحديد أي حساب Google');
-      }
-
-      // 2. Perform secure backend authentication with the chosen Gmail account
-      await customAuth.loginWithGoogle(googleUser.email, googleUser.name, googleUser.photoURL);
+      await customAuth.loginWithGoogle(account.email, account.name, account.photoURL);
       safeStorage.setItem('s6_activeSection', 'hub');
     } catch (err: any) {
       console.error("Google Auth Error:", err);
-      setError(err.message || 'فشل تسجيل الدخول عبر Google');
+      const msg = err.message || 'فشل تسجيل الدخول عبر Google';
+      setError(msg);
+      throw err;
     } finally {
       setAuthLoading(false);
     }
@@ -377,7 +359,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onOpenPrivacy }) => {
               <motion.button 
                 whileHover={{ scale: 1.05, backgroundColor: "rgba(255,255,255,0.95)" }}
                 whileTap={{ scale: 0.95 }}
-                onClick={handleGoogleSignIn} 
+                onClick={handleOpenGooglePicker} 
                 type="button"
                 className="py-4 px-8 bg-white text-gray-900 font-bold text-[17px] rounded-[1.5rem] flex items-center justify-center gap-3 transition-all shadow-[0_10px_25px_rgba(255,255,255,0.1)] w-auto"
               >
@@ -423,6 +405,14 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onOpenPrivacy }) => {
         </div>
 
       </motion.div>
+
+      {/* Google Account Picker Modal */}
+      <GoogleAccountPickerModal
+        isOpen={showGooglePickerModal}
+        onClose={() => setShowGooglePickerModal(false)}
+        initialEmail={formData.email}
+        onSelectAccount={handleSelectGoogleAccount}
+      />
 
       {/* Recovery Modal (WhatsApp & Email) */}
       <RecoveryModal
