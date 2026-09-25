@@ -41,7 +41,7 @@ import {
 } from 'lucide-react';
 import { ConfirmDialog } from './ConfirmDialog';
 import { StaffPrintModal } from './StaffPrintModal';
-import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, where } from '@/src/lib/firebase';
+import { collection, addDoc, updateDoc, deleteDoc, doc, onSnapshot, query, orderBy, where } from '../lib/firebase';
 import { db } from '../lib/firebase';
 import { useSubjectDistributor } from '../hooks/useSubjectDistributor';
 import { staffService } from '../services/staffService';

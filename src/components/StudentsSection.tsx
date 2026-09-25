@@ -4,7 +4,7 @@ import {
   Users, Search, CheckCircle2, GraduationCap, ArrowRight, Save, Printer, FileSpreadsheet, Send, Plus, X, RotateCcw, Trash2, Layout,
   DollarSign, CreditCard, TrendingUp, Star, BookOpen, Award, Camera, Filter, Share2, Archive, FolderOpen, Settings
 } from 'lucide-react';
-import { collection, query, where, getDocs, updateDoc, doc, writeBatch } from '@/src/lib/firebase';
+import { collection, query, where, getDocs, updateDoc, doc, writeBatch } from '../lib/firebase';
 import { db } from '../lib/firebase';
 import { ConfirmDialog } from './ConfirmDialog';
 import { SubjectManager } from './SubjectManager';

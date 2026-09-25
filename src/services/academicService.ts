@@ -15,7 +15,7 @@ import { collection,
   arrayUnion,
   increment,
   setDoc,
-  runTransaction } from '@/src/lib/firebase';
+  runTransaction } from '../lib/firebase';
 import { db } from '../lib/firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { logActivity } from '../utils/auditLogger';

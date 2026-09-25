@@ -7,7 +7,7 @@ import { collection,
   query, 
   where, 
   orderBy, 
-  serverTimestamp } from '@/src/lib/firebase';
+  serverTimestamp } from '../lib/firebase';
 import { db, auth } from '../lib/firebase';
 import { logActivity } from '../utils/auditLogger';
 import { generateQrDataUrl } from '../utils/qrGenerator';

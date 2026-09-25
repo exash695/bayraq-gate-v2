@@ -1,3 +1,4 @@
+import * as FirebaseMock from "@/src/lib/firebase.ts"; const { db, auth, storage, collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit, serverTimestamp, getDocs, getDoc, getDocFromServer, getDocFromCache, increment, arrayUnion, arrayRemove, writeBatch, runTransaction, purgeFirestore, getStorage, ref, uploadBytesResumable, getDownloadURL, deleteObject } = FirebaseMock;
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
 import { Document, Page, pdfjs } from "react-pdf";
@@ -15,29 +16,6 @@ import { copyToClipboard } from "../../utils/clipboard";
 import { AIEnhancedRadar } from "../AIEnhancedRadar";
 import { AIQuestionAssistantModal } from "../AIQuestionAssistantModal";
 import { AIPaperExtractorModal } from "../AIPaperExtractorModal";
-import {
-  collection,
-  query,
-  onSnapshot,
-  addDoc,
-  serverTimestamp,
-  where,
-  orderBy,
-  getDocs,
-  getDoc,
-  doc,
-  setDoc,
-  increment,
-  updateDoc,
-  deleteDoc,
-  arrayUnion,
-  ref,
-  uploadBytesResumable,
-  getDownloadURL,
-  db,
-  auth,
-  storage,
-} from "../../lib/firebase";
 import { handleFirestoreError, OperationType } from "../../lib/firestoreUtils";
 import { academicService } from "../../services/academicService";
 import { compressImage } from "../../utils/imageCompressor";

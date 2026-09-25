@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { db } from '../lib/firebase';
-import { doc, getDoc } from '@/src/lib/firebase';
+import { doc, getDoc } from '../lib/firebase';
 import { ShieldCheck, Calendar, Wallet, User, ShieldAlert, BadgeCheck } from 'lucide-react';
 import { SCHOOLS_DATA, getOfficialSchoolLogoUrl, getOfficialSchoolName } from '../lib/constants';
 import { Skeleton } from './shared/ShimmerSkeleton';

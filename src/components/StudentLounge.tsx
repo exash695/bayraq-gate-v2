@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Send, Image as ImageIcon, Smile, MoreVertical, Coffee, Search, Check, CheckCheck, User, MessageCircle, ArrowRight, Lock, Paperclip, FileText, Video, Headphones, Loader2, Mic, AlertTriangle, Maximize2, ExternalLink, Download, Film } from 'lucide-react';
 import { db, auth } from '../lib/firebase';
-import { collection, query, where, orderBy, getDocs, addDoc, updateDoc, doc, serverTimestamp, onSnapshot, limit } from '@/src/lib/firebase';
+import { collection, query, where, orderBy, getDocs, addDoc, updateDoc, doc, serverTimestamp, onSnapshot, limit } from '../lib/firebase';
 import { realtimeManager } from '../lib/realtimeManager';
 import { staffService } from '../services/staffService';
 

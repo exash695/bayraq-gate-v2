@@ -1,8 +1,7 @@
+import * as FirebaseMock from "../lib/firebase"; const { db, auth, collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, limit, serverTimestamp, getDocs, getDoc, getDocFromServer, getDocFromCache, increment, arrayUnion, arrayRemove, writeBatch, runTransaction, purgeFirestore, getStorage, ref, deleteObject } = FirebaseMock;
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Users, Shield, Crown, Plus, Sword, MessageSquare, Target, Trophy, LogOut, ChevronRight, Send, UserPlus, Search, X } from 'lucide-react';
-import { db, auth } from '../lib/firebase';
-import { collection, onSnapshot, doc, updateDoc, arrayUnion, addDoc, arrayRemove, getDoc, query, where, orderBy, limit, serverTimestamp, getDocs } from '@/src/lib/firebase';
 
 const BattalionChat = ({ battalionId, userProfile, language }: { battalionId: string, userProfile: any, language: 'ar' | 'en' }) => {
   const [messages, setMessages] = useState<any[]>([]);

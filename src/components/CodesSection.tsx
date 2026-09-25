@@ -6,7 +6,7 @@ import {
 import { ConfirmDialog } from './ConfirmDialog';
 import { logActivity } from '../utils/auditLogger';
 import { db } from '../lib/firebase';
-import { collection, addDoc, serverTimestamp } from '@/src/lib/firebase';
+import { collection, addDoc, serverTimestamp } from '../lib/firebase';
 
 import { 
   getPrefixForGrade,

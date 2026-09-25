@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Trophy, Medal, Star, Target, Shield, Crown, CheckCircle2, Lightbulb, Lock as LockIcon, Sparkles } from 'lucide-react';
 import { UserProgress } from '../types';
 import { BerqCharacter } from './BerqCharacterManager';
-import { collection, query, where, getDocs, limit } from '@/src/lib/firebase';
+import { collection, query, where, getDocs, limit } from '../lib/firebase';
 import { db } from '../lib/firebase';
 import { CardGridSkeleton } from './shared/ShimmerSkeleton';
 

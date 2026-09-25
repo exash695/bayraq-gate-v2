@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, orderBy, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc, updateDoc } from '@/src/lib/firebase';
+import { collection, query, where, orderBy, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc, updateDoc } from '../lib/firebase';
 import { db } from '../lib/firebase';
 import { Database, Plus, Trash2, Edit2, BookOpen, Layers, Calendar, BookOpenText, ArrowRight, Save, X, CheckCircle, BrainCircuit, Search, Filter, Scan, Loader, FileText } from 'lucide-react';
 import { TeacherExamPapers } from './TeacherExamPapers';

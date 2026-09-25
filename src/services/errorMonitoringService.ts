@@ -1,15 +1,4 @@
-import { db, auth } from '../lib/firebase';
-import { collection,
-  doc,
-  setDoc,
-  updateDoc,
-  deleteDoc,
-  onSnapshot,
-  query,
-  orderBy,
-  limit,
-  serverTimestamp,
-  getDocs } from '@/src/lib/firebase';
+import { db, auth, collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, query, orderBy, limit, serverTimestamp, getDocs } from '../lib/firebase';
 
 export type ErrorSeverity = 'critical' | 'warning' | 'info';
 export type ErrorService = 'firestore' | 'auth' | 'storage' | 'ai' | 'network' | 'ui' | 'backend';

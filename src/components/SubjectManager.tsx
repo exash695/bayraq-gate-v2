@@ -14,7 +14,7 @@ import {
   Check,
   Sparkles
 } from 'lucide-react';
-import { doc, setDoc, onSnapshot } from '@/src/lib/firebase';
+import { doc, setDoc, onSnapshot } from '../lib/firebase';
 import { db } from '../lib/firebase';
 import { logActivity } from '../utils/auditLogger';
 import { CardGridSkeleton } from './shared/ShimmerSkeleton';

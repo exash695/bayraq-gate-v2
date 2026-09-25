@@ -13,7 +13,7 @@ import { AccessLogsSection } from './AccessLogsSection';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { logActivity } from '../utils/auditLogger';
 import { auth, db } from '../lib/firebase';
-import { collection, query, onSnapshot, orderBy, doc, setDoc, updateDoc, writeBatch, where, addDoc } from '@/src/lib/firebase';
+import { collection, query, onSnapshot, orderBy, doc, setDoc, updateDoc, writeBatch, where, addDoc } from '../lib/firebase';
 import { calculateStudentFinancials, isArchivedList } from '../utils/studentUtils';
 import { DigitalReceiptModal } from './DigitalReceiptModal';
 import { safeStorage, safeSessionStorage } from '../lib/storage';

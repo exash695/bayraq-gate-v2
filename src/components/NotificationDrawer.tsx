@@ -164,7 +164,7 @@ export const NotificationDrawer = ({
                 <div className="relative">
                   <Bell className="text-theme-primary" size={24} />
                   {unreadCount > 0 && (
-                    <span className="absolute -top-1 -right-1 w-4 h-4 bg-rose-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center border border-black">
+                    <span className="absolute -top-1 -right-1 w-4 h-4 bg-amber-400 text-black text-[10px] font-bold rounded-full flex items-center justify-center border border-black">
                       {unreadCount}
                     </span>
                   )}

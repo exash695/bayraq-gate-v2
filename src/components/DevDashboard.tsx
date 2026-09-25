@@ -16,7 +16,7 @@ import {
   collection, doc, setDoc, deleteDoc, getDoc, getDocs, 
   addDoc, serverTimestamp, query, orderBy, onSnapshot, where, limit,
   updateDoc, deleteField, getCountFromServer, arrayUnion, collectionGroup
-} from "@/src/lib/firebase";
+} from "../lib/firebase";
 import { db } from "../lib/firebase";
 import { handleFirestoreError, OperationType } from "../lib/firestoreUtils";
 import { BerqCharacter, getBerqImageUrl, isVideoUrl, POSE_ALIASES_MAP, updateGlobalPoses, subscribeToPoseOverrides, initPoseOverrides, resolveMediaUrl } from "./BerqCharacterManager";

@@ -137,6 +137,8 @@ import {
   ChevronLeft,
   Trophy,
   Home,
+  UserCircle,
+  Edit2,
   Zap,
   Target,
   Flame,
@@ -292,16 +294,30 @@ export default function App() {
     }
   }, []);
 
-  const [authReady, setAuthReady] = useState(true);
-  const [splashFinished, setSplashFinished] = useState(true);
-  const [hasSeenOnboarding, setHasSeenOnboarding] = useState(true);
-  const [hasSeenWelcomeIntro, setHasSeenWelcomeIntro] = useState(true);
+  const [authReady, setAuthReady] = useState(false);
+  const [splashFinished, setSplashFinished] = useState(false);
+  const [hasSeenOnboarding, setHasSeenOnboarding] = useState(() => {
+    try {
+      return safeStorage.getItem("app_has_seen_onboarding") === "true";
+    } catch {
+      return false;
+    }
+  });
+  const [hasSeenWelcomeIntro, setHasSeenWelcomeIntro] = useState(() => {
+    try {
+      return safeStorage.getItem("app_has_seen_welcome_intro") === "true";
+    } catch {
+      return false;
+    }
+  });
 
-  // Global failsafe: Ensure immediate loading readiness
+  // Ensure loading readiness is managed by components, remove forced skip
   useEffect(() => {
-    setAuthReady(true);
-    setSplashFinished(true);
-  }, []);
+    // If no welcome intro needed, we can set splash finished if auth is ready or when loading screen finishes
+    if (hasSeenWelcomeIntro) {
+      // Auth listener will handle setAuthReady
+    }
+  }, [hasSeenWelcomeIntro]);
 
   const handleWelcomeIntroComplete = React.useCallback(() => {
     safeStorage.setItem("app_has_seen_welcome_intro", "true");
@@ -329,19 +345,39 @@ export default function App() {
     return "student";
   });
 
-  // Sync portalType when userProfile loads if not manually overridden
+  // Sync portalType when userProfile loads
   useEffect(() => {
-    if (userProfile && !safeStorage.getItem("bayraq_user_role")) {
+    if (userProfile) {
       const isDevEmail = userProfile.email?.toLowerCase() === 'mntzralghanm527@gmail.com';
+      const savedRole = safeStorage.getItem("bayraq_user_role");
+      
       let role = userProfile.role === "admin" 
         ? (userProfile.adminBranch === "boys" ? "admin-boys" : "admin-girls")
         : userProfile.role;
         
-      if (isDevEmail || userProfile.role === 'developer' || userProfile.role === 'dev') role = 'admin-boys'; // Default dev to admin for platform viewing
+      if (isDevEmail || userProfile.role === 'developer' || userProfile.role === 'dev') role = 'admin-boys';
       if (userProfile.role === 'superadmin') role = 'admin-boys';
 
       const validRoles = ["student", "parent", "admin-boys", "admin-girls", "teacher", "admin-observer", "driver", "developer", "superadmin"];
-      if (validRoles.includes(role)) {
+      
+      // If we have a saved role, validate it against the profile role
+      if (savedRole && validRoles.includes(savedRole)) {
+        // Validation: A student cannot be an admin, etc.
+        const isAdminProfile = userProfile.role === 'admin' || userProfile.role === 'developer' || userProfile.role === 'superadmin' || isDevEmail;
+        const isTeacherProfile = userProfile.role === 'teacher';
+        const isParentProfile = userProfile.role === 'parent';
+        const isDriverProfile = userProfile.role === 'driver';
+
+        if (savedRole.startsWith('admin') && !isAdminProfile) {
+           setPortalType('student');
+           safeStorage.removeItem("bayraq_user_role");
+        } else if (savedRole === 'teacher' && !isTeacherProfile && !isAdminProfile) {
+           setPortalType('student');
+           safeStorage.removeItem("bayraq_user_role");
+        } else {
+           setPortalType(savedRole as any);
+        }
+      } else if (validRoles.includes(role)) {
         setPortalType(role as any);
       }
     }
@@ -691,7 +727,11 @@ export default function App() {
 
   // Fetch active homework and competitions count for "Today's Tasks" card
   useEffect(() => {
-    const targetSchoolId = selectedSchoolId || "school1";
+    if (!selectedSchoolId && !userProfile?.schoolId) {
+      setTodayTasksCount(0);
+      return;
+    }
+    const targetSchoolId = selectedSchoolId || userProfile?.schoolId || "school1";
     try {
       const q = query(collection(db, "schools", targetSchoolId, "ai_materials"));
       const unsubscribe = onSnapshot(
@@ -1258,6 +1298,16 @@ export default function App() {
         }
 
         const profileData = docSnap.data();
+        
+        // Fix for users who were accidentally named 'الحساب الحالي' during the previous broken login state
+        if (profileData.fullName === 'الحساب الحالي' || profileData.name === 'الحساب الحالي') {
+          const betterName = user.displayName || user.email?.split('@')[0] || 'فارس بيرق';
+          updateDoc(docRef, { 
+            fullName: betterName,
+            name: betterName 
+          }).catch(console.error);
+        }
+
         setUserProfile({ uid: user.uid, ...profileData });
 
         if (profileData.isBanned) {
@@ -2010,6 +2060,7 @@ export default function App() {
           language={settings.language}
           user={user}
           userProfile={userProfile}
+          notifications={memoizedNotifications}
           onBack={() => {
             setIsChoosingSchool(false);
             setShowRoleSelectionModal(true);
@@ -2533,10 +2584,6 @@ export default function App() {
           return <DriverDashboard driverId={loggedInDriver?.id || "unknown"} routeId={loggedInDriver?.routeId || "unknown"} onBack={() => setActiveSection("hub")} />;
         }
 
-        if (isParentUser) {
-          return <ParentPortal studentName={userProfile?.name || "ولي أمر"} onBack={() => setActiveSection("hub")} />;
-        }
-        
         const currentSchool = allSchoolsList.find(
           (s) => s.id === selectedSchoolId,
         );
@@ -2579,7 +2626,7 @@ export default function App() {
                 >
                   <Bell size={20} className="text-white/60 group-hover:text-white transition-colors" />
                   {memoizedNotifications.filter((n) => !n.read).length > 0 && (
-                    <span className="absolute top-3 right-3 w-2.5 h-2.5 bg-red-500 rounded-full border-[1.5px] border-[#0A0F1D] animate-pulse" />
+                    <span className="absolute top-3 right-3 w-2.5 h-2.5 bg-amber-400 rounded-full border-[1.5px] border-[#0A0F1D] animate-pulse" />
                   )}
                 </button>
               </div>
@@ -3002,24 +3049,26 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* 3. الإشعارات */}
+                  {/* 3. الواجبات المدرسية */}
                   <div
-                    onClick={() => setIsNotificationDrawerOpen(true)}
+                    onClick={() => navigateToParentPlatform("homework")}
                     className="bg-[#0A0F1D] border border-amber-500/20 hover:border-amber-500/50 rounded-[1.5rem] p-4 flex flex-col justify-between relative overflow-hidden group transition-all cursor-pointer shadow-sm hover:shadow-[0_4px_25px_rgba(245,158,11,0.2)] active:scale-95 min-h-[110px]"
                   >
                     <div className="absolute left-0 top-0 w-24 h-full bg-gradient-to-r from-amber-500/10 to-transparent pointer-events-none" />
                     <div className="flex items-center justify-between w-full mb-2">
-                      <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping shadow-[0_0_8px_rgba(245,158,11,0.8)]" />
+                      <span className="text-[10px] font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20">
+                        المهام
+                      </span>
                       <div className="w-10 h-10 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 transition-transform">
-                        <Bell size={20} className="text-amber-400" />
+                        <Edit2 size={20} className="text-amber-400" />
                       </div>
                     </div>
                     <div className="text-right">
                       <span className="block text-sm font-black text-white group-hover:text-amber-300 transition-colors">
-                        الإشعارات والتعاميم 🔔
+                        الواجبات المدرسية 📝
                       </span>
                       <span className="block text-[10px] font-medium text-white/50 mt-0.5">
-                        التبليغات العاجلة من المدرسة
+                        متابعة الواجبات والأنشطة اليومية
                       </span>
                     </div>
                   </div>
@@ -3130,7 +3179,9 @@ export default function App() {
                     الواجبات اليومية
                   </span>
                   <span className="block text-sm sm:text-base font-black text-white">
-                    {todayTasksCount === null ? (
+                    {(!userProfile?.schoolId || !userProfile?.grade) ? (
+                      <span className="text-white/20 text-[10px] font-bold italic">سجل مدرستك</span>
+                    ) : todayTasksCount === null ? (
                       <span className="text-[10px] font-bold text-white/40 animate-pulse">جاري التحميل...</span>
                     ) : todayTasksCount > 0 ? (
                       <span className="text-amber-400 drop-shadow-sm">{todayTasksCount}</span>
@@ -3155,7 +3206,7 @@ export default function App() {
                     الفرسان المتصلين
                   </span>
                   <span className="block text-sm sm:text-base font-black text-white">
-                    {activeKnightsCount || 1}
+                    {(!userProfile?.grade) ? "٠" : (activeKnightsCount || 1)}
                   </span>
                 </div>
                 <div className="w-10 h-10 rounded-2xl bg-orange-500/5 border border-orange-500/10 flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 group-active:scale-95 transition-transform ml-2">
@@ -3174,7 +3225,7 @@ export default function App() {
                     تتويجات الصف
                   </span>
                   <span className="block text-sm sm:text-base font-black text-indigo-400">
-                    السيادة
+                    {(!userProfile?.grade) ? "قريباً" : "السيادة"}
                   </span>
                 </div>
                 <div className="w-10 h-10 rounded-2xl bg-indigo-500/5 border border-indigo-500/10 flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 group-active:scale-95 transition-transform ml-2">
@@ -3190,7 +3241,7 @@ export default function App() {
                     الرتبة الحالية
                   </span>
                   <span className="block text-sm sm:text-base font-black text-[#D4AF37] truncate">
-                    بطل بيرق
+                    {(!userProfile?.grade) ? "فارس جديد" : "بطل بيرق"}
                   </span>
                 </div>
                 <div className="w-10 h-10 rounded-2xl bg-[#D4AF37]/5 border border-[#D4AF37]/10 flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 transition-transform ml-2">
@@ -3209,7 +3260,7 @@ export default function App() {
                     ترتيبك بين زملائك
                   </span>
                   <span className="block text-sm sm:text-base font-black text-amber-300 truncate">
-                    المركز #2 🥈
+                    {(!userProfile?.grade) ? "غير محدد" : "المركز #2 🥈"}
                   </span>
                 </div>
                 <div className="w-10 h-10 rounded-2xl bg-amber-500/5 border border-amber-500/10 flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 group-active:scale-95 transition-transform ml-2">
@@ -3238,7 +3289,7 @@ export default function App() {
                     آخر درس قرأته
                   </span>
                   <span className="block text-xs sm:text-sm font-black text-cyan-300 truncate">
-                    {safeStorage.getItem("s6_last_read_file_name") || "الوحدة الأولى: المفاهيم الرقمية"}
+                    {(!userProfile?.grade) ? "لم تبدأ بعد" : (safeStorage.getItem("s6_last_read_file_name") || "الوحدة الأولى: المفاهيم الرقمية")}
                   </span>
                 </div>
                 <div className="w-10 h-10 rounded-2xl bg-cyan-500/5 border border-cyan-500/10 flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 group-active:scale-95 transition-transform ml-2">
@@ -3853,6 +3904,7 @@ export default function App() {
             language={settings.language}
             user={user}
             userProfile={userProfile}
+            notifications={memoizedNotifications}
             onBack={() => {
               setIsChoosingSchool(false);
               setShowRoleSelectionModal(true);
@@ -4056,17 +4108,25 @@ export default function App() {
                     return { ...prev, role: isRoleAdmin ? "admin" : role, adminBranch: branch, isAdmin: isRoleAdmin };
                   });
 
-                  // Update Firestore safely
+                  // Update Firestore safely - only for non-admin roles unless already admin
                   if (user && user.uid) {
-                    const updateData: any = { role: isRoleAdmin ? "admin" : role };
-                    if (isRoleAdmin) {
-                      updateData.adminBranch = branch;
-                      updateData.isAdmin = true;
-                    }
-                    try {
-                      await setDoc(doc(db, "users", user.uid), updateData, { merge: true });
-                    } catch (err) {
-                      console.warn("Could not sync role to user doc:", err);
+                    const isDevEmail = userProfile?.email?.toLowerCase() === 'mntzralghanm527@gmail.com';
+                    const isAdminProfile = userProfile?.role === 'admin' || userProfile?.role === 'developer' || userProfile?.role === 'superadmin' || isDevEmail;
+                    
+                    if (isRoleAdmin && !isAdminProfile) {
+                      // Don't escalate to admin in Firestore if they aren't one.
+                      // Just let them view the UI path, the gateway will stop them anyway.
+                    } else {
+                      const updateData: any = { role: isRoleAdmin ? "admin" : role };
+                      if (isRoleAdmin) {
+                        updateData.adminBranch = branch;
+                        updateData.isAdmin = true;
+                      }
+                      try {
+                        await setDoc(doc(db, "users", user.uid), updateData, { merge: true });
+                      } catch (err) {
+                        console.warn("Could not sync role to user doc:", err);
+                      }
                     }
                   }
                 }}
@@ -4629,7 +4689,7 @@ export default function App() {
                     </button>
                   </div>
 
-                  {/* Nav: Knights Club / Hall of Fame / Admin Panel (Left) */}
+                  {/* Nav: Knights Club / Hall of Fame / Admin Panel / Parent Portal (Left) */}
                   {userProfile?.role === "admin" || userProfile?.role === "dev" ? (
                     <button
                       onClick={() => {
@@ -4645,6 +4705,24 @@ export default function App() {
                         className={`text-[9px] font-bold transition-all duration-300 ${activeSection === "admin-hub" && !isChoosingSchool ? "opacity-100 translate-y-0" : "opacity-0 translate-y-1 h-0 overflow-hidden"}`}
                       >
                         لوحة الإدارة
+                      </span>
+                    </button>
+                  ) : userProfile?.role === "parent" ? (
+                    <button
+                      onClick={() => {
+                        setActiveSection("school-content");
+                        setPortalType("parent");
+                      }}
+                      className={`flex-1 flex flex-col justify-center items-center h-full transition-all duration-300 ${activeSection === "school-content" && portalType === "parent" && !isChoosingSchool ? "text-amber-400" : "text-white/30 hover:text-white/60"}`}
+                    >
+                      <UserCircle
+                        size={activeSection === "school-content" && portalType === "parent" && !isChoosingSchool ? 22 : 20}
+                        className={`mb-0.5 transition-all duration-300 ${activeSection === "school-content" && portalType === "parent" && !isChoosingSchool ? "drop-shadow-[0_0_8px_rgba(251,191,36,0.5)] scale-110" : ""}`}
+                      />
+                      <span
+                        className={`text-[9px] font-bold transition-all duration-300 ${activeSection === "school-content" && portalType === "parent" && !isChoosingSchool ? "opacity-100 translate-y-0" : "opacity-0 translate-y-1 h-0 overflow-hidden"}`}
+                      >
+                        لوحة ولي الأمر
                       </span>
                     </button>
                   ) : (

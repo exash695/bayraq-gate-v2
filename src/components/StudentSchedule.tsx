@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, getDocs, onSnapshot } from '@/src/lib/firebase';
+import { collection, query, where, getDocs, onSnapshot } from '../lib/firebase';
 import { db } from '../lib/firebase';
 import { Calendar, MonitorPlay, Users, Shirt, Info, Sparkles, CheckCircle2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';

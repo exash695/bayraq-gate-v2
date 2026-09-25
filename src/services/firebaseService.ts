@@ -19,7 +19,7 @@ import { collection,
   orderBy,
   limit,
   DocumentData,
-  QueryConstraint } from '@/src/lib/firebase';
+  QueryConstraint } from '../lib/firebase';
 import { cacheService } from './cacheService';
 
 export class FirebaseService {

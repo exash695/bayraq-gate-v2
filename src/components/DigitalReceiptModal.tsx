@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { ShieldCheck, QrCode, Lock, Verified, Download, RefreshCw, CheckCircle2, X, ArrowRight } from 'lucide-react';
 import { db } from '../lib/firebase';
-import { collection, addDoc, doc, getDoc, updateDoc } from '@/src/lib/firebase';
+import { collection, addDoc, doc, getDoc, updateDoc } from '../lib/firebase';
 import { getOfficialSchoolLogoUrl, getOfficialSchoolName } from '../lib/constants';
 
 interface DigitalReceiptModalProps {

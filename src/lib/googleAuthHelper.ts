@@ -32,7 +32,7 @@ function loadGoogleGsiScript(): Promise<void> {
 
 /**
  * Prompts Google's native Account Chooser popup listing all user Gmail accounts.
- * Returns the verified email, name, photoURL, and Google UID.
+ * Uses the robust OAuth2 Token Client flow which is compatible with iframes and mobile devices.
  */
 export async function promptGoogleAccountPicker(): Promise<{ email: string; name?: string; photoURL?: string; uid: string }> {
   await loadGoogleGsiScript();
@@ -41,9 +41,11 @@ export async function promptGoogleAccountPicker(): Promise<{ email: string; name
     try {
       const google = (window as any).google;
       if (!google?.accounts?.oauth2) {
-        throw new Error('محرك حسابات Google غير متاح حالياً');
+        throw new Error('محرك حسابات Google غير متاح حالياً. يرجى إعادة تحميل الصفحة.');
       }
 
+      // Initialize the Token Client which opens a standard browser popup
+      // This flow is highly stable and bypasses the FedCM/Iframe constraints
       const client = google.accounts.oauth2.initTokenClient({
         client_id: GOOGLE_CLIENT_ID,
         scope: 'email profile openid',
@@ -51,44 +53,53 @@ export async function promptGoogleAccountPicker(): Promise<{ email: string; name
         callback: async (tokenResponse: any) => {
           if (tokenResponse.error) {
             if (tokenResponse.error === 'access_denied') {
-              return reject(new Error('تم إلغاء اختيار الحساب'));
+              return reject(new Error('تم إلغاء اختيار الحساب من قبل المستخدم'));
             }
-            return reject(new Error(`خطأ أثناء المصادقة عبر Google: ${tokenResponse.error}`));
+            return reject(new Error(`خطأ في مصادقة Google: ${tokenResponse.error}`));
           }
+
           if (tokenResponse.access_token) {
             try {
+              // Fetch user profile info using the access token
               const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
                 headers: { Authorization: `Bearer ${tokenResponse.access_token}` }
               });
+
               if (!userInfoRes.ok) {
-                throw new Error('فشل استرجاع بيانات الحساب من Google');
+                throw new Error('فشل استرجاع بيانات الحساب من خوادم Google');
               }
+
               const profile = await userInfoRes.json();
+              
               if (!profile.email) {
-                throw new Error('لم يتم العثور على بريد إلكتروني في حساب Google المختار');
+                throw new Error('لم يتم العثور على بريد إلكتروني في الحساب المختار');
               }
+
               return resolve({
                 email: profile.email.trim().toLowerCase(),
                 name: profile.name || profile.given_name || profile.email.split('@')[0],
                 photoURL: profile.picture || undefined,
                 uid: profile.sub || `g_${Date.now()}`
               });
-            } catch (fetchErr: any) {
-              return reject(fetchErr);
+            } catch (err: any) {
+              console.error('Error fetching Google user profile:', err);
+              return reject(new Error('حدث خطأ أثناء استلام بيانات الحساب من Google'));
             }
           }
-          return reject(new Error('لم يتم استرجاع تفويض صالح من Google'));
+          
+          return reject(new Error('فشل استلام تفويض صالح من Google'));
         },
-        error_callback: (nonOAuthError: any) => {
-          if (nonOAuthError?.type === 'popup_closed') {
-            return reject(new Error('تم إلغاء اختيار الحساب'));
-          }
-          return reject(new Error('تعذر فتح نافذة اختيار حساب Google'));
+        error_callback: (err: any) => {
+          console.error('GSI Popup Error:', err);
+          reject(new Error('فشل فتح نافذة تسجيل الدخول. يرجى التأكد من عدم حظر النوافذ المنبثقة.'));
         }
       });
 
-      client.requestAccessToken({ prompt: 'select_account' });
+      // Request the access token - this will open the native Google Account Picker popup
+      client.requestAccessToken();
+
     } catch (err: any) {
+      console.error('Google Auth Initialization Error:', err);
       reject(err);
     }
   });

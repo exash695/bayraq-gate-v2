@@ -12,7 +12,7 @@ import { collection,
   getDoc,
   setDoc,
   deleteDoc,
-  writeBatch } from '@/src/lib/firebase';
+  writeBatch } from '../lib/firebase';
 import { db } from '../lib/firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { logActivity } from '../utils/auditLogger';

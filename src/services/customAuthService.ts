@@ -212,6 +212,41 @@ class CustomAuthService {
     return this.loginWithEmail(email, password);
   }
 
+  public async registerPhoneRequest(phone: string, name: string, password: string, schoolId: string): Promise<{
+    success: boolean;
+    message: string;
+    tempId?: string;
+    whatsappLink?: string;
+    gatewaySent?: boolean;
+  }> {
+    const res = await fetch(resolveApiUrl('/api/auth/register-phone/request'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone, fullName: name, password, schoolId })
+    });
+    const data = await res.json();
+    if (!data.success) {
+      throw new Error(data.message || 'فشل طلب التسجيل برقم الهاتف');
+    }
+    return data;
+  }
+
+  public async registerPhoneVerify(tempId: string, otp: string): Promise<CustomUser> {
+    const res = await fetch(resolveApiUrl('/api/auth/register-phone/verify'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tempId, otp })
+    });
+    const data = await res.json();
+    if (!data.success) {
+      throw new Error(data.message || 'فشل تفعيل الحساب');
+    }
+    localStorage.setItem(this.tokenKey, data.token);
+    this.currentUser = data.user;
+    this.notifyListeners();
+    return data.user;
+  }
+
   public async loginWithGoogle(email?: string, name?: string, photoURL?: string): Promise<CustomUser> {
     let res: Response;
     try {

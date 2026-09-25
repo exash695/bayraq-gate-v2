@@ -4,4 +4,5 @@
     <string name="title_activity_main">بوابة بيرق</string>
     <string name="package_name">com.bairaq.gate6</string>
     <string name="custom_url_scheme">com.bairaq.gate6</string>
+    <string name="server_client_id">728585268376-hf25klmd55cjomn0cuhso6qno10gn977.apps.googleusercontent.com</string>
 </resources>

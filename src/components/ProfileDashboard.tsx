@@ -1,7 +1,7 @@
 import React, { useRef } from 'react';
 import { motion } from 'motion/react';
 import { auth, db } from '../lib/firebase';
-import { doc, updateDoc } from '@/src/lib/firebase';
+import { doc, updateDoc } from '../lib/firebase';
 import { customAuth } from '../services/customAuthService';
 import { Flame, Shield, Flag, Award, BookOpen, Target, Trophy, Crosshair, Lock as LockIcon, Hourglass, Gem, ScrollText, PenLine, LogOut, Camera } from 'lucide-react';
 import { UserProgress, Badge } from '../types';

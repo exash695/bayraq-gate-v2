@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { db, auth } from '../lib/firebase';
-import { collection, addDoc, serverTimestamp, query, where, onSnapshot, orderBy, updateDoc, doc, deleteDoc } from '@/src/lib/firebase';
+import { collection, addDoc, serverTimestamp, query, where, onSnapshot, orderBy, updateDoc, doc, deleteDoc } from '../lib/firebase';
 import { ShieldAlert, X, MessageSquare, History, Send, Bell, Trash2 } from 'lucide-react';
 import { AppNotification } from '../types';
 import { ConfirmDialog } from './ConfirmDialog';

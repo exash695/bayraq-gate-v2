@@ -4,7 +4,7 @@ import { motion } from 'motion/react';
 import { useCachedMedia } from '../hooks/useCachedMedia';
 import { getInMemoryCachedUrl } from '../utils/imageCacher';
 import { db } from '../lib/firebase';
-import { doc, getDoc, onSnapshot } from '@/src/lib/firebase';
+import { doc, getDoc, onSnapshot } from '../lib/firebase';
 import { resolveApiUrl } from '../lib/serverConfig';
 
 // Berq Debug Store for UI Inspection

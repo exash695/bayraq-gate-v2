@@ -1,6 +1,6 @@
 import { safeStorage } from "../lib/storage";
 import React, { useState, useEffect, useMemo } from 'react';
-import { collection, query, getDocs, updateDoc, doc, deleteDoc, addDoc, serverTimestamp, orderBy, where, getDoc, getDocFromCache, writeBatch, onSnapshot, setDoc, limit, startAfter, getCountFromServer } from '@/src/lib/firebase';
+import { collection, query, getDocs, updateDoc, doc, deleteDoc, addDoc, serverTimestamp, orderBy, where, getDoc, getDocFromCache, writeBatch, onSnapshot, setDoc, limit, startAfter, getCountFromServer } from '../lib/firebase';
 import { db, auth } from '../lib/firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { academicService } from '../services/academicService';

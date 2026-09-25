@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc } from '@/src/lib/firebase';
+import { collection, query, where, onSnapshot, addDoc, serverTimestamp, deleteDoc, doc } from '../lib/firebase';
 import { db } from '../lib/firebase';
 import { FileText, Plus, Trash2, Calendar, Save, X, Image as ImageIcon, CheckCircle, Loader, Filter, Maximize2, ArrowRight } from 'lucide-react';
 import { uploadFileToR2 } from '../services/uploadService';

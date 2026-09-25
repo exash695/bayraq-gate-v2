@@ -41,7 +41,7 @@ import {
   Send
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
-import { doc, onSnapshot, collection, query, where, orderBy, limit, updateDoc, addDoc, serverTimestamp } from '@/src/lib/firebase';
+import { doc, onSnapshot, collection, query, where, orderBy, limit, updateDoc, addDoc, serverTimestamp } from '../lib/firebase';
 import { academicService } from '../services/academicService';
 import { supportService } from '../services/supportService';
 import { ideaService } from '../services/ideaService';

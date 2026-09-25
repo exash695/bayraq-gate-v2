@@ -1,3 +1,4 @@
+import * as FirebaseMock from "../lib/firebase"; const { db, auth, collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit, serverTimestamp, getDocs, getDoc, getDocFromServer, getDocFromCache, increment, arrayUnion, arrayRemove, writeBatch, runTransaction, purgeFirestore, getStorage, ref, deleteObject } = FirebaseMock;
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -7,12 +8,6 @@ import {
   Play, Download, Sparkles, LayoutGrid, List, ChevronRight, HelpCircle,
   TrendingUp, Users, MessageCircle, AlertCircle, Bookmark, Check
 } from 'lucide-react';
-import { db } from '../lib/firebase';
-import { 
-  collection, query, onSnapshot, deleteDoc, doc, orderBy, 
-  serverTimestamp, getDocs, where 
-} from '@/src/lib/firebase';
-import { getStorage, ref, deleteObject } from '@/src/lib/firebase';
 import { logActivity } from '../utils/auditLogger';
 import { staffService } from '../services/staffService';
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc, writeBatch, where } from '@/src/lib/firebase';
+import { collection, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc, writeBatch, where } from '../lib/firebase';
 import { db } from '../lib/firebase';
 import { ClipboardCheck, Search, CheckCircle, XCircle, Trophy, User, Calendar, MessageSquare, Send, Sparkles, Trash2, AlertTriangle, ExternalLink, Image as ImageIcon } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';

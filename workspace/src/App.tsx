@@ -1,23 +1,54 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { ROLES, UserRole } from './types';
 import { StudentHome } from './components/StudentHome';
 import { TeacherHome } from './components/TeacherHome';
 import { ParentHome } from './components/ParentHome';
 import { AdminHome } from './components/AdminHome';
-import { GraduationCap, BookOpen, Users, ShieldAlert, Bell, Search, User, Sparkles, School, Settings, X, Check } from 'lucide-react';
+import { Login } from './components/Login';
+import { customAuth, User } from './services/customAuthService';
+import { GraduationCap, BookOpen, Users, ShieldAlert, Bell, Search, User as UserIcon, Sparkles, School, Settings, X, Check, LogOut } from 'lucide-react';
 
 export function App() {
-  const [activeRole, setActiveRole] = useState<UserRole>(() => {
-    const saved = localStorage.getItem('school_active_role');
-    return (saved as UserRole) || 'admin';
-  });
-
+  const [user, setUser] = useState<User | null>(null);
+  const [isInitializing, setIsInitializing] = useState(true);
+  const [activeRole, setActiveRole] = useState<UserRole>('admin');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  useEffect(() => {
+    const initAuth = async () => {
+      await customAuth.ensureAuthReady();
+      const currentUser = customAuth.getCurrentUser();
+      if (currentUser) {
+        setUser(currentUser);
+        const savedRole = localStorage.getItem('school_active_role');
+        setActiveRole((savedRole as UserRole) || currentUser.role);
+      }
+      setIsInitializing(false);
+    };
+    initAuth();
+  }, []);
 
   const handleRoleChange = (role: UserRole) => {
     setActiveRole(role);
     localStorage.setItem('school_active_role', role);
   };
+
+  const handleLogout = () => {
+    customAuth.logout();
+    setUser(null);
+  };
+
+  if (isInitializing) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Login onLoginSuccess={() => setUser(customAuth.getCurrentUser())} />;
+  }
 
   const renderRoleComponent = () => {
     switch (activeRole) {
@@ -92,19 +123,29 @@ export function App() {
               <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full"></span>
             </button>
 
-            <div className="flex items-center gap-3 pr-3 border-r border-slate-200">
-              <div className="w-10 h-10 rounded-xl bg-slate-200 flex items-center justify-center text-slate-700 font-bold">
-                <User className="w-5 h-5" />
+            <div className="flex items-center gap-3 pr-3 border-r border-slate-200 group relative">
+              <div className="w-10 h-10 rounded-xl overflow-hidden bg-slate-200 flex items-center justify-center text-slate-700 font-bold border-2 border-transparent group-hover:border-blue-500 transition-all">
+                {user?.photoURL ? (
+                  <img src={user.photoURL} alt={user.name} className="w-full h-full object-cover" />
+                ) : (
+                  <UserIcon className="w-5 h-5" />
+                )}
               </div>
               <div className="hidden sm:block text-right">
-                <div className="text-sm font-bold text-slate-900">
-                  {activeRole === 'student' && 'أحمد محمد (طالب)'}
-                  {activeRole === 'teacher' && 'أ. خالد الزهراني (معلم)'}
-                  {activeRole === 'parent' && 'أ. محمد عبدالله (ولي أمر)'}
-                  {activeRole === 'admin' && 'د. إبراهيم السعيد (المدير)'}
+                <div className="text-sm font-bold text-slate-900 line-clamp-1">
+                  {user?.name || 'مستخدم'}
                 </div>
-                <div className="text-xs text-slate-500">متصل الآن</div>
+                <div className="text-xs text-slate-500">{activeRole === 'admin' ? 'مدير النظام' : 'نشط الآن'}</div>
               </div>
+
+              {/* Logout Tooltip/Dropdown */}
+              <button 
+                onClick={handleLogout}
+                className="p-2 mr-2 bg-rose-50 text-rose-600 rounded-lg hover:bg-rose-100 transition-colors"
+                title="تسجيل الخروج"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
             </div>
           </div>
         </div>

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { doc, getDoc, setDoc } from '@/src/lib/firebase';
+import { doc, getDoc, setDoc } from '../lib/firebase';
 import { db } from '../lib/firebase';
 import { Save, Plus, Trash2 } from 'lucide-react';
 import { safeStorage, safeSessionStorage } from '../lib/storage';

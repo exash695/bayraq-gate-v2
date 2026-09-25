@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { doc, onSnapshot } from '@/src/lib/firebase';
+import { doc, onSnapshot } from '../lib/firebase';
 import { db } from '../lib/firebase';
 import { getSubjectsForGrade } from '../utils/studentUtils';
 

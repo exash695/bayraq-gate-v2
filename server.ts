@@ -8238,9 +8238,10 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
   app.post('/api/auth/login', async (req, res) => {
     try {
       const { email, password } = req.body;
+      const identifier = (email || '').toLowerCase().trim();
 
       // Security check: Active Bans & Rate Limiting
-      const securityCheck = await checkSecurityBanOrLock(req, email);
+      const securityCheck = await checkSecurityBanOrLock(req, identifier);
       if (securityCheck.blocked) {
         return res.status(securityCheck.status || 403).json({
           success: false,
@@ -8253,11 +8254,15 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
       const incomingDeviceId = (req.body?.deviceId || (req.headers['x-device-id'] as string) || '').trim();
       const secSettings = await getSecuritySettings();
       const allowMulti = secSettings.allowMultiDeviceLogin !== false;
-      const isDeveloperAccount = DEVELOPER_EMAILS.includes((email || '').toLowerCase().trim());
+      const isDeveloperAccount = DEVELOPER_EMAILS.includes(identifier);
 
       let userList: any[] = [];
       try {
-        userList = await db.select().from(users).where(eq(users.email, email));
+        const cleanPhone = formatPhoneForWhatsApp(identifier);
+        userList = await db.select().from(users).where(or(
+          eq(users.email, identifier),
+          eq(users.phone, cleanPhone)
+        ));
       } catch (dbErr) {
         console.warn("DB select failed during login:", dbErr);
       }
@@ -8269,7 +8274,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
           const devHash = await bcrypt.hash(password || '12345678', 10);
           const devUser = {
             id: 'dev_mntzr_main',
-            email: email.toLowerCase().trim(),
+            email: identifier.includes('@') ? identifier : `phone_${identifier.replace(/\+/g, '')}@bairaq-gate.local`,
             name: 'المهندس منتظر (المطور العام)',
             passwordHash: devHash,
             role: 'developer',
@@ -8283,7 +8288,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
           }
           user = devUser;
         } else {
-          await recordFailedAuthAttempt(req, email);
+          await recordFailedAuthAttempt(req, identifier);
           return res.status(401).json({ success: false, message: 'Invalid credentials' });
         }
       } else {
@@ -8296,7 +8301,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
             } catch (upErr) {}
             user.role = 'developer';
           } else {
-            await recordFailedAuthAttempt(req, email);
+            await recordFailedAuthAttempt(req, identifier);
             return res.status(401).json({ success: false, message: 'Invalid credentials' });
           }
         }
@@ -8732,7 +8737,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
       const recipientPhone = formatPhoneForWhatsApp(targetUser.phone || identifier);
 
       // 5. Retrieve support WhatsApp number from settings
-      let supportWhatsapp = '+9647700000000';
+      let supportWhatsapp = '07817912921';
       try {
         if (fs.existsSync(SETTINGS_FILE_PATH)) {
           const raw = fs.readFileSync(SETTINGS_FILE_PATH, 'utf8');
@@ -8857,7 +8862,167 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
   });
 
   
-  // Lounge Messages
+  // --- 10. Phone Registration Module ---
+  
+  // POST /api/auth/register-phone/request
+  app.post('/api/auth/register-phone/request', async (req, res) => {
+    try {
+      const { phone, fullName, password, schoolId } = req.body;
+      if (!phone || !fullName || !password) {
+        return res.status(400).json({ success: false, message: 'جميع الحقول (الاسم، الهاتف، كلمة المرور) مطلوبة' });
+      }
+
+      const cleanPhone = formatPhoneForWhatsApp(phone);
+      const placeholderEmail = `phone_${cleanPhone.replace(/\+/g, '')}@bairaq-gate.local`;
+      
+      // Check if user already exists
+      const existingUser = await db.select().from(users).where(or(
+        eq(users.phone, cleanPhone),
+        eq(users.email, placeholderEmail)
+      )).limit(1);
+
+      const otp = Math.floor(100000 + Math.random() * 900000).toString();
+      const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+      const passwordHash = await bcrypt.hash(password, 10);
+
+      let tempId: string;
+
+      if (existingUser.length > 0) {
+        const user = existingUser[0];
+        // If user is already active (has password but no OTP, or ID doesn't start with pending_)
+        // Actually, let's check if they are "pending" by looking at the ID prefix we use
+        if (!user.id.startsWith('pending_')) {
+          return res.status(400).json({ success: false, message: 'هذا الرقم مسجل بالفعل مسبقاً' });
+        }
+        
+        // Update existing pending user
+        tempId = user.id;
+        await db.update(users).set({
+          name: fullName,
+          passwordHash: passwordHash,
+          whatsappOtp: otp,
+          whatsappOtpExpires: otpExpires,
+        }).where(eq(users.id, tempId));
+      } else {
+        // Create new temp user
+        tempId = `pending_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
+        await db.insert(users).values({
+          id: tempId,
+          name: fullName,
+          email: placeholderEmail,
+          phone: cleanPhone,
+          passwordHash: passwordHash,
+          role: 'student',
+          schoolId: schoolId || 'general',
+          whatsappOtp: otp,
+          whatsappOtpExpires: otpExpires
+        });
+      }
+
+      // WhatsApp logic (Same as recovery)
+      const recipientPhone = formatPhoneForWhatsApp(cleanPhone);
+      let supportWhatsapp = '07817912921';
+      try {
+        if (fs.existsSync(SETTINGS_FILE_PATH)) {
+          const raw = fs.readFileSync(SETTINGS_FILE_PATH, 'utf8');
+          const parsed = JSON.parse(raw);
+          if (parsed?.app_updates?.supportWhatsapp) {
+            supportWhatsapp = parsed.app_updates.supportWhatsapp;
+          } else if (parsed?.school_info?.adminWhatsapp) {
+            supportWhatsapp = parsed.school_info.adminWhatsapp;
+          }
+        }
+      } catch (e) {}
+
+      const cleanSupportPhone = formatPhoneForWhatsApp(supportWhatsapp).replace(/[^0-9]/g, '');
+      const waMessage = `كود تفعيل حسابك في بوابة بيرق هو: ${otp}\nالاسم: ${fullName}`;
+      const whatsappDirectLink = `https://wa.me/${cleanSupportPhone}?text=${encodeURIComponent(waMessage)}`;
+
+      let gatewaySent = false;
+      const waApiUrl = process.env.WHATSAPP_API_URL || process.env.ULTRAMSG_API_URL;
+      const waToken = process.env.WHATSAPP_TOKEN || process.env.ULTRAMSG_TOKEN;
+      const waInstanceId = process.env.WHATSAPP_INSTANCE_ID || process.env.ULTRAMSG_INSTANCE_ID;
+
+      if (waApiUrl || (waInstanceId && waToken)) {
+        try {
+          const endpoint = waApiUrl || `https://api.ultramsg.com/${waInstanceId}/messages/chat`;
+          await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              token: waToken,
+              to: recipientPhone,
+              body: `مرحباً بك في بوابة بيرق 🛡️\nكود تفعيل حسابك الجديد هو: *${otp}*\n(صالح لمدة 10 دقائق)`
+            })
+          });
+          gatewaySent = true;
+        } catch (e) {}
+      }
+
+      return res.json({
+        success: true,
+        message: 'تم إرسال كود التفعيل بنجاح',
+        tempId,
+        whatsappLink: whatsappDirectLink,
+        gatewaySent
+      });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // POST /api/auth/register-phone/verify
+  app.post('/api/auth/register-phone/verify', async (req, res) => {
+    try {
+      const { tempId, otp } = req.body;
+      if (!tempId || !otp) {
+        return res.status(400).json({ success: false, message: 'كود التفعيل مطلوب' });
+      }
+
+      const userList = await db.select().from(users).where(eq(users.id, tempId)).limit(1);
+      if (userList.length === 0) {
+        return res.status(404).json({ success: false, message: 'طلب التسجيل غير موجود أو انتهت صلاحيته' });
+      }
+
+      const user = userList[0];
+      if (user.whatsappOtp !== String(otp).trim()) {
+        return res.status(400).json({ success: false, message: 'كود التفعيل غير صحيح' });
+      }
+
+      if (user.whatsappOtpExpires && new Date(user.whatsappOtpExpires) < new Date()) {
+        return res.status(400).json({ success: false, message: 'انتهت صلاحية الكود. يرجى إعادة المحاولة.' });
+      }
+
+      // Finalize registration
+      await db.update(users).set({
+        whatsappOtp: null,
+        whatsappOtpExpires: null
+      }).where(eq(users.id, tempId));
+
+      const token = jwt.sign({ 
+        id: tempId, 
+        uid: tempId,
+        name: user.name, 
+        role: user.role, 
+        schoolId: user.schoolId 
+      }, JWT_SECRET, { expiresIn: '30d' });
+
+      res.json({
+        success: true,
+        message: 'تم تفعيل الحساب بنجاح',
+        token,
+        user: {
+          id: tempId,
+          uid: tempId,
+          name: user.name,
+          role: user.role,
+          schoolId: user.schoolId
+        }
+      });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
   
   app.get('/api/lounge-messages/unread/:uid', async (req, res) => {
     try {

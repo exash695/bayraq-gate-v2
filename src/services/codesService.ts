@@ -8,7 +8,7 @@ import { collection,
   where, 
   Timestamp,
   orderBy,
-  onSnapshot } from '@/src/lib/firebase';
+  onSnapshot } from '../lib/firebase';
 import { db } from '../lib/firebase';
 
 export interface SubscriptionCode {

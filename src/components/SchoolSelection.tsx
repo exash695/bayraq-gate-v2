@@ -44,6 +44,7 @@ interface SchoolSelectionProps {
   onNavigateHome?: () => void;
   onNavigateHallOfFame?: () => void;
   onOpenNotifications?: () => void;
+  notifications?: any[];
 }
 
 interface SchoolThemeConfig {
@@ -334,7 +335,8 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
   userProfile,
   onNavigateHome,
   onNavigateHallOfFame,
-  onOpenNotifications
+  onOpenNotifications,
+  notifications = []
 }) => {
   const appLogo = useAppLogo();
   const [apiSchools, setApiSchools] = useState<SchoolRecord[]>([]);
@@ -633,7 +635,9 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
             >
               <Bell size={18} />
               {/* Notification indicator dot */}
-              <span className="absolute top-2.5 left-2.5 w-2 h-2 rounded-full bg-[#FFD600] shadow-[0_0_8px_#FFD600]" />
+              {notifications.filter(n => !n.read).length > 0 && (
+                <span className="absolute top-2.5 left-2.5 w-2 h-2 rounded-full bg-[#FFD600] shadow-[0_0_8px_#FFD600]" />
+              )}
             </button>
           </div>
 

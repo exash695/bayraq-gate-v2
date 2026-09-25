@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { collection, query, orderBy, limit, onSnapshot, deleteDoc, doc } from '@/src/lib/firebase';
+import { collection, query, orderBy, limit, onSnapshot, deleteDoc, doc } from '../lib/firebase';
 import { db } from '../lib/firebase';
 
 export const BroadcastTabTest = () => {

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { User, MapPin, ShieldCheck, ChevronLeft } from 'lucide-react';
-import { doc, setDoc } from '@/src/lib/firebase';
+import { doc, setDoc } from '../lib/firebase';
 import { db } from '../lib/firebase';
 
 const iraqGovernorates = [

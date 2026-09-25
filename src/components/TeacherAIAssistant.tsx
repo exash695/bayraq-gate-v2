@@ -12,7 +12,7 @@ import { BerqCharacter } from './BerqCharacterManager';
 import { useRemoteConfig } from '../services/remoteConfig';
 import { safeStorage } from '../lib/storage';
 import { db } from '../lib/firebase';
-import { collection, addDoc, serverTimestamp, getDocs, query, where, deleteDoc, doc } from '@/src/lib/firebase';
+import { collection, addDoc, serverTimestamp, getDocs, query, where, deleteDoc, doc } from '../lib/firebase';
 
 interface TeacherAIAssistantProps {
   schoolId: string;

@@ -14,6 +14,11 @@ const config = {
   plugins: {
     CapacitorHttp: {
       enabled: true
+    },
+    GoogleAuth: {
+      scopes: ['profile', 'email'],
+      serverClientId: '728585268376-hf25klmd55cjomn0cuhso6qno10gn977.apps.googleusercontent.com',
+      forceCodeForRefreshToken: true
     }
   },
   android: {

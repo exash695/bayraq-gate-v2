@@ -3,7 +3,7 @@ import { academicService, AcademicList, SchoolStudent } from '../services/academ
 import { staffService } from '../services/staffService';
 import { subscribeToPendingPayments, StudentPayment } from '../services/financeService';
 import { auth, db } from '../lib/firebase';
-import { doc, getDoc, getDocFromCache } from '@/src/lib/firebase';
+import { doc, getDoc, getDocFromCache } from '../lib/firebase';
 import { safeStorage } from '../lib/storage';
 import { realtimeManager } from '../lib/realtimeManager';
 

@@ -1,4 +1,4 @@
-import { collection, onSnapshot } from '@/src/lib/firebase';
+import { collection, onSnapshot } from '../lib/firebase';
 import { db } from '../lib/firebase';
 import { safeStorage } from '../lib/storage';
 
