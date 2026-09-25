@@ -141,6 +141,7 @@ class PushNotificationManager {
     if ('serviceWorker' in navigator) {
       try {
         const registration = await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+        registration.update().catch(() => {});
         console.log("[PushManager] Web Service Worker registered successfully with scope:", registration.scope);
       } catch (swErr) {
         console.warn("[PushManager] Service Worker registration failed:", swErr);
