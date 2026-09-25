@@ -17,13 +17,34 @@
     <link rel="apple-touch-icon" sizes="180x180" href="/logo.png" />
     <link rel="manifest" href="/manifest.json" />
     <style>
-      html, body, #root {
+      html {
         background-color: #020617 !important;
         color: #ffffff;
         margin: 0;
         padding: 0;
+        width: 100%;
+        min-height: 100%;
+        overflow-x: hidden;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        touch-action: pan-y pinch-zoom;
+      }
+      body {
+        background-color: #020617 !important;
+        color: #ffffff;
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        min-height: 100vh;
+        overflow-x: hidden;
+        -webkit-overflow-scrolling: touch;
+        touch-action: pan-y pinch-zoom;
+      }
+      #root {
         min-height: 100vh;
         width: 100%;
+        display: flex;
+        flex-direction: column;
         overflow-x: hidden;
       }
     </style>

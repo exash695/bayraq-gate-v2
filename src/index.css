@@ -107,16 +107,24 @@
     --theme-glow: rgba(255, 0, 119, 0.5);
   }
 
+html {
+  touch-action: pan-y pinch-zoom;
+  -webkit-overflow-scrolling: touch;
+}
+
 body {
-  @apply bg-[#020617] text-white font-sans antialiased overflow-x-hidden transition-colors duration-500;
+  @apply bg-[#020617] text-white font-sans antialiased transition-colors duration-500;
   direction: rtl;
   min-height: 100vh;
+  width: 100%;
   padding: 0;
   margin: 0;
   box-sizing: border-box;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  touch-action: manipulation;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y pinch-zoom;
+  overflow-x: hidden;
 }
 
 @media (min-width: 1024px) {

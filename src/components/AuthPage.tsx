@@ -145,31 +145,31 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onOpenPrivacy }) => {
   }
 
   return (
-    <div className="relative min-h-screen flex flex-col items-center justify-center p-6 md:p-12 overflow-hidden bg-[#020617] text-right font-sans" dir="rtl">
+    <div className="relative min-h-screen w-full flex flex-col items-center justify-start py-8 sm:py-12 px-4 sm:px-6 md:py-16 overflow-y-auto overflow-x-hidden bg-[#020617] text-right font-sans" dir="rtl">
       
       {/* Background Splashes & Effects */}
-      <div className="absolute inset-0 bg-gradient-to-br from-[#020617] via-[#0A1024] to-[#050A18] pointer-events-none" />
+      <div className="fixed inset-0 bg-gradient-to-br from-[#020617] via-[#0A1024] to-[#050A18] pointer-events-none" />
       
       {/* Starry Tech Nodes Effect */}
-      <div className="absolute inset-0 z-0 pointer-events-none opacity-10" 
+      <div className="fixed inset-0 z-0 pointer-events-none opacity-10" 
            style={{ 
              backgroundImage: 'radial-gradient(circle at center, rgba(212,175,55,0.8) 1px, transparent 1px)', 
              backgroundSize: '40px 40px',
              backgroundPosition: '0 0, 20px 20px'
            }} 
       />
-      <div className="absolute inset-0 z-0 pointer-events-none bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#D4AF37]/15 via-transparent to-transparent opacity-80" />
+      <div className="fixed inset-0 z-0 pointer-events-none bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-[#D4AF37]/15 via-transparent to-transparent opacity-80" />
       
       {/* Dynamic Glow Orbs */}
-      <div className="absolute top-[-10%] right-[-10%] w-[40%] h-[40%] bg-[#D4AF37]/10 blur-[120px] rounded-full pointer-events-none" />
-      <div className="absolute bottom-[-10%] left-[-10%] w-[40%] h-[40%] bg-[#00E5FF]/5 blur-[120px] rounded-full pointer-events-none" />
+      <div className="fixed top-[-10%] right-[-10%] w-[40%] h-[40%] bg-[#D4AF37]/10 blur-[120px] rounded-full pointer-events-none" />
+      <div className="fixed bottom-[-10%] left-[-10%] w-[40%] h-[40%] bg-[#00E5FF]/5 blur-[120px] rounded-full pointer-events-none" />
 
-      {/* Main Content Container - Edge to Edge Feel */}
+      {/* Main Content Container - Edge to Edge Feel with natural vertical scrolling */}
       <motion.div 
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-        className="relative z-10 w-full max-w-md flex flex-col items-center justify-center"
+        className="relative z-10 w-full max-w-md flex flex-col items-center justify-center my-auto pb-8"
       >
         {/* Header Section */}
         <motion.div 
