@@ -74,14 +74,18 @@ export const RoleSelectionModal: React.FC<RoleSelectionModalProps> = ({ onSelect
   ];
 
   return (
-    <div className="fixed inset-0 z-[99999] flex flex-col items-center justify-start p-4 py-8 sm:py-12 bg-[#02050F]/95 backdrop-blur-xl overflow-y-auto overflow-x-hidden" dir="rtl">
+    <div 
+      className="fixed inset-0 z-[99999] flex flex-col items-center justify-start p-4 py-6 sm:py-12 bg-[#02050F]/95 backdrop-blur-xl overflow-y-auto overflow-x-hidden" 
+      dir="rtl"
+      style={{ WebkitOverflowScrolling: "touch", touchAction: "pan-y" }}
+    >
       <div className="fixed inset-0 bg-gradient-to-tr from-indigo-950/40 via-transparent to-amber-950/30 pointer-events-none" />
       
       <motion.div
         initial={{ opacity: 0, scale: 0.9, y: 20 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
         transition={{ duration: 0.4, ease: "easeOut" }}
-        className="relative w-full max-w-xl bg-[#0A0F1D]/90 border border-white/10 rounded-[2.5p] p-6 sm:p-8 shadow-[0_20px_60px_rgba(0,0,0,0.8)] backdrop-blur-2xl my-auto"
+        className="relative w-full max-w-xl bg-[#0A0F1D]/90 border border-white/10 rounded-[2.5rem] p-6 sm:p-8 shadow-[0_20px_60px_rgba(0,0,0,0.8)] backdrop-blur-2xl my-auto sm:my-auto"
         style={{ borderRadius: "2rem" }}
       >
         {/* Header */}

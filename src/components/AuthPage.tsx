@@ -145,7 +145,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onOpenPrivacy }) => {
   }
 
   return (
-    <div className="relative min-h-screen w-full flex flex-col items-center justify-start py-8 sm:py-12 px-4 sm:px-6 md:py-16 overflow-y-auto overflow-x-hidden bg-[#020617] text-right font-sans" dir="rtl">
+    <div className="relative min-h-screen w-full flex flex-col items-center justify-start py-8 sm:py-12 px-4 sm:px-6 bg-[#020617] text-right font-sans" dir="rtl">
       
       {/* Background Splashes & Effects */}
       <div className="fixed inset-0 bg-gradient-to-br from-[#020617] via-[#0A1024] to-[#050A18] pointer-events-none" />
@@ -164,12 +164,12 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onOpenPrivacy }) => {
       <div className="fixed top-[-10%] right-[-10%] w-[40%] h-[40%] bg-[#D4AF37]/10 blur-[120px] rounded-full pointer-events-none" />
       <div className="fixed bottom-[-10%] left-[-10%] w-[40%] h-[40%] bg-[#00E5FF]/5 blur-[120px] rounded-full pointer-events-none" />
 
-      {/* Main Content Container - Edge to Edge Feel with natural vertical scrolling */}
+      {/* Main Content Container */}
       <motion.div 
         initial={{ opacity: 0, y: 30 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.8, ease: [0.16, 1, 0.3, 1] }}
-        className="relative z-10 w-full max-w-md flex flex-col items-center justify-center my-auto pb-8"
+        className="relative z-10 w-full max-w-md flex flex-col items-center justify-start py-4 pb-16"
       >
         {/* Header Section */}
         <motion.div 

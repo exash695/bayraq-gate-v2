@@ -487,12 +487,6 @@ body {
   /* Font inherited from body */
 }
 
-body {
-  -webkit-user-select: none; /* Safari */
-  -ms-user-select: none; /* IE 10 and IE 11 */
-  user-select: none; /* Standard syntax */
-}
-
 /* Ensure React-PDF scales correctly on mobile */
 .react-pdf__Page__canvas {
   max-width: 100% !important;
@@ -501,7 +495,6 @@ body {
 
 /* Mobile Safe-Area & Touch Optimization */
 html, body {
-  overscroll-behavior-y: none;
   -webkit-tap-highlight-color: transparent;
   padding-top: env(safe-area-inset-top, 0px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
