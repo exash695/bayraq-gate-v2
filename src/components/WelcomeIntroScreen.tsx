@@ -88,7 +88,7 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
       }
     }
     
-    // FAILSAFE: Only trigger if the video has failed to load/play after 6 seconds
+    // FAILSAFE: Only trigger if the video has failed to load/play after 2.5 seconds
     const failsafe = setTimeout(() => {
       if (!videoLoaded) {
         if (currentStep === 0 && hasSecondary) {
@@ -100,7 +100,7 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
           onCompleteRef.current();
         }
       }
-    }, 6000);
+    }, 2500);
     
     return () => clearTimeout(failsafe);
   }, [currentVideoSrc, videoLoaded, currentStep, hasSecondary, stopAllMedia]);

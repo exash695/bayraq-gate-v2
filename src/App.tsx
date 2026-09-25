@@ -4237,9 +4237,10 @@ export default function App() {
                   className={`relative z-10 flex-1 flex flex-col min-h-screen transition-all duration-300 w-full overflow-x-hidden ${user && portalType !== "driver" && activeSection !== "school-content" && !isChoosingSchool && isSidebarOpen ? (settings.language === "ar" ? "lg:pr-72" : "lg:pl-72") : ""}`}
                 >
                   {/* Seasonal Cloud Theme Banner & Ambiance */}
-                  {portalType !== "driver" && activeSection !== "school-content" && <SeasonalThemeBanner />}
+                  {user && portalType !== "driver" && activeSection !== "school-content" && <SeasonalThemeBanner />}
                   <main id="main-content-area"
                     className={
+                      !user ||
                       activeSection === "hub" ||
                       activeSection === "unit-detail" ||
                       activeSection === "sovereignty" ||
