@@ -9,7 +9,7 @@
         "@aws-sdk/s3-request-presigner": "^3.714.0",
         "@capacitor/android": "^8.5.2",
         "@capacitor/core": "^8.5.2",
-        "@codetrix-studio/capacitor-google-auth": "^3.4.0-rc.4",
+        "@capacitor/live-updates": "^0.5.0",
         "@google/genai": "^2.24.0",
         "@types/fs-extra": "^11.0.4",
         "@types/nodemailer": "^8.0.2",
@@ -156,7 +156,7 @@
 
     "@capacitor/core": ["@capacitor/core@8.5.2", "", { "dependencies": { "tslib": "^2.1.0" } }, "sha512-agnQbGdhGw/KZFuLf7H9SY2o+oE7upkr/WPQsYaokXP6f9chaE8iVmbKkfN6SVl4w3pmz7oZ3Ur1hbkmy1hx+w=="],
 
-    "@codetrix-studio/capacitor-google-auth": ["@codetrix-studio/capacitor-google-auth@3.4.0-rc.4", "", { "peerDependencies": { "@capacitor/core": "^6.0.0" } }, "sha512-d548/xKrbMHHbzMYSWnlgZCLZYo2zzY7Onrh3x8ujojrb7atkNK68I6su5WgmaBt4E+R4gxBsWams4554aOFjA=="],
+    "@capacitor/live-updates": ["@capacitor/live-updates@0.5.0", "", { "peerDependencies": { "@capacitor/core": ">=8.0.0" } }, "sha512-qJBD+gVg4JwfRryM/i366Uzw9DRYqCAmFl5+k9ph9kDbvikvT69UiITcdJw840C3Q3RA2z+rLC7LZOZ5L56cuQ=="],
 
     "@drizzle-team/brocli": ["@drizzle-team/brocli@0.10.2", "", {}, "sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w=="],
 

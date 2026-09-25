@@ -12,6 +12,12 @@ const config = {
     ]
   },
   plugins: {
+    LiveUpdates: {
+      appId: '54ca6aa9',
+      channel: 'production',
+      autoUpdateMethod: 'background',
+      maxVersions: 2
+    },
     CapacitorHttp: {
       enabled: true
     },
