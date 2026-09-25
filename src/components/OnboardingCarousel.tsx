@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   Sparkles, 
@@ -108,7 +108,7 @@ export const OnboardingCarousel: React.FC<OnboardingCarouselProps> = ({ onComple
   const poses = useBerqPoses();
   const [currentStep, setCurrentStep] = useState(0);
   const [direction, setDirection] = useState(1);
-  const [isMuted] = useState(true); // Default to muted, clean ambient experience
+  const [touchStartX, setTouchStartX] = useState<number | null>(null);
 
   const activeStep = ONBOARDING_STEPS[currentStep];
   const customKey = `welcome_card_${activeStep.id}`;
@@ -118,74 +118,64 @@ export const OnboardingCarousel: React.FC<OnboardingCarouselProps> = ({ onComple
   useEffect(() => {
     const custom = poses[`welcome_card_${activeStep.id}`] || poses[activeStep.id];
     setImgSrc(custom || activeStep.image);
-  }, [currentStep, poses]);
+  }, [currentStep, poses, activeStep.id, activeStep.image]);
 
-  // Synthesizer chime audio for interaction feedback
-  const playChime = (type: "next" | "welcome" | "finish" | "tap" = "next") => {
-    if (isMuted) return;
-    try {
-      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioContext) return;
-      const ctx = new AudioContext();
-      const now = ctx.currentTime;
-
-      let freqs = [523.25, 659.25, 783.99, 1046.50]; // Ascent chord
-      if (type === "welcome") {
-        freqs = [392.00, 523.25, 659.25, 783.99, 1046.50];
-      } else if (type === "finish") {
-        freqs = [523.25, 659.25, 783.99, 1046.50, 1318.51, 1567.98];
-      } else if (type === "tap") {
-        freqs = [659.25, 880.00];
+  const handleNext = useCallback((e?: React.SyntheticEvent) => {
+    if (e) {
+      e.stopPropagation();
+    }
+    setDirection(1);
+    setCurrentStep((prev) => {
+      if (prev < ONBOARDING_STEPS.length - 1) {
+        return prev + 1;
+      } else {
+        setTimeout(() => {
+          onComplete();
+        }, 0);
+        return prev;
       }
+    });
+  }, [onComplete]);
 
-      freqs.forEach((freq, idx) => {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        
-        osc.type = "sine";
-        osc.frequency.setValueAtTime(freq, now + idx * 0.08);
-        
-        gain.gain.setValueAtTime(0, now + idx * 0.08);
-        gain.gain.linearRampToValueAtTime(0.08, now + idx * 0.08 + 0.02);
-        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.6);
-        
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        
-        osc.start(now + idx * 0.08);
-        osc.stop(now + idx * 0.08 + 0.8);
-      });
-    } catch (e) {
-      console.warn("Audio Context blocked:", e);
+  const handlePrev = useCallback((e?: React.SyntheticEvent) => {
+    if (e) {
+      e.stopPropagation();
     }
-  };
+    setDirection(-1);
+    setCurrentStep((prev) => (prev > 0 ? prev - 1 : prev));
+  }, []);
 
-  const handleNext = () => {
-    if (currentStep < ONBOARDING_STEPS.length - 1) {
-      setDirection(1);
-      playChime("next");
-      setCurrentStep((prev) => prev + 1);
-    } else {
-      handleComplete();
+  const handleComplete = useCallback((e?: React.SyntheticEvent) => {
+    if (e) {
+      e.stopPropagation();
     }
-  };
-
-  const handlePrev = () => {
-    if (currentStep > 0) {
-      setDirection(-1);
-      playChime("next");
-      setCurrentStep((prev) => prev - 1);
-    }
-  };
-
-  const handleComplete = () => {
-    playChime("finish");
     onComplete();
+  }, [onComplete]);
+
+  // Touch swipe support on artwork area (RTL aware: swipe left goes to next card, swipe right goes to prev card)
+  const onTouchStart = (e: React.TouchEvent) => {
+    setTouchStartX(e.touches[0].clientX);
+  };
+
+  const onTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartX === null) return;
+    const diff = touchStartX - e.changedTouches[0].clientX;
+    // Threshold 40px
+    if (Math.abs(diff) > 40) {
+      if (diff > 0) {
+        // Swiped left (in RTL, forward/next)
+        handleNext();
+      } else {
+        // Swiped right (in RTL, back/prev)
+        handlePrev();
+      }
+    }
+    setTouchStartX(null);
   };
 
   return (
     <div 
-      className="fixed inset-0 z-[9000] flex flex-col justify-between overflow-hidden select-none font-sans transition-all duration-1000"
+      className="fixed inset-0 z-[9999] flex flex-col justify-between overflow-hidden select-none font-sans transition-all duration-700 pointer-events-auto"
       style={{ backgroundColor: activeStep.bgColor }}
       dir="rtl"
     >
@@ -208,19 +198,26 @@ export const OnboardingCarousel: React.FC<OnboardingCarouselProps> = ({ onComple
       <AnimatePresence>
         {currentStep < ONBOARDING_STEPS.length - 1 && (
           <motion.button
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            type="button"
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
             onClick={handleComplete}
-            className="absolute top-6 left-6 z-50 text-xs font-bold text-white/40 hover:text-amber-400 bg-transparent border-0 outline-none p-0 cursor-pointer transition-all drop-shadow-md"
+            onTouchEnd={handleComplete}
+            className="absolute top-4 sm:top-6 left-4 sm:left-6 z-[100] px-3.5 py-1.5 rounded-full bg-black/50 backdrop-blur-md border border-white/15 text-white/80 hover:text-amber-300 text-xs font-bold cursor-pointer transition-all active:scale-95 shadow-lg flex items-center gap-1 touch-manipulation"
           >
-            تخطي
+            <span>تخطي</span>
+            <span className="text-[10px] text-white/50">⚡</span>
           </motion.button>
         )}
       </AnimatePresence>
 
-      {/* 3. FULL-BLEED EDGE-TO-EDGE CINEMATIC HERO (Requirement 1, 2, 3, 4, 5, 8) */}
-      <div className="relative w-full h-[50vh] z-10 overflow-hidden">
+      {/* 3. FULL-BLEED EDGE-TO-EDGE CINEMATIC HERO with Swipe Support */}
+      <div 
+        className="relative w-full h-[50vh] z-10 overflow-hidden touch-pan-y"
+        onTouchStart={onTouchStart}
+        onTouchEnd={onTouchEnd}
+      >
         {/* Step-specific glowing ambient sphere */}
         <motion.div 
           className="absolute w-[400px] h-[400px] rounded-full filter blur-[100px] opacity-25 pointer-events-none transition-all duration-1000"
@@ -326,9 +323,9 @@ export const OnboardingCarousel: React.FC<OnboardingCarouselProps> = ({ onComple
               return (
                 <button
                   key={`indicator-${idx}`}
+                  type="button"
                   onClick={() => {
                     setDirection(idx > currentStep ? 1 : -1);
-                    playChime("next");
                     setCurrentStep(idx);
                   }}
                   className={`h-1 rounded-full transition-all duration-300 cursor-pointer ${
@@ -344,22 +341,23 @@ export const OnboardingCarousel: React.FC<OnboardingCarouselProps> = ({ onComple
         </div>
 
         {/* Action Button & Navigation Row (Requirement 12, 13) */}
-        <div className="w-full space-y-3">
+        <div className="w-full space-y-3 z-50">
           <button
-            onClick={handleNext}
-            className="w-full h-11 rounded-lg flex items-center justify-center gap-2 font-bold text-xs tracking-wide transition-all duration-300 transform active:scale-98 cursor-pointer text-slate-950 bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500 hover:shadow-[0_0_20px_rgba(251,191,36,0.4)] shadow-[0_4px_12px_rgba(0,0,0,0.3)] border border-amber-300/20 relative overflow-hidden group"
+            type="button"
+            onClick={(e) => handleNext(e)}
+            className="w-full h-11 rounded-lg flex items-center justify-center gap-2 font-bold text-xs tracking-wide transition-all duration-300 transform active:scale-98 cursor-pointer text-slate-950 bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500 hover:shadow-[0_0_20px_rgba(251,191,36,0.4)] shadow-[0_4px_12px_rgba(0,0,0,0.3)] border border-amber-300/20 relative overflow-hidden group select-none touch-manipulation"
           >
-            <div className="absolute inset-0 w-1/3 h-full bg-white/10 skew-x-[30deg] -translate-x-[150%] group-hover:translate-x-[350%] transition-transform duration-1000 ease-out" />
+            <div className="absolute inset-0 w-1/3 h-full bg-white/10 skew-x-[30deg] -translate-x-[150%] group-hover:translate-x-[350%] transition-transform duration-1000 ease-out pointer-events-none" />
             
             {currentStep === ONBOARDING_STEPS.length - 1 ? (
               <>
-                <span className="text-xs font-bold">ابدأ رحلتك ⚡</span>
-                <Sparkles className="w-3.5 h-3.5 text-slate-950 animate-pulse" />
+                <span className="text-xs font-bold pointer-events-none">ابدأ رحلتك ⚡</span>
+                <Sparkles className="w-3.5 h-3.5 text-slate-950 animate-pulse pointer-events-none" />
               </>
             ) : (
               <>
-                <span className="text-xs font-bold">التالي</span>
-                <ChevronLeft className="w-3.5 h-3.5 text-slate-950" />
+                <span className="text-xs font-bold pointer-events-none">التالي</span>
+                <ChevronLeft className="w-3.5 h-3.5 text-slate-950 pointer-events-none" />
               </>
             )}
           </button>
@@ -368,11 +366,12 @@ export const OnboardingCarousel: React.FC<OnboardingCarouselProps> = ({ onComple
           <div className="flex items-center justify-between px-1 text-[10px] font-semibold text-white/30">
             {currentStep > 0 ? (
               <button
-                onClick={handlePrev}
-                className="hover:text-white transition-colors cursor-pointer flex items-center gap-1"
+                type="button"
+                onClick={(e) => handlePrev(e)}
+                className="hover:text-white transition-colors cursor-pointer flex items-center gap-1 p-1"
               >
-                <ChevronRight className="w-3 h-3" />
-                <span>السابق</span>
+                <ChevronRight className="w-3 h-3 pointer-events-none" />
+                <span className="pointer-events-none">السابق</span>
               </button>
             ) : (
               <div />

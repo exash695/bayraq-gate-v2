@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Sparkles, ArrowLeft, Loader2, Volume2, VolumeX, Play, ChevronLeft } from "lucide-react";
+import { Sparkles, ArrowLeft, Loader2, Play, ChevronLeft } from "lucide-react";
 import { useBerqPoses, useAppLogo } from "./BerqCharacterManager";
 
 interface WelcomeIntroScreenProps {
@@ -19,7 +19,7 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
 
   // Primary & Secondary Video resolution
   const primaryVideoSrc = propVideoSrc || poses['welcome_video'] || poses['greeting_welcome'] || "/mascot/sliced_bairaq_sheet5_pose_broadcaster.mp4";
-  const secondaryVideoSrc = propSecondaryVideoSrc || poses['welcome_video_secondary'] || poses['welcome_intro_secondary'] || "";
+  const secondaryVideoSrc = propSecondaryVideoSrc || poses['welcome_video_secondary'] || poses['welcome_intro_secondary'] || "/mascot/sliced_bairaq_sheet5_greeting_hello.mp4";
 
   const hasSecondary = Boolean(secondaryVideoSrc && secondaryVideoSrc.trim() !== "" && secondaryVideoSrc !== primaryVideoSrc);
 
@@ -30,7 +30,29 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoLoaded, setVideoLoaded] = useState(false);
   const [videoError, setVideoError] = useState(false);
-  const [isMuted, setIsMuted] = useState(true);
+
+  const stopAllMedia = useCallback(() => {
+    if (videoRef.current) {
+      try {
+        videoRef.current.pause();
+        videoRef.current.muted = true;
+        videoRef.current.currentTime = 0;
+      } catch (e) {}
+    }
+  }, []);
+
+  // Cleanup on unmount - absolutely guarantee audio/video stops
+  useEffect(() => {
+    return () => {
+      stopAllMedia();
+      if (videoRef.current) {
+        try {
+          videoRef.current.src = "";
+          videoRef.current.load();
+        } catch (e) {}
+      }
+    };
+  }, [stopAllMedia]);
 
   const onCompleteRef = useRef(onComplete);
   useEffect(() => {
@@ -41,63 +63,63 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
   useEffect(() => {
     const nextSrc = currentStep === 0 ? primaryVideoSrc : secondaryVideoSrc;
     if (nextSrc) {
+      stopAllMedia();
       setCurrentVideoSrc(nextSrc);
       setVideoLoaded(false);
       setVideoError(false);
     }
-  }, [currentStep, primaryVideoSrc, secondaryVideoSrc]);
+  }, [currentStep, primaryVideoSrc, secondaryVideoSrc, stopAllMedia]);
 
-  // Autoplay attempt on video source change
+  // Autoplay attempt with sound enabled directly on video source change
   useEffect(() => {
     const video = videoRef.current;
     if (video) {
       video.playsInline = true;
-      video.muted = isMuted;
+      video.muted = false; // Audio enabled directly by default
       const playPromise = video.play();
       
       if (playPromise !== undefined) {
         playPromise.catch((err) => {
-          console.warn("[WelcomeIntroScreen] Autoplay notice:", err?.message || err);
-          // Fallback to muted autoplay
+          console.warn("[WelcomeIntroScreen] Direct unmuted autoplay restricted, attempting fallback:", err?.message || err);
+          // If browser policy strictly restricts audio without prior user gesture, start muted
           video.muted = true;
-          setIsMuted(true);
           video.play().catch(() => {});
         });
       }
     }
     
-    // FAILSAFE: If the video hasn't successfully played within 2.5 seconds (likely 404 or blocked), skip to prevent a black screen
+    // FAILSAFE: Only trigger if the video has failed to load/play after 6 seconds
     const failsafe = setTimeout(() => {
-      onCompleteRef.current();
-    }, 2200);
+      if (!videoLoaded) {
+        if (currentStep === 0 && hasSecondary) {
+          stopAllMedia();
+          setCurrentStep(1);
+          setVideoLoaded(false);
+        } else {
+          stopAllMedia();
+          onCompleteRef.current();
+        }
+      }
+    }, 6000);
     
     return () => clearTimeout(failsafe);
-  }, [currentVideoSrc, isMuted]);
+  }, [currentVideoSrc, videoLoaded, currentStep, hasSecondary, stopAllMedia]);
 
   const handleNextStepOrComplete = useCallback(() => {
+    stopAllMedia();
     if (currentStep === 0 && hasSecondary) {
       // Transition to secondary welcome video
       setCurrentStep(1);
+      setVideoLoaded(false);
     } else {
       onComplete();
     }
-  }, [currentStep, hasSecondary, onComplete]);
+  }, [currentStep, hasSecondary, onComplete, stopAllMedia]);
 
-  const handleSkipAll = () => {
+  const handleSkipAll = useCallback(() => {
+    stopAllMedia();
     onCompleteRef.current();
-  };
-
-  const toggleMute = () => {
-    const video = videoRef.current;
-    if (video) {
-      const nextMuted = !video.muted;
-      video.muted = nextMuted;
-      setIsMuted(nextMuted);
-      if (!nextMuted) {
-        video.play().catch(console.warn);
-      }
-    }
-  };
+  }, [stopAllMedia]);
 
   const handleVideoError = () => {
     console.warn(`[WelcomeIntroScreen] Video error on step ${currentStep} (${currentVideoSrc})`);
@@ -116,7 +138,7 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
     <motion.div 
       ref={ref}
       initial={{ opacity: 1 }}
-      exit={{ opacity: 0, transition: { duration: 0.4 } }}
+      exit={{ opacity: 0, pointerEvents: 'none', transition: { duration: 0.3 } }}
       className="fixed inset-0 z-[10000] bg-[#020617] flex items-center justify-center overflow-hidden select-none"
       dir="rtl"
     >
@@ -155,7 +177,6 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
           className="w-full h-full object-cover pointer-events-none"
           playsInline
           autoPlay
-          muted={isMuted}
           preload="auto"
           onLoadedData={() => setVideoLoaded(true)}
           onPlay={() => setVideoLoaded(true)}
@@ -215,35 +236,14 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
           )}
         </div>
 
-        {/* Center: Stage Pill Indicator if multiple videos */}
+        {/* Left: Stage Pill Indicator if multiple videos */}
         {hasSecondary && (
-          <div className="hidden sm:flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-black/60 backdrop-blur-md border border-amber-500/20 text-[11px] font-bold text-amber-300 shadow-md">
+          <div className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-black/60 backdrop-blur-md border border-amber-500/20 text-[11px] font-bold text-amber-300 shadow-md pointer-events-auto">
             <span className={`w-2 h-2 rounded-full ${currentStep === 0 ? "bg-amber-400 animate-pulse" : "bg-white/30"}`} />
             <span>{currentStep === 0 ? "المقدمة الأولى (١ / ٢)" : "المقدمة الثانية (٢ / ٢)"}</span>
             <span className={`w-2 h-2 rounded-full ${currentStep === 1 ? "bg-amber-400 animate-pulse" : "bg-white/30"}`} />
           </div>
         )}
-
-        {/* Left side: Sound Mute / Unmute Toggle */}
-        <div className="pointer-events-auto flex items-center gap-2">
-          <button
-            onClick={toggleMute}
-            className="flex items-center justify-center w-10 h-10 rounded-full bg-black/50 backdrop-blur-md border border-white/10 hover:border-amber-400 text-white hover:text-amber-400 transition-all duration-300 cursor-pointer active:scale-95 shadow-lg"
-            title={isMuted ? "تشغيل الصوت" : "كتم الصوت"}
-          >
-            {isMuted ? (
-              <div className="relative flex items-center justify-center">
-                <VolumeX className="w-4 h-4 text-red-400" />
-                <span className="absolute -top-1 -right-1 flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>
-                </span>
-              </div>
-            ) : (
-              <Volume2 className="w-4 h-4 text-amber-400 animate-pulse" />
-            )}
-          </button>
-        </div>
       </div>
 
       {/* 3. Bottom Vignette & Branding Bar */}
@@ -276,3 +276,4 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
 });
 
 WelcomeIntroScreen.displayName = "WelcomeIntroScreen";
+

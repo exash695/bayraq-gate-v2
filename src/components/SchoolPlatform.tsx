@@ -7966,11 +7966,10 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
                         <span className="shrink-0 text-xs">🏛️</span>
                         <span className="truncate">{schoolName || "ثانوية أوائل غماس الأهلية"}</span>
                       </div>
-                      <div className="flex items-center gap-1.5 text-white/80 font-semibold text-[11px] sm:text-xs tracking-wide drop-shadow-sm mt-0.5 min-w-0">
+                      <div className="flex items-center gap-1.5 text-white/90 font-bold text-[11px] sm:text-xs tracking-wide drop-shadow-sm mt-0.5 min-w-0">
                         <span className="shrink-0 text-[10px]">👨‍🏫</span>
-                        <span className="truncate">بوابة الكادر التعليمي • {teacherData?.name || "أستاذ"}</span>
-                        <span className="px-1.5 py-0.5 bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 rounded-md text-[10px] font-black shrink-0">
-                          {selectedTeacherClass === "ALL" || !selectedTeacherClass ? "كافة الشُعب الموكلة" : selectedTeacherClass}
+                        <span className="truncate">
+                          بوابة الكادر التعليمي - {currentTeacherData?.name || teacherData?.name || userProfile?.name || userProfile?.displayName || userName || "أستاذ"}
                         </span>
                       </div>
                     </div>

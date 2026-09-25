@@ -58,7 +58,7 @@ const upload = multer({
   dest: os.tmpdir(),
   limits: { fileSize: 500 * 1024 * 1024 }
 });
-import { statusRouter } from "./server-status.js";
+import { statusRouter } from "./server-status";
 const memoryUpload = multer({ storage: multer.memoryStorage() });
 
 let s3Client: S3Client | null = null;
@@ -2305,8 +2305,8 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
   });
 
   // Cloudflare R2 CDN Streaming Proxy with Local Fallback
-  app.get('/cdn/*', async (req, res) => {
-    const rawPath = req.params[0] || '';
+  app.get('/cdn/{*splat}', async (req, res) => {
+    const rawPath = req.params.splat || '';
     const relPath = rawPath.replace(/^\/+/, '');
     if (!relPath) return res.status(400).send('Missing media path');
 
@@ -7730,7 +7730,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         }
       }
 
-      // Fallback: If student not found in students table yet, check academic_lists
+      // Fallback: If student or parent not found in tables yet, check academic_lists
       if (studentList.length === 0 && !isAdminPrefix && !isTeacherPrefix && !isDriverPrefix) {
         try {
           const allLists = await db.select().from(academic_lists);
@@ -7763,6 +7763,40 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
           }
         } catch (listErr) {
           console.error('Error searching academic_lists for student:', listErr);
+        }
+      }
+
+      if (parentList.length === 0 && (isParentPrefix || (!isAdminPrefix && !isTeacherPrefix && !isDriverPrefix))) {
+        try {
+          const allLists = await db.select().from(academic_lists);
+          for (const aList of allLists) {
+            const listStudents = Array.isArray(aList.students) ? aList.students : [];
+            const foundStu = listStudents.find((s: any) => {
+              const pcode = String(s.parent || s.parentCode || '').trim().toUpperCase();
+              return pcode === cleanCode || pcode === code.trim().toUpperCase();
+            });
+            if (foundStu) {
+              const gradeFromPfx = getGradeFromCodePrefix(cleanCode);
+              const resolvedGrade = gradeFromPfx || foundStu.grade || aList.grade || 'أول ابتدائي';
+              parentList = [{
+                id: String(foundStu.id || `${aList.schoolId || 'school1'}_${cleanCode}`),
+                schoolId: aList.schoolId || targetSchoolId || 'school1',
+                name: foundStu.name || 'طالب الأكاديمية',
+                grade: resolvedGrade,
+                section: aList.name || (foundStu as any).section || '',
+                class: aList.name || (foundStu as any).class || '',
+                className: aList.name || (foundStu as any).className || '',
+                code: foundStu.student || foundStu.code || cleanCode,
+                parentCode: foundStu.parent || foundStu.parentCode || cleanCode,
+                status: 'نشط',
+                isBanned: false,
+                gender: foundStu.gender || (cleanCode.includes('-G-') ? 'female' : 'male')
+              }] as any;
+              break;
+            }
+          }
+        } catch (listErr) {
+          console.error('Error searching academic_lists for parent:', listErr);
         }
       }
 
@@ -8152,6 +8186,25 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
           return res.status(400).json({ success: false, isBanned: true, message: 'ACCOUNT_BANNED' });
         }
         clearFailedAuthAttempt(req);
+
+        try {
+          await db.insert(users).values({
+            id: parentId,
+            name: "ولي أمر " + stu.name,
+            email: `${parentId}@bairaq.iq`,
+            role: 'parent',
+            schoolId: stu.schoolId || targetSchoolId || 'school8',
+            status: 'online'
+          } as any).onConflictDoUpdate({
+            target: users.id,
+            set: {
+              role: 'parent',
+              name: "ولي أمر " + stu.name,
+              schoolId: stu.schoolId || targetSchoolId || 'school8'
+            } as any
+          });
+        } catch (uErr) {}
+
         const token = jwt.sign(
           { uid: parentId, name: "ولي أمر " + stu.name, role: 'parent', schoolId: stu.schoolId, grade: stu.grade },
           JWT_SECRET,
@@ -13094,7 +13147,7 @@ app.post('/api/admin/maintenance/purge-cache', async (req, res) => {
 });
 
 // Catch-all route for any unhandled /api/* endpoint: return JSON 404 so Vite never returns HTML
-  app.all('/api/*', (req, res) => {
+  app.all('/api/{*splat}', (req, res) => {
     console.warn(`[Server API 404] No route matched for: ${req.method} ${req.originalUrl}`);
     res.status(404).json({ 
       success: false, 
@@ -13118,7 +13171,7 @@ app.post('/api/admin/maintenance/purge-cache', async (req, res) => {
   } else {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
+    app.get('/{*splat}', (req, res) => {
       // Explicitly prevent returning HTML for /api/ routes that somehow leaked through
       if (req.path.startsWith('/api/')) {
         console.warn(`[Server API Leaked] /api/ request reached SPA fallback: ${req.method} ${req.path}`);

@@ -88,7 +88,7 @@ export const SchoolAccessGate: React.FC<SchoolAccessGateProps> = ({
     }
 
     setShowDropdown(false);
-    onVerify(targetCode, false);
+    onVerify(targetCode, activePortal === 'parent');
   };
 
   const handleSelectSavedCode = (item: SavedAccessCodeItem, e: React.MouseEvent) => {

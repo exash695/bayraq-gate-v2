@@ -374,11 +374,21 @@ export default function App() {
         } else if (savedRole === 'teacher' && !isTeacherProfile && !isAdminProfile) {
            setPortalType('student');
            safeStorage.removeItem("bayraq_user_role");
+        } else if (isParentProfile) {
+           setPortalType('parent');
+           safeStorage.setItem("bayraq_user_role", "parent");
+        } else if (isTeacherProfile) {
+           setPortalType('teacher');
+           safeStorage.setItem("bayraq_user_role", "teacher");
+        } else if (isDriverProfile) {
+           setPortalType('driver');
+           safeStorage.setItem("bayraq_user_role", "driver");
         } else {
            setPortalType(savedRole as any);
         }
       } else if (validRoles.includes(role)) {
         setPortalType(role as any);
+        safeStorage.setItem("bayraq_user_role", role);
       }
     }
   }, [userProfile]);
@@ -1333,29 +1343,33 @@ export default function App() {
               safeStorage.setItem("s6_selectedSchoolId", profileData.schoolId);
             }
             setIsSchoolVerified(true);
-          } else if (profileData.role === "parent" && profileData.studentCode) {
+          } else if (profileData.role === "parent") {
             setPortalType("parent");
+            safeStorage.setItem("bayraq_user_role", "parent");
             setVerifiedStudentInfo({
               studentCode: profileData.studentCode,
               parentCode: profileData.parentCode,
               schoolId: profileData.schoolId,
+              gender: profileData.gender,
+              grade: profileData.grade,
               name:
                 profileData.studentName ||
                 "طالب مدرسة " + (profileData.schoolName || ""),
+              studentName:
+                profileData.studentName ||
+                "طالب مدرسة " + (profileData.schoolName || ""),
             });
+            if (profileData.grade) {
+              setSelectedStudentGrade(profileData.grade);
+            }
             if (profileData.schoolId) {
               setSelectedSchoolId(profileData.schoolId);
               safeStorage.setItem("s6_selectedSchoolId", profileData.schoolId);
             }
             setIsSchoolVerified(true);
-          } else if (
-            (profileData.role === "student" || profileData.studentCode) &&
-            profileData.studentCode &&
-            !profileData.role?.includes("admin")
-          ) {
-            setPortalType("student");
-            safeStorage.setItem("bayraq_user_role", "student");
-            setSelectedStudentGrade(profileData.grade || "غير محدد");
+          } else if (profileData.role === "driver") {
+            setPortalType("driver");
+            safeStorage.setItem("bayraq_user_role", "driver");
             if (profileData.schoolId) {
               setSelectedSchoolId(profileData.schoolId);
               safeStorage.setItem("s6_selectedSchoolId", profileData.schoolId);
@@ -1364,6 +1378,16 @@ export default function App() {
           } else if (profileData.role === "admin" || profileData.isAdmin) {
             const branch = profileData.adminBranch || "boys";
             setPortalType(branch === "boys" ? "admin-boys" : "admin-girls");
+            safeStorage.setItem("bayraq_user_role", branch === "boys" ? "admin-boys" : "admin-girls");
+            if (profileData.schoolId) {
+              setSelectedSchoolId(profileData.schoolId);
+              safeStorage.setItem("s6_selectedSchoolId", profileData.schoolId);
+            }
+            setIsSchoolVerified(true);
+          } else if (profileData.role === "student" || (!profileData.role && profileData.studentCode)) {
+            setPortalType("student");
+            safeStorage.setItem("bayraq_user_role", "student");
+            setSelectedStudentGrade(profileData.grade || "غير محدد");
             if (profileData.schoolId) {
               setSelectedSchoolId(profileData.schoolId);
               safeStorage.setItem("s6_selectedSchoolId", profileData.schoolId);
@@ -2137,6 +2161,7 @@ export default function App() {
                 (user as any).role === "TEACHER"
               ) {
                 setPortalType("teacher");
+                safeStorage.setItem("bayraq_user_role", "teacher");
                 const teacherObj = {
                   id: user.uid || (user as any).id,
                   code: code, // Add the login code here
@@ -2174,11 +2199,18 @@ export default function App() {
                   id: user.uid,
                   code: code,
                   name: user.displayName || "",
-                  role: user.role,
+                  role: "admin",
                   schoolId: user.schoolId,
                 });
-              } else if (user.role === "parent") {
+                setUserProfile((prev: any) => ({
+                  ...prev,
+                  ...user,
+                  role: "admin",
+                  adminBranch: branch === "admin-boys" ? "boys" : "girls",
+                }));
+              } else if (user.role === "parent" || isParent || code.trim().toUpperCase().startsWith('PAR-') || code.trim().toUpperCase().startsWith('PCODE-')) {
                 setPortalType("parent");
+                safeStorage.setItem("bayraq_user_role", "parent");
                 const studentGrade =
                   (user as any).grade ||
                   (user as any).academicLevel ||
@@ -2186,7 +2218,7 @@ export default function App() {
                 if (studentGrade) {
                   setSelectedStudentGrade(studentGrade);
                 }
-                setVerifiedStudentInfo({
+                const parentInfo = {
                   id: user.uid,
                   parentCode: code,
                   code: code,
@@ -2204,9 +2236,17 @@ export default function App() {
                   section: (user as any).section || (user as any).studentSection || (user as any).class || "",
                   schoolId: user.schoolId || selectedSchoolId,
                   gender: (user as any).gender,
-                });
+                };
+                setVerifiedStudentInfo(parentInfo);
+                setUserProfile((prev: any) => ({
+                  ...prev,
+                  ...user,
+                  ...parentInfo,
+                  role: "parent",
+                }));
               } else if (user.role === "driver") {
                 setPortalType("driver");
+                safeStorage.setItem("bayraq_user_role", "driver");
                 setVerifiedStudentInfo({
                   id: user.uid,
                   code: code,
@@ -2214,9 +2254,15 @@ export default function App() {
                   role: "driver",
                   schoolId: user.schoolId,
                 });
+                setUserProfile((prev: any) => ({
+                  ...prev,
+                  ...user,
+                  role: "driver",
+                }));
               } else {
                 // Student
                 setPortalType("student");
+                safeStorage.setItem("bayraq_user_role", "student");
                 const studentGrade =
                   (user as any).grade ||
                   (user as any).academicLevel ||
@@ -2224,7 +2270,7 @@ export default function App() {
                 if (studentGrade) {
                   setSelectedStudentGrade(studentGrade);
                 }
-                setVerifiedStudentInfo({
+                const stuInfo = {
                   id: user.uid,
                   code: code,
                   studentCode: (user as any).studentCode || code,
@@ -2239,7 +2285,14 @@ export default function App() {
                   schoolId:
                     user.schoolId || selectedSchoolId || "school8",
                   gender: (user as any).gender,
-                });
+                };
+                setVerifiedStudentInfo(stuInfo);
+                setUserProfile((prev: any) => ({
+                  ...prev,
+                  ...user,
+                  ...stuInfo,
+                  role: "student",
+                }));
               }
             } catch (e: any) {
               if (e.message === 'SCHOOL_SUSPENDED' || e.isSchoolSuspended) {
