@@ -296,6 +296,15 @@ export default function App() {
 
   const [authReady, setAuthReady] = useState(false);
   const [splashFinished, setSplashFinished] = useState(false);
+
+  // FAILSAFE DEADLOCK PREVENTION: Force readiness after 3.5 seconds to prevent permanent black screen on app reopen
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setAuthReady(true);
+      setSplashFinished(true);
+    }, 3500);
+    return () => clearTimeout(timer);
+  }, []);
   const [hasSeenOnboarding, setHasSeenOnboarding] = useState(() => {
     try {
       return safeStorage.getItem("app_has_seen_onboarding") === "true";

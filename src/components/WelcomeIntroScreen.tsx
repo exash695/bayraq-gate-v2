@@ -17,6 +17,20 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
   const poses = useBerqPoses();
   const appLogo = useAppLogo();
 
+  // Force fetch latest poses from server on mount so regular users get developer uploaded welcome videos instantly
+  useEffect(() => {
+    fetch('/api/bairaq/poses')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.poses) {
+          import('./BerqCharacterManager').then(({ updateGlobalPoses }) => {
+            updateGlobalPoses(data.poses);
+          });
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // Primary & Secondary Video resolution
   const primaryVideoSrc = propVideoSrc || poses['welcome_video'] || poses['greeting_welcome'] || "/mascot/sliced_bairaq_sheet5_pose_broadcaster.mp4";
   const secondaryVideoSrc = propSecondaryVideoSrc || poses['welcome_video_secondary'] || poses['welcome_intro_secondary'] || "/mascot/sliced_bairaq_sheet5_greeting_hello.mp4";
