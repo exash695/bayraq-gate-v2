@@ -87,7 +87,8 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
   const [primaryLoaded, setPrimaryLoaded] = useState(false);
   const [secondaryLoaded, setSecondaryLoaded] = useState(false);
   const [videoError, setVideoError] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
+  // Default to muted: guarantees 100% instant autoplay on Android/iOS without native play icon
+  const [isMuted, setIsMuted] = useState(true);
 
   const stopAllMedia = useCallback(() => {
     if (primaryVideoRef.current) {
@@ -116,52 +117,49 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
     onCompleteRef.current = onComplete;
   }, [onComplete]);
 
-  // Handle Playback for current step
+  const enableSound = useCallback((e?: React.MouseEvent | TouchEvent) => {
+    if (e && 'stopPropagation' in e) e.stopPropagation();
+    const activeVideo = currentStep === 0 ? primaryVideoRef.current : secondaryVideoRef.current;
+    if (activeVideo) {
+      activeVideo.muted = false;
+      setIsMuted(false);
+    }
+  }, [currentStep]);
+
+  // Handle Playback for current step (Silent Instant Start)
   useEffect(() => {
     const activeVideo = currentStep === 0 ? primaryVideoRef.current : secondaryVideoRef.current;
     if (!activeVideo) return;
 
     activeVideo.playsInline = true;
     (activeVideo as any)['webkitPlaysinline'] = true;
+    activeVideo.muted = true; // Always start muted to bypass Android gesture restriction
 
     const attemptPlay = async () => {
       try {
-        activeVideo.muted = false;
-        setIsMuted(false);
         await activeVideo.play();
         if (currentStep === 0) setPrimaryLoaded(true);
         else setSecondaryLoaded(true);
       } catch (err) {
-        // Fallback to muted instant autoplay
-        try {
-          activeVideo.muted = true;
-          setIsMuted(true);
-          await activeVideo.play();
-          if (currentStep === 0) setPrimaryLoaded(true);
-          else setSecondaryLoaded(true);
-        } catch (innerErr) {
-          console.warn("[WelcomeIntroScreen] Playback fallback notice:", innerErr);
-        }
+        console.warn("[WelcomeIntroScreen] Silent autoplay notice:", err);
       }
     };
 
     attemptPlay();
 
-    const handleTouch = () => {
-      if (activeVideo && activeVideo.muted) {
-        activeVideo.muted = false;
-        setIsMuted(false);
-      }
+    // Enable sound on ANY user touch anywhere on the screen
+    const handleScreenTouch = () => {
+      enableSound();
     };
 
-    window.addEventListener('click', handleTouch, { once: true, passive: true });
-    window.addEventListener('touchstart', handleTouch, { once: true, passive: true });
+    window.addEventListener('click', handleScreenTouch, { once: true, passive: true });
+    window.addEventListener('touchstart', handleScreenTouch, { once: true, passive: true });
 
     return () => {
-      window.removeEventListener('click', handleTouch);
-      window.removeEventListener('touchstart', handleTouch);
+      window.removeEventListener('click', handleScreenTouch);
+      window.removeEventListener('touchstart', handleScreenTouch);
     };
-  }, [currentStep]);
+  }, [currentStep, enableSound]);
 
   const toggleSound = useCallback((e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -251,6 +249,7 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
           disablePictureInPicture
           disableRemotePlayback
           muted={isMuted}
+          defaultMuted
           preload="auto"
           onTimeUpdate={() => {
             if (primaryVideoRef.current && primaryVideoRef.current.currentTime > 0.05) {
@@ -279,6 +278,7 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
             disablePictureInPicture
             disableRemotePlayback
             muted={isMuted}
+            defaultMuted
             preload="auto"
             onTimeUpdate={() => {
               if (secondaryVideoRef.current && secondaryVideoRef.current.currentTime > 0.05) {
@@ -367,6 +367,28 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
           </div>
         )}
       </div>
+
+      {/* 2.5 Prominent Sound Activation Floating Banner */}
+      <AnimatePresence>
+        {isMuted && (
+          <motion.div
+            initial={{ opacity: 0, y: 25, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
+            className="absolute bottom-28 inset-x-0 z-50 flex justify-center pointer-events-auto px-4"
+          >
+            <button
+              onClick={enableSound}
+              className="flex items-center gap-3 px-6 py-3 rounded-full bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 text-slate-950 font-black text-sm shadow-[0_0_35px_rgba(245,158,11,0.7)] border-2 border-white/60 active:scale-95 transition-all cursor-pointer animate-pulse"
+            >
+              <div className="w-8 h-8 rounded-full bg-slate-950/15 flex items-center justify-center">
+                <Volume2 className="w-4 h-4 text-slate-950 animate-bounce" />
+              </div>
+              <span className="tracking-wide">اضغط هنا لتشغيل الصوت 🔊</span>
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* 3. Bottom Vignette & Branding Bar */}
       <div className="absolute bottom-0 inset-x-0 h-36 z-20 flex flex-col items-center justify-end pb-8 bg-gradient-to-t from-black via-black/50 to-transparent pointer-events-none">
