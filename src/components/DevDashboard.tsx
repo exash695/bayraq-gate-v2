@@ -986,8 +986,27 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
     const fetchSchoolsFromPg = async () => {
       try {
         const fetched = await schoolService.fetchSchools();
-        if (fetched && fetched.length > 0) {
-          const activeSchools = (fetched as any[]).filter((s: any) => !deletedSchoolIds.includes(s.id));
+        let activeSchools = fetched && fetched.length > 0 
+          ? (fetched as any[]).filter((s: any) => !deletedSchoolIds.includes(s.id))
+          : [];
+
+        // Guarantee 'general' (أكاديمية بيرق الرقمية) is always present
+        if (!activeSchools.some((s: any) => s.id === 'general')) {
+          activeSchools.push({
+            id: 'general',
+            name: 'أكاديمية بيرق الرقمية',
+            governorate: 'العراق - دورات نخبة الأساتذة',
+            type: 'منصة الدورات الألكترونية لنخبة الأساتذة',
+            status: 'active',
+            coverUrl: '/schools/cover_general.jpg',
+            logoUrl: '/school-logos/logo_general.jpg',
+            schoolBairaqImageUrl: '/schools/cover_general.jpg',
+            schoolLogoUrl: '/school-logos/logo_general.jpg',
+            disabledModules: []
+          });
+        }
+
+        if (activeSchools.length > 0) {
           setSchools(activeSchools);
           setConfiguringSchoolModules(prev => {
             if (!prev) return null;
@@ -999,7 +1018,22 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
           // Fallback to cached schools if available
           const saved = localStorage.getItem("berq_dev_schools");
           if (saved) {
-            setSchools(JSON.parse(saved));
+            let parsed = JSON.parse(saved);
+            if (!parsed.some((s: any) => s.id === 'general')) {
+              parsed.push({
+                id: 'general',
+                name: 'أكاديمية بيرق الرقمية',
+                governorate: 'العراق - دورات نخبة الأساتذة',
+                type: 'منصة الدورات الألكترونية لنخبة الأساتذة',
+                status: 'active',
+                coverUrl: '/schools/cover_general.jpg',
+                logoUrl: '/school-logos/logo_general.jpg',
+                schoolBairaqImageUrl: '/schools/cover_general.jpg',
+                schoolLogoUrl: '/school-logos/logo_general.jpg',
+                disabledModules: []
+              });
+            }
+            setSchools(parsed);
           }
         }
       } catch (e) {
@@ -1007,7 +1041,22 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
         try {
           const saved = localStorage.getItem("berq_dev_schools");
           if (saved) {
-            setSchools(JSON.parse(saved));
+            let parsed = JSON.parse(saved);
+            if (!parsed.some((s: any) => s.id === 'general')) {
+              parsed.push({
+                id: 'general',
+                name: 'أكاديمية بيرق الرقمية',
+                governorate: 'العراق - دورات نخبة الأساتذة',
+                type: 'منصة الدورات الألكترونية لنخبة الأساتذة',
+                status: 'active',
+                coverUrl: '/schools/cover_general.jpg',
+                logoUrl: '/school-logos/logo_general.jpg',
+                schoolBairaqImageUrl: '/schools/cover_general.jpg',
+                schoolLogoUrl: '/school-logos/logo_general.jpg',
+                disabledModules: []
+              });
+            }
+            setSchools(parsed);
           }
         } catch (localErr) {
           console.warn("Local storage fallback notice:", localErr);
