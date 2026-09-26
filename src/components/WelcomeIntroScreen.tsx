@@ -2,6 +2,15 @@ import React, { useRef, useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Sparkles, ArrowLeft, Loader2, Play, ChevronLeft, Volume2, VolumeX } from "lucide-react";
 import { useBerqPoses, useAppLogo } from "./BerqCharacterManager";
+import { Capacitor } from "@capacitor/core";
+
+// Detect if running inside native Android / iOS or WebView
+const isNativeApp = typeof window !== "undefined" && (
+  Capacitor.isNativePlatform() ||
+  window.location.protocol === "capacitor:" ||
+  window.location.protocol === "ionic:" ||
+  (window.location.hostname === "localhost" && /Android/i.test(navigator.userAgent))
+);
 
 interface WelcomeIntroScreenProps {
   onComplete: () => void;
@@ -17,15 +26,18 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
   const poses = useBerqPoses();
   const appLogo = useAppLogo();
 
-  const [serverPosesLoaded, setServerPosesLoaded] = useState(false);
+  const [serverPosesLoaded, setServerPosesLoaded] = useState(isNativeApp);
   const [remotePoses, setRemotePoses] = useState<Record<string, string>>(poses);
 
-  // Force fetch latest poses from server on mount so regular users get developer uploaded welcome videos instantly
+  // For Web only: optionally fetch latest poses from server
+  // On Native Android App: Skip completely to guarantee 0ms local offline startup
   useEffect(() => {
+    if (isNativeApp) return;
+
     let isMounted = true;
     const timeout = setTimeout(() => {
       if (isMounted) setServerPosesLoaded(true);
-    }, 1200);
+    }, 1000);
 
     fetch('/api/bairaq/poses', { cache: 'no-store' })
       .then(res => res.json())
@@ -51,10 +63,21 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
     };
   }, []);
 
-  // Primary & Secondary Video resolution
+  // Primary & Secondary Video resolution:
+  // On Native App: STRICTLY use bundled local assets for 0ms instant startup without internet
+  // On Website: Use developer uploaded poses or local fallback
   const activePoses = serverPosesLoaded ? { ...poses, ...remotePoses } : poses;
-  const primaryVideoSrc = propVideoSrc || activePoses['welcome_video'] || activePoses['greeting_welcome'] || "/mascot/sliced_bairaq_sheet5_pose_broadcaster.mp4";
-  const secondaryVideoSrc = propSecondaryVideoSrc || activePoses['welcome_video_secondary'] || activePoses['welcome_intro_secondary'] || "/mascot/sliced_bairaq_sheet5_greeting_hello.mp4";
+  
+  const primaryVideoSrc = isNativeApp 
+    ? "/videos/welcome_intro_1.mp4"
+    : (propVideoSrc || activePoses['welcome_video'] || activePoses['greeting_welcome'] || "/videos/welcome_intro_1.mp4");
+
+  const secondaryVideoSrc = isNativeApp
+    ? "/videos/welcome_intro_2.mp4"
+    : (propSecondaryVideoSrc || activePoses['welcome_video_secondary'] || activePoses['welcome_intro_secondary'] || "/videos/welcome_intro_2.mp4");
+
+  const poster1 = "/videos/welcome_poster_1.jpg";
+  const poster2 = "/videos/welcome_poster_2.jpg";
 
   const hasSecondary = Boolean(secondaryVideoSrc && secondaryVideoSrc.trim() !== "" && secondaryVideoSrc !== primaryVideoSrc);
 
@@ -207,11 +230,19 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
           </div>
         )}
 
+        {/* Background HD Poster for 0ms Instant Visual Presence */}
+        <img 
+          src={currentStep === 0 ? poster1 : poster2} 
+          alt="Welcome Poster"
+          className="absolute inset-0 w-full h-full object-cover z-0"
+        />
+
         {/* Primary Video */}
         <video
           ref={primaryVideoRef}
           src={primaryVideoSrc}
-          className={`w-full h-full object-cover pointer-events-none transition-opacity duration-300 ${
+          poster={poster1}
+          className={`w-full h-full object-cover pointer-events-none transition-opacity duration-300 relative z-10 ${
             currentStep === 0 && primaryLoaded ? "opacity-100" : "opacity-0 pointer-events-none"
           }`}
           playsInline
@@ -239,7 +270,8 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
           <video
             ref={secondaryVideoRef}
             src={secondaryVideoSrc}
-            className={`w-full h-full object-cover pointer-events-none transition-opacity duration-300 ${
+            poster={poster2}
+            className={`w-full h-full object-cover pointer-events-none transition-opacity duration-300 relative z-10 ${
               currentStep === 1 && secondaryLoaded ? "opacity-100" : "opacity-0 pointer-events-none"
             }`}
             playsInline
