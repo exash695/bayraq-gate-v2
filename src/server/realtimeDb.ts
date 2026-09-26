@@ -48,64 +48,86 @@ const REALTIME_TABLES = [
 
 export async function initDatabaseTriggers(sql: Sql): Promise<void> {
   try {
-    // 1. Create or replace the universal lightweight notify function
-    await sql`
-      CREATE OR REPLACE FUNCTION notify_db_event() RETURNS trigger AS $$
-      DECLARE
-        v_school_id TEXT := NULL;
-        v_entity_id TEXT := NULL;
-        v_recipient_id TEXT := NULL;
-        v_user_id TEXT := NULL;
-        v_student_id TEXT := NULL;
-        v_payload JSONB;
-      BEGIN
-        IF (TG_OP = 'DELETE') THEN
-          BEGIN v_entity_id := OLD.id::text; EXCEPTION WHEN OTHERS THEN 
-            BEGIN v_entity_id := OLD.path::text; EXCEPTION WHEN OTHERS THEN v_entity_id := NULL; END;
-          END;
-          BEGIN v_school_id := OLD.school_id::text; EXCEPTION WHEN OTHERS THEN v_school_id := NULL; END;
-        ELSE
-          BEGIN v_entity_id := NEW.id::text; EXCEPTION WHEN OTHERS THEN 
-            BEGIN v_entity_id := NEW.path::text; EXCEPTION WHEN OTHERS THEN v_entity_id := NULL; END;
-          END;
-          BEGIN v_school_id := NEW.school_id::text; EXCEPTION WHEN OTHERS THEN v_school_id := NULL; END;
-          BEGIN v_recipient_id := NEW.recipient_id::text; EXCEPTION WHEN OTHERS THEN v_recipient_id := NULL; END;
-          BEGIN v_user_id := NEW.user_id::text; EXCEPTION WHEN OTHERS THEN v_user_id := NULL; END;
-          BEGIN v_student_id := NEW.student_id::text; EXCEPTION WHEN OTHERS THEN v_student_id := NULL; END;
-        END IF;
-
-        v_payload := json_build_object(
-          'table', TG_TABLE_NAME,
-          'action', TG_OP,
-          'id', v_entity_id,
-          'school_id', v_school_id,
-          'recipient_id', v_recipient_id,
-          'user_id', v_user_id,
-          'student_id', v_student_id,
-          'timestamp', (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint
-        );
-
-        PERFORM pg_notify('bairaq_realtime_events', v_payload::text);
-        RETURN COALESCE(NEW, OLD);
-      END;
-      $$ LANGUAGE plpgsql;
-    `;
-
-    // 2. Attach triggers to tables
-    for (const table of REALTIME_TABLES) {
-      try {
-        await sql.unsafe(`
-          DROP TRIGGER IF EXISTS trg_${table}_notify ON ${table};
-          CREATE TRIGGER trg_${table}_notify
-          AFTER INSERT OR UPDATE OR DELETE ON ${table}
-          FOR EACH ROW EXECUTE FUNCTION notify_db_event();
-        `);
-      } catch (err: any) {
-        console.warn(`[Realtime DB] Skipped trigger for ${table}:`, err.message);
-      }
+    // In cluster mode (multiple PM2 workers), ensure only ONE worker executes DDL trigger setup
+    let isLocked = true;
+    try {
+      const lockRows = await sql`SELECT pg_try_advisory_lock(748392) as locked`;
+      isLocked = lockRows && lockRows[0] && lockRows[0].locked;
+    } catch {
+      isLocked = true;
     }
 
-    console.log('[Realtime DB] PostgreSQL triggers initialized successfully.');
+    if (!isLocked) {
+      // Another cluster worker is already initializing triggers
+      return;
+    }
+
+    try {
+      // 1. Create or replace the universal lightweight notify function
+      await sql`
+        CREATE OR REPLACE FUNCTION notify_db_event() RETURNS trigger AS $$
+        DECLARE
+          v_school_id TEXT := NULL;
+          v_entity_id TEXT := NULL;
+          v_recipient_id TEXT := NULL;
+          v_user_id TEXT := NULL;
+          v_student_id TEXT := NULL;
+          v_payload JSONB;
+        BEGIN
+          IF (TG_OP = 'DELETE') THEN
+            BEGIN v_entity_id := OLD.id::text; EXCEPTION WHEN OTHERS THEN 
+              BEGIN v_entity_id := OLD.path::text; EXCEPTION WHEN OTHERS THEN v_entity_id := NULL; END;
+            END;
+            BEGIN v_school_id := OLD.school_id::text; EXCEPTION WHEN OTHERS THEN v_school_id := NULL; END;
+          ELSE
+            BEGIN v_entity_id := NEW.id::text; EXCEPTION WHEN OTHERS THEN 
+              BEGIN v_entity_id := NEW.path::text; EXCEPTION WHEN OTHERS THEN v_entity_id := NULL; END;
+            END;
+            BEGIN v_school_id := NEW.school_id::text; EXCEPTION WHEN OTHERS THEN v_school_id := NULL; END;
+            BEGIN v_recipient_id := NEW.recipient_id::text; EXCEPTION WHEN OTHERS THEN v_recipient_id := NULL; END;
+            BEGIN v_user_id := NEW.user_id::text; EXCEPTION WHEN OTHERS THEN v_user_id := NULL; END;
+            BEGIN v_student_id := NEW.student_id::text; EXCEPTION WHEN OTHERS THEN v_student_id := NULL; END;
+          END IF;
+
+          v_payload := json_build_object(
+            'table', TG_TABLE_NAME,
+            'action', TG_OP,
+            'id', v_entity_id,
+            'school_id', v_school_id,
+            'recipient_id', v_recipient_id,
+            'user_id', v_user_id,
+            'student_id', v_student_id,
+            'timestamp', (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint
+          );
+
+          PERFORM pg_notify('bairaq_realtime_events', v_payload::text);
+          RETURN COALESCE(NEW, OLD);
+        END;
+        $$ LANGUAGE plpgsql;
+      `;
+
+      // 2. Attach triggers to tables
+      for (const table of REALTIME_TABLES) {
+        try {
+          await sql.unsafe(`
+            DROP TRIGGER IF EXISTS trg_${table}_notify ON ${table};
+            CREATE TRIGGER trg_${table}_notify
+            AFTER INSERT OR UPDATE OR DELETE ON ${table}
+            FOR EACH ROW EXECUTE FUNCTION notify_db_event();
+          `);
+        } catch (err: any) {
+          console.warn(`[Realtime DB] Skipped trigger for ${table}:`, err.message);
+        }
+      }
+
+      console.log('[Realtime DB] PostgreSQL triggers initialized successfully.');
+    } finally {
+      try {
+        await sql`SELECT pg_advisory_unlock(748392)`;
+      } catch {
+        // Safe fallback
+      }
+    }
   } catch (err) {
     console.error('[Realtime DB] Error initializing PostgreSQL triggers:', err);
   }
