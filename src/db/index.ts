@@ -96,16 +96,17 @@ export async function withDbRetry<T>(operation: () => Promise<T>, retries = 3, d
 
 if (connectionString) {
   try {
-    const maxConnections = process.env.DB_MAX_CONNECTIONS ? parseInt(process.env.DB_MAX_CONNECTIONS, 10) : 15;
-    const idleTimeout = process.env.DB_IDLE_TIMEOUT ? parseInt(process.env.DB_IDLE_TIMEOUT, 10) : 20;
-    const connectTimeout = process.env.DB_CONNECT_TIMEOUT ? parseInt(process.env.DB_CONNECT_TIMEOUT, 10) : 15;
+    // High-concurrency tuned pool: default 50 connections instead of 15
+    const maxConnections = process.env.DB_MAX_CONNECTIONS ? parseInt(process.env.DB_MAX_CONNECTIONS, 10) : 50;
+    const idleTimeout = process.env.DB_IDLE_TIMEOUT ? parseInt(process.env.DB_IDLE_TIMEOUT, 10) : 30;
+    const connectTimeout = process.env.DB_CONNECT_TIMEOUT ? parseInt(process.env.DB_CONNECT_TIMEOUT, 10) : 10;
 
     client = postgres(connectionString, {
       prepare: false,
       max: maxConnections,
       idle_timeout: idleTimeout,
       connect_timeout: connectTimeout,
-      max_lifetime: 60 * 15,
+      max_lifetime: 60 * 30, // 30 minutes lifetime
       keep_alive: 10,
       onnotice: () => {}, // suppress server notices
     });

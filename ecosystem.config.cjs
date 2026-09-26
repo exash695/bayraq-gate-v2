@@ -11,7 +11,7 @@
 module.exports = {
   apps: [
     {
-      name: "bayraq-gate-portal",
+      name: "bayraq",
       script: "./dist/server.cjs",
       
       // 🚀 CLUSTER MODE: Spawn a worker process per CPU core for zero-downtime & max throughput

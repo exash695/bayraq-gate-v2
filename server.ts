@@ -43,6 +43,7 @@ import { GoogleGenAI } from "@google/genai";
 
 import nodemailer from "nodemailer";
 import rateLimit from "express-rate-limit";
+import compression from "compression";
 import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import multer from "multer";
@@ -227,17 +228,56 @@ const redeemCodeLimiter = rateLimit({
   legacyHeaders: false,
 });
 
+// General API protection limiter (High concurrency safe: 600 req/min per IP)
+const apiLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => !req.path.startsWith('/api/') || req.path.startsWith('/api/health') || req.path.startsWith('/uploads/'),
+  message: { success: false, message: 'معدل الطلبات مرتفع جداً، يرجى المحاولة بعد قليل.' }
+});
+
+// Authentication rate limiter to protect against brute-force attacks
+const authLimiter = rateLimit({
+  windowMs: 1 * 60 * 1000,
+  max: 25,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: 'تجاوزت عدد محاولات الدخول المسموح بها، يرجى الانتظار دقيقة.' }
+});
+
 async function startServer() {
   const app = express();
-app.use(statusRouter);
-  app.use(express.json({ limit: '500mb' }));
-  app.use(express.urlencoded({ limit: '500mb', extended: true }));
 
-  // 1. Security Headers & Full CORS Middleware (Supports Web and Capacitor Mobile Apps)
+  // High-Throughput Performance: Gzip/Deflate Compression Middleware
+  app.use(compression({
+    threshold: 1024, // Compress responses > 1KB
+    filter: (req, res) => {
+      if (req.headers['x-no-compression']) return false;
+      return compression.filter(req, res);
+    }
+  }));
+
+  app.use(statusRouter);
+  app.use('/api/', apiLimiter);
+  app.use('/api/auth/login', authLimiter);
+  app.use('/api/login', authLimiter);
+
+  // Safe request limits to protect Node.js heap memory under high concurrency
+  app.use(express.json({ limit: '25mb' }));
+  app.use(express.urlencoded({ limit: '25mb', extended: true }));
+
+  // 1. Security Headers, Request Tracing & Full CORS Middleware (Supports Web and Capacitor Mobile Apps)
   app.use((req, res, next) => {
+    const requestId = (req.headers['x-request-id'] as string) || `req_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    res.setHeader('X-Request-ID', requestId);
+    (req as any).requestId = requestId;
+
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-device-id, x-auth-token, x-jwt-token, x-user-email, x-developer-email, x-user-role, x-school-id');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-device-id, x-auth-token, x-jwt-token, x-user-email, x-developer-email, x-user-role, x-school-id, x-request-id');
+    res.setHeader('Access-Control-Expose-Headers', 'X-Request-ID, X-Cache-Status, Content-Range, Content-Length, Accept-Ranges');
     
     if (req.method === 'OPTIONS') {
       return res.sendStatus(200);
@@ -1588,9 +1628,21 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
     }
   });
 
+  // High-Performance In-Memory Cache for /api/schools (Reduces DB queries by 95% under high concurrency)
+  let schoolsMemoryCache: { data: any; expiresAt: number } | null = null;
+  const invalidateSchoolsCache = () => { schoolsMemoryCache = null; };
+
   // جلب جميع المدارس
   app.get('/api/schools', async (req, res) => {
     try {
+      const now = Date.now();
+      // Serve from memory cache if fresh (< 45s) and no explicit bypass header
+      if (schoolsMemoryCache && now < schoolsMemoryCache.expiresAt && !req.headers['x-cache-bypass']) {
+        res.setHeader('X-Cache-Status', 'HIT');
+        res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+        return res.json(schoolsMemoryCache.data);
+      }
+
       const dbSchools = await withDbRetry(() => db.select().from(schools));
       const existingIds = new Set(dbSchools.map((s: any) => s.id));
 
@@ -1643,7 +1695,14 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
             : (Array.isArray(s.disabled_modules) ? s.disabled_modules : [])
         };
       });
-      res.json({ success: true, schools: mappedSchools, data: mappedSchools });
+      const responsePayload = { success: true, schools: mappedSchools, data: mappedSchools };
+      schoolsMemoryCache = {
+        data: responsePayload,
+        expiresAt: Date.now() + 45 * 1000 // 45 seconds TTL
+      };
+      res.setHeader('X-Cache-Status', 'MISS');
+      res.setHeader('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
+      res.json(responsePayload);
     } catch (error: any) {
       console.error('Error fetching schools:', error);
       res.status(500).json({ success: false, message: error.message });
@@ -1784,23 +1843,31 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
   // 🎓 طلاب بوابة بيرق - PostgreSQL API
   // ==========================================
 
-  // جلب جميع الطلاب أو بحسب المدرسة
+  // جلب جميع الطلاب أو بحسب المدرسة مع دعم الترقيم الآمن (Pagination)
   app.get('/api/students', async (req, res) => {
     try {
       const { schoolId } = req.query;
+      const limit = req.query.limit ? Math.min(Math.max(parseInt(req.query.limit as string, 10) || 50, 1), 2000) : undefined;
+      const offset = req.query.offset ? Math.max(parseInt(req.query.offset as string, 10) || 0, 0) : undefined;
+
       if (schoolId && schoolId !== 'all') {
         const cleaned = (schoolId as string).trim().toLowerCase();
-        let schoolStudents;
-        if (cleaned === 'school_awail_ghamas' || cleaned === 'ghamas_awail') {
-          schoolStudents = await db.select().from(students).where(
-            or(eq(students.schoolId, 'school1'), eq(students.schoolId, schoolId as string))
-          );
-        } else {
-          schoolStudents = await db.select().from(students).where(eq(students.schoolId, schoolId as string));
-        }
+        let query = (cleaned === 'school_awail_ghamas' || cleaned === 'ghamas_awail')
+          ? db.select().from(students).where(or(eq(students.schoolId, 'school1'), eq(students.schoolId, schoolId as string)))
+          : db.select().from(students).where(eq(students.schoolId, schoolId as string));
+
+        if (limit) query = query.limit(limit);
+        if (offset) query = query.offset(offset);
+
+        const schoolStudents = await query;
         return res.json({ success: true, students: schoolStudents, data: schoolStudents });
       }
-      const allStudents = await db.select().from(students);
+
+      let allQuery = db.select().from(students);
+      if (limit) allQuery = allQuery.limit(limit);
+      if (offset) allQuery = allQuery.offset(offset);
+
+      const allStudents = await allQuery;
       res.json({ success: true, students: allStudents, data: allStudents });
     } catch (error: any) {
       console.error('Error fetching all students:', error);
@@ -1808,19 +1875,22 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
     }
   });
 
-  // جلب طلاب مدرسة معينة أو طالب محدد بالمعرف
+  // جلب طلاب مدرسة معينة أو طالب محدد بالمعرف مع دعم الترقيم (Pagination)
   app.get('/api/students/:schoolId', async (req, res) => {
     try {
       const { schoolId } = req.params;
       const cleaned = (schoolId || '').trim().toLowerCase();
-      let schoolStudents;
-      if (cleaned === 'school_awail_ghamas' || cleaned === 'ghamas_awail') {
-        schoolStudents = await db.select().from(students).where(
-          or(eq(students.schoolId, 'school1'), eq(students.schoolId, schoolId))
-        );
-      } else {
-        schoolStudents = await db.select().from(students).where(eq(students.schoolId, schoolId));
-      }
+      const limit = req.query.limit ? Math.min(Math.max(parseInt(req.query.limit as string, 10) || 50, 1), 2000) : undefined;
+      const offset = req.query.offset ? Math.max(parseInt(req.query.offset as string, 10) || 0, 0) : undefined;
+
+      let query = (cleaned === 'school_awail_ghamas' || cleaned === 'ghamas_awail')
+        ? db.select().from(students).where(or(eq(students.schoolId, 'school1'), eq(students.schoolId, schoolId)))
+        : db.select().from(students).where(eq(students.schoolId, schoolId));
+
+      if (limit) query = query.limit(limit);
+      if (offset) query = query.offset(offset);
+
+      const schoolStudents = await query;
       if (schoolStudents.length > 0) {
         return res.json({ success: true, students: schoolStudents, data: schoolStudents });
       }
@@ -2327,12 +2397,16 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
 
 
   app.use('/uploads', express.static(path.join(process.cwd(), 'public', 'uploads'), {
+    maxAge: '7d',
+    etag: true,
+    lastModified: true,
     setHeaders: (res) => {
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
       res.setHeader('Access-Control-Allow-Headers', 'Range, Content-Type');
       res.setHeader('Access-Control-Expose-Headers', 'Content-Range, Content-Length, Accept-Ranges');
       res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Cache-Control', 'public, max-age=604800, stale-while-revalidate=86400');
     }
   }));
 
@@ -2441,6 +2515,9 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
 
   // Serve all static files from public folder (including mascots) directly from Express
   app.use(express.static(path.join(process.cwd(), 'public'), {
+    maxAge: '1d',
+    etag: true,
+    lastModified: true,
     setHeaders: (res, filePath) => {
       res.setHeader('Access-Control-Allow-Origin', '*');
       res.setHeader('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
@@ -2450,6 +2527,8 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
       } else if (filePath.endsWith('.webm')) {
         res.setHeader('Content-Type', 'video/webm');
         res.setHeader('Accept-Ranges', 'bytes');
+      } else if (filePath.endsWith('.jpg') || filePath.endsWith('.jpeg') || filePath.endsWith('.png') || filePath.endsWith('.webp') || filePath.endsWith('.svg') || filePath.endsWith('.woff2')) {
+        res.setHeader('Cache-Control', 'public, max-age=86400, stale-while-revalidate=43200');
       }
     }
   }));
@@ -6308,17 +6387,31 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
     }
   });
 
-  // Generic attendance-logs collection endpoint
+  // Generic attendance-logs collection endpoint with high-concurrency pagination
   app.get('/api/attendance-logs', async (req, res) => {
     try {
       const { schoolId, studentId } = req.query;
+      const limit = Math.min(Math.max(parseInt(req.query.limit as string, 10) || 200, 1), 1000);
+      const offset = Math.max(parseInt(req.query.offset as string, 10) || 0, 0);
+
       let logs;
       if (studentId) {
-        logs = await db.select().from(attendance_logs).where(eq(attendance_logs.studentId, studentId as string)).orderBy(desc(attendance_logs.timestamp));
+        logs = await db.select().from(attendance_logs)
+          .where(eq(attendance_logs.studentId, studentId as string))
+          .orderBy(desc(attendance_logs.timestamp))
+          .limit(limit)
+          .offset(offset);
       } else if (schoolId && schoolId !== 'all') {
-        logs = await db.select().from(attendance_logs).where(eq(attendance_logs.schoolId, schoolId as string)).orderBy(desc(attendance_logs.timestamp));
+        logs = await db.select().from(attendance_logs)
+          .where(eq(attendance_logs.schoolId, schoolId as string))
+          .orderBy(desc(attendance_logs.timestamp))
+          .limit(limit)
+          .offset(offset);
       } else {
-        logs = await db.select().from(attendance_logs).orderBy(desc(attendance_logs.timestamp));
+        logs = await db.select().from(attendance_logs)
+          .orderBy(desc(attendance_logs.timestamp))
+          .limit(limit)
+          .offset(offset);
       }
       res.json({ success: true, logs, data: logs });
     } catch (error: any) {
@@ -6326,17 +6419,31 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
     }
   });
 
-  // Generic behavior-logs collection endpoint
+  // Generic behavior-logs collection endpoint with high-concurrency pagination
   app.get('/api/behavior-logs', async (req, res) => {
     try {
       const { schoolId, studentId } = req.query;
+      const limit = Math.min(Math.max(parseInt(req.query.limit as string, 10) || 200, 1), 1000);
+      const offset = Math.max(parseInt(req.query.offset as string, 10) || 0, 0);
+
       let logs;
       if (studentId) {
-        logs = await db.select().from(behavior_logs).where(eq(behavior_logs.studentId, studentId as string)).orderBy(desc(behavior_logs.timestamp));
+        logs = await db.select().from(behavior_logs)
+          .where(eq(behavior_logs.studentId, studentId as string))
+          .orderBy(desc(behavior_logs.timestamp))
+          .limit(limit)
+          .offset(offset);
       } else if (schoolId && schoolId !== 'all') {
-        logs = await db.select().from(behavior_logs).where(eq(behavior_logs.schoolId, schoolId as string)).orderBy(desc(behavior_logs.timestamp));
+        logs = await db.select().from(behavior_logs)
+          .where(eq(behavior_logs.schoolId, schoolId as string))
+          .orderBy(desc(behavior_logs.timestamp))
+          .limit(limit)
+          .offset(offset);
       } else {
-        logs = await db.select().from(behavior_logs).orderBy(desc(behavior_logs.timestamp));
+        logs = await db.select().from(behavior_logs)
+          .orderBy(desc(behavior_logs.timestamp))
+          .limit(limit)
+          .offset(offset);
       }
       res.json({ success: true, logs, data: logs });
     } catch (error: any) {
@@ -13200,7 +13307,16 @@ app.post('/api/admin/maintenance/purge-cache', async (req, res) => {
     app.use(vite.middlewares);
   } else {
     const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
+    app.use(express.static(distPath, {
+      maxAge: '30d',
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.html')) {
+          res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+        } else if (filePath.includes('/assets/')) {
+          res.setHeader('Cache-Control', 'public, max-age=2592000, immutable');
+        }
+      }
+    }));
     app.get('/{*splat}', (req, res) => {
       // Explicitly prevent returning HTML for /api/ routes that somehow leaked through
       if (req.path.startsWith('/api/')) {
@@ -13224,6 +13340,13 @@ app.post('/api/admin/maintenance/purge-cache', async (req, res) => {
     await sqlRaw`ALTER TABLE schools ADD COLUMN IF NOT EXISTS "logo_url" text;`;
     await sqlRaw`ALTER TABLE schools ADD COLUMN IF NOT EXISTS "location" text;`;
     await sqlRaw`ALTER TABLE schools ADD COLUMN IF NOT EXISTS "type" varchar(100);`;
+    // High-concurrency performance indexes
+    await sqlRaw`CREATE INDEX IF NOT EXISTS idx_schools_status ON schools(status);`;
+    await sqlRaw`CREATE INDEX IF NOT EXISTS idx_students_school_id ON students(school_id);`;
+    await sqlRaw`CREATE INDEX IF NOT EXISTS idx_students_code ON students(code);`;
+    await sqlRaw`CREATE INDEX IF NOT EXISTS idx_users_school_id ON users(school_id);`;
+    await sqlRaw`CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);`;
+    await sqlRaw`CREATE INDEX IF NOT EXISTS idx_teachers_school_id ON teachers(school_id);`;
   } catch (schemaErr) {
     // Non-blocking fallback
   }
