@@ -56,14 +56,31 @@ class CustomAuthService {
             'x-device-id': getOrCreateDeviceId()
           }
         });
-        const data = await res.json();
-        if (data.success) {
+
+        if (!res.ok) {
+          if (res.status === 401 || res.status === 403) {
+            localStorage.removeItem(this.tokenKey);
+          }
+          this.currentUser = null;
+          this.notifyListeners();
+          return;
+        }
+
+        const text = await res.text();
+        let data: any = null;
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = null;
+        }
+
+        if (data && data.success) {
           this.currentUser = data.user;
           this.notifyListeners();
           return;
         }
       } catch (err) {
-        console.error("Failed to restore session", err);
+        console.warn("[customAuth] Session restore skipped gracefully:", err);
       }
     }
     this.currentUser = null;

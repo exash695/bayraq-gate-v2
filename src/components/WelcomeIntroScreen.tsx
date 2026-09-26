@@ -212,13 +212,20 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
           ref={primaryVideoRef}
           src={primaryVideoSrc}
           className={`w-full h-full object-cover pointer-events-none transition-opacity duration-300 ${
-            currentStep === 0 && primaryLoaded ? "opacity-100 block" : "opacity-0 absolute inset-0 pointer-events-none"
+            currentStep === 0 && primaryLoaded ? "opacity-100" : "opacity-0 pointer-events-none"
           }`}
           playsInline
           autoPlay
+          controls={false}
+          disablePictureInPicture
+          disableRemotePlayback
           muted={isMuted}
           preload="auto"
-          onLoadedData={() => setPrimaryLoaded(true)}
+          onTimeUpdate={() => {
+            if (primaryVideoRef.current && primaryVideoRef.current.currentTime > 0.05) {
+              setPrimaryLoaded(true);
+            }
+          }}
           onPlaying={() => setPrimaryLoaded(true)}
           onEnded={handleNextStepOrComplete}
           onError={() => {
@@ -233,12 +240,19 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
             ref={secondaryVideoRef}
             src={secondaryVideoSrc}
             className={`w-full h-full object-cover pointer-events-none transition-opacity duration-300 ${
-              currentStep === 1 && secondaryLoaded ? "opacity-100 block" : "opacity-0 absolute inset-0 pointer-events-none"
+              currentStep === 1 && secondaryLoaded ? "opacity-100" : "opacity-0 pointer-events-none"
             }`}
             playsInline
+            controls={false}
+            disablePictureInPicture
+            disableRemotePlayback
             muted={isMuted}
             preload="auto"
-            onLoadedData={() => setSecondaryLoaded(true)}
+            onTimeUpdate={() => {
+              if (secondaryVideoRef.current && secondaryVideoRef.current.currentTime > 0.05) {
+                setSecondaryLoaded(true);
+              }
+            }}
             onPlaying={() => setSecondaryLoaded(true)}
             onEnded={handleNextStepOrComplete}
             onError={() => onCompleteRef.current()}
