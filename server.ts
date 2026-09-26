@@ -4731,14 +4731,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
     }
   });
 
-  app.get('/api/schools', async (req, res) => {
-    try {
-      const allSchools = await db.select().from(schools).orderBy(asc(schools.name));
-      res.json({ success: true, schools: allSchools, data: allSchools });
-    } catch (error: any) {
-      res.status(500).json({ success: false, message: error.message });
-    }
-  });
+  // (Duplicate api/schools route removed to prevent overriding main enhanced endpoint)
 
   app.get('/api/schools/:id', async (req, res) => {
     try {
