@@ -251,7 +251,6 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
           disablePictureInPicture
           disableRemotePlayback
           muted={isMuted}
-          defaultMuted
           preload="auto"
           onTimeUpdate={() => {
             if (primaryVideoRef.current && primaryVideoRef.current.currentTime > 0.05) {
@@ -280,7 +279,6 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
             disablePictureInPicture
             disableRemotePlayback
             muted={isMuted}
-            defaultMuted
             preload="auto"
             onTimeUpdate={() => {
               if (secondaryVideoRef.current && secondaryVideoRef.current.currentTime > 0.05) {
