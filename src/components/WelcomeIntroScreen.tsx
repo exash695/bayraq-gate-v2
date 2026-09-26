@@ -244,8 +244,8 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
           onError={handleVideoError}
         />
 
-        {/* Preload secondary video in background for seamless transition */}
-        {hasSecondary && currentStep === 0 && (
+        {/* Preload secondary video in background only after primary video is playing */}
+        {hasSecondary && currentStep === 0 && videoLoaded && (
           <video
             src={secondaryVideoSrc}
             preload="auto"
