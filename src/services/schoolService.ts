@@ -119,7 +119,9 @@ export const schoolService = {
       }
 
       if (mergedMap['general']) {
-        mergedMap['general'].name = 'أكاديمية بيرق الرقمية';
+        if (!mergedMap['general'].name || mergedMap['general'].name === 'مدرسة جديدة') {
+          mergedMap['general'].name = 'أكاديمية بيرق الرقمية';
+        }
       } else {
         const sysGen = SCHOOLS_DATA.find(s => s.id === 'general');
         if (sysGen) {
@@ -157,7 +159,7 @@ export const schoolService = {
       const allMerged = Object.values(mergedMap).filter((item: any) => 
         !deletedSchoolIds.includes(item.id) &&
         item.id !== 'school_awail_ghamas' &&
-        item.name !== 'مدرسة جديدة'
+        (item.name !== 'مدرسة جديدة' || item.id === 'general')
       );
 
       return allMerged.map((item: any) => {
