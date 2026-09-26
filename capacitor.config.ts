@@ -3,6 +3,7 @@ const config = {
   appName: 'بوابة بيرق - Bayraq Gate',
   webDir: 'dist',
   server: {
+    url: 'https://bairaq-iq.com',
     androidScheme: 'https',
     cleartext: true,
     allowNavigation: [

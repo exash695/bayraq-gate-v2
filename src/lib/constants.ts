@@ -82,7 +82,7 @@ export function getSchoolBairaqImageUrl(schoolId?: string, schoolName?: string):
   let relativePath = '/schools/cover1.jpg';
   if (schoolId) {
     const cleanId = String(schoolId).trim();
-    if (cleanId === 'general') return '/uploads/school_general_cover_1790088445960.png';
+    if (cleanId === 'general') return '/schools/cover_general.jpg';
     const num = cleanId.replace(/\D/g, '');
     if (num && parseInt(num) >= 1 && parseInt(num) <= 8) {
       relativePath = `/schools/cover${num}.jpg`;
@@ -99,7 +99,7 @@ export function getSchoolBairaqImageUrl(schoolId?: string, schoolName?: string):
     else if (name.includes('اليمامة')) relativePath = '/schools/cover6.jpg';
     else if (name.includes('الجواهري')) relativePath = '/schools/cover7.jpg';
     else if (name.includes('إبداعنا') || name.includes('ابداعنا')) relativePath = '/schools/cover8.jpg';
-    else if (name.includes('بيرق') || name.includes('أكاديمية') || name.includes('اكاديمية')) relativePath = '/uploads/school_general_cover_1790088445960.png';
+    else if (name.includes('بيرق') || name.includes('أكاديمية') || name.includes('اكاديمية')) relativePath = '/schools/cover_general.jpg';
   }
   return relativePath;
 }
@@ -114,7 +114,7 @@ export function getOfficialSchoolLogoUrl(schoolId?: string, schoolName?: string,
   let relativePath = '/school-logos/logo1.jpg';
   if (schoolId) {
     const cleanId = String(schoolId).trim();
-    if (cleanId === 'general') return '/logo.png';
+    if (cleanId === 'general') return '/school-logos/logo_general.jpg';
     const num = cleanId.replace(/\D/g, '');
     if (num && parseInt(num) >= 1 && parseInt(num) <= 8) {
       relativePath = `/school-logos/logo${num}.jpg`;
@@ -131,7 +131,7 @@ export function getOfficialSchoolLogoUrl(schoolId?: string, schoolName?: string,
     else if (name.includes('اليمامة')) relativePath = '/school-logos/logo6.jpg';
     else if (name.includes('الجواهري')) relativePath = '/school-logos/logo7.jpg';
     else if (name.includes('إبداعنا') || name.includes('ابداعنا')) relativePath = '/school-logos/logo8.jpg';
-    else if (name.includes('بيرق') || name.includes('أكاديمية') || name.includes('اكاديمية')) relativePath = '/logo.png';
+    else if (name.includes('بيرق') || name.includes('أكاديمية') || name.includes('اكاديمية')) relativePath = '/school-logos/logo_general.jpg';
   }
   return relativePath;
 }

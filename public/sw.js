@@ -1,5 +1,5 @@
 // Service Worker for Bayraq Gate - Web Push Notifications & Background Sync
-const CACHE_NAME = 'bayraq-gate-v3';
+const CACHE_NAME = 'bayraq-gate-v4';
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();

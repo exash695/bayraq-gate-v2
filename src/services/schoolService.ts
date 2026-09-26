@@ -100,13 +100,15 @@ export const schoolService = {
         }
       });
 
-      // Ensure both school8 (معهد ابداعنا) and general (أكاديمية بيرق الرقمية) coexist independently
-      if (!mergedMap['school8']) {
+      // Ensure both school8 (معهد ابداعنا) and general (أكاديمية بيرق الرقمية) coexist independently with strict names
+      if (mergedMap['school8']) {
+        mergedMap['school8'].name = 'معهد ابداعنا للتعليم المطور';
+      } else {
         const sys8 = SCHOOLS_DATA.find(s => s.id === 'school8');
         if (sys8) {
           mergedMap['school8'] = {
             id: 'school8',
-            name: sys8.name,
+            name: 'معهد ابداعنا للتعليم المطور',
             type: sys8.type,
             governorate: 'الديوانية - غماس',
             status: 'active',
@@ -115,12 +117,15 @@ export const schoolService = {
           };
         }
       }
-      if (!mergedMap['general']) {
+
+      if (mergedMap['general']) {
+        mergedMap['general'].name = 'أكاديمية بيرق الرقمية';
+      } else {
         const sysGen = SCHOOLS_DATA.find(s => s.id === 'general');
         if (sysGen) {
           mergedMap['general'] = {
             id: 'general',
-            name: sysGen.name,
+            name: 'أكاديمية بيرق الرقمية',
             type: sysGen.type,
             governorate: 'العراق - دورات نخبة الأساتذة',
             status: 'active',

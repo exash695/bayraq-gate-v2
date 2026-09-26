@@ -3,6 +3,7 @@
 	"appName": "بوابة بيرق - Bayraq Gate",
 	"webDir": "dist",
 	"server": {
+		"url": "https://bairaq-iq.com",
 		"androidScheme": "https",
 		"cleartext": true,
 		"allowNavigation": [
@@ -12,6 +13,12 @@
 		]
 	},
 	"plugins": {
+		"LiveUpdates": {
+			"appId": "54ca6aa9",
+			"channel": "production",
+			"autoUpdateMethod": "background",
+			"maxVersions": 2
+		},
 		"CapacitorHttp": {
 			"enabled": true
 		},
