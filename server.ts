@@ -1586,13 +1586,46 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
   // جلب جميع المدارس
   app.get('/api/schools', async (req, res) => {
     try {
-      const allSchools = await withDbRetry(() => db.select().from(schools));
-      const mappedSchools = allSchools.map((s: any) => {
-        const cover = s.coverUrl || s.cover_url;
-        const logo = s.logoUrl || s.logo_url;
+      const dbSchools = await withDbRetry(() => db.select().from(schools));
+      const existingIds = new Set(dbSchools.map((s: any) => s.id));
+
+      const defaultSchools = [
+        { id: 'school1', name: 'مدرسة أوائل غماس الابتدائية', governorate: 'الديوانية - غماس', type: 'جيل واعد ومبدع' },
+        { id: 'school2', name: 'مدارس النخبة الأهلية', governorate: 'الديوانية - غماس', type: 'رواد العلم والمعرفة' },
+        { id: 'school3', name: 'ثانوية نون النموذجية للبنات', governorate: 'الديوانية - غماس', type: 'صرح تفوق وعطاء' },
+        { id: 'school4', name: 'ثانوية النبأ العظيم للبنين', governorate: 'الديوانية - غماس', type: 'بناء جيل واعٍ' },
+        { id: 'school5', name: 'مدرسة الامام عقيل الابتدائية', governorate: 'الديوانية - غماس', type: 'أجيال تبني الوطن' },
+        { id: 'school6', name: 'مدرسة اليمامة الابتدائية', governorate: 'الديوانية - غماس', type: 'جيل واعد ومبدع' },
+        { id: 'school7', name: 'مدارس الجواهري الاهلية', governorate: 'الديوانية - غماس', type: 'منارة العلم والأدب' },
+        { id: 'school8', name: 'معهد ابداعنا للتعليم المطور', governorate: 'الديوانية - غماس', type: 'تعليم نوعي وتطوير مستمر' },
+        { id: 'general', name: 'أكاديمية بيرق الرقمية', governorate: 'العراق - دورات نخبة الأساتذة', type: 'منصة الدورات الألكترونية لنخبة الأساتذة' }
+      ];
+
+      const mergedList = [...dbSchools];
+      for (const def of defaultSchools) {
+        if (!existingIds.has(def.id)) {
+          mergedList.push({
+            id: def.id,
+            name: def.name,
+            governorate: def.governorate,
+            location: def.governorate,
+            type: def.type,
+            status: 'active',
+            coverUrl: def.id === 'general' ? '/schools/cover_general.jpg' : `/schools/cover${def.id.replace(/\D/g, '')}.jpg`,
+            logoUrl: def.id === 'general' ? '/school-logos/logo_general.jpg' : `/school-logos/logo${def.id.replace(/\D/g, '')}.jpg`,
+            disabledModules: []
+          });
+        }
+      }
+
+      const mappedSchools = mergedList.map((s: any) => {
+        const cover = s.coverUrl || s.cover_url || (s.id === 'general' ? '/schools/cover_general.jpg' : `/schools/cover${s.id.replace(/\D/g, '') || '1'}.jpg`);
+        const logo = s.logoUrl || s.logo_url || (s.id === 'general' ? '/school-logos/logo_general.jpg' : `/school-logos/logo${s.id.replace(/\D/g, '') || '1'}.jpg`);
         const loc = s.location || s.governorate || 'الديوانية - غماس';
+        const name = s.id === 'general' ? 'أكاديمية بيرق الرقمية' : (s.id === 'school8' ? 'معهد ابداعنا للتعليم المطور' : s.name);
         return {
           ...s,
+          name,
           coverUrl: cover,
           logoUrl: logo,
           schoolBairaqImageUrl: cover,
