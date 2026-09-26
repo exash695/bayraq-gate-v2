@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Sparkles, ArrowLeft, Loader2, Play, ChevronLeft } from "lucide-react";
+import { Sparkles, ArrowLeft, Loader2, Play, ChevronLeft, Volume2, VolumeX } from "lucide-react";
 import { useBerqPoses, useAppLogo } from "./BerqCharacterManager";
 
 interface WelcomeIntroScreenProps {
@@ -94,6 +94,8 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
     onCompleteRef.current = onComplete;
   }, [onComplete]);
 
+  const [isMuted, setIsMuted] = useState(false);
+
   // Sync video source on step change or remote pose update
   useEffect(() => {
     const nextSrc = currentStep === 0 ? primaryVideoSrc : secondaryVideoSrc;
@@ -105,40 +107,62 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
     }
   }, [currentStep, primaryVideoSrc, secondaryVideoSrc, stopAllMedia]);
 
-  // Autoplay attempt with sound enabled directly on video source change
+  // Autoplay attempt with smart audio fallback for Android / iOS WebView
   useEffect(() => {
     const video = videoRef.current;
-    if (video) {
-      video.playsInline = true;
-      video.muted = false; // Audio enabled directly by default
-      const playPromise = video.play();
-      
-      if (playPromise !== undefined) {
-        playPromise.catch((err) => {
-          console.warn("[WelcomeIntroScreen] Direct unmuted autoplay restricted, attempting fallback:", err?.message || err);
-          // If browser policy strictly restricts audio without prior user gesture, start muted
+    if (!video) return;
+
+    video.playsInline = true;
+    (video as any)['webkitPlaysinline'] = true;
+
+    const attemptPlay = async () => {
+      try {
+        // Try playing unmuted first
+        video.muted = false;
+        setIsMuted(false);
+        await video.play();
+        setVideoLoaded(true);
+      } catch (err: any) {
+        console.warn("[WelcomeIntroScreen] Unmuted autoplay restricted by Android/iOS policy, switching to muted instant start:", err?.message || err);
+        // Fallback to muted autoplay (always succeeds 100% instantly on all mobile WebViews)
+        try {
           video.muted = true;
-          video.play().catch(() => {});
-        });
-      }
-    }
-    
-    // FAILSAFE: Only trigger if the video has failed to load/play after 2.5 seconds
-    const failsafe = setTimeout(() => {
-      if (!videoLoaded) {
-        if (currentStep === 0 && hasSecondary) {
-          stopAllMedia();
-          setCurrentStep(1);
-          setVideoLoaded(false);
-        } else {
-          stopAllMedia();
-          onCompleteRef.current();
+          setIsMuted(true);
+          await video.play();
+          setVideoLoaded(true);
+        } catch (innerErr) {
+          console.error("[WelcomeIntroScreen] Muted play error:", innerErr);
         }
       }
-    }, 2500);
-    
-    return () => clearTimeout(failsafe);
-  }, [currentVideoSrc, videoLoaded, currentStep, hasSecondary, stopAllMedia]);
+    };
+
+    attemptPlay();
+
+    // Enable sound on first screen interaction
+    const handleFirstTouch = () => {
+      if (video && video.muted) {
+        video.muted = false;
+        setIsMuted(false);
+      }
+    };
+
+    window.addEventListener('click', handleFirstTouch, { once: true, passive: true });
+    window.addEventListener('touchstart', handleFirstTouch, { once: true, passive: true });
+
+    return () => {
+      window.removeEventListener('click', handleFirstTouch);
+      window.removeEventListener('touchstart', handleFirstTouch);
+    };
+  }, [currentVideoSrc]);
+
+  const toggleSound = useCallback((e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (videoRef.current) {
+      const newMuted = !videoRef.current.muted;
+      videoRef.current.muted = newMuted;
+      setIsMuted(newMuted);
+    }
+  }, []);
 
   const handleNextStepOrComplete = useCallback(() => {
     stopAllMedia();
@@ -212,12 +236,23 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
           className="w-full h-full object-cover pointer-events-none"
           playsInline
           autoPlay
+          muted={isMuted}
           preload="auto"
           onLoadedData={() => setVideoLoaded(true)}
           onPlay={() => setVideoLoaded(true)}
           onEnded={handleNextStepOrComplete}
           onError={handleVideoError}
         />
+
+        {/* Preload secondary video in background for seamless transition */}
+        {hasSecondary && currentStep === 0 && (
+          <video
+            src={secondaryVideoSrc}
+            preload="auto"
+            className="hidden"
+            muted
+          />
+        )}
 
         {/* Fallback Screen if Video Cannot Play */}
         {videoError && (
@@ -269,6 +304,21 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
               <ChevronLeft className="w-3.5 h-3.5" />
             </button>
           )}
+
+          <button
+            onClick={toggleSound}
+            aria-label={isMuted ? "تشغيل الصوت" : "كتم الصوت"}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-bold text-white/90 bg-black/50 backdrop-blur-md border border-white/15 hover:bg-white/20 transition-all cursor-pointer active:scale-95 shadow-lg"
+          >
+            {isMuted ? (
+              <>
+                <VolumeX className="w-3.5 h-3.5 text-red-400 animate-pulse" />
+                <span className="text-[10px] text-amber-300">تشغيل الصوت</span>
+              </>
+            ) : (
+              <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
+            )}
+          </button>
         </div>
 
         {/* Left: Stage Pill Indicator if multiple videos */}
