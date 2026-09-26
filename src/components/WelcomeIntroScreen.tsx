@@ -59,19 +59,24 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
   const hasSecondary = Boolean(secondaryVideoSrc && secondaryVideoSrc.trim() !== "" && secondaryVideoSrc !== primaryVideoSrc);
 
   const [currentStep, setCurrentStep] = useState<0 | 1>(0);
-  const activeSrc = currentStep === 0 ? primaryVideoSrc : secondaryVideoSrc;
-
-  const [currentVideoSrc, setCurrentVideoSrc] = useState(activeSrc);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [videoLoaded, setVideoLoaded] = useState(false);
+  const primaryVideoRef = useRef<HTMLVideoElement>(null);
+  const secondaryVideoRef = useRef<HTMLVideoElement>(null);
+  const [primaryLoaded, setPrimaryLoaded] = useState(false);
+  const [secondaryLoaded, setSecondaryLoaded] = useState(false);
   const [videoError, setVideoError] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
 
   const stopAllMedia = useCallback(() => {
-    if (videoRef.current) {
+    if (primaryVideoRef.current) {
       try {
-        videoRef.current.pause();
-        videoRef.current.muted = true;
-        videoRef.current.currentTime = 0;
+        primaryVideoRef.current.pause();
+        primaryVideoRef.current.muted = true;
+      } catch (e) {}
+    }
+    if (secondaryVideoRef.current) {
+      try {
+        secondaryVideoRef.current.pause();
+        secondaryVideoRef.current.muted = true;
       } catch (e) {}
     }
   }, []);
@@ -80,12 +85,6 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
   useEffect(() => {
     return () => {
       stopAllMedia();
-      if (videoRef.current) {
-        try {
-          videoRef.current.src = "";
-          videoRef.current.load();
-        } catch (e) {}
-      }
     };
   }, [stopAllMedia]);
 
@@ -94,83 +93,71 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
     onCompleteRef.current = onComplete;
   }, [onComplete]);
 
-  const [isMuted, setIsMuted] = useState(false);
-
-  // Sync video source on step change or remote pose update
+  // Handle Playback for current step
   useEffect(() => {
-    const nextSrc = currentStep === 0 ? primaryVideoSrc : secondaryVideoSrc;
-    if (nextSrc) {
-      stopAllMedia();
-      setCurrentVideoSrc(nextSrc);
-      setVideoLoaded(false);
-      setVideoError(false);
-    }
-  }, [currentStep, primaryVideoSrc, secondaryVideoSrc, stopAllMedia]);
+    const activeVideo = currentStep === 0 ? primaryVideoRef.current : secondaryVideoRef.current;
+    if (!activeVideo) return;
 
-  // Autoplay attempt with smart audio fallback for Android / iOS WebView
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video) return;
-
-    video.playsInline = true;
-    (video as any)['webkitPlaysinline'] = true;
+    activeVideo.playsInline = true;
+    (activeVideo as any)['webkitPlaysinline'] = true;
 
     const attemptPlay = async () => {
       try {
-        // Try playing unmuted first
-        video.muted = false;
+        activeVideo.muted = false;
         setIsMuted(false);
-        await video.play();
-        setVideoLoaded(true);
-      } catch (err: any) {
-        console.warn("[WelcomeIntroScreen] Unmuted autoplay restricted by Android/iOS policy, switching to muted instant start:", err?.message || err);
-        // Fallback to muted autoplay (always succeeds 100% instantly on all mobile WebViews)
+        await activeVideo.play();
+        if (currentStep === 0) setPrimaryLoaded(true);
+        else setSecondaryLoaded(true);
+      } catch (err) {
+        // Fallback to muted instant autoplay
         try {
-          video.muted = true;
+          activeVideo.muted = true;
           setIsMuted(true);
-          await video.play();
-          setVideoLoaded(true);
+          await activeVideo.play();
+          if (currentStep === 0) setPrimaryLoaded(true);
+          else setSecondaryLoaded(true);
         } catch (innerErr) {
-          console.error("[WelcomeIntroScreen] Muted play error:", innerErr);
+          console.warn("[WelcomeIntroScreen] Playback fallback notice:", innerErr);
         }
       }
     };
 
     attemptPlay();
 
-    // Enable sound on first screen interaction
-    const handleFirstTouch = () => {
-      if (video && video.muted) {
-        video.muted = false;
+    const handleTouch = () => {
+      if (activeVideo && activeVideo.muted) {
+        activeVideo.muted = false;
         setIsMuted(false);
       }
     };
 
-    window.addEventListener('click', handleFirstTouch, { once: true, passive: true });
-    window.addEventListener('touchstart', handleFirstTouch, { once: true, passive: true });
+    window.addEventListener('click', handleTouch, { once: true, passive: true });
+    window.addEventListener('touchstart', handleTouch, { once: true, passive: true });
 
     return () => {
-      window.removeEventListener('click', handleFirstTouch);
-      window.removeEventListener('touchstart', handleFirstTouch);
+      window.removeEventListener('click', handleTouch);
+      window.removeEventListener('touchstart', handleTouch);
     };
-  }, [currentVideoSrc]);
+  }, [currentStep]);
 
   const toggleSound = useCallback((e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    if (videoRef.current) {
-      const newMuted = !videoRef.current.muted;
-      videoRef.current.muted = newMuted;
+    const activeVideo = currentStep === 0 ? primaryVideoRef.current : secondaryVideoRef.current;
+    if (activeVideo) {
+      const newMuted = !activeVideo.muted;
+      activeVideo.muted = newMuted;
       setIsMuted(newMuted);
     }
-  }, []);
+  }, [currentStep]);
 
   const handleNextStepOrComplete = useCallback(() => {
-    stopAllMedia();
     if (currentStep === 0 && hasSecondary) {
-      // Transition to secondary welcome video
+      if (primaryVideoRef.current) {
+        primaryVideoRef.current.pause();
+      }
       setCurrentStep(1);
-      setVideoLoaded(false);
     } else {
+      stopAllMedia();
       onComplete();
     }
   }, [currentStep, hasSecondary, onComplete, stopAllMedia]);
@@ -180,18 +167,7 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
     onCompleteRef.current();
   }, [stopAllMedia]);
 
-  const handleVideoError = () => {
-    console.warn(`[WelcomeIntroScreen] Video error on step ${currentStep} (${currentVideoSrc})`);
-    if (currentStep === 0 && hasSecondary) {
-      // If primary fails and secondary exists, attempt secondary
-      setCurrentStep(1);
-    } else if (currentVideoSrc !== "/mascot/sliced_bairaq_sheet5_pose_broadcaster.mp4" && currentVideoSrc !== "/short-intro.webm") {
-      // Try reliable default video
-      setCurrentVideoSrc("/mascot/sliced_bairaq_sheet5_pose_broadcaster.mp4");
-    } else {
-      setVideoError(true);
-    }
-  };
+  const currentVideoLoaded = currentStep === 0 ? primaryLoaded : secondaryLoaded;
 
   return (
     <motion.div 
@@ -201,10 +177,12 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
       className="fixed inset-0 z-[10000] bg-[#020617] flex items-center justify-center overflow-hidden select-none"
       dir="rtl"
     >
-      {/* 1. Immersive Video Player & Visual Background */}
-      <div className="absolute inset-0 w-full h-full z-0 bg-[#020617]">
-        {!videoLoaded && !videoError && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-[#020617] via-[#0A1024] to-[#050A18] z-30 space-y-5 p-6">
+      {/* 1. Immersive Dual-Video Player & Visual Background */}
+      <div className="absolute inset-0 w-full h-full z-0 bg-[#020617] overflow-hidden">
+        
+        {/* Aesthetic Loading Screen: Masks any native Android player buffering */}
+        {!currentVideoLoaded && !videoError && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-[#020617] z-30 space-y-5 p-6">
             <div className="relative">
               <div className="w-16 h-16 rounded-full border-2 border-amber-500/20 border-t-amber-400 animate-spin" />
               <img 
@@ -216,7 +194,7 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
             </div>
             <div className="text-center space-y-1">
               <span className="text-xs font-bold text-amber-400/90 tracking-wider">
-                {currentStep === 0 ? "جاري تشغيل الفيديو الترحيبي..." : "جاري تشغيل الفيديو الترحيبي الثانوي..."}
+                {currentStep === 0 ? "جاري تشغيل الفيديو الترحيبي..." : "جاري تشغيل الفيديو الترحيبي الثاني..."}
               </span>
               <p className="text-[10px] text-white/40">بوابة بيرق للتعليم الذكي</p>
             </div>
@@ -229,28 +207,41 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
           </div>
         )}
 
+        {/* Primary Video */}
         <video
-          key={`welcome-video-${currentStep}-${currentVideoSrc}`}
-          ref={videoRef}
-          src={currentVideoSrc}
-          className="w-full h-full object-cover pointer-events-none"
+          ref={primaryVideoRef}
+          src={primaryVideoSrc}
+          className={`w-full h-full object-cover pointer-events-none transition-opacity duration-300 ${
+            currentStep === 0 && primaryLoaded ? "opacity-100 block" : "opacity-0 absolute inset-0 pointer-events-none"
+          }`}
           playsInline
           autoPlay
           muted={isMuted}
           preload="auto"
-          onLoadedData={() => setVideoLoaded(true)}
-          onPlay={() => setVideoLoaded(true)}
+          onLoadedData={() => setPrimaryLoaded(true)}
+          onPlaying={() => setPrimaryLoaded(true)}
           onEnded={handleNextStepOrComplete}
-          onError={handleVideoError}
+          onError={() => {
+            if (currentStep === 0 && hasSecondary) setCurrentStep(1);
+            else setVideoError(true);
+          }}
         />
 
-        {/* Preload secondary video in background only after primary video is playing */}
-        {hasSecondary && currentStep === 0 && videoLoaded && (
+        {/* Secondary Video (Preloaded in background) */}
+        {hasSecondary && (
           <video
+            ref={secondaryVideoRef}
             src={secondaryVideoSrc}
+            className={`w-full h-full object-cover pointer-events-none transition-opacity duration-300 ${
+              currentStep === 1 && secondaryLoaded ? "opacity-100 block" : "opacity-0 absolute inset-0 pointer-events-none"
+            }`}
+            playsInline
+            muted={isMuted}
             preload="auto"
-            className="hidden"
-            muted
+            onLoadedData={() => setSecondaryLoaded(true)}
+            onPlaying={() => setSecondaryLoaded(true)}
+            onEnded={handleNextStepOrComplete}
+            onError={() => onCompleteRef.current()}
           />
         )}
 
