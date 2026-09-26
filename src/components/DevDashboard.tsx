@@ -2448,6 +2448,21 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
   const displayedSchools = React.useMemo(() => {
     // We now show both real and sys schools
     const list = [...schools];
+    // Ensure 'general' (أكاديمية بيرق الرقمية) is ALWAYS present in the dev dashboard schools list
+    if (!list.some(s => s.id === 'general')) {
+      list.push({
+        id: 'general',
+        name: 'أكاديمية بيرق الرقمية',
+        governorate: 'العراق - دورات نخبة الأساتذة',
+        type: 'منصة الدورات الألكترونية لنخبة الأساتذة',
+        status: 'active',
+        coverUrl: '/schools/cover_general.jpg',
+        logoUrl: '/school-logos/logo_general.jpg',
+        schoolBairaqImageUrl: '/schools/cover_general.jpg',
+        schoolLogoUrl: '/school-logos/logo_general.jpg',
+        disabledModules: []
+      } as any);
+    }
     if (!codeSearchTerm) return list;
     const term = codeSearchTerm.toLowerCase();
     return list.filter(s =>
