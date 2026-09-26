@@ -1,0 +1,41 @@
+{
+	"appId": "com.bairaq.gate6",
+	"appName": "بوابة بيرق - Bayraq Gate",
+	"webDir": "dist",
+	"server": {
+		"url": "https://bairaq-iq.com",
+		"androidScheme": "https",
+		"cleartext": true,
+		"allowNavigation": [
+			"bairaq-iq.com",
+			"*.bairaq-iq.com",
+			"api.bairaq-iq.com"
+		]
+	},
+	"plugins": {
+		"LiveUpdates": {
+			"appId": "54ca6aa9",
+			"channel": "production",
+			"autoUpdateMethod": "background",
+			"maxVersions": 2
+		},
+		"CapacitorHttp": {
+			"enabled": true
+		},
+		"GoogleAuth": {
+			"scopes": [
+				"profile",
+				"email"
+			],
+			"serverClientId": "728585268376-hf25klmd55cjomn0cuhso6qno10gn977.apps.googleusercontent.com",
+			"forceCodeForRefreshToken": true
+		}
+	},
+	"android": {
+		"allowMixedContent": true,
+		"backgroundColor": "#020617"
+	},
+	"packageClassList": [
+		"CAPLiveUpdatesPlugin"
+	]
+}

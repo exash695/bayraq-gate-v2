@@ -7,6 +7,7 @@
     "@aws-sdk/s3-request-presigner": "^3.714.0",
     "@capacitor/android": "^8.5.2",
     "@capacitor/core": "^8.5.2",
+    "@capacitor/ios": "^8.5.2",
     "@capacitor/live-updates": "^0.5.0",
     "@google/genai": "^2.24.0",
     "@types/compression": "^1.8.1",
