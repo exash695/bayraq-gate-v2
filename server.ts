@@ -1266,7 +1266,8 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         { id: 'school5', name: 'مدارس ابن عقيل الأهلية', governorate: 'الديوانية - غماس', status: 'active' },
         { id: 'school6', name: 'مدرسة اليمامة الابتدائية', governorate: 'الديوانية - غماس', status: 'active' },
         { id: 'school7', name: 'مدارس الجواهري الاهلية', governorate: 'الديوانية - غماس', status: 'active' },
-        { id: 'school8', name: 'أكاديمية بيرق الرقمية', governorate: 'العراق - دورات نخبة الأساتذة', status: 'active' },
+        { id: 'school8', name: 'معهد ابداعنا للتعليم المطور', governorate: 'الديوانية - غماس', status: 'active' },
+        { id: 'general', name: 'أكاديمية بيرق الرقمية', governorate: 'العراق - دورات نخبة الأساتذة', status: 'active' },
       ];
       for (const item of defaultOfficialSchools) {
         await db.insert(schools).values({
@@ -1276,6 +1277,10 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
           status: item.status,
         }).onConflictDoNothing();
       }
+      // Also ensure update any existing school8 in DB that was misnamed as academy
+      await db.update(schools).set({ name: 'معهد ابداعنا للتعليم المطور' }).where(eq(schools.id, 'school8'));
+      await db.update(schools).set({ name: 'أكاديمية بيرق الرقمية' }).where(eq(schools.id, 'general'));
+
       console.log('[DB] Official Ghammas schools verified in PostgreSQL');
     } catch (e) {
       console.warn('[DB] Seed default schools notice:', e);
