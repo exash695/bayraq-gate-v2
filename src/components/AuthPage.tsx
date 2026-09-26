@@ -51,6 +51,24 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onOpenPrivacy }) => {
   const [message, setMessage] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [authLoading, setAuthLoading] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
+
+  // Load saved login credentials on mount
+  React.useEffect(() => {
+    try {
+      const saved = safeStorage.getItem('bayraq_saved_credential');
+      if (saved) {
+        const data = JSON.parse(saved);
+        if (data.method === 'phone' && data.phone) {
+          setAuthMethod('phone');
+          setFormData(prev => ({ ...prev, phone: data.phone }));
+        } else if (data.email) {
+          setAuthMethod('email');
+          setFormData(prev => ({ ...prev, email: data.email }));
+        }
+      }
+    } catch (e) {}
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -64,8 +82,21 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onOpenPrivacy }) => {
           setAuthLoading(false);
           return;
         }
-        // In this app, login is currently unified via email or phone-as-identifier in backend
         await customAuth.loginWithEmail(authMethod === 'phone' ? formData.phone : formData.email, formData.password);
+        
+        // Save credential if Remember Me is checked
+        if (rememberMe) {
+          try {
+            safeStorage.setItem('bayraq_saved_credential', JSON.stringify({
+              method: authMethod,
+              email: authMethod === 'email' ? formData.email : '',
+              phone: authMethod === 'phone' ? formData.phone : ''
+            }));
+          } catch (e) {}
+        } else {
+          safeStorage.removeItem('bayraq_saved_credential');
+        }
+
         safeStorage.removeItem('bayraq_user_role');
         safeStorage.setItem('s6_activeSection', 'hub');
       } else {
@@ -439,6 +470,15 @@ export const AuthPage: React.FC<AuthPageProps> = ({ onOpenPrivacy }) => {
 
                 {isLogin && (
                   <div className="flex justify-between items-center px-2 mt-1 mb-2">
+                    <label className="flex items-center gap-2 cursor-pointer select-none text-xs text-white/80 hover:text-white transition-colors">
+                      <input 
+                        type="checkbox" 
+                        checked={rememberMe} 
+                        onChange={e => setRememberMe(e.target.checked)} 
+                        className="w-4 h-4 rounded border-white/20 bg-white/5 text-amber-500 focus:ring-amber-500 accent-amber-500 cursor-pointer"
+                      />
+                      <span>تذكرني تلقائياً</span>
+                    </label>
                     <button 
                       type="button" 
                       onClick={() => setShowRecoveryModal(true)} 

@@ -17,23 +17,44 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
   const poses = useBerqPoses();
   const appLogo = useAppLogo();
 
+  const [serverPosesLoaded, setServerPosesLoaded] = useState(false);
+  const [remotePoses, setRemotePoses] = useState<Record<string, string>>(poses);
+
   // Force fetch latest poses from server on mount so regular users get developer uploaded welcome videos instantly
   useEffect(() => {
-    fetch('/api/bairaq/poses')
+    let isMounted = true;
+    const timeout = setTimeout(() => {
+      if (isMounted) setServerPosesLoaded(true);
+    }, 1200);
+
+    fetch('/api/bairaq/poses', { cache: 'no-store' })
       .then(res => res.json())
       .then(data => {
-        if (data && data.poses) {
+        if (isMounted && data && data.poses) {
+          setRemotePoses(prev => ({ ...prev, ...data.poses }));
           import('./BerqCharacterManager').then(({ updateGlobalPoses }) => {
             updateGlobalPoses(data.poses);
           });
         }
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => {
+        if (isMounted) {
+          clearTimeout(timeout);
+          setServerPosesLoaded(true);
+        }
+      });
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timeout);
+    };
   }, []);
 
   // Primary & Secondary Video resolution
-  const primaryVideoSrc = propVideoSrc || poses['welcome_video'] || poses['greeting_welcome'] || "/mascot/sliced_bairaq_sheet5_pose_broadcaster.mp4";
-  const secondaryVideoSrc = propSecondaryVideoSrc || poses['welcome_video_secondary'] || poses['welcome_intro_secondary'] || "/mascot/sliced_bairaq_sheet5_greeting_hello.mp4";
+  const activePoses = serverPosesLoaded ? { ...poses, ...remotePoses } : poses;
+  const primaryVideoSrc = propVideoSrc || activePoses['welcome_video'] || activePoses['greeting_welcome'] || "/mascot/sliced_bairaq_sheet5_pose_broadcaster.mp4";
+  const secondaryVideoSrc = propSecondaryVideoSrc || activePoses['welcome_video_secondary'] || activePoses['welcome_intro_secondary'] || "/mascot/sliced_bairaq_sheet5_greeting_hello.mp4";
 
   const hasSecondary = Boolean(secondaryVideoSrc && secondaryVideoSrc.trim() !== "" && secondaryVideoSrc !== primaryVideoSrc);
 
