@@ -4121,10 +4121,16 @@ export default function App() {
       ) : (
         <>
           <AnimatePresence>
-            {!hasSeenWelcomeIntro ? (
-              <WelcomeIntroScreen
-                key="welcome-intro"
-                onComplete={handleWelcomeIntroComplete}
+            {!hasSeenOnboarding ? (
+              <OnboardingCarousel
+                key="onboarding"
+                onComplete={() => {
+                  safeStorage.setItem("app_has_seen_onboarding", "true");
+                  safeStorage.setItem("app_has_seen_welcome_intro", "true");
+                  setHasSeenOnboarding(true);
+                  setHasSeenWelcomeIntro(true);
+                  setShowRoleSelectionModal(true);
+                }}
               />
             ) : loading ? (
               <motion.div
@@ -4135,21 +4141,9 @@ export default function App() {
                 className="fixed inset-0 z-[9999]"
               >
                 <LoadingScreen
-                  videoSrc={
-                    hasSeenOnboarding ? "/short-intro.webm" : "/mascot/sliced_bairaq_sheet5_greeting_hello.mp4"
-                  }
                   onFinish={handleSplashFinished}
                 />
               </motion.div>
-            ) : !hasSeenOnboarding ? (
-              <OnboardingCarousel
-                key="onboarding"
-                onComplete={() => {
-                  safeStorage.setItem("app_has_seen_onboarding", "true");
-                  setHasSeenOnboarding(true);
-                  setShowRoleSelectionModal(true);
-                }}
-              />
             ) : showRoleSelectionModal ? (
               <RoleSelectionModal
                 key="role-selection"
