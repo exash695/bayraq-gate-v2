@@ -195,7 +195,9 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
       ref={ref}
       initial={{ opacity: 1 }}
       exit={{ opacity: 0, pointerEvents: 'none', transition: { duration: 0.3 } }}
-      className="fixed inset-0 z-[10000] bg-[#020617] flex items-center justify-center overflow-hidden select-none"
+      onClick={() => { if (isMuted) enableSound(); }}
+      onTouchStart={() => { if (isMuted) enableSound(); }}
+      className="fixed inset-0 z-[10000] bg-[#020617] flex items-center justify-center overflow-hidden select-none cursor-pointer"
       dir="rtl"
     >
       {/* 1. Immersive Dual-Video Player & Visual Background */}
@@ -320,13 +322,13 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
       </div>
 
       {/* 2. Top Header Controls & Stage Badges */}
-      <div className="absolute top-6 inset-x-6 z-50 flex items-center justify-between pointer-events-none">
+      <div className="absolute top-6 inset-x-6 z-[200] flex items-center justify-between pointer-events-none">
         
         {/* Right side: Skip and Step Navigation */}
         <div className="pointer-events-auto flex items-center gap-2">
           <button
             onClick={handleSkipAll}
-            className="group flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-black tracking-wider text-amber-400 hover:text-black bg-black/50 backdrop-blur-md border border-amber-500/30 transition-all duration-300 cursor-pointer active:scale-95 hover:bg-amber-400 hover:border-amber-400 shadow-lg"
+            className="group flex items-center gap-1.5 px-4 py-2 rounded-full text-xs font-black tracking-wider text-amber-400 hover:text-black bg-black/70 backdrop-blur-md border border-amber-500/30 transition-all duration-300 cursor-pointer active:scale-95 hover:bg-amber-400 hover:border-amber-400 shadow-xl"
           >
             <span>تخطي</span>
             <ArrowLeft className="w-3.5 h-3.5 transition-transform duration-300 group-hover:-translate-x-1" />
@@ -335,7 +337,7 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
           {hasSecondary && currentStep === 0 && (
             <button
               onClick={() => setCurrentStep(1)}
-              className="flex items-center gap-1 px-3.5 py-2 rounded-full text-xs font-bold text-white bg-white/10 hover:bg-white/20 backdrop-blur-md border border-white/10 transition-all duration-300 cursor-pointer active:scale-95 shadow-lg"
+              className="flex items-center gap-1 px-3.5 py-2 rounded-full text-xs font-bold text-white bg-black/60 hover:bg-white/20 backdrop-blur-md border border-white/20 transition-all duration-300 cursor-pointer active:scale-95 shadow-xl"
             >
               <span>الفيديو التالي</span>
               <ChevronLeft className="w-3.5 h-3.5" />
@@ -345,22 +347,29 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
           <button
             onClick={toggleSound}
             aria-label={isMuted ? "تشغيل الصوت" : "كتم الصوت"}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-bold text-white/90 bg-black/50 backdrop-blur-md border border-white/15 hover:bg-white/20 transition-all cursor-pointer active:scale-95 shadow-lg"
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-full text-xs font-bold transition-all cursor-pointer active:scale-95 shadow-2xl backdrop-blur-md border ${
+              isMuted
+                ? "bg-amber-500 text-slate-950 border-amber-400 animate-pulse font-black"
+                : "bg-black/70 text-emerald-400 border-emerald-500/40"
+            }`}
           >
             {isMuted ? (
               <>
-                <VolumeX className="w-3.5 h-3.5 text-red-400 animate-pulse" />
-                <span className="text-[10px] text-amber-300">تشغيل الصوت</span>
+                <VolumeX className="w-4 h-4 text-slate-950" />
+                <span className="text-[11px] font-black">تشغيل الصوت</span>
               </>
             ) : (
-              <Volume2 className="w-3.5 h-3.5 text-emerald-400" />
+              <>
+                <Volume2 className="w-4 h-4 text-emerald-400" />
+                <span className="text-[11px] text-white">الصوت يعمل</span>
+              </>
             )}
           </button>
         </div>
 
         {/* Left: Stage Pill Indicator if multiple videos */}
         {hasSecondary && (
-          <div className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-black/60 backdrop-blur-md border border-amber-500/20 text-[11px] font-bold text-amber-300 shadow-md pointer-events-auto">
+          <div className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-black/70 backdrop-blur-md border border-amber-500/30 text-[11px] font-bold text-amber-300 shadow-xl pointer-events-auto">
             <span className={`w-2 h-2 rounded-full ${currentStep === 0 ? "bg-amber-400 animate-pulse" : "bg-white/30"}`} />
             <span>{currentStep === 0 ? "المقدمة الأولى (١ / ٢)" : "المقدمة الثانية (٢ / ٢)"}</span>
             <span className={`w-2 h-2 rounded-full ${currentStep === 1 ? "bg-amber-400 animate-pulse" : "bg-white/30"}`} />
@@ -368,23 +377,25 @@ export const WelcomeIntroScreen = React.forwardRef<HTMLDivElement, WelcomeIntroS
         )}
       </div>
 
-      {/* 2.5 Prominent Sound Activation Floating Banner */}
+      {/* 2.5 Prominent Sound Activation Floating Banner (Always visible when muted) */}
       <AnimatePresence>
         {isMuted && (
           <motion.div
-            initial={{ opacity: 0, y: 25, scale: 0.95 }}
+            initial={{ opacity: 0, y: 30, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
-            className="absolute bottom-28 inset-x-0 z-50 flex justify-center pointer-events-auto px-4"
+            exit={{ opacity: 0, y: 20, scale: 0.9, transition: { duration: 0.2 } }}
+            className="absolute bottom-28 inset-x-0 z-[250] flex justify-center pointer-events-auto px-4"
           >
             <button
               onClick={enableSound}
-              className="flex items-center gap-3 px-6 py-3 rounded-full bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 text-slate-950 font-black text-sm shadow-[0_0_35px_rgba(245,158,11,0.7)] border-2 border-white/60 active:scale-95 transition-all cursor-pointer animate-pulse"
+              className="flex items-center gap-3 px-7 py-3.5 rounded-full bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 text-slate-950 font-black text-sm shadow-[0_0_40px_rgba(245,158,11,0.85)] border-2 border-white/80 active:scale-95 hover:scale-105 transition-all cursor-pointer animate-pulse"
             >
-              <div className="w-8 h-8 rounded-full bg-slate-950/15 flex items-center justify-center">
-                <Volume2 className="w-4 h-4 text-slate-950 animate-bounce" />
+              <div className="w-8 h-8 rounded-full bg-slate-950/20 flex items-center justify-center">
+                <Volume2 className="w-5 h-5 text-slate-950 animate-bounce" />
               </div>
-              <span className="tracking-wide">اضغط هنا لتشغيل الصوت 🔊</span>
+              <span className="tracking-wide text-sm font-black drop-shadow-sm">
+                انقر هنا لتشغيل الصوت 🔊
+              </span>
             </button>
           </motion.div>
         )}
