@@ -1393,7 +1393,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
             {/* Return / Close Button */}
             <button
               onClick={() => setActiveSubPage(null)}
-              className="absolute top-8 left-3 sm:top-8 sm:left-5 z-20 w-9 h-9 rounded-full bg-black/70 hover:bg-black/90 active:scale-95 transition-all flex items-center justify-center text-amber-400 shrink-0 border border-amber-400/50 shadow-xl backdrop-blur-md cursor-pointer"
+              className="absolute top-13 left-3 sm:top-8 sm:left-5 z-20 w-9 h-9 rounded-full bg-black/70 hover:bg-black/90 active:scale-95 transition-all flex items-center justify-center text-amber-400 shrink-0 border border-amber-400/50 shadow-xl backdrop-blur-md cursor-pointer"
               title="عودة"
             >
               <ArrowRight size={19} />
@@ -3904,7 +3904,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
 
               <button
                 onClick={() => setShowTransportView(false)}
-                className="absolute top-8 left-3 sm:top-8 sm:left-5 z-20 w-9 h-9 rounded-full bg-black/70 hover:bg-black/90 active:scale-95 transition-all flex items-center justify-center text-amber-400 shrink-0 border border-amber-400/50 shadow-xl backdrop-blur-md cursor-pointer"
+                className="absolute top-13 left-3 sm:top-8 sm:left-5 z-20 w-9 h-9 rounded-full bg-black/70 hover:bg-black/90 active:scale-95 transition-all flex items-center justify-center text-amber-400 shrink-0 border border-amber-400/50 shadow-xl backdrop-blur-md cursor-pointer"
                 title="عودة"
               >
                 <ArrowRight size={19} />
@@ -3970,7 +3970,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
           </div>
 
           {/* زر الخروج العائم في أعلى اليسار */}
-          <div className="absolute top-8 left-3 sm:top-8 sm:left-4 z-30">
+          <div className="absolute top-13 left-3 sm:top-8 sm:left-4 z-30">
             <button 
               onClick={onBack}
               className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-black/70 hover:bg-black/90 active:scale-95 transition-all flex items-center justify-center text-amber-400 hover:text-amber-300 shrink-0 border border-amber-400/50 shadow-xl cursor-pointer backdrop-blur-md"

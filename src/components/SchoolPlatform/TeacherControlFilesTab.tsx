@@ -39,6 +39,7 @@ import {
   storage,
 } from "../../lib/firebase";
 import { handleFirestoreError, OperationType } from "../../lib/firestoreUtils";
+import { resolveApiUrl } from "../../lib/serverConfig";
 import { academicService } from "../../services/academicService";
 import { compressImage } from "../../utils/imageCompressor";
 import {
@@ -543,10 +544,11 @@ export const TeacherControlFilesTab: React.FC = () => {
                                 const finalSubject = inferredTeacherSubject;
                                 const finalGrade = getComputedTargetGrade();
 
-                                const res = await fetch('/api/school-files', {
+                                const res = await fetch(resolveApiUrl('/api/school-files'), {
                                   method: 'POST',
                                   headers: { 'Content-Type': 'application/json' },
                                   body: JSON.stringify({
+                                    fileName,
                                     title: finalTitle,
                                     size: fileSize,
                                     downloads: 0,
@@ -648,7 +650,7 @@ export const TeacherControlFilesTab: React.FC = () => {
                                     <button
                                       onClick={async () => {
                                         try {
-                                          const delRes = await fetch(`/api/school-files/${file.id}`, { method: 'DELETE' });
+                                          const delRes = await fetch(resolveApiUrl()`/api/school-files/${file.id}`, { method: 'DELETE' });
                                           if (delRes.ok) {
                                             if (setSchoolFiles) {
                                               setSchoolFiles((prev: any[]) => prev.filter((f: any) => f.id !== file.id));

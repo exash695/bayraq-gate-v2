@@ -75,8 +75,9 @@ export async function compressImageIfNeeded(file: File, maxDimension = 1400, qua
 export const uploadFileToR2 = async (
   rawFile: File, 
   onProgressOrCategory?: ((progress: number) => void) | string,
-  onProgressOrXhr?: ((progress: number) => void) | ((xhr: XMLHttpRequest) => void),
-  onXhrCreated?: (xhr: XMLHttpRequest) => void
+  onProgressOrXhr?: ((progress: number) => void) | ((xhr: XMLHttpRequest) => void) | string,
+  onXhrCreated?: ((xhr: XMLHttpRequest) => void) | string,
+  ..._extra: any[]
 ): Promise<string> => {
   // Normalize parameters in case caller passed (file, category, onProgress) or (file, onProgress, onXhr)
   const onProgress: ((progress: number) => void) | undefined = 
@@ -131,7 +132,8 @@ export const uploadFileToR2 = async (
 
           xhr.addEventListener('load', () => {
             if (xhr.status >= 200 && xhr.status < 300) {
-              resolve(presignData.publicUrl);
+              const finalR2Url = presignData.publicUrl.startsWith('/') ? resolveApiUrl(presignData.publicUrl) : presignData.publicUrl;
+              resolve(finalR2Url);
             } else {
               reject(new Error(`R2 direct upload failed with status ${xhr.status}`));
             }
@@ -167,8 +169,11 @@ export const uploadFileToR2 = async (
         if (fallbackXhr.status >= 200 && fallbackXhr.status < 300) {
           try {
             const response = JSON.parse(fallbackXhr.responseText);
-            const resolvedUrl = response.publicUrl || response.url;
+            let resolvedUrl = response.publicUrl || response.url;
             if (resolvedUrl && typeof resolvedUrl === 'string' && resolvedUrl.trim().length > 0) {
+              if (resolvedUrl.startsWith('/')) {
+                resolvedUrl = resolveApiUrl(resolvedUrl);
+              }
               console.log('[uploadService] File upload succeeded. URL:', resolvedUrl);
               resolve(resolvedUrl);
             } else {
@@ -183,7 +188,7 @@ export const uploadFileToR2 = async (
             reject(new Error(errorResponse.error || `فشل الرفع: رمز الخطأ ${fallbackXhr.status}`));
           } catch (e) {
             if (fallbackXhr.status === 413) {
-              reject(new Error('حجم الملف كبير جداً (رمز 413). تم تقليله، يرجى إعادة المحاولة.'));
+              reject(new Error('حجم الملف كبير جداً (رمز 413). يرجى اختيار ملف أصغر حجماً.'));
             } else {
               reject(new Error(`فشل رفع الملف إلى السحابة: رمز ${fallbackXhr.status}`));
             }
@@ -197,7 +202,6 @@ export const uploadFileToR2 = async (
       const formData = new FormData();
       formData.append('file', file);
       fallbackXhr.open('POST', resolveApiUrl('/api/upload'), true);
-      fallbackXhr.setRequestHeader('X-Frontend-Origin', window.location.origin);
       fallbackXhr.send(formData);
     });
 
