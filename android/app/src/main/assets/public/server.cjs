@@ -1055,15 +1055,16 @@ async function withDbRetry(operation, retries = 3, delayMs = 500) {
 }
 if (connectionString) {
   try {
-    const maxConnections = process.env.DB_MAX_CONNECTIONS ? parseInt(process.env.DB_MAX_CONNECTIONS, 10) : 15;
-    const idleTimeout = process.env.DB_IDLE_TIMEOUT ? parseInt(process.env.DB_IDLE_TIMEOUT, 10) : 20;
-    const connectTimeout = process.env.DB_CONNECT_TIMEOUT ? parseInt(process.env.DB_CONNECT_TIMEOUT, 10) : 15;
+    const maxConnections = process.env.DB_MAX_CONNECTIONS ? parseInt(process.env.DB_MAX_CONNECTIONS, 10) : 50;
+    const idleTimeout = process.env.DB_IDLE_TIMEOUT ? parseInt(process.env.DB_IDLE_TIMEOUT, 10) : 30;
+    const connectTimeout = process.env.DB_CONNECT_TIMEOUT ? parseInt(process.env.DB_CONNECT_TIMEOUT, 10) : 10;
     client = (0, import_postgres.default)(connectionString, {
       prepare: false,
       max: maxConnections,
       idle_timeout: idleTimeout,
       connect_timeout: connectTimeout,
-      max_lifetime: 60 * 15,
+      max_lifetime: 60 * 30,
+      // 30 minutes lifetime
       keep_alive: 10,
       onnotice: () => {
       }
@@ -1124,60 +1125,77 @@ var REALTIME_TABLES = [
 ];
 async function initDatabaseTriggers(sql3) {
   try {
-    await sql3`
-      CREATE OR REPLACE FUNCTION notify_db_event() RETURNS trigger AS $$
-      DECLARE
-        v_school_id TEXT := NULL;
-        v_entity_id TEXT := NULL;
-        v_recipient_id TEXT := NULL;
-        v_user_id TEXT := NULL;
-        v_student_id TEXT := NULL;
-        v_payload JSONB;
-      BEGIN
-        IF (TG_OP = 'DELETE') THEN
-          BEGIN v_entity_id := OLD.id::text; EXCEPTION WHEN OTHERS THEN 
-            BEGIN v_entity_id := OLD.path::text; EXCEPTION WHEN OTHERS THEN v_entity_id := NULL; END;
-          END;
-          BEGIN v_school_id := OLD.school_id::text; EXCEPTION WHEN OTHERS THEN v_school_id := NULL; END;
-        ELSE
-          BEGIN v_entity_id := NEW.id::text; EXCEPTION WHEN OTHERS THEN 
-            BEGIN v_entity_id := NEW.path::text; EXCEPTION WHEN OTHERS THEN v_entity_id := NULL; END;
-          END;
-          BEGIN v_school_id := NEW.school_id::text; EXCEPTION WHEN OTHERS THEN v_school_id := NULL; END;
-          BEGIN v_recipient_id := NEW.recipient_id::text; EXCEPTION WHEN OTHERS THEN v_recipient_id := NULL; END;
-          BEGIN v_user_id := NEW.user_id::text; EXCEPTION WHEN OTHERS THEN v_user_id := NULL; END;
-          BEGIN v_student_id := NEW.student_id::text; EXCEPTION WHEN OTHERS THEN v_student_id := NULL; END;
-        END IF;
+    let isLocked = true;
+    try {
+      const lockRows = await sql3`SELECT pg_try_advisory_lock(748392) as locked`;
+      isLocked = lockRows && lockRows[0] && lockRows[0].locked;
+    } catch {
+      isLocked = true;
+    }
+    if (!isLocked) {
+      return;
+    }
+    try {
+      await sql3`
+        CREATE OR REPLACE FUNCTION notify_db_event() RETURNS trigger AS $$
+        DECLARE
+          v_school_id TEXT := NULL;
+          v_entity_id TEXT := NULL;
+          v_recipient_id TEXT := NULL;
+          v_user_id TEXT := NULL;
+          v_student_id TEXT := NULL;
+          v_payload JSONB;
+        BEGIN
+          IF (TG_OP = 'DELETE') THEN
+            BEGIN v_entity_id := OLD.id::text; EXCEPTION WHEN OTHERS THEN 
+              BEGIN v_entity_id := OLD.path::text; EXCEPTION WHEN OTHERS THEN v_entity_id := NULL; END;
+            END;
+            BEGIN v_school_id := OLD.school_id::text; EXCEPTION WHEN OTHERS THEN v_school_id := NULL; END;
+          ELSE
+            BEGIN v_entity_id := NEW.id::text; EXCEPTION WHEN OTHERS THEN 
+              BEGIN v_entity_id := NEW.path::text; EXCEPTION WHEN OTHERS THEN v_entity_id := NULL; END;
+            END;
+            BEGIN v_school_id := NEW.school_id::text; EXCEPTION WHEN OTHERS THEN v_school_id := NULL; END;
+            BEGIN v_recipient_id := NEW.recipient_id::text; EXCEPTION WHEN OTHERS THEN v_recipient_id := NULL; END;
+            BEGIN v_user_id := NEW.user_id::text; EXCEPTION WHEN OTHERS THEN v_user_id := NULL; END;
+            BEGIN v_student_id := NEW.student_id::text; EXCEPTION WHEN OTHERS THEN v_student_id := NULL; END;
+          END IF;
 
-        v_payload := json_build_object(
-          'table', TG_TABLE_NAME,
-          'action', TG_OP,
-          'id', v_entity_id,
-          'school_id', v_school_id,
-          'recipient_id', v_recipient_id,
-          'user_id', v_user_id,
-          'student_id', v_student_id,
-          'timestamp', (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint
-        );
+          v_payload := json_build_object(
+            'table', TG_TABLE_NAME,
+            'action', TG_OP,
+            'id', v_entity_id,
+            'school_id', v_school_id,
+            'recipient_id', v_recipient_id,
+            'user_id', v_user_id,
+            'student_id', v_student_id,
+            'timestamp', (EXTRACT(EPOCH FROM NOW()) * 1000)::bigint
+          );
 
-        PERFORM pg_notify('bairaq_realtime_events', v_payload::text);
-        RETURN COALESCE(NEW, OLD);
-      END;
-      $$ LANGUAGE plpgsql;
-    `;
-    for (const table of REALTIME_TABLES) {
+          PERFORM pg_notify('bairaq_realtime_events', v_payload::text);
+          RETURN COALESCE(NEW, OLD);
+        END;
+        $$ LANGUAGE plpgsql;
+      `;
+      for (const table of REALTIME_TABLES) {
+        try {
+          await sql3.unsafe(`
+            DROP TRIGGER IF EXISTS trg_${table}_notify ON ${table};
+            CREATE TRIGGER trg_${table}_notify
+            AFTER INSERT OR UPDATE OR DELETE ON ${table}
+            FOR EACH ROW EXECUTE FUNCTION notify_db_event();
+          `);
+        } catch (err) {
+          console.warn(`[Realtime DB] Skipped trigger for ${table}:`, err.message);
+        }
+      }
+      console.log("[Realtime DB] PostgreSQL triggers initialized successfully.");
+    } finally {
       try {
-        await sql3.unsafe(`
-          DROP TRIGGER IF EXISTS trg_${table}_notify ON ${table};
-          CREATE TRIGGER trg_${table}_notify
-          AFTER INSERT OR UPDATE OR DELETE ON ${table}
-          FOR EACH ROW EXECUTE FUNCTION notify_db_event();
-        `);
-      } catch (err) {
-        console.warn(`[Realtime DB] Skipped trigger for ${table}:`, err.message);
+        await sql3`SELECT pg_advisory_unlock(748392)`;
+      } catch {
       }
     }
-    console.log("[Realtime DB] PostgreSQL triggers initialized successfully.");
   } catch (err) {
     console.error("[Realtime DB] Error initializing PostgreSQL triggers:", err);
   }
@@ -1574,6 +1592,7 @@ var import_path2 = __toESM(require("path"), 1);
 var import_genai2 = require("@google/genai");
 var import_nodemailer = __toESM(require("nodemailer"), 1);
 var import_express_rate_limit = __toESM(require("express-rate-limit"), 1);
+var import_compression = __toESM(require("compression"), 1);
 var import_client_s3 = require("@aws-sdk/client-s3");
 var import_s3_request_presigner = require("@aws-sdk/s3-request-presigner");
 var import_multer = __toESM(require("multer"), 1);
@@ -2278,15 +2297,45 @@ var redeemCodeLimiter = (0, import_express_rate_limit.default)({
   standardHeaders: true,
   legacyHeaders: false
 });
+var apiLimiter = (0, import_express_rate_limit.default)({
+  windowMs: 1 * 60 * 1e3,
+  max: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => !req.path.startsWith("/api/") || req.path.startsWith("/api/health") || req.path.startsWith("/uploads/"),
+  message: { success: false, message: "\u0645\u0639\u062F\u0644 \u0627\u0644\u0637\u0644\u0628\u0627\u062A \u0645\u0631\u062A\u0641\u0639 \u062C\u062F\u0627\u064B\u060C \u064A\u0631\u062C\u0649 \u0627\u0644\u0645\u062D\u0627\u0648\u0644\u0629 \u0628\u0639\u062F \u0642\u0644\u064A\u0644." }
+});
+var authLimiter = (0, import_express_rate_limit.default)({
+  windowMs: 1 * 60 * 1e3,
+  max: 25,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, message: "\u062A\u062C\u0627\u0648\u0632\u062A \u0639\u062F\u062F \u0645\u062D\u0627\u0648\u0644\u0627\u062A \u0627\u0644\u062F\u062E\u0648\u0644 \u0627\u0644\u0645\u0633\u0645\u0648\u062D \u0628\u0647\u0627\u060C \u064A\u0631\u062C\u0649 \u0627\u0644\u0627\u0646\u062A\u0638\u0627\u0631 \u062F\u0642\u064A\u0642\u0629." }
+});
 async function startServer() {
   const app = (0, import_express2.default)();
+  app.use((0, import_compression.default)({
+    threshold: 1024,
+    // Compress responses > 1KB
+    filter: (req, res) => {
+      if (req.headers["x-no-compression"]) return false;
+      return import_compression.default.filter(req, res);
+    }
+  }));
   app.use(statusRouter);
-  app.use(import_express2.default.json({ limit: "500mb" }));
-  app.use(import_express2.default.urlencoded({ limit: "500mb", extended: true }));
+  app.use("/api/", apiLimiter);
+  app.use("/api/auth/login", authLimiter);
+  app.use("/api/login", authLimiter);
+  app.use(import_express2.default.json({ limit: "25mb" }));
+  app.use(import_express2.default.urlencoded({ limit: "25mb", extended: true }));
   app.use((req, res, next) => {
+    const requestId = req.headers["x-request-id"] || `req_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+    res.setHeader("X-Request-ID", requestId);
+    req.requestId = requestId;
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-device-id, x-auth-token, x-jwt-token, x-user-email, x-developer-email, x-user-role, x-school-id");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-device-id, x-auth-token, x-jwt-token, x-user-email, x-developer-email, x-user-role, x-school-id, x-request-id");
+    res.setHeader("Access-Control-Expose-Headers", "X-Request-ID, X-Cache-Status, Content-Range, Content-Length, Accept-Ranges");
     if (req.method === "OPTIONS") {
       return res.sendStatus(200);
     }
@@ -3088,7 +3137,8 @@ async function startServer() {
         { id: "school5", name: "\u0645\u062F\u0627\u0631\u0633 \u0627\u0628\u0646 \u0639\u0642\u064A\u0644 \u0627\u0644\u0623\u0647\u0644\u064A\u0629", governorate: "\u0627\u0644\u062F\u064A\u0648\u0627\u0646\u064A\u0629 - \u063A\u0645\u0627\u0633", status: "active" },
         { id: "school6", name: "\u0645\u062F\u0631\u0633\u0629 \u0627\u0644\u064A\u0645\u0627\u0645\u0629 \u0627\u0644\u0627\u0628\u062A\u062F\u0627\u0626\u064A\u0629", governorate: "\u0627\u0644\u062F\u064A\u0648\u0627\u0646\u064A\u0629 - \u063A\u0645\u0627\u0633", status: "active" },
         { id: "school7", name: "\u0645\u062F\u0627\u0631\u0633 \u0627\u0644\u062C\u0648\u0627\u0647\u0631\u064A \u0627\u0644\u0627\u0647\u0644\u064A\u0629", governorate: "\u0627\u0644\u062F\u064A\u0648\u0627\u0646\u064A\u0629 - \u063A\u0645\u0627\u0633", status: "active" },
-        { id: "school8", name: "\u0623\u0643\u0627\u062F\u064A\u0645\u064A\u0629 \u0628\u064A\u0631\u0642 \u0627\u0644\u0631\u0642\u0645\u064A\u0629", governorate: "\u0627\u0644\u0639\u0631\u0627\u0642 - \u062F\u0648\u0631\u0627\u062A \u0646\u062E\u0628\u0629 \u0627\u0644\u0623\u0633\u0627\u062A\u0630\u0629", status: "active" }
+        { id: "school8", name: "\u0645\u0639\u0647\u062F \u0627\u0628\u062F\u0627\u0639\u0646\u0627 \u0644\u0644\u062A\u0639\u0644\u064A\u0645 \u0627\u0644\u0645\u0637\u0648\u0631", governorate: "\u0627\u0644\u062F\u064A\u0648\u0627\u0646\u064A\u0629 - \u063A\u0645\u0627\u0633", status: "active" },
+        { id: "general", name: "\u0623\u0643\u0627\u062F\u064A\u0645\u064A\u0629 \u0628\u064A\u0631\u0642 \u0627\u0644\u0631\u0642\u0645\u064A\u0629", governorate: "\u0627\u0644\u0639\u0631\u0627\u0642 - \u062F\u0648\u0631\u0627\u062A \u0646\u062E\u0628\u0629 \u0627\u0644\u0623\u0633\u0627\u062A\u0630\u0629", status: "active" }
       ];
       for (const item of defaultOfficialSchools) {
         await db.insert(schools).values({
@@ -3098,6 +3148,8 @@ async function startServer() {
           status: item.status
         }).onConflictDoNothing();
       }
+      await db.update(schools).set({ name: "\u0645\u0639\u0647\u062F \u0627\u0628\u062F\u0627\u0639\u0646\u0627 \u0644\u0644\u062A\u0639\u0644\u064A\u0645 \u0627\u0644\u0645\u0637\u0648\u0631" }).where((0, import_drizzle_orm.eq)(schools.id, "school8"));
+      await db.update(schools).set({ name: "\u0623\u0643\u0627\u062F\u064A\u0645\u064A\u0629 \u0628\u064A\u0631\u0642 \u0627\u0644\u0631\u0642\u0645\u064A\u0629" }).where((0, import_drizzle_orm.eq)(schools.id, "general"));
       console.log("[DB] Official Ghammas schools verified in PostgreSQL");
     } catch (e) {
       console.warn("[DB] Seed default schools notice:", e);
@@ -3354,15 +3406,55 @@ async function startServer() {
       res.status(500).json({ success: false, message: error.message });
     }
   });
+  let schoolsMemoryCache = null;
+  const invalidateSchoolsCache = () => {
+    schoolsMemoryCache = null;
+  };
   app.get("/api/schools", async (req, res) => {
     try {
-      const allSchools = await withDbRetry(() => db.select().from(schools));
-      const mappedSchools = allSchools.map((s) => {
-        const cover = s.coverUrl || s.cover_url;
-        const logo = s.logoUrl || s.logo_url;
+      const now = Date.now();
+      if (schoolsMemoryCache && now < schoolsMemoryCache.expiresAt && !req.headers["x-cache-bypass"]) {
+        res.setHeader("X-Cache-Status", "HIT");
+        res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=60");
+        return res.json(schoolsMemoryCache.data);
+      }
+      const dbSchools = await withDbRetry(() => db.select().from(schools));
+      const existingIds = new Set(dbSchools.map((s) => s.id));
+      const defaultSchools = [
+        { id: "school1", name: "\u0645\u062F\u0631\u0633\u0629 \u0623\u0648\u0627\u0626\u0644 \u063A\u0645\u0627\u0633 \u0627\u0644\u0627\u0628\u062A\u062F\u0627\u0626\u064A\u0629", governorate: "\u0627\u0644\u062F\u064A\u0648\u0627\u0646\u064A\u0629 - \u063A\u0645\u0627\u0633", type: "\u062C\u064A\u0644 \u0648\u0627\u0639\u062F \u0648\u0645\u0628\u062F\u0639" },
+        { id: "school2", name: "\u0645\u062F\u0627\u0631\u0633 \u0627\u0644\u0646\u062E\u0628\u0629 \u0627\u0644\u0623\u0647\u0644\u064A\u0629", governorate: "\u0627\u0644\u062F\u064A\u0648\u0627\u0646\u064A\u0629 - \u063A\u0645\u0627\u0633", type: "\u0631\u0648\u0627\u062F \u0627\u0644\u0639\u0644\u0645 \u0648\u0627\u0644\u0645\u0639\u0631\u0641\u0629" },
+        { id: "school3", name: "\u062B\u0627\u0646\u0648\u064A\u0629 \u0646\u0648\u0646 \u0627\u0644\u0646\u0645\u0648\u0630\u062C\u064A\u0629 \u0644\u0644\u0628\u0646\u0627\u062A", governorate: "\u0627\u0644\u062F\u064A\u0648\u0627\u0646\u064A\u0629 - \u063A\u0645\u0627\u0633", type: "\u0635\u0631\u062D \u062A\u0641\u0648\u0642 \u0648\u0639\u0637\u0627\u0621" },
+        { id: "school4", name: "\u062B\u0627\u0646\u0648\u064A\u0629 \u0627\u0644\u0646\u0628\u0623 \u0627\u0644\u0639\u0638\u064A\u0645 \u0644\u0644\u0628\u0646\u064A\u0646", governorate: "\u0627\u0644\u062F\u064A\u0648\u0627\u0646\u064A\u0629 - \u063A\u0645\u0627\u0633", type: "\u0628\u0646\u0627\u0621 \u062C\u064A\u0644 \u0648\u0627\u0639\u064D" },
+        { id: "school5", name: "\u0645\u062F\u0631\u0633\u0629 \u0627\u0644\u0627\u0645\u0627\u0645 \u0639\u0642\u064A\u0644 \u0627\u0644\u0627\u0628\u062A\u062F\u0627\u0626\u064A\u0629", governorate: "\u0627\u0644\u062F\u064A\u0648\u0627\u0646\u064A\u0629 - \u063A\u0645\u0627\u0633", type: "\u0623\u062C\u064A\u0627\u0644 \u062A\u0628\u0646\u064A \u0627\u0644\u0648\u0637\u0646" },
+        { id: "school6", name: "\u0645\u062F\u0631\u0633\u0629 \u0627\u0644\u064A\u0645\u0627\u0645\u0629 \u0627\u0644\u0627\u0628\u062A\u062F\u0627\u0626\u064A\u0629", governorate: "\u0627\u0644\u062F\u064A\u0648\u0627\u0646\u064A\u0629 - \u063A\u0645\u0627\u0633", type: "\u062C\u064A\u0644 \u0648\u0627\u0639\u062F \u0648\u0645\u0628\u062F\u0639" },
+        { id: "school7", name: "\u0645\u062F\u0627\u0631\u0633 \u0627\u0644\u062C\u0648\u0627\u0647\u0631\u064A \u0627\u0644\u0627\u0647\u0644\u064A\u0629", governorate: "\u0627\u0644\u062F\u064A\u0648\u0627\u0646\u064A\u0629 - \u063A\u0645\u0627\u0633", type: "\u0645\u0646\u0627\u0631\u0629 \u0627\u0644\u0639\u0644\u0645 \u0648\u0627\u0644\u0623\u062F\u0628" },
+        { id: "school8", name: "\u0645\u0639\u0647\u062F \u0627\u0628\u062F\u0627\u0639\u0646\u0627 \u0644\u0644\u062A\u0639\u0644\u064A\u0645 \u0627\u0644\u0645\u0637\u0648\u0631", governorate: "\u0627\u0644\u062F\u064A\u0648\u0627\u0646\u064A\u0629 - \u063A\u0645\u0627\u0633", type: "\u062A\u0639\u0644\u064A\u0645 \u0646\u0648\u0639\u064A \u0648\u062A\u0637\u0648\u064A\u0631 \u0645\u0633\u062A\u0645\u0631" },
+        { id: "general", name: "\u0623\u0643\u0627\u062F\u064A\u0645\u064A\u0629 \u0628\u064A\u0631\u0642 \u0627\u0644\u0631\u0642\u0645\u064A\u0629", governorate: "\u0627\u0644\u0639\u0631\u0627\u0642 - \u062F\u0648\u0631\u0627\u062A \u0646\u062E\u0628\u0629 \u0627\u0644\u0623\u0633\u0627\u062A\u0630\u0629", type: "\u0645\u0646\u0635\u0629 \u0627\u0644\u062F\u0648\u0631\u0627\u062A \u0627\u0644\u0623\u0644\u0643\u062A\u0631\u0648\u0646\u064A\u0629 \u0644\u0646\u062E\u0628\u0629 \u0627\u0644\u0623\u0633\u0627\u062A\u0630\u0629" }
+      ];
+      const mergedList = [...dbSchools];
+      for (const def of defaultSchools) {
+        if (!existingIds.has(def.id)) {
+          mergedList.push({
+            id: def.id,
+            name: def.name,
+            governorate: def.governorate,
+            location: def.governorate,
+            type: def.type,
+            status: "active",
+            coverUrl: def.id === "general" ? "/schools/cover_general.jpg" : `/schools/cover${def.id.replace(/\D/g, "")}.jpg`,
+            logoUrl: def.id === "general" ? "/school-logos/logo_general.jpg" : `/school-logos/logo${def.id.replace(/\D/g, "")}.jpg`,
+            disabledModules: []
+          });
+        }
+      }
+      const mappedSchools = mergedList.map((s) => {
+        const cover = s.coverUrl || s.cover_url || (s.id === "general" ? "/schools/cover_general.jpg" : `/schools/cover${s.id.replace(/\D/g, "") || "1"}.jpg`);
+        const logo = s.logoUrl || s.logo_url || (s.id === "general" ? "/school-logos/logo_general.jpg" : `/school-logos/logo${s.id.replace(/\D/g, "") || "1"}.jpg`);
         const loc = s.location || s.governorate || "\u0627\u0644\u062F\u064A\u0648\u0627\u0646\u064A\u0629 - \u063A\u0645\u0627\u0633";
+        const name = s.id === "general" ? "\u0623\u0643\u0627\u062F\u064A\u0645\u064A\u0629 \u0628\u064A\u0631\u0642 \u0627\u0644\u0631\u0642\u0645\u064A\u0629" : s.id === "school8" ? "\u0645\u0639\u0647\u062F \u0627\u0628\u062F\u0627\u0639\u0646\u0627 \u0644\u0644\u062A\u0639\u0644\u064A\u0645 \u0627\u0644\u0645\u0637\u0648\u0631" : s.name;
         return {
           ...s,
+          name,
           coverUrl: cover,
           logoUrl: logo,
           schoolBairaqImageUrl: cover,
@@ -3373,7 +3465,15 @@ async function startServer() {
           disabledModules: Array.isArray(s.disabledModules) ? s.disabledModules : Array.isArray(s.disabled_modules) ? s.disabled_modules : []
         };
       });
-      res.json({ success: true, schools: mappedSchools, data: mappedSchools });
+      const responsePayload = { success: true, schools: mappedSchools, data: mappedSchools };
+      schoolsMemoryCache = {
+        data: responsePayload,
+        expiresAt: Date.now() + 45 * 1e3
+        // 45 seconds TTL
+      };
+      res.setHeader("X-Cache-Status", "MISS");
+      res.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=60");
+      res.json(responsePayload);
     } catch (error) {
       console.error("Error fetching schools:", error);
       res.status(500).json({ success: false, message: error.message });
@@ -3486,19 +3586,20 @@ async function startServer() {
   app.get("/api/students", async (req, res) => {
     try {
       const { schoolId } = req.query;
+      const limit = req.query.limit ? Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 2e3) : void 0;
+      const offset = req.query.offset ? Math.max(parseInt(req.query.offset, 10) || 0, 0) : void 0;
       if (schoolId && schoolId !== "all") {
         const cleaned = schoolId.trim().toLowerCase();
-        let schoolStudents;
-        if (cleaned === "school_awail_ghamas" || cleaned === "ghamas_awail") {
-          schoolStudents = await db.select().from(students).where(
-            (0, import_drizzle_orm.or)((0, import_drizzle_orm.eq)(students.schoolId, "school1"), (0, import_drizzle_orm.eq)(students.schoolId, schoolId))
-          );
-        } else {
-          schoolStudents = await db.select().from(students).where((0, import_drizzle_orm.eq)(students.schoolId, schoolId));
-        }
+        let query = cleaned === "school_awail_ghamas" || cleaned === "ghamas_awail" ? db.select().from(students).where((0, import_drizzle_orm.or)((0, import_drizzle_orm.eq)(students.schoolId, "school1"), (0, import_drizzle_orm.eq)(students.schoolId, schoolId))) : db.select().from(students).where((0, import_drizzle_orm.eq)(students.schoolId, schoolId));
+        if (limit) query = query.limit(limit);
+        if (offset) query = query.offset(offset);
+        const schoolStudents = await query;
         return res.json({ success: true, students: schoolStudents, data: schoolStudents });
       }
-      const allStudents = await db.select().from(students);
+      let allQuery = db.select().from(students);
+      if (limit) allQuery = allQuery.limit(limit);
+      if (offset) allQuery = allQuery.offset(offset);
+      const allStudents = await allQuery;
       res.json({ success: true, students: allStudents, data: allStudents });
     } catch (error) {
       console.error("Error fetching all students:", error);
@@ -3509,14 +3610,12 @@ async function startServer() {
     try {
       const { schoolId } = req.params;
       const cleaned = (schoolId || "").trim().toLowerCase();
-      let schoolStudents;
-      if (cleaned === "school_awail_ghamas" || cleaned === "ghamas_awail") {
-        schoolStudents = await db.select().from(students).where(
-          (0, import_drizzle_orm.or)((0, import_drizzle_orm.eq)(students.schoolId, "school1"), (0, import_drizzle_orm.eq)(students.schoolId, schoolId))
-        );
-      } else {
-        schoolStudents = await db.select().from(students).where((0, import_drizzle_orm.eq)(students.schoolId, schoolId));
-      }
+      const limit = req.query.limit ? Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 1), 2e3) : void 0;
+      const offset = req.query.offset ? Math.max(parseInt(req.query.offset, 10) || 0, 0) : void 0;
+      let query = cleaned === "school_awail_ghamas" || cleaned === "ghamas_awail" ? db.select().from(students).where((0, import_drizzle_orm.or)((0, import_drizzle_orm.eq)(students.schoolId, "school1"), (0, import_drizzle_orm.eq)(students.schoolId, schoolId))) : db.select().from(students).where((0, import_drizzle_orm.eq)(students.schoolId, schoolId));
+      if (limit) query = query.limit(limit);
+      if (offset) query = query.offset(offset);
+      const schoolStudents = await query;
       if (schoolStudents.length > 0) {
         return res.json({ success: true, students: schoolStudents, data: schoolStudents });
       }
@@ -3931,12 +4030,16 @@ async function startServer() {
     }
   });
   app.use("/uploads", import_express2.default.static(import_path2.default.join(process.cwd(), "public", "uploads"), {
+    maxAge: "7d",
+    etag: true,
+    lastModified: true,
     setHeaders: (res) => {
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
       res.setHeader("Access-Control-Allow-Headers", "Range, Content-Type");
       res.setHeader("Access-Control-Expose-Headers", "Content-Range, Content-Length, Accept-Ranges");
       res.setHeader("Accept-Ranges", "bytes");
+      res.setHeader("Cache-Control", "public, max-age=604800, stale-while-revalidate=86400");
     }
   }));
   app.use("/uploads", (req, res) => {
@@ -4021,6 +4124,9 @@ async function startServer() {
     return res.status(404).send("Asset not found");
   });
   app.use(import_express2.default.static(import_path2.default.join(process.cwd(), "public"), {
+    maxAge: "1d",
+    etag: true,
+    lastModified: true,
     setHeaders: (res, filePath) => {
       res.setHeader("Access-Control-Allow-Origin", "*");
       res.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
@@ -4030,6 +4136,8 @@ async function startServer() {
       } else if (filePath.endsWith(".webm")) {
         res.setHeader("Content-Type", "video/webm");
         res.setHeader("Accept-Ranges", "bytes");
+      } else if (filePath.endsWith(".jpg") || filePath.endsWith(".jpeg") || filePath.endsWith(".png") || filePath.endsWith(".webp") || filePath.endsWith(".svg") || filePath.endsWith(".woff2")) {
+        res.setHeader("Cache-Control", "public, max-age=86400, stale-while-revalidate=43200");
       }
     }
   }));
@@ -5987,14 +6095,6 @@ ${extractedText}
       res.status(500).json({ success: false, message: error.message });
     }
   });
-  app.get("/api/schools", async (req, res) => {
-    try {
-      const allSchools = await db.select().from(schools).orderBy((0, import_drizzle_orm.asc)(schools.name));
-      res.json({ success: true, schools: allSchools, data: allSchools });
-    } catch (error) {
-      res.status(500).json({ success: false, message: error.message });
-    }
-  });
   app.get("/api/schools/:id", async (req, res) => {
     try {
       const { id } = req.params;
@@ -7322,13 +7422,15 @@ ${extractedText}
   app.get("/api/attendance-logs", async (req, res) => {
     try {
       const { schoolId, studentId } = req.query;
+      const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 200, 1), 1e3);
+      const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
       let logs;
       if (studentId) {
-        logs = await db.select().from(attendance_logs).where((0, import_drizzle_orm.eq)(attendance_logs.studentId, studentId)).orderBy((0, import_drizzle_orm.desc)(attendance_logs.timestamp));
+        logs = await db.select().from(attendance_logs).where((0, import_drizzle_orm.eq)(attendance_logs.studentId, studentId)).orderBy((0, import_drizzle_orm.desc)(attendance_logs.timestamp)).limit(limit).offset(offset);
       } else if (schoolId && schoolId !== "all") {
-        logs = await db.select().from(attendance_logs).where((0, import_drizzle_orm.eq)(attendance_logs.schoolId, schoolId)).orderBy((0, import_drizzle_orm.desc)(attendance_logs.timestamp));
+        logs = await db.select().from(attendance_logs).where((0, import_drizzle_orm.eq)(attendance_logs.schoolId, schoolId)).orderBy((0, import_drizzle_orm.desc)(attendance_logs.timestamp)).limit(limit).offset(offset);
       } else {
-        logs = await db.select().from(attendance_logs).orderBy((0, import_drizzle_orm.desc)(attendance_logs.timestamp));
+        logs = await db.select().from(attendance_logs).orderBy((0, import_drizzle_orm.desc)(attendance_logs.timestamp)).limit(limit).offset(offset);
       }
       res.json({ success: true, logs, data: logs });
     } catch (error) {
@@ -7338,13 +7440,15 @@ ${extractedText}
   app.get("/api/behavior-logs", async (req, res) => {
     try {
       const { schoolId, studentId } = req.query;
+      const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 200, 1), 1e3);
+      const offset = Math.max(parseInt(req.query.offset, 10) || 0, 0);
       let logs;
       if (studentId) {
-        logs = await db.select().from(behavior_logs).where((0, import_drizzle_orm.eq)(behavior_logs.studentId, studentId)).orderBy((0, import_drizzle_orm.desc)(behavior_logs.timestamp));
+        logs = await db.select().from(behavior_logs).where((0, import_drizzle_orm.eq)(behavior_logs.studentId, studentId)).orderBy((0, import_drizzle_orm.desc)(behavior_logs.timestamp)).limit(limit).offset(offset);
       } else if (schoolId && schoolId !== "all") {
-        logs = await db.select().from(behavior_logs).where((0, import_drizzle_orm.eq)(behavior_logs.schoolId, schoolId)).orderBy((0, import_drizzle_orm.desc)(behavior_logs.timestamp));
+        logs = await db.select().from(behavior_logs).where((0, import_drizzle_orm.eq)(behavior_logs.schoolId, schoolId)).orderBy((0, import_drizzle_orm.desc)(behavior_logs.timestamp)).limit(limit).offset(offset);
       } else {
-        logs = await db.select().from(behavior_logs).orderBy((0, import_drizzle_orm.desc)(behavior_logs.timestamp));
+        logs = await db.select().from(behavior_logs).orderBy((0, import_drizzle_orm.desc)(behavior_logs.timestamp)).limit(limit).offset(offset);
       }
       res.json({ success: true, logs, data: logs });
     } catch (error) {
@@ -13401,7 +13505,16 @@ ${extractedText}
     app.use(vite.middlewares);
   } else {
     const distPath = import_path2.default.join(process.cwd(), "dist");
-    app.use(import_express2.default.static(distPath));
+    app.use(import_express2.default.static(distPath, {
+      maxAge: "30d",
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith(".html")) {
+          res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+        } else if (filePath.includes("/assets/")) {
+          res.setHeader("Cache-Control", "public, max-age=2592000, immutable");
+        }
+      }
+    }));
     app.get("/{*splat}", (req, res) => {
       if (req.path.startsWith("/api/")) {
         console.warn(`[Server API Leaked] /api/ request reached SPA fallback: ${req.method} ${req.path}`);
@@ -13421,6 +13534,12 @@ ${extractedText}
     await sql`ALTER TABLE schools ADD COLUMN IF NOT EXISTS "logo_url" text;`;
     await sql`ALTER TABLE schools ADD COLUMN IF NOT EXISTS "location" text;`;
     await sql`ALTER TABLE schools ADD COLUMN IF NOT EXISTS "type" varchar(100);`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_schools_status ON schools(status);`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_students_school_id ON students(school_id);`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_students_code ON students(code);`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_users_school_id ON users(school_id);`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);`;
+    await sql`CREATE INDEX IF NOT EXISTS idx_teachers_school_id ON teachers(school_id);`;
   } catch (schemaErr) {
   }
   try {

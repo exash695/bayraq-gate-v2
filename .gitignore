@@ -10,3 +10,8 @@ coverage/
 # Android wrapper & gradlew must be committed
 !android/gradle/wrapper/gradle-wrapper.jar
 !android/gradlew
+
+# Uploaded user files in dev should not be bundled in git / APK
+public/uploads/*
+!public/uploads/.gitkeep
+
