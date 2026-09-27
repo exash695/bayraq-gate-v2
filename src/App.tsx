@@ -4121,12 +4121,7 @@ export default function App() {
       ) : (
         <>
           <AnimatePresence>
-            {!hasSeenWelcomeIntro ? (
-              <WelcomeIntroScreen
-                key="welcome-intro"
-                onComplete={handleWelcomeIntroComplete}
-              />
-            ) : loading ? (
+            {loading ? (
               <motion.div
                 key="loading"
                 initial={{ opacity: 1 }}
