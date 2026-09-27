@@ -1364,7 +1364,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
         className="fixed inset-0 bg-[#050A18] z-[130] flex flex-col"
       >
         <header className="shrink-0 bg-[#050A18] pt-0 pb-1 px-0 relative border-b border-white/10 z-10">
-          <div className="shrink-0 relative w-full overflow-hidden bg-gradient-to-r from-[#0a1536] via-[#0D47A1] to-[#0D47A1] shadow-[0_10px_30px_rgba(13,71,161,0.3)] min-h-[135px] sm:min-h-[145px] flex items-end pb-3 px-3.5 sm:px-6">
+          <div className="shrink-0 relative w-full overflow-hidden bg-gradient-to-r from-[#0a1536] via-[#0D47A1] to-[#0D47A1] shadow-[0_10px_30px_rgba(13,71,161,0.3)] min-h-[145px] sm:min-h-[150px] flex items-end pb-3 px-3.5 sm:px-6">
             {/* Background Bairaq Mascot Backdrop with full brightness */}
             <div className="absolute inset-0 pointer-events-none z-0 overflow-hidden">
               <BerqCharacter
@@ -1376,7 +1376,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
             </div>
 
             {/* Header Content positioned at bottom right */}
-            <div className="relative z-10 flex-1 flex flex-col justify-end text-right min-w-0 pr-1 pl-10 select-none pb-0.5">
+            <div className="relative z-10 flex-1 flex flex-col justify-end text-right min-w-0 pr-1 pl-12 select-none pb-0.5">
               <h2 className="text-white text-xs sm:text-sm md:text-base font-black leading-tight drop-shadow-[0_2px_6px_rgba(0,0,0,0.9)] break-words">
                 {headerDetails.title}
               </h2>
@@ -1393,10 +1393,10 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
             {/* Return / Close Button */}
             <button
               onClick={() => setActiveSubPage(null)}
-              className="absolute top-13 left-3 sm:top-8 sm:left-5 z-20 w-9 h-9 rounded-full bg-black/70 hover:bg-black/90 active:scale-95 transition-all flex items-center justify-center text-amber-400 shrink-0 border border-amber-400/50 shadow-xl backdrop-blur-md cursor-pointer"
+              className="absolute top-18 left-3 sm:top-8 sm:left-5 z-20 w-10 h-10 rounded-full bg-black/80 hover:bg-black active:scale-95 transition-all flex items-center justify-center text-amber-400 shrink-0 border border-amber-400/60 shadow-2xl backdrop-blur-lg cursor-pointer"
               title="عودة"
             >
-              <ArrowRight size={19} />
+              <ArrowRight size={20} />
             </button>
           </div>
         </header>
@@ -3904,10 +3904,10 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
 
               <button
                 onClick={() => setShowTransportView(false)}
-                className="absolute top-13 left-3 sm:top-8 sm:left-5 z-20 w-9 h-9 rounded-full bg-black/70 hover:bg-black/90 active:scale-95 transition-all flex items-center justify-center text-amber-400 shrink-0 border border-amber-400/50 shadow-xl backdrop-blur-md cursor-pointer"
+                className="absolute top-18 left-3 sm:top-8 sm:left-5 z-20 w-10 h-10 rounded-full bg-black/80 hover:bg-black active:scale-95 transition-all flex items-center justify-center text-amber-400 shrink-0 border border-amber-400/60 shadow-2xl backdrop-blur-lg cursor-pointer"
                 title="عودة"
               >
-                <ArrowRight size={19} />
+                <ArrowRight size={20} />
               </button>
             </div>
 
@@ -3953,7 +3953,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
 
       {/* 1. رأس الصفحة الرئيسية لولي الأمر مع رفيق بيرق الرقمي */}
       <header className="shrink-0 z-40 relative px-0 pt-0 pb-0">
-        <div className="shrink-0 relative w-full h-[125px] sm:h-[135px] overflow-hidden bg-[#050A18] shadow-[0_10px_30px_rgba(13,71,161,0.4)] flex flex-col justify-end pb-1 pt-2 px-3 sm:px-5">
+        <div className="shrink-0 relative w-full h-[135px] sm:h-[140px] overflow-hidden bg-[#050A18] shadow-[0_10px_30px_rgba(13,71,161,0.4)] flex flex-col justify-end pb-1 pt-2 px-3 sm:px-5">
           {/* خلفية مشعة وتأثيرات ضوئية */}
           <div className="absolute top-0 left-0 w-44 h-44 bg-[#FFD600]/15 rounded-full blur-2xl pointer-events-none" />
           <div className="absolute bottom-0 right-0 w-52 h-52 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
@@ -3970,10 +3970,10 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
           </div>
 
           {/* زر الخروج العائم في أعلى اليسار */}
-          <div className="absolute top-13 left-3 sm:top-8 sm:left-4 z-30">
+          <div className="absolute top-18 left-3 sm:top-8 sm:left-4 z-30">
             <button 
               onClick={onBack}
-              className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-black/70 hover:bg-black/90 active:scale-95 transition-all flex items-center justify-center text-amber-400 hover:text-amber-300 shrink-0 border border-amber-400/50 shadow-xl cursor-pointer backdrop-blur-md"
+              className="w-9 h-9 sm:w-9 sm:h-9 rounded-full bg-black/80 hover:bg-black active:scale-95 transition-all flex items-center justify-center text-amber-400 hover:text-amber-300 shrink-0 border border-amber-400/60 shadow-2xl cursor-pointer backdrop-blur-lg"
               title="خروج"
             >
               <ArrowRight size={17} className="rotate-180" />

@@ -2334,7 +2334,7 @@ async function startServer() {
     req.requestId = requestId;
     res.setHeader("Access-Control-Allow-Origin", "*");
     res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-device-id, x-auth-token, x-jwt-token, x-user-email, x-developer-email, x-user-role, x-school-id, x-request-id");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, x-device-id, x-auth-token, x-jwt-token, x-user-email, x-developer-email, x-user-role, x-school-id, x-request-id, x-frontend-origin, *");
     res.setHeader("Access-Control-Expose-Headers", "X-Request-ID, X-Cache-Status, Content-Range, Content-Length, Accept-Ranges");
     if (req.method === "OPTIONS") {
       return res.sendStatus(200);
