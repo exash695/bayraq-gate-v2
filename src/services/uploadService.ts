@@ -72,6 +72,60 @@ export async function compressImageIfNeeded(file: File, maxDimension = 1400, qua
   });
 }
 
+function getNativeXMLHttpRequest(): typeof XMLHttpRequest {
+  if (typeof window !== 'undefined') {
+    const capXhr = (window as any).CapacitorWebXMLHttpRequest;
+    if (capXhr?.fullObject) return capXhr.fullObject;
+    if (capXhr?.constructor) return capXhr.constructor;
+  }
+  return XMLHttpRequest;
+}
+
+async function uploadViaFetch(
+  file: File, 
+  targetUrl: string, 
+  onProgress?: (progress: number) => void
+): Promise<string> {
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  if (typeof onProgress === 'function') {
+    onProgress(30);
+    setTimeout(() => onProgress(65), 300);
+    setTimeout(() => onProgress(88), 700);
+  }
+
+  const res = await fetch(targetUrl, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!res.ok) {
+    if (res.status === 413) {
+      throw new Error('حجم الملف كبير جداً (رمز 413). يرجى اختيار ملف أصغر حجماً.');
+    }
+    let errorText = `فشل رفع الملف إلى السحابة: رمز ${res.status}`;
+    try {
+      const errJson = await res.json();
+      if (errJson?.error) errorText = errJson.error;
+    } catch {}
+    throw new Error(errorText);
+  }
+
+  const data = await res.json();
+  let resolvedUrl = data.publicUrl || data.url;
+  if (!resolvedUrl || typeof resolvedUrl !== 'string' || resolvedUrl.trim().length === 0) {
+    throw new Error('لم يرجع الخادم رابطاً صالحاً للملف المرفوع');
+  }
+  if (resolvedUrl.startsWith('/')) {
+    resolvedUrl = resolveApiUrl(resolvedUrl);
+  }
+  if (typeof onProgress === 'function') {
+    onProgress(100);
+  }
+  return resolvedUrl;
+}
+
 export const uploadFileToR2 = async (
   rawFile: File, 
   onProgressOrCategory?: ((progress: number) => void) | string,
@@ -120,7 +174,8 @@ export const uploadFileToR2 = async (
     if (presignData && !presignData.local && presignData.presignedUrl && presignData.publicUrl) {
       try {
         return await new Promise<string>((resolve, reject) => {
-          const xhr = new XMLHttpRequest();
+          const XhrClass = getNativeXMLHttpRequest();
+          const xhr = new XhrClass();
           if (resolvedOnXhrCreated) resolvedOnXhrCreated(xhr);
 
           xhr.upload.addEventListener('progress', (event) => {
@@ -142,9 +197,13 @@ export const uploadFileToR2 = async (
           xhr.addEventListener('error', () => reject(new Error('Network error during R2 upload')));
           xhr.addEventListener('abort', () => reject(new Error('Upload aborted')));
 
-          xhr.open('PUT', presignData.presignedUrl, true);
-          xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
-          xhr.send(file);
+          try {
+            xhr.open('PUT', presignData.presignedUrl, true);
+            xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+            xhr.send(file);
+          } catch (r2SendErr) {
+            reject(r2SendErr);
+          }
         });
       } catch (r2Error) {
         console.warn('[uploadService] R2 direct upload failed, proceeding to server proxy upload...', r2Error);
@@ -152,57 +211,94 @@ export const uploadFileToR2 = async (
     }
 
     // 3. Core Permanent Storage: Server-side proxy upload (/api/upload)
-    // Supports Cloudflare R2 on backend or local permanent /uploads storage
-    // Provides real-time progress events and permanent CDN/accessible URL
+    // Uses unpatched native XMLHttpRequest with automatic fetch fallback
+    const proxyUploadUrl = resolveApiUrl('/api/upload');
+
     return await new Promise<string>((resolve, reject) => {
-      const fallbackXhr = new XMLHttpRequest();
-      if (resolvedOnXhrCreated) resolvedOnXhrCreated(fallbackXhr);
-
-      fallbackXhr.upload.addEventListener('progress', (event) => {
-        if (event.lengthComputable && typeof onProgress === 'function') {
-          const progress = Math.round((event.loaded / event.total) * 100);
-          onProgress(progress);
+      let isSettled = false;
+      const safeResolve = (url: string) => {
+        if (!isSettled) {
+          isSettled = true;
+          resolve(url);
         }
-      });
+      };
+      const safeReject = (err: any) => {
+        if (!isSettled) {
+          isSettled = true;
+          reject(err);
+        }
+      };
 
-      fallbackXhr.addEventListener('load', () => {
-        if (fallbackXhr.status >= 200 && fallbackXhr.status < 300) {
-          try {
-            const response = JSON.parse(fallbackXhr.responseText);
-            let resolvedUrl = response.publicUrl || response.url;
-            if (resolvedUrl && typeof resolvedUrl === 'string' && resolvedUrl.trim().length > 0) {
-              if (resolvedUrl.startsWith('/')) {
-                resolvedUrl = resolveApiUrl(resolvedUrl);
+      try {
+        const XhrClass = getNativeXMLHttpRequest();
+        const fallbackXhr = new XhrClass();
+        if (resolvedOnXhrCreated) resolvedOnXhrCreated(fallbackXhr);
+
+        fallbackXhr.upload.addEventListener('progress', (event) => {
+          if (event.lengthComputable && typeof onProgress === 'function') {
+            const progress = Math.round((event.loaded / event.total) * 100);
+            onProgress(progress);
+          }
+        });
+
+        fallbackXhr.addEventListener('load', () => {
+          if (fallbackXhr.status >= 200 && fallbackXhr.status < 300) {
+            try {
+              const response = JSON.parse(fallbackXhr.responseText);
+              let resolvedUrl = response.publicUrl || response.url;
+              if (resolvedUrl && typeof resolvedUrl === 'string' && resolvedUrl.trim().length > 0) {
+                if (resolvedUrl.startsWith('/')) {
+                  resolvedUrl = resolveApiUrl(resolvedUrl);
+                }
+                console.log('[uploadService] File upload succeeded. URL:', resolvedUrl);
+                safeResolve(resolvedUrl);
+              } else {
+                safeReject(new Error('لم يرجع الخادم رابطاً صالحاً للملف المرفوع'));
               }
-              console.log('[uploadService] File upload succeeded. URL:', resolvedUrl);
-              resolve(resolvedUrl);
-            } else {
-              reject(new Error('لم يرجع الخادم رابطاً صالحاً للملف المرفوع'));
+            } catch (e) {
+              safeReject(new Error('استجابة غير صالحة من خادم الرفع'));
             }
-          } catch (e) {
-            reject(new Error('استجابة غير صالحة من خادم الرفع'));
-          }
-        } else {
-          try {
-            const errorResponse = JSON.parse(fallbackXhr.responseText);
-            reject(new Error(errorResponse.error || `فشل الرفع: رمز الخطأ ${fallbackXhr.status}`));
-          } catch (e) {
-            if (fallbackXhr.status === 413) {
-              reject(new Error('حجم الملف كبير جداً (رمز 413). يرجى اختيار ملف أصغر حجماً.'));
-            } else {
-              reject(new Error(`فشل رفع الملف إلى السحابة: رمز ${fallbackXhr.status}`));
+          } else {
+            try {
+              const errorResponse = JSON.parse(fallbackXhr.responseText);
+              safeReject(new Error(errorResponse.error || `فشل الرفع: رمز الخطأ ${fallbackXhr.status}`));
+            } catch (e) {
+              if (fallbackXhr.status === 413) {
+                safeReject(new Error('حجم الملف كبير جداً (رمز 413). يرجى اختيار ملف أصغر حجماً.'));
+              } else {
+                safeReject(new Error(`فشل رفع الملف إلى السحابة: رمز ${fallbackXhr.status}`));
+              }
             }
           }
+        });
+
+        fallbackXhr.addEventListener('error', () => {
+          console.warn('[uploadService] XHR network error, attempting fetch fallback...');
+          uploadViaFetch(file, proxyUploadUrl, onProgress)
+            .then(safeResolve)
+            .catch(safeReject);
+        });
+
+        fallbackXhr.addEventListener('abort', () => safeReject(new Error('تم إلغاء رفع الملف')));
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+          fallbackXhr.open('POST', proxyUploadUrl, true);
+          fallbackXhr.send(formData);
+        } catch (sendError) {
+          console.warn('[uploadService] XHR open/send failed synchronously, switching to fetch upload:', sendError);
+          uploadViaFetch(file, proxyUploadUrl, onProgress)
+            .then(safeResolve)
+            .catch(safeReject);
         }
-      });
-
-      fallbackXhr.addEventListener('error', () => reject(new Error('خطأ في الاتصال بالشبكة أثناء رفع الملف')));
-      fallbackXhr.addEventListener('abort', () => reject(new Error('تم إلغاء رفع الملف')));
-
-      const formData = new FormData();
-      formData.append('file', file);
-      fallbackXhr.open('POST', resolveApiUrl('/api/upload'), true);
-      fallbackXhr.send(formData);
+      } catch (ctorErr) {
+        console.warn('[uploadService] XHR initialization failed, using fetch upload:', ctorErr);
+        uploadViaFetch(file, proxyUploadUrl, onProgress)
+          .then(safeResolve)
+          .catch(safeReject);
+      }
     });
 
   } catch (error: any) {

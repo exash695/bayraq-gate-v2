@@ -20,7 +20,7 @@ const config = {
       maxVersions: 2
     },
     CapacitorHttp: {
-      enabled: true
+      enabled: false
     },
     GoogleAuth: {
       scopes: ['profile', 'email'],
