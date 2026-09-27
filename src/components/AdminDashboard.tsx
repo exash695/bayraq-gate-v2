@@ -85,8 +85,6 @@ import { PortalPulseDashboard } from './PortalPulseDashboard';
 import { safeStorage, safeSessionStorage } from '../lib/storage';
 import { useCachedMedia } from '../hooks/useCachedMedia';
 
-import { ActivationRequestsSection } from './ActivationRequestsSection';
-
 interface AdminDashboardProps {
   schoolName: string;
   adminBranch: 'boys' | 'girls';
@@ -167,11 +165,6 @@ const mascotVideos: Record<string, { src: string; title: string; tip: string }> 
     src: '/mascot/sliced_bairaq_sheet5_pose_activity_logs.mp4',
     title: 'مفتش سجل النشاطات',
     tip: 'مرحباً بك في سجل التدقيق والأمان. نراقب كافة العمليات الإدارية المنفذة في النظام لضمان النزاهة التامة والأمن السيبراني.'
-  },
-  activations: {
-    src: '/mascot/sliced_bairaq_sheet5_pose_key_master.mp4',
-    title: 'مركز طلبات التفعيل',
-    tip: 'مرحباً بك في مركز التفعيل. هنا يمكنك مراجعة طلبات الطلاب الذين سجلوا عبر الهاتف وتفعيل حساباتهم بعد مطابقة كود الواتساب.'
   }
 };
 
@@ -320,7 +313,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     };
   }, []);
 
-  const [activeTab, setActiveTab] = useState<'pulse' | 'codes' | 'students' | 'grades' | 'finance' | 'broadcast' | 'teachers' | 'archive' | 'control' | 'ideas' | 'radar' | 'hall' | 'resources' | 'audit' | 'academy' | 'attendance' | 'support' | 'transport' | 'sovereignty' | 'activations'>(() => {
+  const [activeTab, setActiveTab] = useState<'pulse' | 'codes' | 'students' | 'grades' | 'finance' | 'broadcast' | 'teachers' | 'archive' | 'control' | 'ideas' | 'radar' | 'hall' | 'resources' | 'audit' | 'academy' | 'attendance' | 'support' | 'transport' | 'sovereignty'>(() => {
     const saved = safeStorage.getItem("s6_admin_target_tab");
     if (saved && saved !== 'home') {
       safeStorage.removeItem("s6_admin_target_tab");
@@ -1221,7 +1214,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const allTabs = [
     { id: 'pulse', name: 'نبض البوابة', icon: Activity, color: 'text-cyan-400', bg: 'bg-cyan-400/10' },
-    { id: 'activations', name: 'تفعيل الفرسان (WhatsApp)', icon: ShieldCheck, color: 'text-amber-400', bg: 'bg-amber-400/10' },
     { id: 'finance', name: 'الموقف المالي والإحصائيات', icon: PieChart, color: 'text-amber-400', bg: 'bg-amber-400/10', cap: 'financial_view' },
     { id: 'codes', name: 'مركز الأكواد', icon: QrCode, color: 'text-purple-400', bg: 'bg-purple-400/10', cap: 'generate_codes' },
     { id: 'students', name: 'شؤون الطلاب والدرجات', icon: Users, color: 'text-blue-400', bg: 'bg-blue-400/10', cap: 'view_grades' },
@@ -1663,18 +1655,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                className={`space-y-6 transition-all duration-500 ${glowingTab === 'pulse' ? 'ring-4 ring-cyan-400 ring-offset-4 ring-offset-[#050B14] rounded-2xl p-2' : ''}`}
             >
               <PortalPulseDashboard showToast={showToast} schoolName={schoolName} selectedSchoolId={selectedSchoolId} />
-            </motion.div>
-          )}
-
-          {activeTab === 'activations' && (
-            <motion.div 
-               key="activations-tab-fixed"
-               initial={{ opacity: 0 }} 
-               animate={{ opacity: 1 }} 
-               exit={{ opacity: 0 }}
-               className={`space-y-6 transition-all duration-500 ${glowingTab === 'activations' ? 'ring-4 ring-amber-400 ring-offset-4 ring-offset-[#050B14] rounded-2xl p-2' : ''}`}
-            >
-              <ActivationRequestsSection schoolId={selectedSchoolId || 'global'} />
             </motion.div>
           )}
 
