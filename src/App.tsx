@@ -630,22 +630,28 @@ export default function App() {
   const [selectedSchoolId, setSelectedSchoolId] = useState<string | null>(
     () => {
       try {
+        const hasLoggedOut = safeStorage.getItem("s6_user_logged_out") === "true";
+        if (hasLoggedOut) return null;
+
         const saved = safeStorage.getItem("s6_selectedSchoolId");
         if (saved && saved !== "general" && saved !== "null" && saved !== "undefined") return saved;
 
         const cachedProfile = safeStorage.getItem("bayraq_cached_user_profile") || safeStorage.getItem("bairaq_cached_auth_user");
         if (cachedProfile) {
-          const parsed = JSON.parse(cachedProfile);
-          if (parsed?.schoolId && parsed.schoolId !== "general") return parsed.schoolId;
+          const parsed = typeof cachedProfile === 'string' ? JSON.parse(cachedProfile) : cachedProfile;
+          if (parsed?.schoolId && parsed.schoolId !== "general" && parsed.schoolId !== "null") return parsed.schoolId;
         }
-        return "school1";
+        return null;
       } catch {
-        return "school1";
+        return null;
       }
     },
   );
   const [isSchoolVerified, setIsSchoolVerified] = useState<boolean>(() => {
     try {
+      const hasLoggedOut = safeStorage.getItem("s6_user_logged_out") === "true";
+      if (hasLoggedOut) return false;
+
       const saved = safeStorage.getItem("s6_isSchoolVerified");
       if (saved === "true") return true;
 
@@ -1386,8 +1392,10 @@ export default function App() {
             ? (currentUser.adminBranch === "girls" ? "admin-girls" : "admin-boys")
             : currentUser.role;
             
-          const isDev = currentUser.role === "developer" || currentUser.role === "dev" || currentUser.role === "superadmin";
-          if (isDev && savedRole && ["student", "parent", "admin-boys", "admin-girls", "teacher", "admin-observer", "driver", "developer", "superadmin"].includes(savedRole)) {
+          const isDev = currentUser.role === "developer" || currentUser.role === "dev" || currentUser.role === "superadmin" || currentUser.email?.toLowerCase() === 'mntzralghanm527@gmail.com';
+          if (savedRole === "parent" || currentUser.role === "parent") {
+            role = "parent";
+          } else if (isDev && savedRole && ["student", "parent", "admin-boys", "admin-girls", "teacher", "admin-observer", "driver", "developer", "superadmin"].includes(savedRole)) {
             role = savedRole;
           } else if (isDev && !savedRole) {
             role = "developer";
@@ -2753,9 +2761,11 @@ export default function App() {
           setIsChoosingSchool(false);
           setActiveSection("school-content");
         };
+
         const isAdminUser =
-          portalType === "admin-boys" ||
-          portalType === "admin-girls";
+          !isParentUser &&
+          (portalType === "admin-boys" ||
+          portalType === "admin-girls");
 
         const isDriverUser =
           portalType === "driver";
@@ -2777,7 +2787,7 @@ export default function App() {
             <div className="max-w-6xl mx-auto p-4 sm:p-6 pb-32">
               <AdminHomeDashboard
                 schoolName={resolvedSchoolName}
-                selectedSchoolId={selectedSchoolId || userProfile?.schoolId}
+                selectedSchoolId={targetAdminSchoolId}
                 setActiveTab={(tab) => {
                   safeStorage.setItem("s6_admin_target_tab", tab);
                   safeStorage.setItem("s6_admin_target_tab_glow", tab);

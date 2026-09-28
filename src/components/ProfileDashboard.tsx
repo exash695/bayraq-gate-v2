@@ -289,7 +289,17 @@ export const ProfileDashboard = ({ userProfile, progress, language }: { userProf
         <button 
           onClick={() => {
             safeStorage.setItem('s6_user_logged_out', 'true');
+            safeStorage.removeItem('bayraq_user_role');
+            safeStorage.removeItem('s6_selectedSchoolId');
+            safeStorage.removeItem('s6_isSchoolVerified');
+            safeStorage.removeItem('s6_portalType');
+            safeStorage.removeItem('bayraq_cached_user_profile');
+            safeStorage.removeItem('bairaq_cached_auth_user');
+            safeStorage.removeItem('s6_verified_student_info');
+            safeStorage.removeItem('s6_selected_student_grade');
+            safeStorage.removeItem('s6_activeSection');
             customAuth.logout();
+            window.location.reload();
           }} 
           className="w-full group relative overflow-hidden py-6 bg-rose-500/5 text-rose-500 border-2 border-rose-500/20 rounded-[2rem] hover:bg-rose-500 hover:text-white transition-all duration-500 font-black text-xl shadow-lg hover:shadow-rose-500/40"
         >

@@ -21,7 +21,8 @@ export const AdminHomeDashboard: React.FC<AdminHomeDashboardProps> = ({
   setActiveTab,
   onOpenNotifications
 }) => {
-  const { students, teachers, savedLists, isLoading } = useAdminData(selectedSchoolId, schoolName);
+  const effectiveSchoolId = (selectedSchoolId && selectedSchoolId !== 'general') ? selectedSchoolId : (schoolName?.includes('غماس') ? 'school1' : 'school1');
+  const { students, teachers, savedLists, isLoading } = useAdminData(effectiveSchoolId, schoolName);
   const [dataError, setDataError] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);

@@ -8,7 +8,9 @@ import { safeStorage } from '../lib/storage';
 import { realtimeManager } from '../lib/realtimeManager';
 
 export const useAdminData = (selectedSchoolId: string | null, schoolName?: string) => {
-  const safeSchoolId = selectedSchoolId || 'all';
+  const safeSchoolId = (selectedSchoolId && selectedSchoolId !== 'general' && selectedSchoolId !== 'null') 
+    ? selectedSchoolId 
+    : (schoolName?.includes('غماس') ? 'school1' : 'school1');
 
   const [rawStudents, setRawStudents] = useState<SchoolStudent[]>(() => {
     try {
@@ -155,12 +157,7 @@ export const useAdminData = (selectedSchoolId: string | null, schoolName?: strin
   }, [selectedSchoolId, auth.currentUser]);
 
   useEffect(() => {
-    if (!selectedSchoolId) {
-      setIsLoading(false);
-      return;
-    }
-
-    const currentSchoolId = selectedSchoolId;
+    const currentSchoolId = safeSchoolId;
     const cleanSchoolName = String(schoolName || "").trim();
 
     // 1. Sync Students (Robust Subscription via PostgreSQL API)
@@ -221,7 +218,7 @@ export const useAdminData = (selectedSchoolId: string | null, schoolName?: strin
       unsubSettings();
       clearTimeout(loadingTimeout);
     };
-  }, [selectedSchoolId, schoolName]);
+  }, [safeSchoolId, schoolName]);
 
   // SOURCE OF TRUTH: If savedLists exist, strictly return active students from savedLists.
   // This automatically cleans up any deleted batches or orphaned documents from deleted lists.
