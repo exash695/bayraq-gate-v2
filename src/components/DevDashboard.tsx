@@ -43,6 +43,7 @@ import { CloudControlSection } from "./dev/CloudControlSection";
 import { AcademyManagementSection } from "./dev/AcademyManagementSection";
 import { MediaManagementSection } from "./dev/MediaManagementSection";
 import { UsersAuditDirectorySection } from "./dev/UsersAuditDirectorySection";
+import { AccountSupportAuditSection } from "./dev/AccountSupportAuditSection";
 import { schoolService } from "../services/schoolService";
 import { dataIntegrityService } from "../services/dataIntegrityService";
 import { activationCodesService } from '../services/activationCodesService';
@@ -552,6 +553,7 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
 
   const [activeTab, setActiveTab] = useState<
     | "users_directory"
+    | "support_audit"
     | "academy"
     | "health"
     | "school_management"
@@ -3868,6 +3870,7 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
       <nav className="fixed bottom-0 left-0 right-0 z-[999] h-20 bg-[#050A18]/95 backdrop-blur-xl border-t border-white/10 flex items-center justify-around px-2 pb-6 pt-2 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] overflow-x-auto no-scrollbar">
         {[
           { id: 'users_directory', name: 'المستخدمون', icon: Users },
+          { id: 'support_audit', name: 'الدعم والتدقيق', icon: Shield },
           { id: 'health', name: 'الصحة', icon: Activity },
           { id: 'school_management', name: 'المدارس', icon: Building },
           { id: 'remote_config', name: 'التحكم السحابي', icon: SlidersHorizontal },

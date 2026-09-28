@@ -649,8 +649,41 @@ export default function App() {
   }, [isSchoolVerified]);
   const [selectedStudentGrade, setSelectedStudentGrade] = useState<
     string | null
-  >(null);
-  const [verifiedStudentInfo, setVerifiedStudentInfo] = useState<any>(null);
+  >(() => {
+    try {
+      return safeStorage.getItem("s6_selected_student_grade") || null;
+    } catch {
+      return null;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      if (selectedStudentGrade) {
+        safeStorage.setItem("s6_selected_student_grade", selectedStudentGrade);
+      } else {
+        safeStorage.removeItem("s6_selected_student_grade");
+      }
+    } catch {}
+  }, [selectedStudentGrade]);
+
+  const [verifiedStudentInfo, setVerifiedStudentInfo] = useState<any>(() => {
+    try {
+      const cached = safeStorage.getItem("s6_verified_student_info");
+      if (cached) return JSON.parse(cached);
+    } catch {}
+    return null;
+  });
+
+  useEffect(() => {
+    try {
+      if (verifiedStudentInfo) {
+        safeStorage.setItem("s6_verified_student_info", JSON.stringify(verifiedStudentInfo));
+      } else {
+        safeStorage.removeItem("s6_verified_student_info");
+      }
+    } catch {}
+  }, [verifiedStudentInfo]);
   const [isVerifying, setIsVerifying] = useState(false);
   const [bannedCode, setBannedCode] = useState<string | null>(null);
   const [suspendedSchoolName, setSuspendedSchoolName] = useState<string | null>(null);
@@ -727,12 +760,16 @@ export default function App() {
     safeStorage.removeItem("s6_userProfile");
     safeStorage.removeItem("bayraq_cached_user_profile");
     safeStorage.removeItem("s6_isSchoolVerified");
+    safeStorage.removeItem("s6_verified_student_info");
+    safeStorage.removeItem("s6_selected_student_grade");
     safeStorage.removeItem("s6_auth_token");
     safeStorage.removeItem("s6_portalType");
     safeStorage.removeItem("bayraq_user_role");
     customAuth.logout();
     setUser(null);
     setUserProfile(null);
+    setVerifiedStudentInfo(null);
+    setSelectedStudentGrade(null);
   };
 
   const allSchoolsList = useMemo(() => {
