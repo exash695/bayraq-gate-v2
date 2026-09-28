@@ -8468,7 +8468,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
             name: 'المهندس منتظر (المطور العام)',
             passwordHash: devHash,
             role: 'developer',
-            schoolId: 'general',
+            schoolId: 'school1',
             status: 'نشط'
           };
           try {
@@ -8499,6 +8499,12 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
 
       // Developer bypass: Check email explicitly to ensure the developer is NEVER locked out
       const isDevEmail = isDeveloperAccount || user.email?.toLowerCase() === 'mntzralghanm527@gmail.com';
+      if (isDevEmail && (!user.schoolId || user.schoolId === 'general')) {
+        user.schoolId = 'school1';
+        try {
+          await db.update(users).set({ schoolId: 'school1' }).where(eq(users.id, user.id));
+        } catch (e) {}
+      }
       
       if (user.role !== 'developer' && user.role !== 'superadmin' && !isDevEmail) {
         const suspUser = await checkIsSchoolSuspended(user.schoolId);

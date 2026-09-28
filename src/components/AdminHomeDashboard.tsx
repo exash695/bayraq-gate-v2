@@ -103,7 +103,9 @@ export const AdminHomeDashboard: React.FC<AdminHomeDashboardProps> = ({
   );
 
   const getGreetingName = (name: string) => {
-    if (!name) return 'المدرسة';
+    if (!name || name === 'أكاديمية بيرق الرقمية' || name === 'أكاديمية بيرق العامة' || name === 'general') {
+      return 'ثانوية أوائل غماس الأهلية';
+    }
     if (
       name.includes('أكاديمية') || 
       name.includes('اكاديمية') || 
