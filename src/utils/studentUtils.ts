@@ -811,8 +811,8 @@ export const calculateStudentFinancials = (stu: any, tuitionFee: number, discoun
   }, 0);
 
   const storedPaidAmount = Number(stu.finance?.paidAmount ?? stu.paidAmount ?? 0);
-  // We trust installments more if they exist, but take whichever is higher to be safe against partial syncs
-  const paidAmount = installments.length > 0 ? paidFromInstallments : Math.max(storedPaidAmount, paidFromInstallments);
+  // Always take the maximum of stored paid amount and sum of paid installments so payments are never lost
+  const paidAmount = Math.max(storedPaidAmount, paidFromInstallments);
   
   const remainingAmount = Math.max(0, requiredAmount - paidAmount);
   const isPaidInFull = (requiredAmount > 0 && remainingAmount <= 5) || (stu.status === 'إعفاء تام') || (discountRate === 100);

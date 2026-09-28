@@ -852,6 +852,11 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
 
   const [confirmDelete, setConfirmDelete] = useState<{ action: () => void; title: string; message: string } | null>(null);
   
+  // Apply Installment Plan States
+  const [showApplyPlanModal, setShowApplyPlanModal] = useState(false);
+  const [applyPlanMode, setApplyPlanMode] = useState<'waterfall' | 'unpaid_only'>('waterfall');
+  const [isApplyingPlan, setIsApplyingPlan] = useState(false);
+  
   // Forgot PIN States
   const [showForgotPIN, setShowForgotPIN] = useState(false);
   const [adminEmailInput, setAdminEmailInput] = useState('');
@@ -1068,14 +1073,23 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
       showToast('يرجى إضافة أقساط أولاً', 'error');
       return;
     }
+    setShowApplyPlanModal(true);
+  };
+
+  const executeApplyPlan = async (mode: 'waterfall' | 'unpaid_only') => {
+    if (!installmentPlan || installmentPlan.length === 0) {
+      showToast('يرجى إضافة أقساط أولاً', 'error');
+      return;
+    }
+
+    setIsApplyingPlan(true);
 
     const newInstallments = installmentPlan.map(p => ({ 
       name: p.name || 'قسط', 
-      amount: p.amount || 0, 
+      amount: Number(p.amount) || 0, 
       dueDate: p.dueDate || '', 
       date: p.dueDate || '', // Backward compatibility
-      id: generateId(), 
-      paid: false 
+      id: generateId()
     }));
 
     // Update main students list and PERSIST to Firestore
@@ -1085,6 +1099,23 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
     const updatedStudents = students.map(s => {
       const studentRef = doc(db, 'school_students', s.id);
       
+      // 🛡️ Calculate what student has already paid from all sources
+      const existingInstallments = s.finance?.installments || s.installments || [];
+      const paidFromInstallments = existingInstallments.reduce((sum: number, inst: any) => {
+        const isPaid = inst.paid === true || ['completed', 'verified', 'verified_payment', 'مكتمل', 'paid'].includes((inst.status || '').toLowerCase());
+        if (isPaid) {
+          return sum + (Number(inst.amount) || Number(inst.paidAmount) || 0);
+        }
+        return sum + (Number(inst.paidAmount) || 0);
+      }, 0);
+      const storedPaid = Number(s.paidAmount || s.finance?.paidAmount || 0);
+      const totalPaidSoFar = Math.max(storedPaid, paidFromInstallments);
+
+      // If mode is unpaid_only and student already paid, preserve their existing plan!
+      if (mode === 'unpaid_only' && totalPaidSoFar > 0) {
+        return s;
+      }
+
       // Respect student's existing discount if available
       const stuDiscountRate = s.discountRate ?? (s.discountType ? (safeDiscountRates[s.discountType] || 0) : 0);
       const discountFactor = (100 - stuDiscountRate) / 100;
@@ -1095,37 +1126,78 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
       const combinedFactor = gradeProportion * discountFactor;
       
       // Scale installments based on student's discount and grade tuition proportion
-      const studentInstallments = newInstallments.map(inst => ({
-        ...inst,
-        amount: Math.round(inst.amount * combinedFactor)
-      }));
+      // 🌊 Smart Waterfall / FIFO allocation of previously paid amounts
+      let remainingPaidToAllocate = totalPaidSoFar;
+      const studentInstallments = newInstallments.map((inst, idx) => {
+        const scaledAmount = Math.round(inst.amount * combinedFactor);
+        let isPaid = false;
+        let status = 'pending';
+        let allocatedPaid = 0;
+        let remainingInstAmount = scaledAmount;
+
+        if (remainingPaidToAllocate >= scaledAmount && scaledAmount > 0) {
+          isPaid = true;
+          status = 'مكتمل';
+          allocatedPaid = scaledAmount;
+          remainingInstAmount = 0;
+          remainingPaidToAllocate -= scaledAmount;
+        } else if (remainingPaidToAllocate > 0) {
+          isPaid = false;
+          status = 'جزئي';
+          allocatedPaid = remainingPaidToAllocate;
+          remainingInstAmount = Math.max(0, scaledAmount - remainingPaidToAllocate);
+          remainingPaidToAllocate = 0;
+        } else {
+          isPaid = false;
+          status = 'pending';
+          allocatedPaid = 0;
+          remainingInstAmount = scaledAmount;
+        }
+
+        return {
+          ...inst,
+          id: `inst_${idx}_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+          amount: scaledAmount,
+          paid: isPaid,
+          status: isPaid ? 'مكتمل' : status,
+          paidAmount: allocatedPaid,
+          remainingAmount: remainingInstAmount
+        };
+      });
       
       const studentTotalAmount = Math.round(baseGradeTuition * discountFactor);
+      const finalPaidAmount = Math.min(studentTotalAmount, totalPaidSoFar);
+      const finalRemainingAmount = Math.max(0, studentTotalAmount - finalPaidAmount);
 
       const financeData = {
+        ...(s.finance || {}),
         installments: studentInstallments,
         totalTuition: studentTotalAmount,
-        paidAmount: 0,
-        remainingAmount: studentTotalAmount
+        paidAmount: finalPaidAmount,
+        remainingAmount: finalRemainingAmount,
+        lastPlanUpdate: new Date().toISOString()
       };
       
       batch.set(studentRef, { 
         'finance': financeData,
         'totalAmount': studentTotalAmount,
-        'paidAmount': 0
+        'paidAmount': finalPaidAmount,
+        'updatedAt': new Date().toISOString()
       }, { merge: true });
 
       return {
         ...s,
         finance: financeData,
         installments: studentInstallments,
-        paidAmount: 0,
+        paidAmount: finalPaidAmount,
         totalAmount: studentTotalAmount,
         discountRate: stuDiscountRate
       };
     });
 
-    batch.commit().then(() => {
+    try {
+      await batch.commit();
+
       // Update state AFTER successful DB write
       setStudents(updatedStudents);
       
@@ -1141,11 +1213,14 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
         }));
       });
 
-      showToast('تم تعميم الخطة المالية وحفظها في قاعدة البيانات بنجاح', 'success');
+      setShowApplyPlanModal(false);
+      setIsApplyingPlan(false);
+
+      showToast('تم تعميم الخطة المالية وإعادة جدولة الأقساط مع صون كافة المدفوعات السابقة بنجاح 🛡️', 'success');
 
       logActivity({
-        action: 'تطبيق خطة مالية',
-        details: `تم تطبيق خطة الأقساط على ${relevantStudents.length} طالب/طالبة بقيمة إجمالية ${tuitionFee.toLocaleString()} د.ع للقسط السنوي`,
+        action: 'تطبيق خطة مالية ذكية',
+        details: `تم تطبيق خطة الأقساط (${mode === 'waterfall' ? 'إعادة جدولة مع حفظ وتوزيع المدفوعات' : 'للطلبة غير المسددين فقط'}) على ${updatedStudents.length} طالب`,
         targetType: 'finance_config'
       });
       
@@ -1153,10 +1228,11 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
       if (selectedSchoolId) {
         academicService.syncStudents(selectedSchoolId, updatedStudents);
       }
-    }).catch(err => {
+    } catch (err: any) {
       console.error("Error applying plan to DB:", err);
-      showToast('خطأ في حفظ البيانات', 'error');
-    });
+      setIsApplyingPlan(false);
+      showToast('خطأ في حفظ البيانات: ' + (err?.message || ''), 'error');
+    }
   };
 
   const toggleInstallmentPayment = async (studentCode: string, installmentId: string, sendNotification: boolean = false) => {
@@ -2068,6 +2144,129 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
         title={confirmDelete?.title || ''}
         message={confirmDelete?.message || ''}
       />
+
+      {/* Smart Apply Plan Modal - Preserving Payments */}
+      <AnimatePresence>
+        {showApplyPlanModal && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.92, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.92, y: 20 }}
+              className="bg-gradient-to-b from-[#131b38] to-[#0c1228] border border-white/10 p-6 md:p-8 rounded-[32px] max-w-xl w-full text-right space-y-6 shadow-2xl relative overflow-hidden"
+            >
+              <div className="absolute top-0 right-0 w-full h-1.5 bg-gradient-to-r from-amber-500 via-emerald-400 to-blue-500" />
+              
+              {/* Header */}
+              <div className="flex items-center gap-4 border-b border-white/10 pb-4">
+                <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center text-amber-400 shrink-0">
+                  <ShieldCheck size={28} />
+                </div>
+                <div>
+                  <h3 className="text-white text-lg md:text-xl font-black">
+                    تطبيق وتعميم خطة الأقساط الجديدة
+                  </h3>
+                  <p className="text-white/40 text-xs mt-0.5 font-medium">
+                    الخطة الجديدة تتكون من <span className="text-amber-400 font-bold">{installmentPlan.length} أقساط</span> بقيمة إجمالية <span className="text-emerald-400 font-bold">{installmentPlan.reduce((s, i) => s + (Number(i.amount) || 0), 0).toLocaleString()} د.ع</span>
+                  </p>
+                </div>
+              </div>
+
+              {/* Options */}
+              <div className="space-y-3">
+                <span className="text-white/60 text-xs font-black block">اختر آلية التعامل مع مدفوعات الطلبة السابقة:</span>
+
+                {/* Option 1: Waterfall */}
+                <div 
+                  onClick={() => setApplyPlanMode('waterfall')}
+                  className={`p-4 rounded-2xl border-2 transition-all cursor-pointer relative overflow-hidden ${
+                    applyPlanMode === 'waterfall'
+                      ? 'border-emerald-500/60 bg-emerald-500/10 shadow-[0_0_20px_rgba(16,185,129,0.15)]'
+                      : 'border-white/5 bg-white/[0.02] hover:border-white/15'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={`w-5 h-5 rounded-full border-2 mt-0.5 flex items-center justify-center shrink-0 ${
+                      applyPlanMode === 'waterfall' ? 'border-emerald-400 bg-emerald-500' : 'border-white/30'
+                    }`}>
+                      {applyPlanMode === 'waterfall' && <div className="w-2 h-2 rounded-full bg-white" />}
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-white font-black text-sm">
+                          إعادة الجدولة الذكية مع حفظ كافة المدفوعات (Waterfall)
+                        </span>
+                        <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full font-bold">
+                          موصى به 🛡️
+                        </span>
+                      </div>
+                      <p className="text-white/60 text-xs leading-relaxed">
+                        يتم صب مبالغ أولياء الأمور المسددة مسبقاً تلقائياً في الأقساط الجديدة بالترتيب؛ فالأقساط المسددة تبقى خضراء ومكتملة، وتتوزع المبالغ المتبقية على الدفعات اللاحقة <span className="text-emerald-300 font-bold">دون أن يضيع أي دينار تم دفعه إطلاقاً</span>.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Option 2: Unpaid Only */}
+                <div 
+                  onClick={() => setApplyPlanMode('unpaid_only')}
+                  className={`p-4 rounded-2xl border-2 transition-all cursor-pointer relative overflow-hidden ${
+                    applyPlanMode === 'unpaid_only'
+                      ? 'border-amber-500/60 bg-amber-500/10 shadow-[0_0_20px_rgba(245,158,11,0.15)]'
+                      : 'border-white/5 bg-white/[0.02] hover:border-white/15'
+                  }`}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className={`w-5 h-5 rounded-full border-2 mt-0.5 flex items-center justify-center shrink-0 ${
+                      applyPlanMode === 'unpaid_only' ? 'border-amber-400 bg-amber-500' : 'border-white/30'
+                    }`}>
+                      {applyPlanMode === 'unpaid_only' && <div className="w-2 h-2 rounded-full bg-white" />}
+                    </div>
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-white font-black text-sm">
+                          تطبيق الخطة على الطلاب غير المسددين فقط
+                        </span>
+                      </div>
+                      <p className="text-white/60 text-xs leading-relaxed">
+                        الإبقاء على جداول وخطط جميع الطلاب الذين سددوا أي قسط سابقاً كما هي دون أي مساس، وتطبيق الخطة الجديدة فقط على الطلاب الجدد والذين لم يدفعوا أي مبلغ بعد.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action buttons */}
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  onClick={() => executeApplyPlan(applyPlanMode)}
+                  disabled={isApplyingPlan}
+                  className="flex-1 h-14 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-black font-black text-sm rounded-2xl shadow-lg active:scale-98 transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+                >
+                  {isApplyingPlan ? (
+                    <>
+                      <div className="w-5 h-5 border-2 border-black/30 border-t-black rounded-full animate-spin" />
+                      <span>جاري المعالجة وحفظ المدفوعات...</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 size={18} />
+                      <span>تأكيد وتعميم الخطة بأمان</span>
+                    </>
+                  )}
+                </button>
+                <button
+                  onClick={() => setShowApplyPlanModal(false)}
+                  disabled={isApplyingPlan}
+                  className="px-6 h-14 bg-white/5 hover:bg-white/10 text-white/70 hover:text-white font-black text-sm rounded-2xl transition-all cursor-pointer"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Confirm Payment Modal */}
       {showConfirmPayment && (
@@ -3368,11 +3567,11 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
               </div>
             </div>
 
-            {/* Elegant Compact Warning Bar */}
-            <div className="p-4 bg-amber-500/5 border border-amber-500/10 rounded-2xl flex items-center gap-3">
-              <AlertCircle className="text-amber-500 shrink-0" size={18} />
-              <p className="text-white/40 text-[10px] md:text-xs font-bold text-right leading-tight">
-                ملاحظة: تفعيل "تطبيق وتعميم الخطة" سيقوم بإعادة جدولة وتوزيع الدفعات غير المسددة لجميع الطلاب المسجلين بالكامل.
+            {/* Elegant Compact Reassurance Bar */}
+            <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center gap-3">
+              <ShieldCheck className="text-emerald-400 shrink-0" size={20} />
+              <p className="text-emerald-300/80 text-[10px] md:text-xs font-bold text-right leading-relaxed">
+                🛡️ نظام الأمان المحاسبي مفعل: عند تعديل أو زيادة عدد الأقساط، يقوم النظام بصَبّ كافة المبالغ المسددة مسبقاً في الأقساط الجديدة تلقائياً (Waterfall) لضمان عدم تصفير أي قسط مدفوع وصون حقوق الجميع.
               </p>
             </div>
 

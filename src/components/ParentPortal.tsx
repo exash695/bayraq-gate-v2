@@ -2153,16 +2153,18 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                           return displayInstallments.map((inst: any, idx: number) => {
                             const installmentId = inst.id || idx.toString();
                             const isPaid = inst.paid === true || ['completed', 'verified', 'verified_payment', 'مكتمل'].includes((inst.status || '').toLowerCase());
+                            const isPartial = !isPaid && (inst.status === 'جزئي' || (Number(inst.paidAmount || 0) > 0 && Number(inst.paidAmount || 0) < Number(inst.amount)));
                             
                             // Check active requests collection
                             const activeRequest = pendingRequests.find((r: any) => r.installmentId === installmentId);
                             const isPending = !isPaid && activeRequest?.status === 'pending';
                             const isRejected = !isPaid && activeRequest?.status === 'rejected';
                             
-                            let statusText = isPaid ? 'مكتمل' : (isPending ? 'قيد المراجعة' : (isRejected ? 'مرفوض' : 'تسديد'));
+                            let statusText = isPaid ? 'مكتمل' : (isPending ? 'قيد المراجعة' : (isRejected ? 'مرفوض' : (isPartial ? 'إكمال القسط' : 'تسديد')));
                             let statusBg = isPaid ? 'bg-emerald-500/10 text-emerald-400' : 
                                          isPending ? 'bg-amber-500/20 text-amber-400' : 
                                          isRejected ? 'bg-rose-500/20 text-rose-400' : 
+                                         isPartial ? 'bg-sky-400 text-black font-black shadow-md shadow-sky-400/25' :
                                          'bg-amber-400 text-black font-extrabold';
                             
                             return (
@@ -2170,13 +2172,20 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                                 <div className="bg-[#101935] p-5 rounded-[24px] border border-white/5 flex items-center justify-between group hover:border-blue-500/20 transition-all">
                                   <div className="flex items-center gap-4">
                                      <div className="relative">
-                                        <div className={`w-3 h-3 rounded-full ${isPaid ? 'bg-emerald-500' : (isPending ? 'bg-amber-500' : (isRejected ? 'bg-rose-500' : 'bg-white/20'))}`} />
+                                        <div className={`w-3 h-3 rounded-full ${isPaid ? 'bg-emerald-500' : (isPending ? 'bg-amber-500' : (isRejected ? 'bg-rose-500' : (isPartial ? 'bg-sky-400' : 'bg-white/20')))}`} />
                                         {isRejected && activeRequest?.viewedByParent === false && (
                                           <div className="absolute -top-1 -right-1 w-2 h-2 bg-rose-500 rounded-full animate-pulse" />
                                         )}
                                      </div>
-                                     <div>
-                                        <p className="text-white font-black text-sm tabular-nums">{Number(inst.amount).toLocaleString()} <span className="text-[10px] opacity-40">د.ع</span></p>
+                                     <div className="space-y-0.5">
+                                        <div className="flex items-center gap-2">
+                                          <p className="text-white font-black text-sm tabular-nums">{Number(inst.amount).toLocaleString()} <span className="text-[10px] opacity-40">د.ع</span></p>
+                                          {isPartial && (
+                                            <span className="text-[9px] text-sky-300 font-bold bg-sky-500/10 px-2 py-0.5 rounded-full border border-sky-500/20">
+                                              مدفوع منه: {Number(inst.paidAmount).toLocaleString()} د.ع
+                                            </span>
+                                          )}
+                                        </div>
                                         <p className="text-white/30 text-[10px] font-bold">{inst.name || 'قسط مدرسي'} • {inst.date}</p>
                                      </div>
                                   </div>

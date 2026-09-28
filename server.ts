@@ -1238,29 +1238,67 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
     const gradeProportion = templateSum > 0 ? (baseFee / templateSum) : 1;
     const combinedFactor = gradeProportion * discountFactor;
     
+    // 🛡️ Calculate total previously paid from stored amounts and existing installments
+    const paidFromExisting = existingInstallments.reduce((sum: number, inst: any) => {
+      const isPaid = inst.paid === true || ['completed', 'verified', 'verified_payment', 'مكتمل', 'paid'].includes((inst.status || '').toLowerCase());
+      if (isPaid) {
+        return sum + (Number(inst.amount) || Number(inst.paidAmount) || 0);
+      }
+      return sum + (Number(inst.paidAmount) || 0);
+    }, 0);
+    const storedPaid = Math.round(Number(student.paidAmount || existingFinance.paidAmount || 0));
+    const totalPaidSoFar = Math.max(storedPaid, paidFromExisting);
+
+    // 🌊 Smart Waterfall / FIFO allocation across the new installments
+    let remainingPaidToAllocate = totalPaidSoFar;
     const installments = installmentPlan.map((inst: any, idx: number) => {
-      // Try to find matching existing installment to preserve paid status
       const existing = existingInstallments.find((ei: any) => ei.name === inst.name) || existingInstallments[idx];
-      const isPaid = existing?.paid === true || ['completed', 'verified', 'verified_payment', 'مكتمل'].includes((existing?.status || '').toLowerCase());
+      const scaledAmount = Math.round((Number(inst.amount) || 0) * combinedFactor);
       
+      let isPaid = false;
+      let status = 'pending';
+      let allocatedPaid = 0;
+      let remainingInstAmount = scaledAmount;
+
+      if (remainingPaidToAllocate >= scaledAmount && scaledAmount > 0) {
+        isPaid = true;
+        status = 'مكتمل';
+        allocatedPaid = scaledAmount;
+        remainingInstAmount = 0;
+        remainingPaidToAllocate -= scaledAmount;
+      } else if (remainingPaidToAllocate > 0) {
+        isPaid = false;
+        status = 'جزئي';
+        allocatedPaid = remainingPaidToAllocate;
+        remainingInstAmount = Math.max(0, scaledAmount - remainingPaidToAllocate);
+        remainingPaidToAllocate = 0;
+      } else {
+        isPaid = false;
+        status = 'pending';
+        allocatedPaid = 0;
+        remainingInstAmount = scaledAmount;
+      }
+
       return {
         ...inst,
         id: existing?.id || inst.id || `inst_${idx}_${Date.now()}`,
-        amount: Math.round((Number(inst.amount) || 0) * combinedFactor),
+        amount: scaledAmount,
         paid: isPaid,
-        status: isPaid ? (existing.status || 'مكتمل') : (existing?.status || 'pending')
+        status: isPaid ? 'مكتمل' : status,
+        paidAmount: allocatedPaid,
+        remainingAmount: remainingInstAmount
       };
     });
 
-    const paidAmount = Math.round(Number(student.paidAmount || 0));
-    const remainingAmount = Math.round(Math.max(0, totalAmount - paidAmount));
+    const finalPaidAmount = Math.min(totalAmount, totalPaidSoFar);
+    const remainingAmount = Math.round(Math.max(0, totalAmount - finalPaidAmount));
 
     return {
       finance: {
         ...existingFinance,
         installments,
         totalTuition: totalAmount,
-        paidAmount,
+        paidAmount: finalPaidAmount,
         remainingAmount,
         lastUpdated: new Date().toISOString()
       },
