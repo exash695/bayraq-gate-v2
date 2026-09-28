@@ -39,10 +39,21 @@ export function getOrCreateDeviceId(): string {
 
 class CustomAuthService {
   private tokenKey = 'bairaq_jwt_token';
+  private cachedUserKey = 'bairaq_cached_auth_user';
   private currentUser: CustomUser | null = null;
   private listeners: ((user: CustomUser | null) => void)[] = [];
 
   constructor() {
+    // Synchronously restore session from local cache immediately on instantiation
+    try {
+      const token = localStorage.getItem(this.tokenKey);
+      const cached = localStorage.getItem(this.cachedUserKey);
+      if (token && cached) {
+        this.currentUser = JSON.parse(cached);
+      }
+    } catch (e) {
+      console.warn('[customAuth] Synchronous session restore notice:', e);
+    }
     this.restoreSession();
   }
 
@@ -60,9 +71,10 @@ class CustomAuthService {
         if (!res.ok) {
           if (res.status === 401 || res.status === 403) {
             localStorage.removeItem(this.tokenKey);
+            localStorage.removeItem(this.cachedUserKey);
+            this.currentUser = null;
+            this.notifyListeners();
           }
-          this.currentUser = null;
-          this.notifyListeners();
           return;
         }
 
@@ -76,15 +88,22 @@ class CustomAuthService {
 
         if (data && data.success) {
           this.currentUser = data.user;
+          try {
+            localStorage.setItem(this.cachedUserKey, JSON.stringify(data.user));
+          } catch (e) {}
           this.notifyListeners();
           return;
         }
       } catch (err) {
-        console.warn("[customAuth] Session restore skipped gracefully:", err);
+        console.warn("[customAuth] Session restore offline/skipped gracefully:", err);
+        // Do NOT nullify currentUser on network errors if we already restored cached user
+        if (this.currentUser) return;
       }
+    } else {
+      localStorage.removeItem(this.cachedUserKey);
+      this.currentUser = null;
+      this.notifyListeners();
     }
-    this.currentUser = null;
-    this.notifyListeners();
   }
 
   public onAuthStateChanged(callback: (user: CustomUser | null) => void) {
@@ -142,6 +161,7 @@ class CustomAuthService {
     }
     
     localStorage.setItem(this.tokenKey, data.token);
+    try { localStorage.setItem(this.cachedUserKey, JSON.stringify(data.user)); } catch (e) {}
     this.currentUser = data.user;
     this.notifyListeners();
     return data.user;
@@ -197,6 +217,7 @@ class CustomAuthService {
     }
     
     localStorage.setItem(this.tokenKey, data.token);
+    try { localStorage.setItem(this.cachedUserKey, JSON.stringify(data.user)); } catch (e) {}
     this.currentUser = data.user;
     this.notifyListeners();
     return data.user;
@@ -368,6 +389,7 @@ class CustomAuthService {
 
   public async logout() {
     localStorage.removeItem(this.tokenKey);
+    localStorage.removeItem(this.cachedUserKey);
     this.currentUser = null;
     this.notifyListeners();
   }

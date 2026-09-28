@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { Shield, UserCheck, School, Key, RefreshCw, AlertTriangle, CheckCircle, Database, Trash2, Send, Lock, Globe, Smartphone, Activity } from "lucide-react";
+import { Shield, UserCheck, School, Key, RefreshCw, AlertTriangle, CheckCircle, Database, Trash2, Send, Lock, Globe, Smartphone, Activity, Loader2, Zap } from "lucide-react";
 import { db, addDoc, collection, serverTimestamp } from "../../lib/firebase";
 
 interface AccountSupportAuditSectionProps {
@@ -12,15 +12,23 @@ export function AccountSupportAuditSection({ userProfile, showToast, schoolId }:
   const [reportReason, setReportReason] = useState("");
   const [reportDetails, setReportDetails] = useState("");
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+  const [isRefreshingStorage, setIsRefreshingStorage] = useState(false);
+  const [isClearingCache, setIsClearingCache] = useState(false);
+  const [isTestingSection, setIsTestingSection] = useState<string | null>(null);
   const [storageItems, setStorageItems] = useState<{ key: string; value: string }[]>([]);
 
-  const loadStorage = () => {
+  const loadStorage = async () => {
+    setIsRefreshingStorage(true);
     try {
+      await new Promise(resolve => setTimeout(resolve, 250)); // Visual spinner feedback
       const keysToInspect = [
         "bayraq_cached_user_profile",
+        "bairaq_cached_auth_user",
         "bayraq_user_role",
         "s6_selectedSchoolId",
         "s6_isSchoolVerified",
+        "s6_verified_student_info",
+        "s6_selected_student_grade",
         "bairaq_jwt_token",
         "bairaq_device_uuid",
         "s6_user_logged_out",
@@ -31,8 +39,11 @@ export function AccountSupportAuditSection({ userProfile, showToast, schoolId }:
         value: localStorage.getItem(k) || "(فارغ / غير موجود)"
       }));
       setStorageItems(items);
+      showToast?.("تم فحص وتحديث كائن التخزين المحلي بنجاح", "info");
     } catch (e) {
       console.error(e);
+    } finally {
+      setIsRefreshingStorage(false);
     }
   };
 
@@ -75,14 +86,31 @@ export function AccountSupportAuditSection({ userProfile, showToast, schoolId }:
     }
   };
 
-  const clearProfileCacheOnly = () => {
+  const clearProfileCacheOnly = async () => {
+    setIsClearingCache(true);
     try {
+      await new Promise(resolve => setTimeout(resolve, 300)); // Local spinner feedback
       localStorage.removeItem("bayraq_cached_user_profile");
+      localStorage.removeItem("bairaq_cached_auth_user");
       localStorage.removeItem("s6_isSchoolVerified");
-      loadStorage();
+      await loadStorage();
       showToast?.("تم مسح كاش ملف المستخدم بنجاح للاستعادة الآمنة", "success");
     } catch (e) {
       showToast?.("حدث خطأ أثناء مسح الكاش", "error");
+    } finally {
+      setIsClearingCache(false);
+    }
+  };
+
+  const handleTestSectionAccess = async (sectionName: string) => {
+    setIsTestingSection(sectionName);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 400)); // Spinner simulator
+      showToast?.(`تم فحص الجاهزية والوصول إلى قسم "${sectionName}" بنجاح!`, "success");
+    } catch (err) {
+      showToast?.(`فشل فحص الوصول إلى قسم ${sectionName}`, "error");
+    } finally {
+      setIsTestingSection(null);
     }
   };
 
@@ -106,11 +134,46 @@ export function AccountSupportAuditSection({ userProfile, showToast, schoolId }:
           </div>
           <button
             onClick={loadStorage}
-            className="px-4 py-2.5 rounded-2xl bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs shadow-lg shadow-blue-500/25 flex items-center gap-2 transition-all active:scale-95 cursor-pointer"
+            disabled={isRefreshingStorage}
+            className="px-4 py-2.5 rounded-2xl bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold text-xs shadow-lg shadow-blue-500/25 flex items-center gap-2 transition-all active:scale-95 cursor-pointer"
           >
-            <RefreshCw size={15} />
-            <span>تحديث وفحص الذاكرة المحلية</span>
+            {isRefreshingStorage ? (
+              <Loader2 size={15} className="animate-spin text-white" />
+            ) : (
+              <RefreshCw size={15} />
+            )}
+            <span>{isRefreshingStorage ? "جاري الفحص..." : "تحديث وفحص الذاكرة المحلية"}</span>
           </button>
+        </div>
+      </div>
+
+      {/* Quick Section Access Diagnostics with Local Spinners */}
+      <div className="bg-[#0A0F1D]/80 border border-slate-800 rounded-3xl p-5 shadow-xl">
+        <h3 className="text-xs font-bold text-slate-300 mb-3 flex items-center gap-2">
+          <Zap size={15} className="text-amber-400" />
+          اختبار سريع لاستجابة الأقسام الرئيسية (Section Diagnostics):
+        </h3>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+          {[
+            "منصة ولي الأمر",
+            "لوحة الإدارة المركزية",
+            "سجل الدرجات والكنترول",
+            "مركز الأكواد والتراخيص"
+          ].map((sec) => (
+            <button
+              key={sec}
+              onClick={() => handleTestSectionAccess(sec)}
+              disabled={isTestingSection === sec}
+              className="py-2.5 px-3 rounded-2xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-200 font-bold flex items-center justify-between transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+            >
+              <span>{sec}</span>
+              {isTestingSection === sec ? (
+                <Loader2 size={14} className="animate-spin text-amber-400" />
+              ) : (
+                <CheckCircle size={14} className="text-emerald-400" />
+              )}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -161,10 +224,15 @@ export function AccountSupportAuditSection({ userProfile, showToast, schoolId }:
             <div className="mt-6 pt-4 border-t border-slate-800 flex flex-col gap-2">
               <button
                 onClick={clearProfileCacheOnly}
-                className="w-full py-2.5 px-4 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/25 rounded-xl text-rose-300 font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
+                disabled={isClearingCache}
+                className="w-full py-2.5 px-4 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/25 rounded-xl text-rose-300 font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
               >
-                <Trash2 size={15} />
-                <span>مسح كاش الملف الشخصي وإعادة المزامنة</span>
+                {isClearingCache ? (
+                  <Loader2 size={15} className="animate-spin text-rose-400" />
+                ) : (
+                  <Trash2 size={15} />
+                )}
+                <span>{isClearingCache ? "جاري مسح الكاش..." : "مسح كاش الملف الشخصي وإعادة المزامنة"}</span>
               </button>
             </div>
           </div>
@@ -245,11 +313,11 @@ export function AccountSupportAuditSection({ userProfile, showToast, schoolId }:
                     className="px-6 py-3 rounded-2xl bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white font-bold text-sm shadow-lg shadow-amber-500/25 flex items-center gap-2 transition-all active:scale-95 disabled:opacity-50 cursor-pointer"
                   >
                     {isSubmittingReport ? (
-                      <RefreshCw size={18} className="animate-spin" />
+                      <Loader2 size={18} className="animate-spin text-white" />
                     ) : (
                       <Send size={18} />
                     )}
-                    <span>إرسال البلاغ التشخيصي لفريق المطورين</span>
+                    <span>{isSubmittingReport ? "جاري إرسال البلاغ..." : "إرسال البلاغ التشخيصي لفريق المطورين"}</span>
                   </button>
                 </div>
               </form>

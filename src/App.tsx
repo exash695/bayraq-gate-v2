@@ -1430,19 +1430,18 @@ export default function App() {
           } else if (profileData.role === "parent") {
             setPortalType("parent");
             safeStorage.setItem("bayraq_user_role", "parent");
-            setVerifiedStudentInfo({
-              studentCode: profileData.studentCode,
-              parentCode: profileData.parentCode,
-              schoolId: profileData.schoolId,
-              gender: profileData.gender,
-              grade: profileData.grade,
-              name:
-                profileData.studentName ||
-                "طالب مدرسة " + (profileData.schoolName || ""),
-              studentName:
-                profileData.studentName ||
-                "طالب مدرسة " + (profileData.schoolName || ""),
-            });
+            const actualStudentName = profileData.studentName || profileData.fullName || profileData.name || profileData.userName;
+            setVerifiedStudentInfo((prev: any) => ({
+              ...prev,
+              studentCode: profileData.studentCode || prev?.studentCode,
+              parentCode: profileData.parentCode || prev?.parentCode,
+              schoolId: profileData.schoolId || prev?.schoolId,
+              gender: profileData.gender || prev?.gender,
+              grade: profileData.grade || prev?.grade,
+              name: actualStudentName || prev?.name || "الطالب",
+              studentName: actualStudentName || prev?.studentName || "الطالب",
+              fullName: actualStudentName || prev?.fullName || "الطالب",
+            }));
             if (profileData.grade) {
               setSelectedStudentGrade(profileData.grade);
             }
