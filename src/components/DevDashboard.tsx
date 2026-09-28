@@ -2573,6 +2573,7 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
       <div className="sticky top-[61px] z-40 bg-[#05060F]/95 backdrop-blur-md border-b border-white/5 px-4 py-2 overflow-x-auto no-scrollbar flex items-center gap-2 shadow-md">
         {[
           { id: 'users_directory', label: '👥 دليل وتدقيق المستخدمين (شامل)', color: 'emerald' },
+          { id: 'support_audit', label: '🎧 مركز الدعم وتدقيق الحساب', color: 'blue' },
           { id: 'academy', label: '🎓 أكاديمية بيرق الرقمية', color: 'amber' },
           { id: 'health', label: '📊 النظام والصحة', color: 'indigo' },
           { id: 'school_management', label: '🏫 إدارة المدارس', color: 'blue' },
@@ -3707,6 +3708,13 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
         {activeTab === "maintenance" && (
           <div className="p-6">
             <MaintenanceArchiveSection />
+          </div>
+        )}
+
+        {/* SUPPORT & ACCOUNT AUDIT TAB */}
+        {activeTab === "support_audit" && (
+          <div className="p-6">
+            <AccountSupportAuditSection userProfile={userProfile} showToast={showToast} schoolId={schoolId} />
           </div>
         )}
 
