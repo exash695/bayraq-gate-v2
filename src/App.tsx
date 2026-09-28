@@ -341,7 +341,26 @@ export default function App() {
   const loading = !authReady || !splashFinished;
 
   const [user, setUser] = useState<any>(null);
-  const [userProfile, setUserProfile] = useState<any>(null);
+  const [userProfile, setUserProfile] = useState<any>(() => {
+    try {
+      const cached = safeStorage.getItem("bayraq_cached_user_profile");
+      if (cached) {
+        return JSON.parse(cached);
+      }
+    } catch {}
+    return null;
+  });
+
+  // Persistent caching effects for userProfile
+  useEffect(() => {
+    try {
+      if (userProfile) {
+        safeStorage.setItem("bayraq_cached_user_profile", JSON.stringify(userProfile));
+      } else {
+        safeStorage.removeItem("bayraq_cached_user_profile");
+      }
+    } catch {}
+  }, [userProfile]);
   const [portalType, setPortalType] = useState<
     "student" | "parent" | "admin-boys" | "admin-girls" | "teacher" | "admin-observer" | "driver" | "developer" | "superadmin"
   >(() => {
@@ -615,7 +634,19 @@ export default function App() {
       }
     },
   );
-  const [isSchoolVerified, setIsSchoolVerified] = useState(false);
+  const [isSchoolVerified, setIsSchoolVerified] = useState(() => {
+    try {
+      return safeStorage.getItem("s6_isSchoolVerified") === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      safeStorage.setItem("s6_isSchoolVerified", String(isSchoolVerified));
+    } catch {}
+  }, [isSchoolVerified]);
   const [selectedStudentGrade, setSelectedStudentGrade] = useState<
     string | null
   >(null);
@@ -694,6 +725,8 @@ export default function App() {
     setActiveSection("hub");
     safeStorage.removeItem("s6_selectedSchoolId");
     safeStorage.removeItem("s6_userProfile");
+    safeStorage.removeItem("bayraq_cached_user_profile");
+    safeStorage.removeItem("s6_isSchoolVerified");
     safeStorage.removeItem("s6_auth_token");
     safeStorage.removeItem("s6_portalType");
     safeStorage.removeItem("bayraq_user_role");
