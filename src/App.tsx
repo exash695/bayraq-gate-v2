@@ -1320,7 +1320,12 @@ export default function App() {
   // 2. Profile Listener: Depends on 'user', manages profile and init logic
   useEffect(() => {
     if (!user) {
-      setUserProfile(null);
+      if (authReady) {
+        const hasLoggedOut = safeStorage.getItem("s6_user_logged_out") === "true";
+        if (hasLoggedOut) {
+          setUserProfile(null);
+        }
+      }
       return;
     }
 
