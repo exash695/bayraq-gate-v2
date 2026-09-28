@@ -4346,12 +4346,12 @@ const finalMethod = matchingTx?.method || inst.method || (isElectronic ? 'إلك
                             <span className="bg-white/5 border border-white/5 px-2 py-1 rounded text-white/60 font-bold whitespace-nowrap text-[9px] md:text-[10px]">
                               بواسطة: {req.method || 'AsiaPay (آسيا حوالة)'}
                             </span>
-                            <span className="bg-white/5 border border-white/5 px-2 py-1 rounded text-white/60 font-mono tracking-tighter whitespace-nowrap text-[9px] md:text-[10px]">
-                              العملية: {req.transactionId || req.transactionNote || req.id}
+                            <span className="bg-emerald-500/10 border border-emerald-500/20 px-2 py-1 rounded text-emerald-300 font-mono tracking-tighter whitespace-nowrap text-[9px] md:text-[10px]">
+                              المحوّل منه: {req.senderAccount || req.transactionId || req.transactionNote || req.id}
                             </span>
                             {req.cardholderName && (
                               <span className="bg-blue-500/10 border border-blue-500/20 px-2 py-1 rounded text-blue-300 font-bold whitespace-nowrap text-[9px] md:text-[10px]">
-                                الحساب: {req.cardholderName}
+                                صاحب الحساب: {req.cardholderName}
                               </span>
                             )}
                           </div>

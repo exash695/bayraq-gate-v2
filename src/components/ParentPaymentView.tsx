@@ -21,7 +21,9 @@ import {
   Info,
   Copy,
   Check,
-  MessageCircle
+  MessageCircle,
+  Smartphone,
+  UserCheck
 } from 'lucide-react';
 import { createPaymentRequest, getStudentFinanceProfile } from '../services/financeService';
 import { academicService } from '../services/academicService';
@@ -58,8 +60,13 @@ export const ParentPaymentView: React.FC<ParentPaymentViewProps> = ({
 }) => {
   const [step, setStep] = useState<'info' | 'payment' | 'receipt' | 'success'>('info');
   const [amount, setAmount] = useState('');
-  const [transactionId, setTransactionId] = useState('');
+  const [senderAccount, setSenderAccount] = useState('');
   const [cardholderName, setCardholderName] = useState('');
+  const [formErrors, setFormErrors] = useState<{
+    amount?: boolean;
+    senderAccount?: boolean;
+    cardholderName?: boolean;
+  }>({});
   const [method, setMethod] = useState<string>('AsiaPay');
   const [financeData, setFinanceData] = useState<any>(null);
   const [schoolSettings, setSchoolSettings] = useState<any>(null);
@@ -344,7 +351,33 @@ export const ParentPaymentView: React.FC<ParentPaymentViewProps> = ({
   }, [studentCode]);
 
   const handleSubmitPayment = async () => {
-    if (!amount || !transactionId) return;
+    const errors: {
+      amount?: boolean;
+      senderAccount?: boolean;
+      cardholderName?: boolean;
+    } = {};
+
+    if (!amount || Number(amount) <= 0) {
+      errors.amount = true;
+    }
+    if (!senderAccount || !senderAccount.trim()) {
+      errors.senderAccount = true;
+    }
+    if (!cardholderName || !cardholderName.trim()) {
+      errors.cardholderName = true;
+    }
+
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
+      try {
+        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+          navigator.vibrate([100, 50, 100]);
+        }
+      } catch (e) {}
+      return;
+    }
+
+    setFormErrors({});
     setIsSubmitting(true);
 
     try {
@@ -354,12 +387,13 @@ export const ParentPaymentView: React.FC<ParentPaymentViewProps> = ({
       const paymentData = {
         studentId: studentCode,
         studentName: studentData?.name || studentData?.fullName || financeData?.studentName || 'طالب غير محدد',
-        senderName: senderName || studentData?.name || financeData?.studentName || 'ولي أمر',
+        senderName: cardholderName.trim() || senderName || studentData?.name || financeData?.studentName || 'ولي أمر',
         amount: Number(amount),
-        transactionId,
-        cardholderName,
+        transactionId: senderAccount.trim(),
+        senderAccount: senderAccount.trim(),
+        cardholderName: cardholderName.trim(),
         method,
-        notes: `طلب تسديد من ${senderName || 'ولي أمر'}`,
+        notes: `تحويل من حساب/محفظة: ${senderAccount.trim()} - صاحب الحساب: ${cardholderName.trim()}`,
         schoolId: studentData?.schoolId || financeData?.schoolId || null,
         installmentId: selectedInstallmentId
       };
@@ -376,7 +410,7 @@ export const ParentPaymentView: React.FC<ParentPaymentViewProps> = ({
   };
 
   const handleShare = async () => {
-    const text = `وصل استلام مالي - ${schoolSettings?.name || 'بيرق'}\nالطالب: ${financeData?.studentName}\nالمبلغ: ${Number(amount).toLocaleString()} د.ع\nالمرجع: ${transactionId}`;
+    const text = `وصل استلام مالي - ${schoolSettings?.name || 'بيرق'}\nالطالب: ${financeData?.studentName}\nالمبلغ: ${Number(amount).toLocaleString()} د.ع\nرقم الحساب المحول منه: ${senderAccount}`;
     if (navigator.share) {
       try {
         await navigator.share({ title: 'وصل استلام', text });
@@ -561,46 +595,123 @@ export const ParentPaymentView: React.FC<ParentPaymentViewProps> = ({
               ))}
             </div>
 
+            {/* 1. المبلغ */}
             <div>
-              <label className="text-[10px] text-white/40 font-black uppercase tracking-widest mb-2 block mr-2">المبلغ المراد إرساله (د.ع)</label>
+              <div className="flex items-center justify-between mb-2 mr-2">
+                <label className="text-[11px] text-white/70 font-black uppercase tracking-wider">
+                  المبلغ (د.ع)
+                </label>
+                {formErrors.amount && (
+                  <span className="text-[10px] text-rose-400 font-black animate-pulse">
+                    * حقل إجباري مطلوب
+                  </span>
+                )}
+              </div>
               <div className="relative">
                 <input 
                   type="number"
                   value={amount}
-                  onChange={(e) => setAmount(e.target.value)}
+                  onChange={(e) => {
+                    setAmount(e.target.value);
+                    if (formErrors.amount) {
+                      setFormErrors(prev => ({ ...prev, amount: false }));
+                    }
+                  }}
                   placeholder="مثال: 250,000"
-                  className="w-full h-16 bg-white/5 rounded-3xl px-6 font-black text-lg focus:outline-none focus:ring-2 focus:ring-blue-500/20 border border-white/10 placeholder:text-white/10 transition-all"
+                  className={`w-full h-16 rounded-3xl px-6 font-black text-lg focus:outline-none transition-all duration-300 border ${
+                    formErrors.amount
+                      ? 'border-rose-500 bg-rose-500/10 text-rose-200 ring-2 ring-rose-500/60 shadow-[0_0_25px_rgba(244,63,94,0.35)]'
+                      : 'bg-white/5 border-white/10 focus:ring-2 focus:ring-blue-500/20 placeholder:text-white/10 text-white'
+                  }`}
                 />
-                <div className="absolute left-6 top-1/2 -translate-y-1/2 text-white/20 font-black text-xs">IQD</div>
+                <div className={`absolute left-6 top-1/2 -translate-y-1/2 font-black text-xs transition-colors ${formErrors.amount ? 'text-rose-400 font-extrabold' : 'text-white/20'}`}>
+                  IQD
+                </div>
               </div>
+              {formErrors.amount && (
+                <div className="flex items-center gap-1.5 mt-2 mr-2 text-rose-400 text-[11px] font-bold">
+                  <AlertCircle size={14} className="shrink-0" />
+                  <span>يرجى إدخال أو تحديد المبلغ المراد تسديده</span>
+                </div>
+              )}
             </div>
 
+            {/* 2. رقم الحساب المحول منهُ */}
             <div>
-              <label className="text-[10px] text-white/40 font-black uppercase tracking-widest mb-2 block mr-2">رقم مرجع العملية / معرف الدفع</label>
+              <div className="flex items-center justify-between mb-2 mr-2">
+                <label className="text-[11px] text-white/70 font-black uppercase tracking-wider">
+                  رقم الحساب المحول منهُ
+                </label>
+                {formErrors.senderAccount && (
+                  <span className="text-[10px] text-rose-400 font-black animate-pulse">
+                    * حقل إجباري مطلوب
+                  </span>
+                )}
+              </div>
               <div className="relative">
                 <input 
                   type="text"
-                  value={transactionId}
-                  onChange={(e) => setTransactionId(e.target.value)}
-                  placeholder="أدخل الرقم الموجود في رسالة التأكيد"
-                  className="w-full h-16 bg-white/5 rounded-3xl px-6 font-black text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 border border-white/10 placeholder:text-white/10 transition-all"
+                  value={senderAccount}
+                  onChange={(e) => {
+                    setSenderAccount(e.target.value);
+                    if (formErrors.senderAccount) {
+                      setFormErrors(prev => ({ ...prev, senderAccount: false }));
+                    }
+                  }}
+                  placeholder="رقم المحفظة (زين كاش / آسيا) أو رقم الحساب"
+                  className={`w-full h-16 rounded-3xl px-6 font-black text-sm focus:outline-none transition-all duration-300 border ${
+                    formErrors.senderAccount
+                      ? 'border-rose-500 bg-rose-500/10 text-rose-200 ring-2 ring-rose-500/60 shadow-[0_0_25px_rgba(244,63,94,0.35)]'
+                      : 'bg-white/5 border-white/10 focus:ring-2 focus:ring-blue-500/20 placeholder:text-white/10 text-white'
+                  }`}
                 />
-                <Info size={18} className="absolute left-6 top-1/2 -translate-y-1/2 text-white/10" />
+                <Smartphone size={18} className={`absolute left-6 top-1/2 -translate-y-1/2 transition-colors ${formErrors.senderAccount ? 'text-rose-400' : 'text-white/20'}`} />
               </div>
+              {formErrors.senderAccount && (
+                <div className="flex items-center gap-1.5 mt-2 mr-2 text-rose-400 text-[11px] font-bold">
+                  <AlertCircle size={14} className="shrink-0" />
+                  <span>يرجى إدخال رقم الحساب أو رقم الهاتف المحول منه للمطابقة</span>
+                </div>
+              )}
             </div>
 
+            {/* 3. اسم صاحب الحساب */}
             <div>
-              <label className="text-[10px] text-white/40 font-black uppercase tracking-widest mb-2 block mr-2">اسم صاحب البطاقة/الحساب</label>
+              <div className="flex items-center justify-between mb-2 mr-2">
+                <label className="text-[11px] text-white/70 font-black uppercase tracking-wider">
+                  اسم صاحب الحساب
+                </label>
+                {formErrors.cardholderName && (
+                  <span className="text-[10px] text-rose-400 font-black animate-pulse">
+                    * حقل إجباري مطلوب
+                  </span>
+                )}
+              </div>
               <div className="relative">
                 <input 
                   type="text"
                   value={cardholderName}
-                  onChange={(e) => setCardholderName(e.target.value)}
-                  placeholder="أدخل الاسم الحقيقي لصاحب الحساب"
-                  className="w-full h-16 bg-white/5 rounded-3xl px-6 font-black text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 border border-white/10 placeholder:text-white/10 transition-all"
+                  onChange={(e) => {
+                    setCardholderName(e.target.value);
+                    if (formErrors.cardholderName) {
+                      setFormErrors(prev => ({ ...prev, cardholderName: false }));
+                    }
+                  }}
+                  placeholder="أدخل الاسم الحقيقي لصاحب الحساب أو المحفظة"
+                  className={`w-full h-16 rounded-3xl px-6 font-black text-sm focus:outline-none transition-all duration-300 border ${
+                    formErrors.cardholderName
+                      ? 'border-rose-500 bg-rose-500/10 text-rose-200 ring-2 ring-rose-500/60 shadow-[0_0_25px_rgba(244,63,94,0.35)]'
+                      : 'bg-white/5 border-white/10 focus:ring-2 focus:ring-blue-500/20 placeholder:text-white/10 text-white'
+                  }`}
                 />
-                <Info size={18} className="absolute left-6 top-1/2 -translate-y-1/2 text-white/10" />
+                <UserCheck size={18} className={`absolute left-6 top-1/2 -translate-y-1/2 transition-colors ${formErrors.cardholderName ? 'text-rose-400' : 'text-white/20'}`} />
               </div>
+              {formErrors.cardholderName && (
+                <div className="flex items-center gap-1.5 mt-2 mr-2 text-rose-400 text-[11px] font-bold">
+                  <AlertCircle size={14} className="shrink-0" />
+                  <span>يرجى كتابة اسم صاحب الحساب الذي تم التحويل منه</span>
+                </div>
+              )}
             </div>
 
             <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-3xl flex flex-col gap-3">
@@ -620,7 +731,7 @@ export const ParentPaymentView: React.FC<ParentPaymentViewProps> = ({
 
             <button 
               onClick={handleSubmitPayment}
-              disabled={isSubmitting || !amount || !transactionId}
+              disabled={isSubmitting}
               className={`w-full h-18 rounded-[28px] font-black text-sm flex items-center justify-center gap-3 transition-all relative overflow-hidden ${
                 isSubmitting ? 'opacity-70 cursor-not-allowed' : 'hover:scale-[1.02] active:scale-95'
               } bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-xl shadow-blue-500/20`}
@@ -762,7 +873,7 @@ export const ParentPaymentView: React.FC<ParentPaymentViewProps> = ({
                   </a>
                   
                   <button 
-                    onClick={() => { setStep('info'); setAmount(''); setTransactionId(''); onBack(); }}
+                    onClick={() => { setStep('info'); setAmount(''); setSenderAccount(''); setCardholderName(''); setFormErrors({}); onBack(); }}
                     className="w-full h-16 bg-white/5 text-white/50 hover:text-white hover:bg-white/10 rounded-3xl font-black text-sm transition-all"
                   >
                     العودة للمحفظة
