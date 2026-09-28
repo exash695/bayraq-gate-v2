@@ -5,6 +5,7 @@ import { auth } from '../lib/firebase';
 import { ConfirmDialog } from './ConfirmDialog';
 import { ideaService, IdeaSubmit, CouncilPoll } from '../services/ideaService';
 import { notificationService } from '../services/notificationService';
+import { cleanParentStudentName, formatParentGreetingTitle } from '../utils/studentUtils';
 
 export interface IdeaBankProps {
   userId?: string;
@@ -58,10 +59,7 @@ export const IdeaBank: React.FC<IdeaBankProps> = ({ userId, userName, studentGra
   const effectiveUserName = userName || auth.currentUser?.displayName || 'طالب/ولي أمر';
 
   const getParentSenderName = (name: string) => {
-    const clean = (name || '').trim();
-    if (!clean || clean === 'طالب/ولي أمر' || clean === 'طالب') return 'ولي أمر';
-    if (clean.startsWith('ولي أمر') || clean.startsWith('ولي امر')) return clean;
-    return `ولي أمر ${clean}`;
+    return formatParentGreetingTitle(name);
   };
 
   const loadData = async () => {

@@ -104,7 +104,17 @@ export const AdminHomeDashboard: React.FC<AdminHomeDashboardProps> = ({
 
   const getGreetingName = (name: string) => {
     if (!name) return 'المدرسة';
-    if (name.includes('مدرسة') || name.includes('ثانوية') || name.includes('إعدادية') || name.includes('ابتدائية') || name.includes('متوسطة')) {
+    if (
+      name.includes('أكاديمية') || 
+      name.includes('اكاديمية') || 
+      name.includes('مدرسة') || 
+      name.includes('ثانوية') || 
+      name.includes('إعدادية') || 
+      name.includes('ابتدائية') || 
+      name.includes('متوسطة') ||
+      name.includes('معهد') ||
+      name.includes('بوابة')
+    ) {
       return name;
     }
     return `مدرسة ${name}`;

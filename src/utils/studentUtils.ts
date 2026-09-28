@@ -1,5 +1,20 @@
 import jsPDF from 'jspdf';
 
+export const cleanParentStudentName = (name?: string): string => {
+  if (!name) return 'الطالب';
+  let clean = String(name).trim();
+  // Strip all repeated leading occurrences of "ولي أمر" or "ولي امر"
+  while (/^(ولي\s*أمر|ولي\s*امر)\s*/i.test(clean)) {
+    clean = clean.replace(/^(ولي\s*أمر|ولي\s*امر)\s*/i, '').trim();
+  }
+  return clean || 'الطالب';
+};
+
+export const formatParentGreetingTitle = (name?: string): string => {
+  const clean = cleanParentStudentName(name);
+  return `ولي أمر ${clean}`;
+};
+
 export const isArchivedList = (l: any): boolean => {
   if (!l) return false;
   if (typeof l === 'string') {

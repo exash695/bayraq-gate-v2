@@ -1,6 +1,7 @@
 import { Gate6 } from './components/Gate6.tsx';
 import { Gate6Demo } from './components/Gate6/Gate6Demo';
 import { matchesTargetGrades, isSchoolMatch, matchesBroadcastAudience } from './utils/gradeMatcher';
+import { formatParentGreetingTitle, cleanParentStudentName } from './utils/studentUtils';
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { customAuth } from "./services/customAuthService";
 import { auth, db, purgeFirestore } from "./lib/firebase";
@@ -628,23 +629,43 @@ export default function App() {
   const [selectedSchoolId, setSelectedSchoolId] = useState<string | null>(
     () => {
       try {
-        return safeStorage.getItem("s6_selectedSchoolId");
+        const saved = safeStorage.getItem("s6_selectedSchoolId");
+        if (saved && saved !== "general" && saved !== "null" && saved !== "undefined") return saved;
+
+        const cachedProfile = safeStorage.getItem("bayraq_cached_user_profile") || safeStorage.getItem("bairaq_cached_auth_user");
+        if (cachedProfile) {
+          const parsed = JSON.parse(cachedProfile);
+          if (parsed?.schoolId && parsed.schoolId !== "general") return parsed.schoolId;
+        }
+        return saved || null;
       } catch {
         return null;
       }
     },
   );
-  const [isSchoolVerified, setIsSchoolVerified] = useState(() => {
+  const [isSchoolVerified, setIsSchoolVerified] = useState<boolean>(() => {
     try {
-      return safeStorage.getItem("s6_isSchoolVerified") === "true";
-    } catch {
-      return false;
-    }
+      const saved = safeStorage.getItem("s6_isSchoolVerified");
+      if (saved === "true") return true;
+
+      const cachedProfile = safeStorage.getItem("bayraq_cached_user_profile") || safeStorage.getItem("bairaq_cached_auth_user");
+      if (cachedProfile) {
+        return true;
+      }
+    } catch {}
+    return false;
   });
 
   useEffect(() => {
     try {
-      safeStorage.setItem("s6_isSchoolVerified", String(isSchoolVerified));
+      if (isSchoolVerified) {
+        safeStorage.setItem("s6_isSchoolVerified", "true");
+      } else {
+        const cachedProfile = safeStorage.getItem("bayraq_cached_user_profile") || safeStorage.getItem("bairaq_cached_auth_user");
+        if (!cachedProfile) {
+          safeStorage.setItem("s6_isSchoolVerified", "false");
+        }
+      }
     } catch {}
   }, [isSchoolVerified]);
   const [selectedStudentGrade, setSelectedStudentGrade] = useState<
@@ -1344,11 +1365,39 @@ export default function App() {
 
   // Auto login removed
 
-  // 1. Auth Listener: Solely responsible for user state
+  // 1. Auth Listener: Solely responsible for user state and instant local hydration
   useEffect(() => {
     const unsubscribeAuth = customAuth.onAuthStateChanged((currentUser: any) => {
       setUser(currentUser);
       setAuthReady(true);
+      if (currentUser) {
+        setUserProfile((prev: any) => {
+          const merged = { ...prev, ...currentUser };
+          try {
+            safeStorage.setItem("bayraq_cached_user_profile", JSON.stringify(merged));
+          } catch {}
+          return merged;
+        });
+
+        if (currentUser.role) {
+          let role = currentUser.role === "admin"
+            ? (currentUser.adminBranch === "girls" ? "admin-girls" : "admin-boys")
+            : currentUser.role;
+          if (currentUser.role === "developer" || currentUser.role === "dev" || currentUser.role === "superadmin") {
+            role = "admin-boys";
+          }
+          setPortalType(role as any);
+          safeStorage.setItem("bayraq_user_role", role);
+        }
+
+        if (currentUser.schoolId && currentUser.schoolId !== "general") {
+          setSelectedSchoolId(currentUser.schoolId);
+          safeStorage.setItem("s6_selectedSchoolId", currentUser.schoolId);
+        }
+
+        setIsSchoolVerified(true);
+        safeStorage.setItem("s6_isSchoolVerified", "true");
+      }
     });
 
     return () => unsubscribeAuth();
@@ -2694,10 +2743,15 @@ export default function App() {
           portalType === "driver" ||
           userProfile?.role === "driver";
 
+        const targetAdminSchoolId = selectedSchoolId || userProfile?.schoolId || user?.schoolId;
         const resolvedSchoolData = allSchoolsList.find(
-          (s) => s.id === (selectedSchoolId || userProfile?.schoolId),
+          (s) => s.id === targetAdminSchoolId,
         );
-        const resolvedSchoolName = resolvedSchoolData?.name || userProfile?.schoolName || "بوابة بيرق";
+        const resolvedSchoolName = 
+          resolvedSchoolData?.name || 
+          (userProfile?.schoolName && userProfile?.schoolName !== "أكاديمية بيرق الرقمية" ? userProfile.schoolName : null) ||
+          (targetAdminSchoolId && targetAdminSchoolId !== "general" ? getOfficialSchoolName(targetAdminSchoolId) : null) ||
+          (userProfile?.schoolId && userProfile?.schoolId !== "general" ? getOfficialSchoolName(userProfile.schoolId) : "ثانوية اوائل غماس الاهلية");
 
         if (isAdminUser) {
           return (
@@ -2848,7 +2902,7 @@ export default function App() {
                       أهلاً وسهلاً بك،
                     </h2>
                     <h1 className="text-xl sm:text-2xl font-black text-white truncate w-full text-right drop-shadow-sm">
-                      ولي أمر {verifiedStudentInfo?.fullName || verifiedStudentInfo?.name || userProfile?.studentName || userProfile?.fullName || userProfile?.name || auth.currentUser?.displayName || "الطالب"}
+                      {formatParentGreetingTitle(verifiedStudentInfo?.fullName || verifiedStudentInfo?.name || userProfile?.studentName || userProfile?.fullName || userProfile?.name || auth.currentUser?.displayName)}
                     </h1>
                     <div className="mt-1 flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-full backdrop-blur-sm">
                       <span className="text-[10px] font-bold text-amber-300 truncate">
@@ -3889,10 +3943,15 @@ export default function App() {
           </div>
         );
       case "admin-hub": {
+        const targetAdminHubSchoolId = selectedSchoolId || userProfile?.schoolId || user?.schoolId;
         const resolvedSchoolData = allSchoolsList.find(
-          (s) => s.id === (selectedSchoolId || userProfile?.schoolId),
+          (s) => s.id === targetAdminHubSchoolId,
         );
-        const resolvedSchoolName = resolvedSchoolData?.name || userProfile?.schoolName || "بوابة بيرق";
+        const resolvedSchoolName = 
+          resolvedSchoolData?.name || 
+          (userProfile?.schoolName && userProfile?.schoolName !== "أكاديمية بيرق الرقمية" ? userProfile.schoolName : null) ||
+          (targetAdminHubSchoolId && targetAdminHubSchoolId !== "general" ? getOfficialSchoolName(targetAdminHubSchoolId) : null) ||
+          (userProfile?.schoolId && userProfile?.schoolId !== "general" ? getOfficialSchoolName(userProfile.schoolId) : "ثانوية اوائل غماس الاهلية");
 
         return (
           <div className="max-w-6xl mx-auto p-2 sm:p-6 space-y-8">

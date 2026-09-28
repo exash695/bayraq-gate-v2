@@ -41,6 +41,7 @@ import {
   Send
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+import { cleanParentStudentName, formatParentGreetingTitle } from '../utils/studentUtils';
 import { doc, onSnapshot, collection, query, where, orderBy, limit, updateDoc, addDoc, serverTimestamp } from '../lib/firebase';
 import { academicService } from '../services/academicService';
 import { supportService } from '../services/supportService';
@@ -238,7 +239,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
         fullContent = fullContent ? `${fullContent}\n\n${imagesMd}` : imagesMd;
       }
 
-      const cleanStudentName = (studentData?.name || studentName || 'الطالب').replace(/^ولي أمر\s*/, '');
+      const cleanStudentName = cleanParentStudentName(studentData?.name || studentName);
       const studentClass = studentData?.grade || grade || 'عام';
 
       const submissionPayload = {
@@ -1245,7 +1246,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   };
 
   const getSubpageHeaderDetails = (subPageId: string) => {
-    const cleanStudentName = studentName.replace(/^ولي أمر\s*/, '');
+    const cleanStudentName = cleanParentStudentName(studentName);
     const activeSchool = schoolName || schoolInfo?.schoolName || schoolInfo?.name || "ثانوية أوائل غماس الأهلية";
 
     switch (subPageId) {
@@ -2673,7 +2674,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                      
                      <Sparkles size={28} className="text-[#FFD600] mb-3 relative z-10 animate-pulse" />
                      <h4 className="text-white font-extrabold text-sm md:text-base mb-1 relative z-10 text-center">
-                        شارك فخرك بـ {studentName.replace(/^ولي أمر\s*/, '')}! 🌟
+                        شارك فخرك بـ {cleanParentStudentName(studentName)}! 🌟
                      </h4>
                      <p className="text-blue-200/60 text-[10px] md:text-xs text-center max-w-sm mb-5 relative z-10 font-bold leading-relaxed">
                         قم بتوليد بطاقة إنجازات مبهرة ورسمية من بوابة بيرق لمشاركتها على وسائل التواصل الاجتماعي والتفاخر بهذا التقدم المتميز.
@@ -3785,7 +3786,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
             <div className="space-y-0 w-full animate-in fade-in slide-in-from-bottom-4">
               <IdeaBank 
                 userId={studentData?.parentCode || auth.currentUser?.uid} 
-                userName={studentName ? `ولي أمر ${studentName.replace(/^ولي أمر\s*/, '')}` : 'ولي أمر'} 
+                userName={studentName ? formatParentGreetingTitle(studentName) : 'ولي أمر'} 
                 studentGrade={studentData?.grade} 
                 schoolId={schoolId}
               />
@@ -3898,7 +3899,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                 </div>
                 <div className="flex items-center gap-1 text-white/90 font-semibold text-[9.5px] sm:text-xs tracking-wide drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] mt-0.5 min-w-0 break-words">
                   <span className="shrink-0 text-[10px]">⚡</span>
-                  <span className="break-words">تتبع حي ومباشر لمسار وموقع الحافلة • الطالب {studentName.replace(/^ولي أمر\s*/, '')}</span>
+                  <span className="break-words">تتبع حي ومباشر لمسار وموقع الحافلة • الطالب {cleanParentStudentName(studentName)}</span>
                 </div>
               </div>
 
@@ -3991,7 +3992,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                 {!studentData?.avatar && (academicProfile?.isEliteStudent ? '👑' : '👨‍🎓')}
               </div>
               <h1 className="font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-white via-amber-100 to-[#FFD600] text-[10.5px] sm:text-[11.5px] md:text-xs tracking-tight leading-none drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)] truncate">
-                متابعة الطالب: {studentName.replace(/^ولي أمر\s*/, '')}
+                متابعة الطالب: {cleanParentStudentName(studentName)}
               </h1>
             </div>
 
