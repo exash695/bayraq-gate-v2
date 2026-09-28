@@ -149,6 +149,13 @@ export const ParentPaymentView: React.FC<ParentPaymentViewProps> = ({
                 } else if (financials.isInstallmentsAtGross) {
                     instAmt = Math.round(instAmt * discountFactor);
                 }
+                
+                // Subtract already paid portion for partial installments to default to correct remaining amount
+                const paidVal = Number(inst.paidAmount) || 0;
+                if (paidVal > 0 && paidVal < instAmt && (inst.status === 'جزئي' || inst.status === 'partial' || !inst.paid)) {
+                    instAmt = Math.max(0, instAmt - paidVal);
+                }
+                
                 setAmount(instAmt.toString());
             }
         }

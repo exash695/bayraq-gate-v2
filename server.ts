@@ -1290,6 +1290,24 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
       };
     });
 
+    // 🛡️ Adjust the last installment to account for any rounding difference so the sum matches totalAmount exactly!
+    if (installments.length > 0) {
+      const sumOfInstallments = installments.reduce((sum: number, inst: any) => sum + inst.amount, 0);
+      const diff = totalAmount - sumOfInstallments;
+      if (diff !== 0) {
+        const lastIdx = installments.length - 1;
+        installments[lastIdx].amount += diff;
+        if (installments[lastIdx].paid) {
+          installments[lastIdx].paidAmount = installments[lastIdx].amount;
+          installments[lastIdx].remainingAmount = 0;
+        } else if (installments[lastIdx].status === 'جزئي') {
+          installments[lastIdx].remainingAmount = Math.max(0, installments[lastIdx].amount - installments[lastIdx].paidAmount);
+        } else {
+          installments[lastIdx].remainingAmount = installments[lastIdx].amount;
+        }
+      }
+    }
+
     const finalPaidAmount = Math.min(totalAmount, totalPaidSoFar);
     const remainingAmount = Math.round(Math.max(0, totalAmount - finalPaidAmount));
 

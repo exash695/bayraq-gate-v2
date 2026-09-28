@@ -26,7 +26,7 @@ export default defineConfig(({mode}) => {
           manualChunks: {
             'vendor-react': ['react', 'react-dom'],
             'vendor-motion': ['motion'],
-            'vendor-firebase': ['firebase/app', 'firebase/auth', 'firebase/firestore'],
+            'vendor-sql-adapter': ['firebase/app', 'firebase/auth', 'firebase/firestore'],
             'vendor-utils': ['lucide-react', 'html2canvas', 'jspdf']
           }
         }

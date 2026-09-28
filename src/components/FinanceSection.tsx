@@ -1166,6 +1166,25 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
       });
       
       const studentTotalAmount = Math.round(baseGradeTuition * discountFactor);
+      
+      // 🛡️ Adjust the last installment to account for any rounding difference so the sum matches studentTotalAmount exactly!
+      if (studentInstallments.length > 0) {
+        const sumOfInstallments = studentInstallments.reduce((sum, inst) => sum + inst.amount, 0);
+        const diff = studentTotalAmount - sumOfInstallments;
+        if (diff !== 0) {
+          const lastIdx = studentInstallments.length - 1;
+          studentInstallments[lastIdx].amount += diff;
+          if (studentInstallments[lastIdx].paid) {
+            studentInstallments[lastIdx].paidAmount = studentInstallments[lastIdx].amount;
+            studentInstallments[lastIdx].remainingAmount = 0;
+          } else if (studentInstallments[lastIdx].status === 'جزئي') {
+            studentInstallments[lastIdx].remainingAmount = Math.max(0, studentInstallments[lastIdx].amount - studentInstallments[lastIdx].paidAmount);
+          } else {
+            studentInstallments[lastIdx].remainingAmount = studentInstallments[lastIdx].amount;
+          }
+        }
+      }
+      
       const finalPaidAmount = Math.min(studentTotalAmount, totalPaidSoFar);
       const finalRemainingAmount = Math.max(0, studentTotalAmount - finalPaidAmount);
 
@@ -3982,7 +4001,7 @@ const finalMethod = matchingTx?.method || inst.method || (isElectronic ? 'إلك
                                         </>
                                       ) : (
                                         <span className={`text-[8.5px] font-semibold ${isLate ? 'text-rose-450/60' : 'text-white/20'}`}>
-                                          {inst.dueDate ? `استحقاق: ${new Date(inst.dueDate).toLocaleDateString('ar-EG')}` : 'بدون استحقاق'}
+                                          {(inst.dueDate || inst.date) ? `استحقاق: ${new Date(inst.dueDate || inst.date).toLocaleDateString('ar-EG')}` : 'تاريخ مرن'}
                                         </span>
                                       )}
                                     </div>
