@@ -1120,17 +1120,33 @@ ${!className && isMultiClass ? `✨ *ميزة الدخول الموحد:*
         {selectedTeacher && (
             <motion.div 
                 initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} 
-                className="fixed inset-0 bg-black/80 z-[100] flex justify-end"
+                className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[1000] flex justify-end"
                 onClick={() => setSelectedTeacher(null)}
             >
                 <motion.div 
                     initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
-                    className="bg-[#0f172a] border-l border-white/10 w-full max-w-lg p-8 space-y-6 overflow-y-auto"
+                    transition={{ type: 'spring', damping: 25, stiffness: 250 }}
+                    className="bg-[#0f172a] border-l border-white/10 w-full max-w-lg p-6 sm:p-8 space-y-6 overflow-y-auto max-h-screen shadow-2xl relative"
                     onClick={(e) => e.stopPropagation()}
                 >
-                    <div className="flex justify-between items-center pb-4 border-b border-white/10">
-                        <h4 className="text-white font-black text-xl">تفاصيل {selectedTeacher.role === 'TEACHER' ? 'المدرس' : 'الموظف'}</h4>
-                        <button onClick={() => setSelectedTeacher(null)}><X size={24} className="text-white/60 hover:text-white" /></button>
+                    {/* Fixed/Sticky Modal Header with prominent close button */}
+                    <div className="sticky top-0 z-30 -mt-6 -mx-6 sm:-mt-8 sm:-mx-8 px-6 sm:px-8 py-4 bg-[#0f172a]/95 backdrop-blur-md flex justify-between items-center border-b border-white/10 shadow-lg">
+                        <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-xl bg-amber-400/15 border border-amber-400/30 flex items-center justify-center text-amber-400 shadow-inner">
+                                {selectedTeacher.role === 'TEACHER' ? <GraduationCap size={18} /> : <UserCog size={18} />}
+                            </div>
+                            <div>
+                                <h4 className="text-white font-black text-lg sm:text-xl">تفاصيل {selectedTeacher.role === 'TEACHER' ? 'المدرس' : 'الموظف'}</h4>
+                                <span className="text-white/40 text-[11px] block">بيانات الكادر والملاحظات الإدارية</span>
+                            </div>
+                        </div>
+                        <button 
+                            onClick={() => setSelectedTeacher(null)}
+                            className="w-10 h-10 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 active:scale-95 flex items-center justify-center text-rose-400 border border-rose-500/30 transition-all cursor-pointer shadow-md"
+                            title="إغلاق النافذة"
+                        >
+                            <X size={20} strokeWidth={2.5} />
+                        </button>
                     </div>
                     
                     <div className="text-white space-y-4">
@@ -1194,6 +1210,17 @@ ${!className && isMultiClass ? `✨ *ميزة الدخول الموحد:*
                                 {selectedTeacher.role === 'TEACHER' && <li>- تم رفع ملف (محاضرة جديدة)</li>}
                             </ul>
                         </div>
+
+                        {/* Extra Close Button at the bottom */}
+                        <div className="pt-6 border-t border-white/10 pb-6">
+                            <button
+                                onClick={() => setSelectedTeacher(null)}
+                                className="w-full py-3.5 bg-gradient-to-r from-white/10 to-white/5 hover:from-white/15 hover:to-white/10 active:scale-[0.98] rounded-2xl text-white font-bold text-sm flex items-center justify-center gap-2 border border-white/15 transition-all shadow-md cursor-pointer"
+                            >
+                                <X size={18} strokeWidth={2.5} />
+                                <span>إغلاق النافذة والعودة</span>
+                            </button>
+                        </div>
                     </div>
                 </motion.div>
             </motion.div>
@@ -1206,7 +1233,7 @@ ${!className && isMultiClass ? `✨ *ميزة الدخول الموحد:*
             initial={{ opacity: 0 }} 
             animate={{ opacity: 1 }} 
             exit={{ opacity: 0 }} 
-            className="fixed inset-0 z-[120] bg-black/85 backdrop-blur-md overflow-y-auto flex items-center justify-center p-2 sm:p-4 md:p-6"
+            className="fixed inset-0 z-[1000] bg-black/85 backdrop-blur-md overflow-y-auto flex items-center justify-center p-2 sm:p-4 md:p-6"
             onClick={() => setIsAdding(false)}
           >
             <motion.div 
