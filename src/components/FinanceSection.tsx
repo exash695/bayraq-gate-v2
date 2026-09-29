@@ -3832,7 +3832,9 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
                             const rawAmount = Number(inst.amount) || 0;
                             const effectiveAmount = financials.isInstallmentsAtGross ? Math.round(rawAmount * financials.discountFactor) : rawAmount;
                             const displayAmount = effectiveAmount.toLocaleString();
-                            const isLate = !isPaid && inst.dueDate && new Date(inst.dueDate) < new Date();
+                            const paidAmountVal = Number(inst.paidAmount) || 0;
+                            const isPartial = !isPaid && (instStatus === 'جزئي' || instStatus === 'partial' || (paidAmountVal > 0 && paidAmountVal < effectiveAmount));
+                            const isLate = !isPaid && !isPartial && inst.dueDate && new Date(inst.dueDate) < new Date();
                             const isElectronic = checkPaymentMethodIsElectronic(inst, stu.finance?.transactions);
                             
                             const bellKey = `${stu.code || stu.student || stu.id}_${inst.id || i}`;
@@ -3844,9 +3846,11 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
                                 <div className={`p-2 rounded-xl border transition-all duration-300 relative group/cell ${
                                   isPaid 
                                     ? 'bg-emerald-500/5 hover:bg-emerald-500/10 border-emerald-500/10 hover:border-emerald-500/20 text-emerald-400' 
-                                    : isLate 
-                                      ? 'bg-rose-500/5 hover:bg-rose-500/10 border-rose-500/15 hover:border-rose-500/25 text-rose-400'
-                                      : 'bg-white/[0.01] hover:bg-white/[0.02] border-white/5 hover:border-white/10 text-white/50'
+                                    : isPartial
+                                      ? 'bg-amber-500/5 hover:bg-amber-500/10 border-amber-500/10 hover:border-amber-500/20 text-amber-400'
+                                      : isLate 
+                                        ? 'bg-rose-500/5 hover:bg-rose-500/10 border-rose-500/15 hover:border-rose-500/25 text-rose-400'
+                                        : 'bg-white/[0.01] hover:bg-white/[0.02] border-white/5 hover:border-white/10 text-white/50'
                                 }`}>
                                     {/* Action Status Indicators adjacent right inside cells */}
                                     <div className="flex items-center justify-between gap-1 mb-1.5">
@@ -3868,6 +3872,13 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
                                               </div>
                                             )}
                                           </>
+                                        ) : isPartial ? (
+                                          <div className="relative group/icon cursor-help p-1 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-md">
+                                            <Lock size={11} className="text-amber-400/80" />
+                                            <div className="absolute bottom-full right-0 mb-1.5 px-2 py-1 bg-slate-950 text-white text-[9px] rounded-md opacity-0 pointer-events-none group-hover/icon:opacity-100 transition-opacity whitespace-nowrap z-50 shadow-xl">
+                                              تم دفع جزء من القسط بنجاح 💸
+                                            </div>
+                                          </div>
                                         ) : isLate ? (
                                           <div className="flex items-center gap-1">
                                             <div className="relative group/icon cursor-help p-1 bg-rose-500/10 border border-rose-500/20 text-rose-500 rounded-md animate-pulse">
@@ -3909,11 +3920,13 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
                                       <span className={`text-[8px] font-black px-1.5 py-0.5 rounded ${
                                         isPaid 
                                           ? 'bg-emerald-500/10 text-emerald-400' 
-                                          : isLate 
-                                            ? 'bg-rose-500/10 text-rose-400' 
-                                            : 'bg-white/5 text-white/40'
+                                          : isPartial
+                                            ? 'bg-amber-500/15 text-amber-400 border border-amber-500/10'
+                                            : isLate 
+                                              ? 'bg-rose-500/10 text-rose-400' 
+                                              : 'bg-white/5 text-white/40'
                                       }`}>
-                                        {isPaid ? 'مدفوع' : isLate ? 'متأخر' : 'مستقبل'}
+                                        {isPaid ? 'مدفوع' : isPartial ? 'جزئي' : isLate ? 'متأخر' : 'مستقبل'}
                                       </span>
                                     </div>
 
@@ -3934,11 +3947,13 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
                                       className={`w-full py-1.5 px-2 rounded-lg text-[9.5px] font-black transition-all flex items-center justify-center gap-1 ${
                                         isPaid 
                                           ? 'bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/15 text-emerald-400 active:scale-95' 
-                                          : isPending 
-                                            ? 'bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 hover:border-amber-500/40 text-amber-500 active:scale-95' 
-                                            : isLate
-                                              ? 'bg-rose-500/20 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/20 active:scale-95'
-                                              : 'bg-white/5 hover:bg-white/10 border border-white/5 hover:border-cyan-500/30 text-white/80 active:scale-95'
+                                          : isPartial
+                                            ? 'bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/15 text-amber-400 active:scale-95'
+                                            : isPending 
+                                              ? 'bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/20 hover:border-amber-500/40 text-amber-500 active:scale-95' 
+                                              : isLate
+                                                ? 'bg-rose-500/20 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/20 active:scale-95'
+                                                : 'bg-white/5 hover:bg-white/10 border border-white/5 hover:border-cyan-500/30 text-white/80 active:scale-95'
                                       }`}
                                     >
                                       {isPaid ? (
@@ -3946,6 +3961,11 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
                                           <Verified size={10} className="fill-emerald-400/20 text-emerald-400 shrink-0" />
                                           <span className="text-[9px] font-black">مستلم ({displayAmount} د.ع)</span>
                                         </span>
+                                      ) : isPartial ? (
+                                        <div className="flex flex-col items-center justify-center leading-tight">
+                                          <span className="text-[8px] text-amber-450/80 font-bold">مسدد: {paidAmountVal.toLocaleString()} د.ع</span>
+                                          <span className="text-[9px] text-amber-400 font-black">متبقي: {(effectiveAmount - paidAmountVal).toLocaleString()} د.ع</span>
+                                        </div>
                                       ) : (
                                         <span>{displayAmount} د.ع</span>
                                       )}
