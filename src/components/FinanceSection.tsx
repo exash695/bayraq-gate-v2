@@ -1432,7 +1432,10 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
   };
 
   const calculateFinancials = (stu: any) => {
-    return calculateStudentFinancials(stu, tuitionFee, safeDiscountRates);
+    const baseGradeTuition = (tuitionFeesByGrade && stu?.grade && tuitionFeesByGrade[stu.grade] !== undefined)
+      ? Number(tuitionFeesByGrade[stu.grade])
+      : Number(tuitionFee);
+    return calculateStudentFinancials(stu, baseGradeTuition, safeDiscountRates);
   };
 
   const tuition = Number(tuitionFee || schoolSettings?.tuitionFee || 0);
@@ -1485,7 +1488,10 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
         foundIdx = 0;
       }
 
-      const financials = calculateStudentFinancials(s, tuition, safeDiscountRates);
+      const baseGradeTuition = (tuitionFeesByGrade && s.grade && tuitionFeesByGrade[s.grade] !== undefined)
+        ? Number(tuitionFeesByGrade[s.grade])
+        : Number(tuition);
+      const financials = calculateStudentFinancials(s, baseGradeTuition, safeDiscountRates);
       const discountFactor = financials.discountFactor;
       const amount = financials.isInstallmentsAtGross ? Math.round(Number(inst.amount) * discountFactor) : Number(inst.amount);
 
@@ -3637,7 +3643,10 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
                   let listRequired = 0;
                   let listPaid = 0;
                   classStudents.forEach((stu: any) => {
-                    const financials = calculateStudentFinancials(stu, tuitionFee, safeDiscountRates);
+                    const baseGradeTuition = (tuitionFeesByGrade && stu.grade && tuitionFeesByGrade[stu.grade] !== undefined)
+                      ? Number(tuitionFeesByGrade[stu.grade])
+                      : Number(tuitionFee);
+                    const financials = calculateStudentFinancials(stu, baseGradeTuition, safeDiscountRates);
                     listRequired += financials.requiredAmount;
                     listPaid += financials.paidAmount;
                   });
@@ -3776,7 +3785,10 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
                                (s.name && stuRef.name && s.name.trim() === stuRef.name.trim());
                       }) || stuRef;
 
-                      const financials = calculateStudentFinancials(stu, tuitionFee, safeDiscountRates);
+                      const baseGradeTuition = (tuitionFeesByGrade && stu.grade && tuitionFeesByGrade[stu.grade] !== undefined)
+                        ? Number(tuitionFeesByGrade[stu.grade])
+                        : Number(tuitionFee);
+                      const financials = calculateStudentFinancials(stu, baseGradeTuition, safeDiscountRates);
                       const studentInstallments = stu.finance?.installments || stu.installments || [];
                       const studentPaidAmount = financials.paidAmount;
 
