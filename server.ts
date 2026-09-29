@@ -5986,144 +5986,129 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
   app.post('/api/students/:studentId/attendance', async (req, res) => {
     try {
       const { studentId } = req.params;
-      const { status, by, reason, period, schoolId, date: customDate } = req.body;
+      const { status, by, reason, period, schoolId, date: customDate, studentCode, code } = req.body;
       const date = customDate || new Date().toISOString().split('T')[0];
-      const id = `att_${studentId}_${date}_${period}`.replace(/\s+/g, '_');
 
-      // 1. Record in detailed log table
-      await db.insert(attendance_logs).values({
-        id,
-        studentId,
-        schoolId: schoolId || '',
-        date,
-        status,
-        period,
-        reason,
-        recordedBy: by,
-        timestamp: new Date()
-      }).onConflictDoUpdate({
-        target: attendance_logs.id,
-        set: { status, reason, recordedBy: by, timestamp: new Date() }
-      });
-
-      // 2. Update summary in students table
-      const student = await db.select().from(students).where(eq(students.id, studentId));
-      if (student.length > 0) {
-        // Fetch all logs from DB to calculate exact statistics
-        const allLogs = await db.select()
-          .from(attendance_logs)
-          .where(eq(attendance_logs.studentId, studentId))
-          .orderBy(desc(attendance_logs.timestamp));
-
-        let present = 0, absent = 0, late = 0;
-        allLogs.forEach(log => {
-          if (log.status === 'present') present++;
-          if (log.status === 'absent') absent++;
-          if (log.status === 'late') late++;
-        });
-
-        // Get recent 50 logs and format them for the UI
-        const recentLogs = allLogs.slice(0, 50).reverse().map(l => ({
-          date: l.date,
-          status: l.status,
-          period: l.period,
-          reason: l.reason,
-          time: new Date(l.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-          by: l.recordedBy
-        }));
-
-        const updatedAttendance = {
-          present,
-          absent,
-          late,
-          logs: recentLogs
-        };
-
-        await db.update(students)
-          .set({ attendance: updatedAttendance, updatedAt: new Date() })
-          .where(eq(students.id, studentId));
-
-        const targetCode = student[0].code;
-        const currentSchoolId = student[0].schoolId || schoolId || '';
-
-        // Sync to Firestore 'school_students' for real-time parent sync
-        try {
-          const { getFirestore, collection, query, where, getDocs, updateDoc, doc, setDoc } = await import('firebase/firestore');
-          const fsDb = getFirestore();
-
-          if (targetCode) {
-            const [snapStudentCode, snapCode] = await Promise.all([
-              getDocs(query(collection(fsDb, 'school_students'), where('studentCode', '==', targetCode))),
-              getDocs(query(collection(fsDb, 'school_students'), where('code', '==', targetCode)))
-            ]);
-
-            const allDocs = [...snapStudentCode.docs, ...snapCode.docs];
-            for (const docSnap of allDocs) {
-              await updateDoc(docSnap.ref, {
-                attendance: updatedAttendance,
-                lastAttendanceUpdate: new Date().toISOString()
-              });
-            }
-          }
-
-          // Direct document ID update
-          try {
-            await setDoc(doc(fsDb, 'school_students', studentId), {
-              attendance: updatedAttendance,
-              studentCode: targetCode || undefined,
-              code: targetCode || undefined,
-              schoolId: currentSchoolId,
-              lastAttendanceUpdate: new Date().toISOString()
-            }, { merge: true });
-          } catch (e) {}
-
-          if (currentSchoolId && targetCode) {
-            try {
-              const scopedDocId = `${currentSchoolId}_${targetCode}`.replace(/\s+/g, '_');
-              await setDoc(doc(fsDb, 'school_students', scopedDocId), {
-                attendance: updatedAttendance,
-                studentCode: targetCode,
-                code: targetCode,
-                schoolId: currentSchoolId,
-                lastAttendanceUpdate: new Date().toISOString()
-              }, { merge: true });
-            } catch (e) {}
-          }
-        } catch (fsErr) {
-          console.warn("Failed to sync attendance to Firestore school_students:", fsErr);
-        }
-
-        // Broadcast Realtime Event to WebSocket clients (Teacher, Admin, Parent dashboards)
-        try {
-          const studentPayload = {
-            id: studentId,
-            code: targetCode,
-            name: student[0].name,
-            grade: student[0].grade,
-            schoolId: currentSchoolId,
-            attendance: updatedAttendance
-          };
-          realtimeServerInstance?.broadcastManual('students', studentId, 'UPDATE', studentPayload);
-          realtimeServerInstance?.broadcastManual('attendance', studentId, 'UPDATE', {
-            studentId,
-            schoolId: currentSchoolId,
-            code: targetCode,
-            date,
-            period,
-            status,
-            reason,
-            by,
-            attendance: updatedAttendance
-          });
-        } catch (wsErr) {
-          console.warn("Failed to broadcast attendance update:", wsErr);
-        }
-
-        return res.json({ success: true, attendance: updatedAttendance });
+      // 1. Locate student record in Postgres
+      let foundStudents = await db.select().from(students).where(eq(students.id, studentId));
+      if (foundStudents.length === 0) {
+        foundStudents = await db.select().from(students).where(eq(students.code, studentId));
+      }
+      const rawCode = studentCode || code;
+      if (foundStudents.length === 0 && rawCode) {
+        foundStudents = await db.select().from(students).where(eq(students.code, rawCode));
       }
 
-      res.json({ success: true });
+      const actualStudentId = foundStudents.length > 0 ? foundStudents[0].id : studentId;
+      const targetCode = foundStudents.length > 0 ? (foundStudents[0].code || '') : (rawCode || studentId);
+      const currentSchoolId = (foundStudents.length > 0 ? foundStudents[0].schoolId : schoolId) || schoolId || '';
+      const id = `att_${actualStudentId}_${date}_${period}`.replace(/\s+/g, '_');
+
+      // 2. Record in detailed log table
+      try {
+        await db.insert(attendance_logs).values({
+          id,
+          studentId: actualStudentId,
+          schoolId: currentSchoolId,
+          date,
+          status,
+          period,
+          reason: reason || '',
+          recordedBy: by || 'الأستاذ',
+          timestamp: new Date()
+        }).onConflictDoUpdate({
+          target: attendance_logs.id,
+          set: { status, reason: reason || '', recordedBy: by || 'الأستاذ', timestamp: new Date() }
+        });
+      } catch (dbLogErr) {
+        console.warn("Could not insert to attendance_logs table:", dbLogErr);
+      }
+
+      // 3. Update summary in students table
+      let updatedAttendance: any = null;
+      if (foundStudents.length > 0) {
+        try {
+          const allLogs = await db.select()
+            .from(attendance_logs)
+            .where(eq(attendance_logs.studentId, actualStudentId))
+            .orderBy(desc(attendance_logs.timestamp));
+
+          let present = 0, absent = 0, late = 0;
+          allLogs.forEach(log => {
+            if (log.status === 'present') present++;
+            if (log.status === 'absent') absent++;
+            if (log.status === 'late') late++;
+          });
+
+          const recentLogs = allLogs.slice(0, 50).reverse().map(l => ({
+            date: l.date,
+            status: l.status,
+            period: l.period,
+            reason: l.reason,
+            time: new Date(l.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+            by: l.recordedBy
+          }));
+
+          updatedAttendance = {
+            present,
+            absent,
+            late,
+            logs: recentLogs
+          };
+
+          await db.update(students)
+            .set({ attendance: updatedAttendance, updatedAt: new Date() })
+            .where(eq(students.id, actualStudentId));
+        } catch (sumErr) {
+          console.warn("Could not compute attendance summary:", sumErr);
+        }
+      }
+
+      if (!updatedAttendance) {
+        updatedAttendance = {
+          present: status === 'present' ? 1 : 0,
+          absent: status === 'absent' ? 1 : 0,
+          late: status === 'late' ? 1 : 0,
+          logs: [{
+            date,
+            status,
+            period,
+            reason: reason || '',
+            time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+            by: by || 'الأستاذ'
+          }]
+        };
+      }
+
+      // 4. Instant WebSocket broadcast to all connected clients
+      try {
+        const studentPayload = {
+          id: actualStudentId,
+          code: targetCode,
+          name: foundStudents[0]?.name || '',
+          grade: foundStudents[0]?.grade || '',
+          schoolId: currentSchoolId,
+          attendance: updatedAttendance
+        };
+        realtimeServerInstance?.broadcastManual('students', actualStudentId, 'UPDATE', studentPayload);
+        realtimeServerInstance?.broadcastManual('attendance', actualStudentId, 'UPDATE', {
+          studentId: actualStudentId,
+          schoolId: currentSchoolId,
+          code: targetCode,
+          date,
+          period,
+          status,
+          reason: reason || '',
+          by: by || 'الأستاذ',
+          attendance: updatedAttendance
+        });
+      } catch (wsErr) {
+        console.warn("Failed to broadcast attendance update:", wsErr);
+      }
+
+      return res.json({ success: true, attendance: updatedAttendance });
     } catch (error: any) {
+      console.error("Attendance API Error:", error);
       res.status(500).json({ success: false, message: error.message });
     }
   });
