@@ -322,6 +322,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     return 'pulse';
   });
   
+  const resolvedActiveTab = React.useMemo(() => {
+    const TAB_ALIASES_MAP: Record<string, string> = {
+      'grades': 'students',
+      'archive': 'codes',
+      'control': 'pulse',
+      'academy': 'pulse',
+      'radar': 'pulse',
+      'hall': 'pulse',
+      'hub': 'pulse'
+    };
+
+    const target = TAB_ALIASES_MAP[activeTab] || activeTab;
+    const KNOWN_TABS = ['pulse', 'codes', 'students', 'attendance', 'finance', 'broadcast', 'teachers', 'support', 'transport', 'ideas', 'resources', 'audit', 'sovereignty'];
+    
+    if (KNOWN_TABS.includes(target)) {
+      return target;
+    }
+    return 'pulse';
+  }, [activeTab]);
+
+  useEffect(() => {
+    try {
+      safeStorage.setItem("s6_admin_active_tab", resolvedActiveTab);
+    } catch {}
+  }, [resolvedActiveTab]);
+
   const [glowingTab, setGlowingTab] = useState<string | null>(() => {
     const saved = safeStorage.getItem("s6_admin_target_tab_glow");
     if (saved) {
@@ -1588,9 +1614,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
         <AnimatePresence mode="wait">
           {/* Locked Module Guard when disabled by Developer */}
-          {isTabDisabled(activeTab) && activeTab !== 'pulse' && (
+          {isTabDisabled(resolvedActiveTab) && resolvedActiveTab !== 'pulse' && (
             <motion.div
-              key={`locked-admin-${activeTab}`}
+              key={`locked-admin-${resolvedActiveTab}`}
               initial={{ opacity: 0, scale: 0.96 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.96 }}
@@ -1612,7 +1638,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <span>🛡️ إشعار إيقاف القسم برمجياً</span>
                 </div>
                 <h3 className="text-xl sm:text-2xl font-black text-white">
-                  قسم {adminTabNamesMap[activeTab] || activeTab} مغلق حالياً من قِبل المطور
+                  قسم {adminTabNamesMap[resolvedActiveTab] || resolvedActiveTab} مغلق حالياً من قِبل المطور
                 </h3>
                 <p className="text-xs sm:text-sm font-medium text-white/70 leading-relaxed px-4">
                   تم إيقاف وتعطيل هذا القسم لهذه المدرسة بناءً على ضبط صلاحيات المطور والإدارة المركزية. تم تجميد الوصول إليه مؤقتاً لحين إعادة التفعيل من لوحة المطور.
@@ -1630,7 +1656,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
                 <div className="flex items-center justify-between text-white/60">
                   <span>رمز القسم:</span>
-                  <span className="font-mono text-zinc-400 text-[11px]">{activeTab}</span>
+                  <span className="font-mono text-zinc-400 text-[11px]">{resolvedActiveTab}</span>
                 </div>
               </div>
 
@@ -1646,7 +1672,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </motion.div>
           )}
 
-          {activeTab === 'pulse' && (
+          {resolvedActiveTab === 'pulse' && (
             <motion.div 
                key="pulse-tab-fixed"
                initial={{ opacity: 0 }} 
@@ -1658,7 +1684,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </motion.div>
           )}
 
-          {!isTabDisabled('codes') && activeTab === 'codes' && (
+          {!isTabDisabled('codes') && resolvedActiveTab === 'codes' && (
             <motion.div 
                key="codes-tab-fixed"
                initial={{ opacity: 0 }} 
@@ -1709,7 +1735,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </motion.div>
           )}
 
-          {!isTabDisabled('students') && activeTab === 'students' && (
+          {!isTabDisabled('students') && resolvedActiveTab === 'students' && (
             <motion.div 
                key="students-tab-fixed"
                initial={{ opacity: 0 }} 
@@ -1742,7 +1768,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </motion.div>
           )}
 
-          {!isTabDisabled('attendance') && activeTab === 'attendance' && (
+          {!isTabDisabled('attendance') && resolvedActiveTab === 'attendance' && (
             <motion.div 
                key="attendance-tab-fixed"
                initial={{ opacity: 0 }} 
@@ -2612,7 +2638,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
            </motion.div>
           )}
 
-          {!isTabDisabled('finance') && activeTab === 'finance' && (
+          {!isTabDisabled('finance') && resolvedActiveTab === 'finance' && (
             <motion.div 
                key="finance-tab-fixed"
                initial={{ opacity: 0 }} 
@@ -2652,7 +2678,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </motion.div>
           )}
 
-          {!isTabDisabled('broadcast') && activeTab === 'broadcast' && (
+          {!isTabDisabled('broadcast') && resolvedActiveTab === 'broadcast' && (
             <motion.div 
                key="broadcast-tab-fixed"
                initial={{ opacity: 0 }} 
@@ -2679,7 +2705,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </motion.div>
           )}
 
-          {!isTabDisabled('sovereignty') && activeTab === 'sovereignty' && (
+          {!isTabDisabled('sovereignty') && resolvedActiveTab === 'sovereignty' && (
             <motion.div 
                key="sovereignty-tab-fixed" 
                initial={{ opacity: 0 }} 
@@ -2691,7 +2717,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </motion.div>
           )}
 
-          {!isTabDisabled('teachers') && activeTab === 'teachers' && (
+          {!isTabDisabled('teachers') && resolvedActiveTab === 'teachers' && (
             <motion.div 
                key="teachers-tab-fixed" 
                initial={{ opacity: 0 }} 
@@ -2703,19 +2729,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </motion.div>
           )}
 
-          {!isTabDisabled('support') && activeTab === 'support' && (
+          {!isTabDisabled('support') && resolvedActiveTab === 'support' && (
             <motion.div key="support-tab-fixed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <SupportManager onSubViewChange={setSupportSubView} schoolId={selectedSchoolId} />
             </motion.div>
           )}
 
-          {!isTabDisabled('transport') && activeTab === "transport" && (
+          {!isTabDisabled('transport') && resolvedActiveTab === "transport" && (
             <motion.div key="transport-tab-fixed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <ComingSoonPlaceholder title="إدارة النقل المدرسي" />
             </motion.div>
           )}
 
-          {!isTabDisabled('ideas') && activeTab === 'ideas' && (
+          {!isTabDisabled('ideas') && resolvedActiveTab === 'ideas' && (
             <motion.div key="ideabank-tab-fixed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <IdeaBankAdminView 
                 schoolId={selectedSchoolId} 
@@ -2735,7 +2761,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </motion.div>
           )}
 
-          {!isTabDisabled('resources') && activeTab === 'resources' && (
+          {!isTabDisabled('resources') && resolvedActiveTab === 'resources' && (
             <motion.div key="resources-tab-fixed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <ResourceManager 
                 schoolId={selectedSchoolId || undefined} 
@@ -2745,9 +2771,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </motion.div>
           )}
 
-          {!isTabDisabled('audit') && activeTab === 'audit' && (
+          {!isTabDisabled('audit') && resolvedActiveTab === 'audit' && (
             <motion.div key="audit-tab-fixed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
               <AuditLogView showToast={showToast} />
+            </motion.div>
+          )}
+
+          {/* Universal Fallback Guard to prevent blank screens under any circumstances */}
+          {!['pulse', 'codes', 'students', 'attendance', 'finance', 'broadcast', 'teachers', 'support', 'transport', 'ideas', 'resources', 'audit', 'sovereignty'].includes(resolvedActiveTab) && (
+            <motion.div key="pulse-tab-fallback" initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+              <PortalPulseDashboard showToast={showToast} schoolName={schoolName} selectedSchoolId={selectedSchoolId} />
             </motion.div>
           )}
         </AnimatePresence>

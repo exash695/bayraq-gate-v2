@@ -907,9 +907,18 @@ export const StudentFilesTab: React.FC<{ disabledModules?: string[], rolePrefix?
                     >
                       <div className="space-y-3">
                         {/* Thumbnail overlay container */}
-                        <div className="aspect-video w-full rounded-lg overflow-hidden bg-black/60 border border-white/5 relative flex items-center justify-center group-hover:border-[#00E5FF]/10 transition-all">
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent z-10" />
-                          <Play size={24} className="text-white/60 group-hover:text-[#00E5FF] group-hover:scale-110 transition-all z-20" fill="currentColor" />
+                        <div 
+                          onClick={() => {
+                            // @ts-ignore
+                            if (typeof sounds !== 'undefined' && sounds.playClick) {
+                              sounds.playClick();
+                            }
+                            setViewingRecordedLesson(vidItem);
+                          }}
+                          className="aspect-video w-full rounded-lg overflow-hidden bg-black/60 border border-white/5 relative flex items-center justify-center group-hover:border-[#00E5FF]/30 transition-all cursor-pointer group/thumb"
+                        >
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent z-10 pointer-events-none" />
+                          <Play size={24} className="text-white/60 group-hover/thumb:text-[#00E5FF] group-hover/thumb:scale-125 group-hover:text-[#00E5FF] group-hover:scale-110 transition-all z-20 drop-shadow-[0_0_10px_rgba(0,229,255,0.3)]" fill="currentColor" />
                           
                           <span className="absolute bottom-2 left-2 text-[8px] font-bold font-mono text-white/90 bg-black/75 px-2 py-0.5 rounded z-20 flex items-center gap-1 backdrop-blur-sm border border-white/10">
                             <Clock size={9} className="text-[#00E5FF]" />

@@ -894,7 +894,19 @@ export const TeacherControlFilesTab: React.FC = () => {
                               {filteredRecordedLessons.map((lesson) => (
                                 <div
                                   key={lesson.id}
-                                  className="p-2.5 bg-[#0B0F21]/85 border border-white/5 rounded-xl hover:border-white/10 transition-all"
+                                  onClick={(e) => {
+                                    // Trigger lecture view unless they click an action button or duration editor
+                                    const isButton = (e.target as HTMLElement).closest('button');
+                                    const isInput = (e.target as HTMLElement).closest('input');
+                                    if (!isButton && !isInput) {
+                                      // @ts-ignore
+                                      if (typeof sounds !== 'undefined' && sounds.playClick) {
+                                        sounds.playClick();
+                                      }
+                                      setViewingRecordedLesson(lesson);
+                                    }
+                                  }}
+                                  className="p-2.5 bg-[#0B0F21]/85 border border-white/5 rounded-xl hover:border-white/15 hover:bg-[#11162e]/90 hover:shadow-[0_0_15px_rgba(0,229,255,0.05)] transition-all cursor-pointer text-right"
                                 >
                                   <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-2 truncate">

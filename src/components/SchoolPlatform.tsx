@@ -175,6 +175,7 @@ import { SixtySecondChallenge } from "./SixtySecondChallenge";
 import { TeacherQuestionBank } from "./TeacherQuestionBank";
 import { TeacherAttendanceTab } from "./TeacherAttendanceTab";
 import DevDashboard from "./DevDashboard";
+import { AnnouncementsCenterTab } from "./SchoolPlatform/AnnouncementsCenterTab";
 
 import { VerticalScrollPicker } from "./SchoolPlatform/VerticalScrollPicker";
 import { RevealBlock, RenderTextWithTags } from "./SchoolPlatform/RevealBlock";
@@ -827,6 +828,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
       name: isTeacher ? "جدولي" : "جدولي اليومي",
       icon: Calendar,
     },
+    { id: "announcements", name: "مركز التبليغات 📢", icon: Megaphone },
     { id: "excellence", name: "التميز", icon: Award },
   ];
 
@@ -887,12 +889,9 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
   const [revealedSolutions, setRevealedSolutions] = useState<Record<string, boolean>>({});
   
   const [isDeveloperModeEnabled, setIsDeveloperModeEnabled] = useState(() => {
-    return typeof window !== "undefined" && (
-      localStorage.getItem("isDeveloper") === "true" ||
-      auth.currentUser?.email === "mntzralghanm527@gmail.com"
-    );
+    const email = auth.currentUser?.email?.toLowerCase() || userProfile?.email?.toLowerCase() || "";
+    return email === "mntzralghanm527@gmail.com" || email === "mntzr.alghanm527@gmail.com";
   });
-  const [headerClicks, setHeaderClicks] = useState(0);
 
   useEffect(() => {
     console.log("[Mount Log] SchoolPlatform mounted. activeTab initialized to:", activeTab);
@@ -6902,6 +6901,16 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
         return <StudentMaterialsTab />;
       case "excellence":
         return <StudentExcellenceTab />;
+      case "announcements":
+        return (
+          <AnnouncementsCenterTab
+            schoolId={resolvedSchoolId}
+            grade={grade}
+            section={userProfile?.section || ""}
+            isTeacher={isTeacher}
+            notifications={notifications}
+          />
+        );
       case "live_watch":
         return <StudentLiveWatchTab />;
       case "questions_bank":
@@ -7943,19 +7952,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
 
                 {/* Content on the RIGHT side */}
                 <div 
-                  className="relative z-10 flex-1 pr-16 md:pr-20 pl-36 sm:pl-40 md:pl-44 py-2 select-none cursor-pointer text-right flex flex-col justify-center h-full"
-                  onClick={() => {
-                    const newClicks = headerClicks + 1;
-                    setHeaderClicks(newClicks);
-                    if (newClicks >= 5) {
-                      localStorage.setItem("isDeveloper", "true");
-                      setIsDeveloperModeEnabled(true);
-                      showToast("تم تفعيل وضع المطور واللوحة الإحصائية بنجاح! 🛠️", "success");
-                      setHeaderClicks(0);
-                    } else if (newClicks > 1) {
-                      showToast(`اضغط ${5 - newClicks} مرات إضافية لتفعيل وضع المطور 🛠️`, "info");
-                    }
-                  }}
+                  className="relative z-10 flex-1 pr-16 md:pr-20 pl-36 sm:pl-40 md:pl-44 py-2 select-none text-right flex flex-col justify-center h-full"
                 >
                   {isTeacher ? (
                     <div className="text-right min-w-0">

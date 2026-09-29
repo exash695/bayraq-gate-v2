@@ -129,4 +129,5 @@ export type PlatformTab =
   | "live_watch"
   | "questions_bank"
   | "ai_assistant"
+  | "announcements"
   | "dev_dashboard";

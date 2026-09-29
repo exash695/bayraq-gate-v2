@@ -6042,6 +6042,21 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         await db.update(students)
           .set({ attendance: updatedAttendance })
           .where(eq(students.id, studentId));
+
+        // Sync to Firestore 'school_students' for real-time parent sync
+        try {
+          const { getFirestore, collection, query, where, getDocs, updateDoc, doc } = await import('firebase/firestore');
+          const fsDb = getFirestore();
+          const qFs = query(collection(fsDb, 'school_students'), where('studentCode', '==', student[0].studentCode));
+          const snap = await getDocs(qFs);
+          if (!snap.empty) {
+            await updateDoc(doc(fsDb, 'school_students', snap.docs[0].id), {
+              attendance: updatedAttendance
+            });
+          }
+        } catch (fsErr) {
+          console.warn("Failed to sync attendance to Firestore school_students:", fsErr);
+        }
       }
 
       res.json({ success: true });

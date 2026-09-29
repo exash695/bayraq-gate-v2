@@ -541,6 +541,43 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
         selectedDate
       );
 
+      // Update local state immediately for instant feedback!
+      setAllStudents(prevStudents => {
+        return prevStudents.map(st => {
+          if (st.id === student.id) {
+            const currentAttendance = st.attendance || { present: 0, absent: 0, late: 0, logs: [] };
+            const otherLogs = (currentAttendance.logs || []).filter((l: any) => !(l.date === selectedDate && l.period === 'يوم كامل'));
+            const newLog = {
+              date: selectedDate,
+              status,
+              period: 'يوم كامل',
+              reason: status === 'present' ? '' : 'بدون عذر',
+              time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+              by: teacherName
+            };
+            
+            const updatedLogs = [newLog, ...otherLogs];
+            let presentCount = 0, absentCount = 0, lateCount = 0;
+            updatedLogs.forEach((l: any) => {
+              if (l.status === 'present') presentCount++;
+              if (l.status === 'absent') absentCount++;
+              if (l.status === 'late') lateCount++;
+            });
+            
+            return {
+              ...st,
+              attendance: {
+                present: presentCount,
+                absent: absentCount,
+                late: lateCount,
+                logs: updatedLogs
+              }
+            };
+          }
+          return st;
+        });
+      });
+
       const statusLabels = {
         present: 'حضور ✅',
         absent: 'غياب ❌',
@@ -573,6 +610,43 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
         schoolId,
         selectedDate
       );
+
+      // Update local state immediately for instant feedback!
+      setAllStudents(prevStudents => {
+        return prevStudents.map(st => {
+          if (st.id === student.id) {
+            const currentAttendance = st.attendance || { present: 0, absent: 0, late: 0, logs: [] };
+            const otherLogs = (currentAttendance.logs || []).filter((l: any) => !(l.date === selectedDate && l.period === actionPeriod));
+            const newLog = {
+              date: selectedDate,
+              status: actionStatus,
+              period: actionPeriod,
+              reason: actionStatus === 'present' ? '' : actionReason,
+              time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+              by: teacherName
+            };
+            
+            const updatedLogs = [newLog, ...otherLogs];
+            let presentCount = 0, absentCount = 0, lateCount = 0;
+            updatedLogs.forEach((l: any) => {
+              if (l.status === 'present') presentCount++;
+              if (l.status === 'absent') absentCount++;
+              if (l.status === 'late') lateCount++;
+            });
+            
+            return {
+              ...st,
+              attendance: {
+                present: presentCount,
+                absent: absentCount,
+                late: lateCount,
+                logs: updatedLogs
+              }
+            };
+          }
+          return st;
+        });
+      });
 
       showToast(`تم تثبيت ${actionStatus === 'present' ? 'حضور' : actionStatus === 'absent' ? 'غياب' : 'تأخير'} للطالب (${actionPeriod})`, 'success');
       setEditingStudentId(null);
@@ -612,6 +686,45 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
           selectedDate
         );
       }
+
+      // Update local state immediately for instant feedback!
+      setAllStudents(prevStudents => {
+        return prevStudents.map(st => {
+          const isUnrecorded = unrecordedStudents.some(u => u.id === st.id);
+          if (isUnrecorded) {
+            const currentAttendance = st.attendance || { present: 0, absent: 0, late: 0, logs: [] };
+            const otherLogs = (currentAttendance.logs || []).filter((l: any) => !(l.date === selectedDate && l.period === 'يوم كامل'));
+            const newLog = {
+              date: selectedDate,
+              status: 'present',
+              period: 'يوم كامل',
+              reason: '',
+              time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+              by: teacherName
+            };
+            
+            const updatedLogs = [newLog, ...otherLogs];
+            let presentCount = 0, absentCount = 0, lateCount = 0;
+            updatedLogs.forEach((l: any) => {
+              if (l.status === 'present') presentCount++;
+              if (l.status === 'absent') absentCount++;
+              if (l.status === 'late') lateCount++;
+            });
+            
+            return {
+              ...st,
+              attendance: {
+                present: presentCount,
+                absent: absentCount,
+                late: lateCount,
+                logs: updatedLogs
+              }
+            };
+          }
+          return st;
+        });
+      });
+
       showToast(`تم رصد حضور لـ ${unrecordedStudents.length} طالب بنجاح وتمت المزامنة الفورية! 🎉`, 'success');
     } catch (err) {
       console.error('Batch attendance error:', err);

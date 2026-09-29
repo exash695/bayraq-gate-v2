@@ -42,6 +42,8 @@ import {
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { cleanParentStudentName, formatParentGreetingTitle } from '../utils/studentUtils';
+import { matchesTargetGrades, extractSectionLetter } from '../utils/gradeMatcher';
+import { AnnouncementsCenterTab } from './SchoolPlatform/AnnouncementsCenterTab';
 import { doc, onSnapshot, collection, query, where, orderBy, limit, updateDoc, addDoc, serverTimestamp } from '../lib/firebase';
 import { academicService } from '../services/academicService';
 import { supportService } from '../services/supportService';
@@ -821,7 +823,30 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
             let grades: string[] = [];
             if (Array.isArray(raw)) grades = raw;
             else if (typeof raw === 'string') grades = [raw];
-            return grades.includes('parent_only');
+            
+            // 1. Show if it explicitly targets parent_only
+            if (grades.includes('parent_only')) return true;
+            
+            // 2. Or, if it targets the student's grade and section
+            if (studentData?.grade) {
+              const gradeMatch = matchesTargetGrades(studentData.grade, raw);
+              if (gradeMatch) {
+                // If it targets a specific section, check section matching
+                const targetSec = b.targetSection || b.target_section;
+                if (targetSec && studentData.section) {
+                  const bSecLetter = extractSectionLetter(targetSec);
+                  const sSecLetter = extractSectionLetter(studentData.section);
+                  if (bSecLetter && sSecLetter) {
+                    return bSecLetter === sSecLetter;
+                  }
+                  return targetSec.trim().toLowerCase() === studentData.section.trim().toLowerCase() ||
+                         targetSec.includes(studentData.section) ||
+                         studentData.section.includes(targetSec);
+                }
+                return true;
+              }
+            }
+            return false;
           })
           .sort((a: any, b: any) => (b.timestampMs || 0) - (a.timestampMs || 0))
           .slice(0, 5);
@@ -961,14 +986,14 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
           const hasFirestoreFinance = data.finance && data.finance.installments && data.finance.installments.length > 0;
           const isFirestoreTotalValid = data.totalAmount && Number(data.totalAmount) > 0;
           
-          if (!hasFirestoreFinance || !isFirestoreTotalValid) {
-            return {
-              ...data,
-              finance: prev.finance,
-              totalAmount: prev.totalAmount
-            };
-          }
-          return data;
+          return {
+            ...prev,
+            ...data,
+            finance: (hasFirestoreFinance && isFirestoreTotalValid) ? data.finance : prev.finance,
+            totalAmount: (hasFirestoreFinance && isFirestoreTotalValid) ? data.totalAmount : prev.totalAmount,
+            // Preserve SQL attendance logs if Firestore doesn't have them
+            attendance: (data.attendance?.logs?.length > 0) ? data.attendance : (prev.attendance || data.attendance)
+          };
         });
         
         setStudentDocId(data.id);
@@ -1127,6 +1152,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
     {
       title: "المتابعة اللحظية",
       items: [
+        { id: "announcements", icon: Megaphone, name: "مركز التبليغات والإعلانات 📢", color: "text-cyan-400", bg: "bg-cyan-400/10", border: "border-cyan-400/20" },
         { id: "grades", icon: BarChart3, name: "سجل الدرجات", color: "text-emerald-400", bg: "bg-emerald-400/10", border: "border-emerald-400/20", cap: 'view_grades' },
         { id: "attendance", icon: Timer, name: "سجل الحضور الذكي", color: "text-orange-400", bg: "bg-orange-400/10", border: "border-orange-400/20" },
         { 
@@ -1250,6 +1276,14 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
     const activeSchool = schoolName || schoolInfo?.schoolName || schoolInfo?.name || "ثانوية أوائل غماس الأهلية";
 
     switch (subPageId) {
+      case 'announcements':
+        return {
+          pose: 'pose_broadcaster' as const,
+          title: 'غرفة المتابعة - مركز التبليغات والإعلانات 📢',
+          subtitle: `السجل المركزي الشامل لتبليغات الإدارة والأساتذة • الطالب ${cleanStudentName}`,
+          school: activeSchool,
+          glowColor: 'cyan' as const
+        };
       case 'homework':
         return {
           pose: 'pose_homework_master' as const,
@@ -1413,7 +1447,18 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
               <span>{error}</span>
             </motion.div>
           )}
-          {activeSubPage === "homework" ? (
+          {activeSubPage === "announcements" ? (
+            <div className="w-full flex flex-col min-h-full animate-in fade-in slide-in-from-bottom-2 pb-16 px-4 md:px-6">
+              <AnnouncementsCenterTab
+                schoolId={schoolId || studentData?.schoolId || 'school_awail_ghamas'}
+                grade={studentData?.grade || grade || 'عام'}
+                section={studentData?.section || ''}
+                isTeacher={false}
+                notifications={parentNotifications}
+                hideHeader={true}
+              />
+            </div>
+          ) : activeSubPage === "homework" ? (
             <div className="w-full flex flex-col min-h-full animate-in fade-in slide-in-from-bottom-2 pb-16">
               {/* Edge-to-Edge Sticky Horizontal Subject Bar */}
               <div className="sticky top-0 z-20 bg-[#070D1E]/95 backdrop-blur-xl border-b border-white/10 px-3 sm:px-5 py-3 shadow-[0_4px_20px_rgba(0,0,0,0.4)]">
@@ -2477,37 +2522,53 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
               <div className="space-y-3">
                 <h4 className="text-white/40 text-[10px] font-black uppercase tracking-widest px-2">آخر تسجيلات الحضور</h4>
                 {studentData?.attendance?.logs?.length > 0 ? (
-                  [...studentData.attendance.logs].reverse().map((log: any, idx: number) => (
-                    <div key={`att_log_${log.date}_${log.time || ''}_${idx}`} className="bg-[#101935] p-4 rounded-2xl border border-white/5 flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                          log.status === 'present' ? 'bg-emerald-500/20 text-emerald-400' : 
-                          log.status === 'absent' ? 'bg-rose-500/20 text-rose-400' : 'bg-amber-500/20 text-amber-400'
+                  [...studentData.attendance.logs].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map((log: any, idx: number) => {
+                    const getArabicDayName = (dateStr: string) => {
+                      try {
+                        const date = new Date(dateStr);
+                        if (isNaN(date.getTime())) return '';
+                        const days = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+                        return days[date.getDay()];
+                      } catch {
+                        return '';
+                      }
+                    };
+                    const dayName = getArabicDayName(log.date);
+
+                    return (
+                      <div key={`att_log_${log.date}_${log.time || ''}_${idx}`} className="bg-[#101935] p-4 rounded-2xl border border-white/5 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                            log.status === 'present' ? 'bg-emerald-500/20 text-emerald-400' : 
+                            log.status === 'absent' ? 'bg-rose-500/20 text-rose-400' : 'bg-amber-500/20 text-amber-400'
+                          }`}>
+                            {log.status === 'present' ? <CheckCircle2 size={16} /> : 
+                             log.status === 'late' ? <Timer size={16} /> : <XCircle size={16} />}
+                          </div>
+                          <div className="flex flex-col">
+                            <div className="flex items-center gap-2">
+                              <span className="text-white font-bold text-sm">
+                                {dayName ? `${dayName} • ` : ''}{log.date}
+                              </span>
+                              {log.period && log.period !== 'عام' && (
+                                  <span className="bg-white/10 text-[8px] text-white/60 px-1.5 py-0.5 rounded uppercase">حصة {log.period}</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1 text-[10px]">
+                              <span className="text-white/30">{log.time || '08:00 AM'}</span>
+                              {log.reason && <span className="text-rose-400/60 font-bold"> - {log.reason}</span>}
+                            </div>
+                          </div>
+                        </div>
+                        <span className={`text-[10px] font-black px-3 py-1 rounded-full ${
+                          log.status === 'present' ? 'bg-emerald-500/10 text-emerald-400' : 
+                          log.status === 'absent' ? 'bg-rose-500/10 text-rose-400' : 'bg-amber-500/10 text-amber-400'
                         }`}>
-                          {log.status === 'present' ? <CheckCircle2 size={16} /> : 
-                           log.status === 'late' ? <Timer size={16} /> : <XCircle size={16} />}
-                        </div>
-                        <div className="flex flex-col">
-                          <div className="flex items-center gap-2">
-                            <span className="text-white font-bold text-sm">{log.date}</span>
-                            {log.period && log.period !== 'عام' && (
-                                <span className="bg-white/10 text-[8px] text-white/60 px-1.5 py-0.5 rounded uppercase">حصة {log.period}</span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-1 text-[10px]">
-                            <span className="text-white/30">{log.time || '08:00 AM'}</span>
-                            {log.reason && <span className="text-rose-400/60 font-bold"> - {log.reason}</span>}
-                          </div>
-                        </div>
+                          {log.status === 'present' ? 'حاضر' : log.status === 'absent' ? 'غائب' : 'متأخر'}
+                        </span>
                       </div>
-                      <span className={`text-[10px] font-black px-3 py-1 rounded-full ${
-                        log.status === 'present' ? 'bg-emerald-500/10 text-emerald-400' : 
-                        log.status === 'absent' ? 'bg-rose-500/10 text-rose-400' : 'bg-amber-500/10 text-amber-400'
-                      }`}>
-                        {log.status === 'present' ? 'حاضر' : log.status === 'absent' ? 'غائب' : 'متأخر'}
-                      </span>
-                    </div>
-                  ))
+                    );
+                  })
                 ) : (
                   <div className="p-10 border-2 border-dashed border-white/5 rounded-[2.5rem] text-center space-y-3">
                     <Timer size={40} className="mx-auto text-white/10" />

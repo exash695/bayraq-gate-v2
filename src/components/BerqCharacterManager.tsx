@@ -632,12 +632,13 @@ export const BerqCharacter: React.FC<BerqCharacterProps> = ({
                 el.muted = true;
                 el.defaultMuted = true;
                 el.playsInline = true;
+                // @ts-ignore
+                el.webkitPlaysInline = true;
                 el.loop = true;
                 el.play().catch(err => {
-                  console.log('[BERQ VIDEO] Ref play notice:', err?.message || err);
-                  if (el.error || String(err).includes('NotSupportedError') || String(err).includes('source') || String(err).includes('format')) {
-                    setVideoError(true);
-                  }
+                  console.log('[BERQ VIDEO] Ref play notice - falling back to static image:', err?.message || err);
+                  // Force fallback to static image if browser blocks autoplay (e.g. low power mode, slow network, or no user gesture)
+                  setVideoError(true);
                 });
               }
             }}
@@ -650,6 +651,7 @@ export const BerqCharacter: React.FC<BerqCharacterProps> = ({
             controls={false}
             disablePictureInPicture
             preload="auto"
+            poster={finalImageSrc}
             onEnded={(e) => {
               const v = e.currentTarget;
               v.currentTime = 0;
@@ -679,7 +681,10 @@ export const BerqCharacter: React.FC<BerqCharacterProps> = ({
             }}
             onCanPlay={(e) => {
               console.log(`[BERQ DEBUG] Element: video | Pose: ${pose} | URL: ${effectiveVideoSrc} | Event: onCanPlay`);
-              e.currentTarget.play().catch(() => {});
+              e.currentTarget.play().catch((err) => {
+                console.log('[BERQ VIDEO] onCanPlay play failed - falling back to static image:', err);
+                setVideoError(true);
+              });
             }}
             onError={(e) => {
               const err = e.currentTarget.error;
@@ -699,7 +704,14 @@ export const BerqCharacter: React.FC<BerqCharacterProps> = ({
               });
             }}
             className={`cursor-pointer select-none rounded-2xl ${fitClass} ${glowShadows[glowColor]} relative z-10`}
-            style={{ height: height }}
+            style={{ 
+              height: height,
+              // Strictly hide native overlay elements
+              // @ts-ignore
+              WebkitMediaControlsStartPlaybackButton: 'none !important',
+              WebkitMediaControlsPlayButton: 'none !important',
+              WebkitMediaControlsOverlayPlayButton: 'none !important'
+            }}
           />
         ) : (
           <img

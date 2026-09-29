@@ -12,6 +12,7 @@ interface ScheduleEntry {
   id: string;
   day: string;
   className: string;
+  sectionName?: string;
   time: string;
   teacherId: string;
   teacherName: string;
@@ -127,6 +128,7 @@ export const StudentSchedule: React.FC<Props> = ({ grade, isTeacher, teacherId, 
             id: item.id || `entry_${Math.random()}`,
             day: item.day || item.dayOfWeek || '',
             className: item.className || item.class_name || '',
+            sectionName: item.sectionName || item.section_name || item.section || '',
             time: item.time || item.startTime || item.start_time || '',
             teacherId: item.teacherId || item.teacher_id || '',
             teacherName: item.teacherName || item.teacher_name || '',
@@ -313,7 +315,28 @@ export const StudentSchedule: React.FC<Props> = ({ grade, isTeacher, teacherId, 
                        <div className="flex sm:flex-col items-center sm:items-end justify-between sm:justify-center gap-1.5 shrink-0 border-t sm:border-t-0 border-white/5 pt-3 sm:pt-0">
                           <p className="text-white font-black text-sm tracking-widest bg-[#101428] px-3 py-1.5 rounded-lg border border-white/5 shadow-inner">{entry.time}</p>
                           {isTeacher && (
-                            <span className="text-[#FFD600] text-[10px] font-black bg-[#FFD600]/10 px-2 py-0.5 rounded-md">{entry.className}</span>
+                            <span className="text-[#FFD600] text-xs font-black bg-[#FFD600]/15 border border-[#FFD600]/30 px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-sm">
+                              <span className="text-[10px]">📌</span>
+                              <span>
+                                {(() => {
+                                  const cls = (entry.className || '').trim();
+                                  const sec = (entry.sectionName || '').trim();
+                                  if (!sec) return cls;
+                                  if (!cls) return sec;
+                                  const normCls = normalizeArabicText(cls);
+                                  const normSec = normalizeArabicText(sec);
+                                  if (normSec.includes(normCls) || normCls.includes(normSec)) {
+                                    return sec;
+                                  }
+                                  return `${cls} - ${sec}`;
+                                })()}
+                              </span>
+                            </span>
+                          )}
+                          {!isTeacher && entry.sectionName && (
+                            <span className="text-cyan-300 text-[10px] font-bold bg-cyan-500/15 border border-cyan-500/25 px-2 py-0.5 rounded-md">
+                              {entry.sectionName}
+                            </span>
                           )}
                        </div>
                     </motion.div>

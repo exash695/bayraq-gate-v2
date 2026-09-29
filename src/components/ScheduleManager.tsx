@@ -2,7 +2,7 @@ import * as FirebaseMock from "../lib/firebase"; const { db, auth, storage, coll
 import React, { useState, useEffect } from 'react';
 import { staffService } from '../services/staffService';
 import { realtimeManager } from '../lib/realtimeManager';
-import { Trash2, Plus, Calendar, MonitorPlay, Users, Search, Clock } from 'lucide-react';
+import { Trash2, Plus, Calendar, MonitorPlay, Users, Search, Clock, Edit2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { logActivity } from '../utils/auditLogger';
 import { TimeSelector } from './TimeSelector';
@@ -184,6 +184,109 @@ export const ScheduleManager: React.FC<Props> = ({ teachers, showToast, CLASSES,
     }
   };
 
+  const [editingEntry, setEditingEntry] = useState<ScheduleEntry | null>(null);
+  const [editFormData, setEditFormData] = useState({
+    day: DAYS[0],
+    className: CLASSES[0],
+    sectionName: '',
+    time: times[0],
+    teacherId: '',
+    type: 'physical' as 'live' | 'physical'
+  });
+
+  const handleOpenEdit = (entry: ScheduleEntry) => {
+    setEditingEntry(entry);
+    setEditFormData({
+      day: entry.day || DAYS[0],
+      className: entry.className || CLASSES[0],
+      sectionName: entry.sectionName || '',
+      time: entry.time || times[0],
+      teacherId: entry.teacherId || '',
+      type: entry.type || 'physical'
+    });
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingEntry) return;
+
+    if (!editFormData.teacherId || !editFormData.time || !editFormData.className) {
+      showToast('يرجى إكمال جميع الحقول', 'error');
+      return;
+    }
+
+    // Conflict Checks excluding currently edited item
+    const teacherConflict = schedules.find(s => 
+      s.id !== editingEntry.id &&
+      s.day === editFormData.day && 
+      s.time === editFormData.time && 
+      s.teacherId === editFormData.teacherId
+    );
+
+    if (teacherConflict) {
+      showToast(`يوجد تضارب: الأستاذ ${teacherConflict.teacherName} لديه حصة في هذا الوقت`, 'error');
+      return;
+    }
+
+    const classConflict = schedules.find(s => 
+      s.id !== editingEntry.id &&
+      s.day === editFormData.day && 
+      s.time === editFormData.time && 
+      s.className === editFormData.className &&
+      (!editFormData.sectionName || !s.sectionName || s.sectionName === editFormData.sectionName)
+    );
+
+    if (classConflict) {
+      showToast(`يوجد تضارب: الصف ${editFormData.className} لديه حصة في هذا الوقت مع الأستاذ ${classConflict.teacherName}`, 'error');
+      return;
+    }
+
+    const teacher = teachingStaff.find(t => t.id === editFormData.teacherId);
+    if (!teacher) return;
+
+    try {
+      const updatedData = {
+        day: editFormData.day,
+        dayOfWeek: editFormData.day,
+        className: editFormData.className,
+        sectionName: editFormData.sectionName || '',
+        time: editFormData.time,
+        startTime: editFormData.time,
+        teacherId: teacher.id,
+        teacherName: teacher.name,
+        subject: teacher.subject,
+        type: editFormData.type,
+        classType: editFormData.type,
+        schoolId: schoolId
+      };
+
+      await staffService.updateSchedule(editingEntry.id, updatedData);
+
+      try {
+        const docRef = doc(db, 'class_schedules', editingEntry.id);
+        await setDoc(docRef, updatedData, { merge: true });
+      } catch (fErr) {
+        console.warn("Firestore schedule update note:", fErr);
+      }
+
+      setSchedules(prev => prev.map(s => s.id === editingEntry.id ? { ...s, ...updatedData } as any : s));
+
+      logActivity({
+        action: 'تعديل حصة',
+        details: `تم تعديل حصة ${teacher.subject} للصف ${editFormData.className} (${editFormData.sectionName || 'عام'}) يوم ${editFormData.day} (${editFormData.time})`,
+        targetType: 'schedule',
+        targetName: editFormData.className
+      });
+
+      realtimeManager.emit('schedules_updated');
+      showToast('تم تعديل بيانات الحصة بنجاح ✏️', 'success');
+      setEditingEntry(null);
+    } catch (err) {
+      console.error(err);
+      showToast('حدث خطأ أثناء تعديل الحصة', 'error');
+    }
+  };
+
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const handleDelete = async (id: string, entry: ScheduleEntry) => {
@@ -268,17 +371,26 @@ export const ScheduleManager: React.FC<Props> = ({ teachers, showToast, CLASSES,
                       exit={{ opacity: 0, scale: 0.9 }}
                       className={`relative p-5 rounded-[24px] border ${entry.type === 'live' ? 'bg-blue-600/10 border-blue-500/20 shadow-[0_0_30px_-10px_rgba(37,99,235,0.2)]' : 'bg-purple-600/10 border-purple-500/20 shadow-[0_0_30px_-10px_rgba(147,51,234,0.2)]'}`}
                     >
-                      <button 
-                        onClick={() => handleDelete(entry.id, entry)}
-                        className={`absolute top-4 left-4 p-2 rounded-xl transition-colors ${
-                          deleteConfirmId === entry.id 
-                            ? 'bg-rose-500/20 text-rose-500 hover:bg-rose-500/30' 
-                            : 'bg-black/20 text-white/20 hover:text-rose-400'
-                        }`}
-                        title={deleteConfirmId === entry.id ? 'تأكيد الحذف' : 'حذف'}
-                      >
-                        <Trash2 size={16} className={deleteConfirmId === entry.id ? 'animate-bounce' : ''} />
-                      </button>
+                      <div className="absolute top-4 left-4 flex items-center gap-1.5 z-10">
+                        <button 
+                          onClick={() => handleOpenEdit(entry)}
+                          className="p-2 rounded-xl bg-black/30 text-white/40 hover:text-amber-300 hover:bg-amber-400/20 border border-white/5 transition-all cursor-pointer shadow-sm"
+                          title="تعديل الحصة الدراسية ✏️"
+                        >
+                          <Edit2 size={15} />
+                        </button>
+                        <button 
+                          onClick={() => handleDelete(entry.id, entry)}
+                          className={`p-2 rounded-xl transition-colors border border-white/5 cursor-pointer shadow-sm ${
+                            deleteConfirmId === entry.id 
+                              ? 'bg-rose-500/20 text-rose-500 hover:bg-rose-500/30 border-rose-500/30' 
+                              : 'bg-black/30 text-white/20 hover:text-rose-400 hover:bg-rose-500/10'
+                          }`}
+                          title={deleteConfirmId === entry.id ? 'تأكيد الحذف' : 'حذف'}
+                        >
+                          <Trash2 size={15} className={deleteConfirmId === entry.id ? 'animate-bounce' : ''} />
+                        </button>
+                      </div>
                       <div className="flex items-center gap-3 mb-4">
                         <div className={`w-10 h-10 rounded-[14px] flex items-center justify-center ${entry.type === 'live' ? 'bg-blue-500/20 text-blue-400' : 'bg-purple-500/20 text-purple-400'}`}>
                           {entry.type === 'live' ? <MonitorPlay size={20} /> : <Users size={20} />}
@@ -438,6 +550,138 @@ export const ScheduleManager: React.FC<Props> = ({ teachers, showToast, CLASSES,
                     className="flex-1 py-4 bg-purple-600 text-white font-black rounded-2xl shadow-lg shadow-purple-600/20 hover:bg-purple-500 transition-colors"
                   >
                     حفظ الحصة
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {/* Edit Schedule Modal */}
+        {editingEntry && (
+          <motion.div 
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[200] flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.95, y: 20 }}
+              className="bg-[#0b1221] border border-amber-500/30 rounded-[40px] p-8 max-w-lg w-full shadow-2xl overflow-y-auto max-h-[90vh] no-scrollbar"
+            >
+              <h3 className="text-2xl font-black text-white mb-6 flex items-center gap-3">
+                <Edit2 className="text-amber-400" />
+                تعديل الحصة الدراسية ✏️
+              </h3>
+
+              <form onSubmit={handleEditSubmit} className="space-y-6">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-white/40 text-xs font-bold mb-2">اليوم</label>
+                    <select 
+                      className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-white font-bold outline-none cursor-pointer"
+                      value={editFormData.day}
+                      onChange={e => setEditFormData({...editFormData, day: e.target.value})}
+                    >
+                      {DAYS.map(d => <option key={d} value={d}>{d}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-white/40 text-xs font-bold mb-2">الوقت</label>
+                    <TimeSelector 
+                        selectedTime={editFormData.time}
+                        onSelect={(time) => setEditFormData({...editFormData, time })}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-white/40 text-xs font-bold mb-2">الصف الدراسي</label>
+                  <select 
+                    className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-white font-bold outline-none cursor-pointer"
+                    value={editFormData.className}
+                    onChange={e => setEditFormData({...editFormData, className: e.target.value, sectionName: ''})}
+                  >
+                    {CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+
+                {/* Section selection based on savedLists */}
+                {savedLists.filter(l => normalizeArabicText(l.students?.[0]?.grade) === normalizeArabicText(editFormData.className)).length > 0 && (
+                  <div>
+                    <label className="block text-white/40 text-xs font-bold mb-2">الشعبة (اختياري)</label>
+                    <select 
+                      className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-white font-bold outline-none cursor-pointer"
+                      value={editFormData.sectionName || ''}
+                      onChange={e => setEditFormData({...editFormData, sectionName: e.target.value})}
+                    >
+                      <option value="">كافة الشعب (عام)</option>
+                      {savedLists
+                        .filter(l => normalizeArabicText(l.students?.[0]?.grade) === normalizeArabicText(editFormData.className))
+                        .map(l => (
+                          <option key={l.id} value={l.name}>{l.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-white/40 text-xs font-bold mb-2">الأستاذ والمادة</label>
+                  <select 
+                    className="w-full bg-black/40 border border-white/10 rounded-2xl p-4 text-white font-bold outline-none cursor-pointer"
+                    value={editFormData.teacherId}
+                    onChange={e => setEditFormData({...editFormData, teacherId: e.target.value})}
+                  >
+                    <option value="" disabled>اختر الأستاذ...</option>
+                    {teachingStaff.map(t => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} ({t.subject} - {t.teacherStage || 'عام'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-white/40 text-xs font-bold mb-3">نوع الحصة</label>
+                  <div className="grid grid-cols-2 gap-4">
+                    <button
+                      type="button"
+                      onClick={() => setEditFormData({...editFormData, type: 'live'})}
+                      className={`p-4 rounded-2xl flex flex-col items-center gap-2 border transition-all ${
+                        editFormData.type === 'live' 
+                        ? 'bg-blue-600/20 border-blue-500 text-blue-400' 
+                        : 'bg-black/40 border-white/10 text-white/40 hover:bg-white/5'
+                      }`}
+                    >
+                      <MonitorPlay size={24} />
+                      <span className="font-bold text-xs">بث مباشر</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEditFormData({...editFormData, type: 'physical'})}
+                      className={`p-4 rounded-2xl flex flex-col items-center gap-2 border transition-all ${
+                        editFormData.type === 'physical' 
+                        ? 'bg-purple-600/20 border-purple-500 text-purple-400' 
+                        : 'bg-black/40 border-white/10 text-white/40 hover:bg-white/5'
+                      }`}
+                    >
+                      <Users size={24} />
+                      <span className="font-bold text-xs">حضور فعلي</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex gap-4 pt-4 border-t border-white/10">
+                  <button
+                    type="button"
+                    onClick={() => setEditingEntry(null)}
+                    className="flex-1 py-4 bg-white/5 text-white/60 font-bold rounded-2xl hover:bg-white/10 transition-colors"
+                  >
+                    إلغاء
+                  </button>
+                  <button
+                    type="submit"
+                    className="flex-1 py-4 bg-gradient-to-r from-amber-500 to-amber-600 text-black font-black rounded-2xl shadow-lg shadow-amber-500/20 hover:from-amber-400 hover:to-amber-500 transition-colors"
+                  >
+                    حفظ التعديلات
                   </button>
                 </div>
               </form>

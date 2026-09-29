@@ -147,6 +147,16 @@ export const staffService = {
     return await response.json();
   },
 
+  updateSchedule: async (id: string, scheduleData: any) => {
+    const response = await fetch(`/api/schedules/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(scheduleData)
+    });
+    if (!response.ok) throw new Error('Failed to update schedule');
+    return await response.json();
+  },
+
   deleteSchedule: async (id: string) => {
     const response = await fetch(`/api/schedules/${id}`, {
       method: 'DELETE'
