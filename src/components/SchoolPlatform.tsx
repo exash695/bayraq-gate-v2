@@ -892,6 +892,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     const email = auth.currentUser?.email?.toLowerCase() || userProfile?.email?.toLowerCase() || "";
     return email === "mntzralghanm527@gmail.com" || email === "mntzr.alghanm527@gmail.com";
   });
+  const [headerClicks, setHeaderClicks] = useState<number>(0);
 
   useEffect(() => {
     console.log("[Mount Log] SchoolPlatform mounted. activeTab initialized to:", activeTab);
