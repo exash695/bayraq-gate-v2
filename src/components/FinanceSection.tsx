@@ -3942,9 +3942,9 @@ export const FinanceSection: React.FC<FinanceSectionProps> = ({
                                       }`}
                                     >
                                       {isPaid ? (
-                                        <span className="flex items-center gap-0.5">
-                                          <Verified size={10} className="fill-emerald-400/20" />
-                                          مستلم
+                                        <span className="flex items-center gap-0.5 justify-center">
+                                          <Verified size={10} className="fill-emerald-400/20 text-emerald-400 shrink-0" />
+                                          <span className="text-[9px] font-black">مستلم ({displayAmount} د.ع)</span>
                                         </span>
                                       ) : (
                                         <span>{displayAmount} د.ع</span>
