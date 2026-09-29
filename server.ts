@@ -6040,23 +6040,86 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         };
 
         await db.update(students)
-          .set({ attendance: updatedAttendance })
+          .set({ attendance: updatedAttendance, updatedAt: new Date() })
           .where(eq(students.id, studentId));
+
+        const targetCode = student[0].code;
+        const currentSchoolId = student[0].schoolId || schoolId || '';
 
         // Sync to Firestore 'school_students' for real-time parent sync
         try {
-          const { getFirestore, collection, query, where, getDocs, updateDoc, doc } = await import('firebase/firestore');
+          const { getFirestore, collection, query, where, getDocs, updateDoc, doc, setDoc } = await import('firebase/firestore');
           const fsDb = getFirestore();
-          const qFs = query(collection(fsDb, 'school_students'), where('studentCode', '==', student[0].studentCode));
-          const snap = await getDocs(qFs);
-          if (!snap.empty) {
-            await updateDoc(doc(fsDb, 'school_students', snap.docs[0].id), {
-              attendance: updatedAttendance
-            });
+
+          if (targetCode) {
+            const [snapStudentCode, snapCode] = await Promise.all([
+              getDocs(query(collection(fsDb, 'school_students'), where('studentCode', '==', targetCode))),
+              getDocs(query(collection(fsDb, 'school_students'), where('code', '==', targetCode)))
+            ]);
+
+            const allDocs = [...snapStudentCode.docs, ...snapCode.docs];
+            for (const docSnap of allDocs) {
+              await updateDoc(docSnap.ref, {
+                attendance: updatedAttendance,
+                lastAttendanceUpdate: new Date().toISOString()
+              });
+            }
+          }
+
+          // Direct document ID update
+          try {
+            await setDoc(doc(fsDb, 'school_students', studentId), {
+              attendance: updatedAttendance,
+              studentCode: targetCode || undefined,
+              code: targetCode || undefined,
+              schoolId: currentSchoolId,
+              lastAttendanceUpdate: new Date().toISOString()
+            }, { merge: true });
+          } catch (e) {}
+
+          if (currentSchoolId && targetCode) {
+            try {
+              const scopedDocId = `${currentSchoolId}_${targetCode}`.replace(/\s+/g, '_');
+              await setDoc(doc(fsDb, 'school_students', scopedDocId), {
+                attendance: updatedAttendance,
+                studentCode: targetCode,
+                code: targetCode,
+                schoolId: currentSchoolId,
+                lastAttendanceUpdate: new Date().toISOString()
+              }, { merge: true });
+            } catch (e) {}
           }
         } catch (fsErr) {
           console.warn("Failed to sync attendance to Firestore school_students:", fsErr);
         }
+
+        // Broadcast Realtime Event to WebSocket clients (Teacher, Admin, Parent dashboards)
+        try {
+          const studentPayload = {
+            id: studentId,
+            code: targetCode,
+            name: student[0].name,
+            grade: student[0].grade,
+            schoolId: currentSchoolId,
+            attendance: updatedAttendance
+          };
+          realtimeServerInstance?.broadcastManual('students', studentId, 'UPDATE', studentPayload);
+          realtimeServerInstance?.broadcastManual('attendance', studentId, 'UPDATE', {
+            studentId,
+            schoolId: currentSchoolId,
+            code: targetCode,
+            date,
+            period,
+            status,
+            reason,
+            by,
+            attendance: updatedAttendance
+          });
+        } catch (wsErr) {
+          console.warn("Failed to broadcast attendance update:", wsErr);
+        }
+
+        return res.json({ success: true, attendance: updatedAttendance });
       }
 
       res.json({ success: true });

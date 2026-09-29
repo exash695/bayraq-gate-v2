@@ -10,6 +10,7 @@ import {
   AlertTriangle, 
   Star, 
   Map as MapIcon, 
+  Calendar,
   Lightbulb,
   ChevronLeft,
   XCircle,
@@ -1022,6 +1023,47 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
       if (unsubRealtime) unsubRealtime();
     };
   }, [studentCode, schoolId, studentDocId]);
+
+  // Instant real-time listener for attendance updates dispatched from teacher or admin
+  useEffect(() => {
+    if (!studentCode) return;
+    const handleAttendanceUpdated = (evt: any) => {
+      const detail = evt?.detail || evt?.data || evt;
+      if (!detail) return;
+      if (detail.code === studentCode || (studentData && detail.studentId === studentData.id)) {
+        setStudentData((prev: any) => {
+          if (!prev) return prev;
+          const currentAttendance = prev.attendance || { present: 0, absent: 0, late: 0, logs: [] };
+          const logs = Array.isArray(currentAttendance.logs) ? currentAttendance.logs : [];
+          const otherLogs = logs.filter((l: any) => !(l.date === detail.date && l.period === (detail.period || 'يوم كامل')));
+          const newLog = {
+            date: detail.date,
+            status: detail.status,
+            period: detail.period || 'يوم كامل',
+            reason: detail.reason || '',
+            time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+            by: detail.by || 'إدارة المدرسة'
+          };
+          const updatedLogs = [newLog, ...otherLogs];
+          let present = 0, absent = 0, late = 0;
+          updatedLogs.forEach((l: any) => {
+            if (l.status === 'present') present++;
+            if (l.status === 'absent') absent++;
+            if (l.status === 'late') late++;
+          });
+          return {
+            ...prev,
+            attendance: { present, absent, late, logs: updatedLogs }
+          };
+        });
+      }
+    };
+
+    window.addEventListener('attendance_updated', handleAttendanceUpdated as any);
+    return () => {
+      window.removeEventListener('attendance_updated', handleAttendanceUpdated as any);
+    };
+  }, [studentCode, studentData?.id]);
 
   // Persist studentData to local cache for instant zero-lag rendering
   useEffect(() => {
@@ -2520,12 +2562,32 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
 
               {/* Log List */}
               <div className="space-y-3">
-                <h4 className="text-white/40 text-[10px] font-black uppercase tracking-widest px-2">آخر تسجيلات الحضور</h4>
+                <div className="flex items-center justify-between px-2">
+                  <h4 className="text-white/60 text-xs font-black uppercase tracking-wider flex items-center gap-1.5">
+                    <Calendar size={14} className="text-cyan-400" />
+                    <span>سجل الحصص والأيام المؤرشفة بالتاريخ</span>
+                  </h4>
+                  <span className="text-[10px] text-white/40 font-mono">
+                    {studentData?.attendance?.logs?.length || 0} تسجيل
+                  </span>
+                </div>
+
                 {studentData?.attendance?.logs?.length > 0 ? (
-                  [...studentData.attendance.logs].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map((log: any, idx: number) => {
+                  [...studentData.attendance.logs].sort((a, b) => {
+                    const timeA = new Date(a.date || a.timestamp || 0).getTime();
+                    const timeB = new Date(b.date || b.timestamp || 0).getTime();
+                    return timeB - timeA;
+                  }).map((log: any, idx: number) => {
+                    const rawDate = log.date || (log.timestamp ? new Date(log.timestamp).toISOString().split('T')[0] : '');
                     const getArabicDayName = (dateStr: string) => {
                       try {
-                        const date = new Date(dateStr);
+                        const parts = (dateStr || '').split('-');
+                        let date: Date;
+                        if (parts.length === 3) {
+                          date = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+                        } else {
+                          date = new Date(dateStr);
+                        }
                         if (isNaN(date.getTime())) return '';
                         const days = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
                         return days[date.getDay()];
@@ -2533,46 +2595,72 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                         return '';
                       }
                     };
-                    const dayName = getArabicDayName(log.date);
+                    const dayName = getArabicDayName(rawDate);
+                    const formattedDate = rawDate || 'تاريخ غير محدد';
 
                     return (
-                      <div key={`att_log_${log.date}_${log.time || ''}_${idx}`} className="bg-[#101935] p-4 rounded-2xl border border-white/5 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                            log.status === 'present' ? 'bg-emerald-500/20 text-emerald-400' : 
-                            log.status === 'absent' ? 'bg-rose-500/20 text-rose-400' : 'bg-amber-500/20 text-amber-400'
+                      <div key={`att_log_${rawDate}_${log.time || ''}_${log.period || ''}_${idx}`} className="bg-[#101935] p-4 rounded-2xl border border-white/10 hover:border-cyan-500/30 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
+                        <div className="flex items-start sm:items-center gap-3">
+                          <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 shadow-sm ${
+                            log.status === 'present' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-[0_0_12px_rgba(16,185,129,0.2)]' : 
+                            log.status === 'absent' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30 shadow-[0_0_12px_rgba(244,63,94,0.2)]' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30 shadow-[0_0_12px_rgba(245,158,11,0.2)]'
                           }`}>
-                            {log.status === 'present' ? <CheckCircle2 size={16} /> : 
-                             log.status === 'late' ? <Timer size={16} /> : <XCircle size={16} />}
+                            {log.status === 'present' ? <CheckCircle2 size={20} /> : 
+                             log.status === 'late' ? <Timer size={20} /> : <XCircle size={20} />}
                           </div>
-                          <div className="flex flex-col">
-                            <div className="flex items-center gap-2">
-                              <span className="text-white font-bold text-sm">
-                                {dayName ? `${dayName} • ` : ''}{log.date}
-                              </span>
-                              {log.period && log.period !== 'عام' && (
-                                  <span className="bg-white/10 text-[8px] text-white/60 px-1.5 py-0.5 rounded uppercase">حصة {log.period}</span>
+                          
+                          <div className="flex flex-col gap-1 min-w-0">
+                            {/* Prominent Date & Day Display */}
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <div className="inline-flex items-center gap-1.5 bg-blue-500/15 border border-blue-400/30 text-blue-300 px-2.5 py-0.5 rounded-lg text-xs font-black">
+                                <Calendar size={13} className="text-amber-400 shrink-0" />
+                                <span>{dayName ? `${dayName}، ` : ''}{formattedDate}</span>
+                              </div>
+
+                              {log.period && (
+                                <span className="bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-[11px] font-black px-2 py-0.5 rounded-lg">
+                                  {log.period === 'يوم كامل' ? 'اليوم بالكامل' : `الحصة ${log.period}`}
+                                </span>
                               )}
                             </div>
-                            <div className="flex items-center gap-1 text-[10px]">
-                              <span className="text-white/30">{log.time || '08:00 AM'}</span>
-                              {log.reason && <span className="text-rose-400/60 font-bold"> - {log.reason}</span>}
+
+                            {/* Additional metadata: Time, Reason, Recorded by */}
+                            <div className="flex items-center gap-2 text-[11px] text-white/50 flex-wrap">
+                              <span className="flex items-center gap-1">
+                                <Clock size={11} className="text-white/40" />
+                                <span className="font-mono text-white/70">{log.time || '08:00 ص'}</span>
+                              </span>
+                              {log.by && (
+                                <span>• الرصد: <span className="text-white/70 font-semibold">{log.by}</span></span>
+                              )}
+                              {log.reason && (
+                                <span className="text-rose-400 font-bold bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.2 rounded">
+                                  السبب: {log.reason}
+                                </span>
+                              )}
                             </div>
                           </div>
                         </div>
-                        <span className={`text-[10px] font-black px-3 py-1 rounded-full ${
-                          log.status === 'present' ? 'bg-emerald-500/10 text-emerald-400' : 
-                          log.status === 'absent' ? 'bg-rose-500/10 text-rose-400' : 'bg-amber-500/10 text-amber-400'
-                        }`}>
-                          {log.status === 'present' ? 'حاضر' : log.status === 'absent' ? 'غائب' : 'متأخر'}
-                        </span>
+
+                        {/* Status Badge */}
+                        <div className="self-end sm:self-center shrink-0">
+                          <span className={`text-xs font-black px-3.5 py-1.5 rounded-xl border flex items-center gap-1.5 ${
+                            log.status === 'present' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' : 
+                            log.status === 'absent' ? 'bg-rose-500/15 text-rose-300 border-rose-500/30' : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+                          }`}>
+                            <span className={`w-2 h-2 rounded-full ${
+                              log.status === 'present' ? 'bg-emerald-400' : log.status === 'absent' ? 'bg-rose-400' : 'bg-amber-400'
+                            }`} />
+                            <span>{log.status === 'present' ? 'حاضر ✅' : log.status === 'absent' ? 'غائب ❌' : 'متأخر ⏳'}</span>
+                          </span>
+                        </div>
                       </div>
                     );
                   })
                 ) : (
                   <div className="p-10 border-2 border-dashed border-white/5 rounded-[2.5rem] text-center space-y-3">
                     <Timer size={40} className="mx-auto text-white/10" />
-                    <p className="text-white/20 text-xs font-bold">لا يوجد سجل حضور مسجل لهذا الأسبوع</p>
+                    <p className="text-white/30 text-xs font-bold">لا يوجد سجل حضور مسجل بعد</p>
                   </div>
                 )}
               </div>

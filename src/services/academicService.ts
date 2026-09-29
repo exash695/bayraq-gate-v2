@@ -494,7 +494,17 @@ export const academicService = {
       body: JSON.stringify({ status, by, reason, period, schoolId, date })
     });
     if (!response.ok) throw new Error('Failed to update attendance');
-    return await response.json();
+    const result = await response.json();
+
+    // Trigger local real-time synchronization across Teacher, Admin, and Parent views
+    realtimeManager.trigger('students', { action: 'UPDATE', id: studentId, schoolId });
+    realtimeManager.trigger('attendance', { action: 'UPDATE', id: studentId, studentId, status, by, reason, period, schoolId, date });
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('students_updated', { detail: { studentId, schoolId } }));
+      window.dispatchEvent(new CustomEvent('attendance_updated', { detail: { studentId, status, by, reason, period, schoolId, date } }));
+    }
+
+    return result;
   },
 
   updateBehavior: async (studentId: string, payload: { type: string, points: number, action: string, note: string, by: string, schoolId?: string }) => {

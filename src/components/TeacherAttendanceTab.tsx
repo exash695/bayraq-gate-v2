@@ -27,6 +27,7 @@ import {
 import { academicService, SchoolStudent, AcademicList } from '../services/academicService';
 import { staffService } from '../services/staffService';
 import { safeStorage } from '../lib/storage';
+import { realtimeManager } from '../lib/realtimeManager';
 import { printAttendanceReport } from '../utils/attendancePrint';
 import { BerqCharacter } from './BerqCharacterManager';
 
@@ -116,6 +117,65 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
       setAllStudents(initialStudents);
     }
   }, [initialStudents]);
+
+  // Instant real-time synchronization with server, Admin dashboard, and other teachers
+  useEffect(() => {
+    if (!schoolId) return;
+    const unsubStudents = academicService.subscribeToStudents(schoolId, (freshStudents) => {
+      if (Array.isArray(freshStudents) && freshStudents.length > 0) {
+        setAllStudents(freshStudents);
+      }
+    });
+
+    const handleRealtimeAttendance = (evt: any) => {
+      const detail = evt?.detail || evt?.data || evt;
+      if (!detail?.studentId) return;
+
+      setAllStudents(prevStudents => {
+        return prevStudents.map(st => {
+          if (st.id === detail.studentId || (detail.code && st.code === detail.code)) {
+            const currentAttendance = st.attendance || { present: 0, absent: 0, late: 0, logs: [] };
+            const existingLogs = Array.isArray(currentAttendance.logs) ? currentAttendance.logs : [];
+            const otherLogs = existingLogs.filter((l: any) => !(l.date === detail.date && l.period === (detail.period || 'يوم كامل')));
+            const newLog = {
+              date: detail.date,
+              status: detail.status,
+              period: detail.period || 'يوم كامل',
+              reason: detail.reason || '',
+              time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+              by: detail.by || 'الأستاذ'
+            };
+            const updatedLogs = [newLog, ...otherLogs];
+            let presentCount = 0, absentCount = 0, lateCount = 0;
+            updatedLogs.forEach((l: any) => {
+              if (l.status === 'present') presentCount++;
+              if (l.status === 'absent') absentCount++;
+              if (l.status === 'late') lateCount++;
+            });
+            return {
+              ...st,
+              attendance: {
+                present: presentCount,
+                absent: absentCount,
+                late: lateCount,
+                logs: updatedLogs
+              }
+            };
+          }
+          return st;
+        });
+      });
+    };
+
+    window.addEventListener('attendance_updated', handleRealtimeAttendance as any);
+    const unsubWs = realtimeManager.subscribe('attendance', handleRealtimeAttendance);
+
+    return () => {
+      unsubStudents();
+      window.removeEventListener('attendance_updated', handleRealtimeAttendance as any);
+      unsubWs();
+    };
+  }, [schoolId]);
 
   // Real-time teacher data state (keeps teacher classes strictly synchronized with administrative updates)
   const [internalTeacherData, setInternalTeacherData] = useState<any>(teacherData);
@@ -475,14 +535,24 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
 
   // Calculate day-specific status for each student
   const studentsWithDayStatus = useMemo(() => {
+    const sDate = String(selectedDate || '').split('T')[0];
     return classStudents.map(student => {
-      const logs = ((student as any).attendance?.logs || []) as any[];
-      const dayLog = logs.find((l: any) => l.date === selectedDate);
-      const status: 'present' | 'absent' | 'late' | 'unrecorded' = dayLog ? dayLog.status : 'unrecorded';
+      const logs = (((student as any).attendance?.logs || []) as any[]);
+      const dayLogs = logs.filter((l: any) => {
+        const lDate = String(l.date || '').split('T')[0];
+        return lDate === sDate;
+      });
+      let status: 'present' | 'absent' | 'late' | 'unrecorded' = 'unrecorded';
+      let dayLog: any = null;
+      if (dayLogs.length > 0) {
+        dayLog = dayLogs[0];
+        status = dayLog.status || 'unrecorded';
+      }
       return {
         ...student,
         dayStatus: status,
-        dayLog: dayLog || null
+        dayLog: dayLog || null,
+        dayLogs
       };
     });
   }, [classStudents, selectedDate]);
@@ -1219,7 +1289,16 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
                     
                     {/* 1. Present Button */}
                     <button
-                      onClick={() => handleQuickStatus(student, 'present')}
+                      onClick={() => {
+                        if (isEditing && actionStatus === 'present') {
+                          setEditingStudentId(null);
+                        } else {
+                          setEditingStudentId(student.id);
+                          setActionStatus('present');
+                          setActionPeriod('يوم كامل');
+                          setActionReason('');
+                        }
+                      }}
                       className={`px-3.5 py-2 rounded-xl font-black text-xs transition-all cursor-pointer flex items-center gap-1.5 ${
                         dayStatus === 'present'
                           ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/25 ring-2 ring-emerald-400/40'
@@ -1288,19 +1367,26 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-[#080d1a] p-3.5 rounded-xl border border-white/5">
                         
                         {/* Period selection */}
-                        <div className="space-y-1.5">
-                          <label className="text-[11px] font-extrabold text-cyan-300 block">
-                            تحديد وقت / الحصة الدراسية:
-                          </label>
+                        <div className={`space-y-1.5 ${actionStatus === 'present' ? 'md:col-span-2' : ''}`}>
+                          <div className="flex items-center justify-between">
+                            <label className="text-[11px] font-extrabold text-cyan-300 block">
+                              تحديد وقت / الحصة الدراسية:
+                            </label>
+                            <span className="text-[10px] text-white/50 font-bold">
+                              المحدد: {actionPeriod === 'يوم كامل' ? 'اليوم بالكامل' : `الحصة ${actionPeriod}`}
+                            </span>
+                          </div>
                           <div className="flex flex-wrap gap-1.5">
                             {['يوم كامل', '1', '2', '3', '4', '5', '6', '7', '8'].map(p => (
                               <button
                                 key={p}
                                 type="button"
                                 onClick={() => setActionPeriod(p)}
-                                className={`px-2.5 py-1 rounded-lg text-xs font-black transition-all cursor-pointer border ${
+                                className={`px-2.5 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer border ${
                                   actionPeriod === p
-                                    ? 'bg-cyan-500 text-black border-cyan-400 shadow-md shadow-cyan-500/20'
+                                    ? (actionStatus === 'present' ? 'bg-emerald-500 text-black border-emerald-400 shadow-md shadow-emerald-500/20' :
+                                       actionStatus === 'absent' ? 'bg-rose-500 text-white border-rose-400 shadow-md shadow-rose-500/20' :
+                                       'bg-amber-500 text-black border-amber-400 shadow-md shadow-amber-500/20')
                                     : 'bg-white/5 text-white/60 border-white/10 hover:text-white'
                                 }`}
                               >
@@ -1332,31 +1418,48 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
                       </div>
 
                       {/* Confirm & Submit */}
-                      <div className="flex items-center justify-end gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setEditingStudentId(null)}
-                          className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/60 hover:text-white text-xs font-bold transition-all cursor-pointer"
-                        >
-                          إلغاء
-                        </button>
-                        <button
-                          type="button"
-                          disabled={isSubmittingAction}
-                          onClick={() => handleSaveDetailedAction(student)}
-                          className={`px-5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shadow-lg ${
-                            actionStatus === 'absent'
-                              ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/25'
-                              : 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-600/25'
-                          }`}
-                        >
-                          {isSubmittingAction ? (
-                            <RefreshCw size={13} className="animate-spin" />
-                          ) : (
-                            <Check size={13} />
+                      <div className="flex items-center justify-between gap-2 pt-1">
+                        <div>
+                          {actionStatus === 'present' && (
+                            <button
+                              type="button"
+                              onClick={() => handleQuickStatus(student, 'present')}
+                              className="text-[11px] text-emerald-400 hover:text-emerald-300 font-bold underline cursor-pointer"
+                            >
+                              تسجيل حضور يوم كامل فوراً ⚡
+                            </button>
                           )}
-                          <span>تأكيد تسجيل ({actionStatus === 'absent' ? 'الغياب' : 'التأخير'}) لـ {actionPeriod}</span>
-                        </button>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setEditingStudentId(null)}
+                            className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/60 hover:text-white text-xs font-bold transition-all cursor-pointer"
+                          >
+                            إلغاء
+                          </button>
+                          <button
+                            type="button"
+                            disabled={isSubmittingAction}
+                            onClick={() => handleSaveDetailedAction(student)}
+                            className={`px-5 py-2 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shadow-lg ${
+                              actionStatus === 'present'
+                                ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/25'
+                                : actionStatus === 'absent'
+                                ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-rose-600/25'
+                                : 'bg-amber-600 hover:bg-amber-500 text-white shadow-amber-600/25'
+                            }`}
+                          >
+                            {isSubmittingAction ? (
+                              <RefreshCw size={13} className="animate-spin" />
+                            ) : (
+                              <Check size={13} />
+                            )}
+                            <span>
+                              تأكيد تسجيل ({actionStatus === 'present' ? 'الحضور' : actionStatus === 'absent' ? 'الغياب' : 'التأخير'}) لـ {actionPeriod === 'يوم كامل' ? 'اليوم بالكامل' : `الحصة ${actionPeriod}`}
+                            </span>
+                          </button>
+                        </div>
                       </div>
                     </motion.div>
                   )}

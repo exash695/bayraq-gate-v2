@@ -2484,10 +2484,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                                 <div className="flex items-center gap-1.5">
                                   <button 
-                                    onClick={() => academicService.updateAttendance(s.id, (s as any).userId, 'present', 'الإدارة', '', 'يوم كامل', selectedSchoolId || '', attendanceDate).then(() => {
-                                      showToast(`تم تسجيل حضور "${s.name}"`);
-                                      setAttendanceAction(null);
-                                    })} 
+                                    onClick={() => {
+                                      if (isEditing && attendanceAction?.status === 'present') {
+                                        setAttendanceAction(null);
+                                      } else {
+                                        setAttendanceAction({ studentId: s.id, status: 'present', period: 'يوم كامل', reason: '' });
+                                      }
+                                    }} 
                                     className={`px-3.5 py-2 rounded-xl font-bold text-xs transition-all active:scale-95 cursor-pointer ${s.dayStatus === 'present' ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/20' : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20'}`}
                                   >
                                     حضور
@@ -2516,16 +2519,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     className="overflow-hidden space-y-3 pt-3 border-t border-white/5"
                                   >
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-right">
-                                      <div className="space-y-1.5">
-                                        <label className="text-[10px] text-white/40 font-bold block">تحديد الوقت/الحصة</label>
+                                      <div className={`space-y-1.5 ${attendanceAction.status === 'present' ? 'sm:col-span-2' : ''}`}>
+                                        <div className="flex items-center justify-between">
+                                          <label className="text-[10px] text-white/40 font-bold block">تحديد الوقت/الحصة</label>
+                                          <span className="text-[10px] text-cyan-400 font-bold">
+                                            المحدد: {attendanceAction.period === 'يوم كامل' ? 'اليوم بالكامل' : `الحصة ${attendanceAction.period}`}
+                                          </span>
+                                        </div>
                                         <div className="flex flex-wrap gap-1">
                                           {['يوم كامل', '1', '2', '3', '4', '5', '6', '7', '8'].map(p => (
                                             <button 
                                               key={p}
                                               onClick={() => setAttendanceAction({ ...attendanceAction, period: p })}
-                                              className={`px-2.5 h-7 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${attendanceAction.period === p ? 'bg-blue-500 border-blue-400 text-white' : 'bg-white/5 border-white/10 text-white/60'}`}
+                                              className={`px-2.5 h-7 rounded-lg text-[10px] font-bold border transition-all cursor-pointer ${
+                                                attendanceAction.period === p 
+                                                  ? (attendanceAction.status === 'present' ? 'bg-emerald-500 border-emerald-400 text-black font-black shadow-md shadow-emerald-500/20' :
+                                                     attendanceAction.status === 'absent' ? 'bg-rose-500 border-rose-400 text-white font-black shadow-md shadow-rose-500/20' :
+                                                     'bg-amber-500 border-amber-400 text-black font-black shadow-md shadow-amber-500/20')
+                                                  : 'bg-white/5 border-white/10 text-white/60 hover:text-white'
+                                              }`}
                                             >
-                                              {p}
+                                              {p === 'يوم كامل' ? 'اليوم بالكامل' : `الحصة ${p}`}
                                             </button>
                                           ))}
                                         </div>
@@ -2548,27 +2562,57 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                       )}
                                     </div>
 
-                                    <button 
-                                      onClick={() => {
-                                        academicService.updateAttendance(
-                                          s.id, 
-                                          (s as any).userId, 
-                                          attendanceAction.status, 
-                                          'الإدارة', 
-                                          attendanceAction.reason, 
-                                          attendanceAction.period,
-                                          selectedSchoolId || '',
-                                          attendanceDate
-                                        ).then(() => {
-                                          showToast(`تم تسجيل ${attendanceAction.status === 'absent' ? 'الغياب' : 'التأخير'}`);
-                                          setAttendanceAction(null);
-                                        });
-                                      }}
-                                      className="w-full py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-bold text-xs shadow-lg shadow-blue-500/20 transition-all flex items-center justify-center gap-2 cursor-pointer"
-                                    >
-                                      <Check size={14} />
-                                      تأكيد التسجيل لـ {attendanceAction.period} ({attendanceDate})
-                                    </button>
+                                    <div className="space-y-1.5 pt-1">
+                                      <button 
+                                        onClick={() => {
+                                          academicService.updateAttendance(
+                                            s.id, 
+                                            (s as any).userId, 
+                                            attendanceAction.status, 
+                                            'الإدارة', 
+                                            attendanceAction.reason, 
+                                            attendanceAction.period,
+                                            selectedSchoolId || '',
+                                            attendanceDate
+                                          ).then(() => {
+                                            showToast(`تم تسجيل ${attendanceAction.status === 'present' ? 'الحضور' : attendanceAction.status === 'absent' ? 'الغياب' : 'التأخير'}`);
+                                            setAttendanceAction(null);
+                                          });
+                                        }}
+                                        className={`w-full py-2.5 ${
+                                          attendanceAction.status === 'present' ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/20' :
+                                          attendanceAction.status === 'absent' ? 'bg-rose-600 hover:bg-rose-500 shadow-rose-600/20' :
+                                          'bg-amber-600 hover:bg-amber-500 shadow-amber-600/20'
+                                        } text-white rounded-xl font-bold text-xs shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer`}
+                                      >
+                                        <Check size={14} />
+                                        تأكيد تسجيل ({attendanceAction.status === 'present' ? 'الحضور' : attendanceAction.status === 'absent' ? 'الغياب' : 'التأخير'}) لـ {attendanceAction.period === 'يوم كامل' ? 'اليوم بالكامل' : `الحصة ${attendanceAction.period}`} ({attendanceDate})
+                                      </button>
+
+                                      {attendanceAction.status === 'present' && (
+                                        <button 
+                                          type="button"
+                                          onClick={() => {
+                                            academicService.updateAttendance(
+                                              s.id, 
+                                              (s as any).userId, 
+                                              'present', 
+                                              'الإدارة', 
+                                              '', 
+                                              'يوم كامل',
+                                              selectedSchoolId || '',
+                                              attendanceDate
+                                            ).then(() => {
+                                              showToast(`تم تسجيل حضور "${s.name}" ليوم كامل`);
+                                              setAttendanceAction(null);
+                                            });
+                                          }}
+                                          className="w-full text-center text-[11px] text-emerald-400 hover:text-emerald-300 font-bold underline cursor-pointer mt-0.5"
+                                        >
+                                          تسجيل حضور يوم كامل فوراً ⚡
+                                        </button>
+                                      )}
+                                    </div>
                                   </motion.div>
                                 )}
                               </AnimatePresence>
