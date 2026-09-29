@@ -1028,18 +1028,32 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   useEffect(() => {
     if (!studentCode) return;
     const handleAttendanceUpdated = (evt: any) => {
-      const detail = evt?.detail || evt?.data || evt;
+      const detail = evt?.detail || evt?.data || evt?.payload || evt;
       if (!detail) return;
-      if (detail.code === studentCode || (studentData && detail.studentId === studentData.id)) {
+      const targetCode = detail.code || detail.studentCode || detail.userId || '';
+      const targetId = detail.studentId || detail.id || '';
+      const currentCode = (studentCode || '').trim().toLowerCase();
+      const sDataId = (studentData?.id || '').trim().toLowerCase();
+      const sDataCode = (studentData?.code || '').trim().toLowerCase();
+
+      const isMatch = 
+        (targetCode && targetCode.trim().toLowerCase() === currentCode) ||
+        (targetId && targetId.trim().toLowerCase() === currentCode) ||
+        (sDataId && (targetId.trim().toLowerCase() === sDataId || targetCode.trim().toLowerCase() === sDataId)) ||
+        (sDataCode && (targetCode.trim().toLowerCase() === sDataCode || targetId.trim().toLowerCase() === sDataCode));
+
+      if (isMatch) {
         setStudentData((prev: any) => {
           if (!prev) return prev;
           const currentAttendance = prev.attendance || { present: 0, absent: 0, late: 0, logs: [] };
           const logs = Array.isArray(currentAttendance.logs) ? currentAttendance.logs : [];
-          const otherLogs = logs.filter((l: any) => !(l.date === detail.date && l.period === (detail.period || 'يوم كامل')));
+          const attPeriod = detail.period || 'يوم كامل';
+          const attDate = detail.date || new Date().toISOString().split('T')[0];
+          const otherLogs = logs.filter((l: any) => !(l.date === attDate && l.period === attPeriod));
           const newLog = {
-            date: detail.date,
-            status: detail.status,
-            period: detail.period || 'يوم كامل',
+            date: attDate,
+            status: detail.status || 'present',
+            period: attPeriod,
             reason: detail.reason || '',
             time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
             by: detail.by || 'إدارة المدرسة'
@@ -1059,11 +1073,31 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
       }
     };
 
+    const unsubAttendance = realtimeManager.subscribe('attendance', (data) => {
+      handleAttendanceUpdated(data);
+    });
+
+    const unsubStudents = realtimeManager.subscribe('students', (data) => {
+      if (data?.action === 'UPDATE' && data?.payload?.attendance) {
+        handleAttendanceUpdated({
+          code: data.payload.code,
+          studentId: data.payload.id,
+          date: new Date().toISOString().split('T')[0],
+          status: data.payload.attendance?.logs?.[0]?.status || 'present',
+          period: data.payload.attendance?.logs?.[0]?.period || 'يوم كامل',
+          reason: data.payload.attendance?.logs?.[0]?.reason || '',
+          by: data.payload.attendance?.logs?.[0]?.by || 'إدارة المدرسة'
+        });
+      }
+    });
+
     window.addEventListener('attendance_updated', handleAttendanceUpdated as any);
     return () => {
       window.removeEventListener('attendance_updated', handleAttendanceUpdated as any);
+      unsubAttendance();
+      unsubStudents();
     };
-  }, [studentCode, studentData?.id]);
+  }, [studentCode, studentData?.id, studentData?.code]);
 
   // Persist studentData to local cache for instant zero-lag rendering
   useEffect(() => {
