@@ -252,8 +252,16 @@ export const useAdminData = (selectedSchoolId: string | null, schoolName?: strin
       return Array.from(studentMap.values());
     }
     
-    // Explicitly return an empty list if no active lists exist in the Code Center.
-    // This prevents showing stale/orphaned students from the database when lists are empty.
+    // If no active batches in savedLists but rawStudents are loaded from SQL database, return rawStudents
+    if (rawStudents && rawStudents.length > 0) {
+      return rawStudents.map((s: any) => ({
+        ...s,
+        schoolId: s.schoolId || selectedSchoolId,
+        schoolName: s.school || schoolName,
+        parentCode: s.parentCode || (s.code ? `P-${s.code}` : (s.student ? `P-${s.student}` : ''))
+      }));
+    }
+
     return [];
   }, [savedLists, rawStudents, selectedSchoolId, schoolName]);
 

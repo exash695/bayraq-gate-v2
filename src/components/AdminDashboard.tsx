@@ -84,6 +84,7 @@ import { PortalPulseDashboard } from './PortalPulseDashboard';
 
 import { safeStorage, safeSessionStorage } from '../lib/storage';
 import { useCachedMedia } from '../hooks/useCachedMedia';
+import { AdminSectionErrorBoundary } from './AdminSectionErrorBoundary';
 
 interface AdminDashboardProps {
   schoolName: string;
@@ -916,6 +917,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setTeachersSubView(false);
   }, [activeTab]);
 
+  // Handle Android app background/foreground & tab switching recovery
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        if (mainRef.current) {
+          mainRef.current.scrollTop = mainRef.current.scrollTop;
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleVisibilityChange);
+    };
+  }, []);
+
   // Reset behavior modal states when active student changes
   useEffect(() => {
     if (selectedBehaviorStudent) {
@@ -1612,7 +1630,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         )}
 
-        <AnimatePresence mode="wait">
+        <AdminSectionErrorBoundary
+          key={`admin-sec-boundary-${resolvedActiveTab}`}
+          sectionName={tabs.find(t => t.id === resolvedActiveTab)?.name || resolvedActiveTab}
+          onRetry={() => {
+            if (mainRef.current) mainRef.current.scrollTop = 0;
+          }}
+          onGoHome={() => setActiveTab('pulse')}
+        >
           {/* Locked Module Guard when disabled by Developer */}
           {isTabDisabled(resolvedActiveTab) && resolvedActiveTab !== 'pulse' && (
             <motion.div
@@ -2827,7 +2852,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <PortalPulseDashboard showToast={showToast} schoolName={schoolName} selectedSchoolId={selectedSchoolId} />
             </motion.div>
           )}
-        </AnimatePresence>
+        </AdminSectionErrorBoundary>
       </main>
       </div>
 
