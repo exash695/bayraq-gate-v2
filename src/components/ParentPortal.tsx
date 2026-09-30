@@ -132,6 +132,8 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   const [isSubmittingSolution, setIsSubmittingSolution] = useState(false);
   const [solutionSubmitSuccess, setSolutionSubmitSuccess] = useState(false);
   const [solutionSubmitError, setSolutionSubmitError] = useState<string | null>(null);
+  const [attendanceFilter, setAttendanceFilter] = useState<'all' | 'absent' | 'late' | 'present'>('all');
+  const [attendanceSearchDate, setAttendanceSearchDate] = useState<string>('');
   const solutionFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [viewedHwIds, setViewedHwIds] = useState<Set<string>>(() => {
@@ -980,7 +982,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
       if (!snapshot.empty) {
         const data = { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
         
-        // Merge Firestore data (like points, level, etc.) into studentData but preserve SQL financials if they are already loaded
+        // Merge Firestore data (like points, level, etc.) into studentData but preserve SQL financials & SQL attendance
         setStudentData(prev => {
           if (!prev) return data;
           
@@ -988,13 +990,17 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
           const hasFirestoreFinance = data.finance && data.finance.installments && data.finance.installments.length > 0;
           const isFirestoreTotalValid = data.totalAmount && Number(data.totalAmount) > 0;
           
+          // Always preserve SQL attendance if loaded with logs
+          const hasPrevLogs = Array.isArray(prev.attendance?.logs) && prev.attendance.logs.length > 0;
+          const hasFirestoreLogs = Array.isArray(data.attendance?.logs) && data.attendance.logs.length > 0;
+          const resolvedAttendance = hasPrevLogs ? prev.attendance : (hasFirestoreLogs ? data.attendance : (prev.attendance || data.attendance));
+
           return {
             ...prev,
             ...data,
             finance: (hasFirestoreFinance && isFirestoreTotalValid) ? data.finance : prev.finance,
             totalAmount: (hasFirestoreFinance && isFirestoreTotalValid) ? data.totalAmount : prev.totalAmount,
-            // Preserve SQL attendance logs if Firestore doesn't have them
-            attendance: (data.attendance?.logs?.length > 0) ? data.attendance : (prev.attendance || data.attendance)
+            attendance: resolvedAttendance
           };
         });
         
@@ -1100,6 +1106,27 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
       unsubStudents();
     };
   }, [studentCode, studentData?.id, studentData?.code]);
+
+  // Fetch fresh attendance logs whenever entering attendance page or code changes
+  useEffect(() => {
+    if (!studentCode || !schoolId) return;
+    if (activeSubPage === 'attendance') {
+      fetch(`/api/students/by-code/${encodeURIComponent(schoolId)}/${encodeURIComponent(studentCode)}`)
+        .then(res => res.json())
+        .then(data => {
+          if (data?.success && data?.student?.attendance) {
+            setStudentData((prev: any) => {
+              if (!prev) return data.student;
+              return {
+                ...prev,
+                attendance: data.student.attendance
+              };
+            });
+          }
+        })
+        .catch(console.warn);
+    }
+  }, [activeSubPage, studentCode, schoolId]);
 
   // Persist studentData to local cache for instant zero-lag rendering
   useEffect(() => {
@@ -2519,28 +2546,63 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
 
           ) : activeSubPage === "attendance" ? (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-              {/* Attendance Stats */}
+              {/* Attendance Stats Cards */}
               <div className="grid grid-cols-3 gap-3">
-                <div className="bg-emerald-500/10 border border-emerald-500/20 p-4 rounded-3xl text-center">
-                  <span className="block text-emerald-400 text-xl font-black">{studentData?.attendance?.present || 0}</span>
-                  <span className="text-[10px] text-emerald-400/60 font-bold uppercase">حضور</span>
+                <div 
+                  onClick={() => setAttendanceFilter('present')}
+                  className={`cursor-pointer transition-all duration-300 p-4 rounded-3xl text-center border ${
+                    attendanceFilter === 'present' 
+                      ? 'bg-emerald-500/20 border-emerald-500 shadow-[0_0_20px_rgba(16,185,129,0.25)] scale-[1.02]' 
+                      : 'bg-emerald-500/10 border-emerald-500/20 hover:border-emerald-500/40'
+                  }`}
+                >
+                  <div className="flex items-center justify-center gap-1 mb-1">
+                    <CheckCircle2 size={16} className="text-emerald-400" />
+                    <span className="block text-emerald-400 text-2xl font-black">{studentData?.attendance?.present || 0}</span>
+                  </div>
+                  <span className="text-[11px] text-emerald-300 font-black">حضور حصص ✅</span>
                 </div>
-                <div className="bg-rose-500/10 border border-rose-500/20 p-4 rounded-3xl text-center">
-                  <span className="block text-rose-400 text-xl font-black">{studentData?.attendance?.absent || 0}</span>
-                  <span className="text-[10px] text-rose-400/60 font-bold uppercase">غياب</span>
+
+                <div 
+                  onClick={() => setAttendanceFilter('absent')}
+                  className={`cursor-pointer transition-all duration-300 p-4 rounded-3xl text-center border ${
+                    attendanceFilter === 'absent' 
+                      ? 'bg-rose-500/20 border-rose-500 shadow-[0_0_20px_rgba(244,63,94,0.25)] scale-[1.02]' 
+                      : 'bg-rose-500/10 border-rose-500/20 hover:border-rose-500/40'
+                  }`}
+                >
+                  <div className="flex items-center justify-center gap-1 mb-1">
+                    <XCircle size={16} className="text-rose-400" />
+                    <span className="block text-rose-400 text-2xl font-black">{studentData?.attendance?.absent || 0}</span>
+                  </div>
+                  <span className="text-[11px] text-rose-300 font-black">غياب حصص ❌</span>
                 </div>
-                <div className="bg-amber-500/10 border border-amber-500/20 p-4 rounded-3xl text-center">
-                  <span className="block text-amber-400 text-xl font-black">{studentData?.attendance?.late || 0}</span>
-                  <span className="text-[10px] text-amber-400/60 font-bold uppercase">تأخير</span>
+
+                <div 
+                  onClick={() => setAttendanceFilter('late')}
+                  className={`cursor-pointer transition-all duration-300 p-4 rounded-3xl text-center border ${
+                    attendanceFilter === 'late' 
+                      ? 'bg-amber-500/20 border-amber-500 shadow-[0_0_20px_rgba(245,158,11,0.25)] scale-[1.02]' 
+                      : 'bg-amber-500/10 border-amber-500/20 hover:border-amber-500/40'
+                  }`}
+                >
+                  <div className="flex items-center justify-center gap-1 mb-1">
+                    <Timer size={16} className="text-amber-400" />
+                    <span className="block text-amber-400 text-2xl font-black">{studentData?.attendance?.late || 0}</span>
+                  </div>
+                  <span className="text-[11px] text-amber-300 font-black">تأخير ⏳</span>
                 </div>
               </div>
 
-              {/* Commitment Score */}
-              <div className="bg-gradient-to-br from-blue-600 to-indigo-700 p-5 rounded-3xl shadow-xl shadow-blue-900/20 relative overflow-hidden">
+              {/* Commitment Score & Rate */}
+              <div className="bg-gradient-to-br from-blue-700 via-indigo-800 to-slate-900 p-5 rounded-3xl shadow-xl shadow-blue-900/30 border border-blue-400/20 relative overflow-hidden">
                  <div className="relative z-10 flex items-center justify-between">
                     <div>
-                        <h3 className="text-white font-black text-lg">معدل الانضباط</h3>
-                        <p className="text-white/60 text-[10px]">بناءً على حضور الطالب خلال الفصل الدراسي</p>
+                        <div className="flex items-center gap-2 mb-1">
+                          <ShieldCheck size={18} className="text-cyan-400" />
+                          <h3 className="text-white font-black text-lg">معدل الانضباط والمواظبة</h3>
+                        </div>
+                        <p className="text-white/70 text-xs">نسبة التزام الطالب بحضور الحصص الدراسية المقررة</p>
                     </div>
                     <div className="text-right">
                         {(() => {
@@ -2549,156 +2611,330 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                            const total = present + absent;
                            const rate = total > 0 ? Math.round((present / total) * 100) : 100;
                            return (
-                             <div className="flex flex-col items-center">
+                             <div className="flex flex-col items-center bg-white/10 px-4 py-2 rounded-2xl border border-white/15 backdrop-blur-md">
                                <span className="text-3xl font-black text-white">{rate}%</span>
-                               <span className="text-[9px] text-white/80 font-bold uppercase tracking-tighter">درجة الالتزام</span>
+                               <span className="text-[10px] text-amber-300 font-black uppercase tracking-wider">
+                                 {rate >= 90 ? 'ممتاز 🌟' : rate >= 75 ? 'جيد جداً 👍' : 'يحتاج متابعة ⚠️'}
+                               </span>
                              </div>
                            );
                         })()}
                     </div>
                  </div>
-                 <div className="absolute -right-4 -bottom-4 w-24 h-24 bg-white/10 rounded-full blur-2xl" />
+                 <div className="absolute -right-6 -bottom-6 w-32 h-32 bg-blue-500/20 rounded-full blur-2xl pointer-events-none" />
               </div>
 
-              {/* Weekly Commitment Status */}
-              <div className="bg-[#101935] p-5 rounded-3xl border border-white/5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h4 className="text-white font-bold text-sm">مؤشر الالتزام الأسبوعي</h4>
-                  <div className="flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                    <span className="text-[10px] text-emerald-400 font-bold">تحديث فوري</span>
-                  </div>
-                </div>
-                
-                <div className="flex justify-between items-end h-20 gap-1 px-1">
-                  {(() => {
-                    const days = ['السبت', 'الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس'];
-                    const logs = studentData?.attendance?.logs || [];
-                    
-                    return days.map((day) => {
-                      const dayLogs = logs.filter((l: any) => {
-                        const logDate = new Date(l.date);
-                        return logDate.toLocaleDateString('ar-EG', { weekday: 'long' }) === day;
-                      });
-                      
-                      const status = dayLogs.length > 0 ? dayLogs[dayLogs.length - 1].status : 'none';
-                      const height = status === 'present' ? 'h-full' : status === 'late' ? 'h-2/3' : status === 'absent' ? 'h-1/3' : 'h-2';
-                      const color = status === 'present' ? 'bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.3)]' : status === 'late' ? 'bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.3)]' : status === 'absent' ? 'bg-rose-500 shadow-[0_0_10px_rgba(244,63,94,0.3)]' : 'bg-white/5';
-                      
-                      return (
-                        <div key={day} className="flex-1 flex flex-col items-center gap-2">
-                          <div className={`w-full ${height} ${color} rounded-t-lg transition-all duration-700`} />
-                          <span className="text-[8px] text-white/40 font-bold">{day}</span>
-                        </div>
-                      );
-                    });
-                  })()}
+              {/* Smart Filter Tabs */}
+              <div className="flex items-center justify-between gap-2 overflow-x-auto no-scrollbar pb-1">
+                <div className="flex items-center gap-1.5 bg-[#101935] p-1.5 rounded-2xl border border-white/10 shrink-0 w-full sm:w-auto">
+                  <button
+                    onClick={() => setAttendanceFilter('all')}
+                    className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-xl text-xs font-black transition-all ${
+                      attendanceFilter === 'all'
+                        ? 'bg-blue-600 text-white shadow-md'
+                        : 'text-white/60 hover:text-white'
+                    }`}
+                  >
+                    الكل ({studentData?.attendance?.logs?.length || 0})
+                  </button>
+
+                  <button
+                    onClick={() => setAttendanceFilter('absent')}
+                    className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1 ${
+                      attendanceFilter === 'absent'
+                        ? 'bg-rose-600 text-white shadow-md'
+                        : 'text-rose-400 hover:text-rose-300'
+                    }`}
+                  >
+                    <span>الغياب فقط ❌</span>
+                    <span>({studentData?.attendance?.absent || 0})</span>
+                  </button>
+
+                  <button
+                    onClick={() => setAttendanceFilter('late')}
+                    className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1 ${
+                      attendanceFilter === 'late'
+                        ? 'bg-amber-600 text-white shadow-md'
+                        : 'text-amber-400 hover:text-amber-300'
+                    }`}
+                  >
+                    <span>التأخيرات ⏳</span>
+                    <span>({studentData?.attendance?.late || 0})</span>
+                  </button>
+
+                  <button
+                    onClick={() => setAttendanceFilter('present')}
+                    className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1 ${
+                      attendanceFilter === 'present'
+                        ? 'bg-emerald-600 text-white shadow-md'
+                        : 'text-emerald-400 hover:text-emerald-300'
+                    }`}
+                  >
+                    <span>الحضور ✅</span>
+                    <span>({studentData?.attendance?.present || 0})</span>
+                  </button>
                 </div>
               </div>
 
-              {/* Log List */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between px-2">
-                  <h4 className="text-white/60 text-xs font-black uppercase tracking-wider flex items-center gap-1.5">
-                    <Calendar size={14} className="text-cyan-400" />
-                    <span>سجل الحصص والأيام المؤرشفة بالتاريخ</span>
+              {/* Attendance Matrix & Days Archive */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between px-1">
+                  <h4 className="text-white text-sm font-black flex items-center gap-2">
+                    <Calendar size={16} className="text-cyan-400" />
+                    <span>سجل الحصص والأيام المؤرشفة بالتاريخ الذكي</span>
                   </h4>
-                  <span className="text-[10px] text-white/40 font-mono">
-                    {studentData?.attendance?.logs?.length || 0} تسجيل
+                  <span className="text-[11px] text-cyan-300 bg-cyan-500/10 border border-cyan-500/20 px-2.5 py-0.5 rounded-full font-bold">
+                    تزامن حي ومباشر ⚡
                   </span>
                 </div>
 
-                {studentData?.attendance?.logs?.length > 0 ? (
-                  [...studentData.attendance.logs].sort((a, b) => {
-                    const timeA = new Date(a.date || a.timestamp || 0).getTime();
-                    const timeB = new Date(b.date || b.timestamp || 0).getTime();
-                    return timeB - timeA;
-                  }).map((log: any, idx: number) => {
-                    const rawDate = log.date || (log.timestamp ? new Date(log.timestamp).toISOString().split('T')[0] : '');
-                    const getArabicDayName = (dateStr: string) => {
-                      try {
-                        const parts = (dateStr || '').split('-');
-                        let date: Date;
-                        if (parts.length === 3) {
-                          date = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
-                        } else {
-                          date = new Date(dateStr);
-                        }
-                        if (isNaN(date.getTime())) return '';
-                        const days = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
-                        return days[date.getDay()];
-                      } catch {
-                        return '';
+                {(() => {
+                  const allLogs = Array.isArray(studentData?.attendance?.logs) ? studentData.attendance.logs : [];
+                  
+                  // Filter logs according to active filter
+                  const filteredLogs = allLogs.filter((l: any) => {
+                    if (attendanceFilter === 'absent') return l.status === 'absent';
+                    if (attendanceFilter === 'late') return l.status === 'late';
+                    if (attendanceFilter === 'present') return l.status === 'present';
+                    return true;
+                  });
+
+                  if (filteredLogs.length === 0) {
+                    return (
+                      <div className="p-10 border-2 border-dashed border-white/10 rounded-3xl text-center space-y-3 bg-[#101935]/40">
+                        <Timer size={44} className="mx-auto text-white/20" />
+                        <h5 className="text-white font-bold text-sm">
+                          {attendanceFilter === 'absent' 
+                            ? 'ممتاز! لا يوجد أي سجل غياب للطالب 🎉' 
+                            : attendanceFilter === 'late'
+                            ? 'لا توجد أي حالات تأخير مسجلة للطالب 👍'
+                            : 'لا توجد سجلات حضور مسجلة حتى الآن'}
+                        </h5>
+                        <p className="text-white/40 text-xs">
+                          {attendanceFilter !== 'all' 
+                            ? 'اضغط على زر "الكل" لعرض كافة السجلات الأخرى'
+                            : 'سيتم ظهور السجلات فور قيام الأساتذة برصد الحصص'}
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  // Group by Date for crystal clear daily breakdown
+                  const dateGroups: { [key: string]: any[] } = {};
+                  filteredLogs.forEach((l: any) => {
+                    const rawDate = l.date || (l.timestamp ? new Date(l.timestamp).toISOString().split('T')[0] : 'سجل سابق');
+                    if (!dateGroups[rawDate]) {
+                      dateGroups[rawDate] = [];
+                    }
+                    dateGroups[rawDate].push(l);
+                  });
+
+                  const sortedDates = Object.keys(dateGroups).sort((a, b) => {
+                    return new Date(b).getTime() - new Date(a).getTime();
+                  });
+
+                  const getArabicDayName = (dateStr: string) => {
+                    try {
+                      const parts = (dateStr || '').split('-');
+                      let date: Date;
+                      if (parts.length === 3) {
+                        date = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+                      } else {
+                        date = new Date(dateStr);
                       }
-                    };
-                    const dayName = getArabicDayName(rawDate);
-                    const formattedDate = rawDate || 'تاريخ غير محدد';
+                      if (isNaN(date.getTime())) return '';
+                      const days = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+                      return days[date.getDay()];
+                    } catch {
+                      return '';
+                    }
+                  };
+
+                  return sortedDates.map((dateKey) => {
+                    const dayLogs = dateGroups[dateKey];
+                    const dayName = getArabicDayName(dateKey);
+
+                    // Calculate day statistics
+                    let dayPresent = 0, dayAbsent = 0, dayLate = 0;
+                    dayLogs.forEach((l: any) => {
+                      if (l.status === 'present') dayPresent++;
+                      if (l.status === 'absent') dayAbsent++;
+                      if (l.status === 'late') dayLate++;
+                    });
+
+                    // Periods status lookup map
+                    const periodsMap: { [key: string]: any } = {};
+                    dayLogs.forEach((l: any) => {
+                      if (l.period) {
+                        periodsMap[l.period] = l;
+                      }
+                    });
+
+                    const isFullDay = periodsMap['يوم كامل'];
 
                     return (
-                      <div key={`att_log_${rawDate}_${log.time || ''}_${log.period || ''}_${idx}`} className="bg-[#101935] p-4 rounded-2xl border border-white/10 hover:border-cyan-500/30 transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
-                        <div className="flex items-start sm:items-center gap-3">
-                          <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 shadow-sm ${
-                            log.status === 'present' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shadow-[0_0_12px_rgba(16,185,129,0.2)]' : 
-                            log.status === 'absent' ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30 shadow-[0_0_12px_rgba(244,63,94,0.2)]' : 'bg-amber-500/20 text-amber-400 border border-amber-500/30 shadow-[0_0_12px_rgba(245,158,11,0.2)]'
-                          }`}>
-                            {log.status === 'present' ? <CheckCircle2 size={20} /> : 
-                             log.status === 'late' ? <Timer size={20} /> : <XCircle size={20} />}
+                      <div key={`date_group_${dateKey}`} className="bg-[#101935] rounded-3xl border border-white/10 p-5 space-y-4 shadow-lg hover:border-blue-500/30 transition-all">
+                        {/* Day Header */}
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3 border-b border-white/5">
+                          <div className="flex items-center gap-2.5">
+                            <div className="w-10 h-10 rounded-2xl bg-blue-500/15 border border-blue-400/30 flex items-center justify-center text-blue-400 shrink-0">
+                              <Calendar size={20} />
+                            </div>
+                            <div>
+                              <h5 className="text-white font-black text-sm flex items-center gap-2">
+                                <span>{dayName ? `يوم ${dayName}` : 'تاريخ الرصد'}</span>
+                                <span className="text-xs text-blue-300 font-mono bg-blue-500/10 px-2 py-0.5 rounded-lg border border-blue-400/20">
+                                  {dateKey}
+                                </span>
+                              </h5>
+                              <p className="text-white/50 text-[11px] mt-0.5">
+                                إجمالي الحصص المسجلة في هذا اليوم: <span className="text-white font-bold">{dayLogs.length}</span>
+                              </p>
+                            </div>
                           </div>
-                          
-                          <div className="flex flex-col gap-1 min-w-0">
-                            {/* Prominent Date & Day Display */}
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <div className="inline-flex items-center gap-1.5 bg-blue-500/15 border border-blue-400/30 text-blue-300 px-2.5 py-0.5 rounded-lg text-xs font-black">
-                                <Calendar size={13} className="text-amber-400 shrink-0" />
-                                <span>{dayName ? `${dayName}، ` : ''}{formattedDate}</span>
-                              </div>
 
-                              {log.period && (
-                                <span className="bg-cyan-500/15 border border-cyan-500/30 text-cyan-300 text-[11px] font-black px-2 py-0.5 rounded-lg">
-                                  {log.period === 'يوم كامل' ? 'اليوم بالكامل' : `الحصة ${log.period}`}
-                                </span>
-                              )}
-                            </div>
-
-                            {/* Additional metadata: Time, Reason, Recorded by */}
-                            <div className="flex items-center gap-2 text-[11px] text-white/50 flex-wrap">
-                              <span className="flex items-center gap-1">
-                                <Clock size={11} className="text-white/40" />
-                                <span className="font-mono text-white/70">{log.time || '08:00 ص'}</span>
+                          {/* Day Quick Verdict Badge */}
+                          <div className="flex items-center gap-1.5 self-start sm:self-center">
+                            {dayAbsent > 0 ? (
+                              <span className="bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-black px-3 py-1 rounded-xl flex items-center gap-1.5 shadow-[0_0_10px_rgba(244,63,94,0.15)]">
+                                <span className="w-2 h-2 rounded-full bg-rose-400 animate-pulse" />
+                                <span>غائب في ({dayAbsent}) حصة ⚠️</span>
                               </span>
-                              {log.by && (
-                                <span>• الرصد: <span className="text-white/70 font-semibold">{log.by}</span></span>
-                              )}
-                              {log.reason && (
-                                <span className="text-rose-400 font-bold bg-rose-500/10 border border-rose-500/20 px-1.5 py-0.2 rounded">
-                                  السبب: {log.reason}
-                                </span>
-                              )}
-                            </div>
+                            ) : dayLate > 0 ? (
+                              <span className="bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-black px-3 py-1 rounded-xl flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-amber-400" />
+                                <span>تأخير ({dayLate}) حصة ⏳</span>
+                              </span>
+                            ) : (
+                              <span className="bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-black px-3 py-1 rounded-xl flex items-center gap-1.5">
+                                <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                                <span>حضور تام ومكتمل 🌟</span>
+                              </span>
+                            )}
                           </div>
                         </div>
 
-                        {/* Status Badge */}
-                        <div className="self-end sm:self-center shrink-0">
-                          <span className={`text-xs font-black px-3.5 py-1.5 rounded-xl border flex items-center gap-1.5 ${
-                            log.status === 'present' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' : 
-                            log.status === 'absent' ? 'bg-rose-500/15 text-rose-300 border-rose-500/30' : 'bg-amber-500/15 text-amber-300 border-amber-500/30'
-                          }`}>
-                            <span className={`w-2 h-2 rounded-full ${
-                              log.status === 'present' ? 'bg-emerald-400' : log.status === 'absent' ? 'bg-rose-400' : 'bg-amber-400'
-                            }`} />
-                            <span>{log.status === 'present' ? 'حاضر ✅' : log.status === 'absent' ? 'غائب ❌' : 'متأخر ⏳'}</span>
+                        {/* Interactive Period Pills Timeline (حصة 1 إلى حصة 8) */}
+                        <div className="space-y-2">
+                          <span className="text-[10px] text-white/50 font-black uppercase tracking-wider block">
+                            مصفوفة الحصص اليومية:
                           </span>
+                          
+                          {isFullDay ? (
+                            <div className={`p-3 rounded-2xl border flex items-center justify-between gap-3 ${
+                              isFullDay.status === 'present' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' :
+                              isFullDay.status === 'absent' ? 'bg-rose-500/10 border-rose-500/30 text-rose-300' :
+                              'bg-amber-500/10 border-amber-500/30 text-amber-300'
+                            }`}>
+                              <div className="flex items-center gap-2">
+                                {isFullDay.status === 'present' ? <CheckCircle2 size={18} /> : isFullDay.status === 'absent' ? <XCircle size={18} /> : <Timer size={18} />}
+                                <span className="text-xs font-black">رصد اليوم بالكامل ({isFullDay.status === 'present' ? 'حاضر ✅' : isFullDay.status === 'absent' ? 'غائب ❌' : 'متأخر ⏳'})</span>
+                              </div>
+                              <span className="text-[11px] font-mono text-white/60">{isFullDay.time || 'صباحاً'}</span>
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-4 sm:grid-cols-8 gap-1.5">
+                              {['1', '2', '3', '4', '5', '6', '7', '8'].map((periodNum) => {
+                                const log = periodsMap[periodNum] || periodsMap[`الحصة ${periodNum}`];
+                                const isPresent = log?.status === 'present';
+                                const isAbsent = log?.status === 'absent';
+                                const isLate = log?.status === 'late';
+
+                                return (
+                                  <div
+                                    key={`period_chip_${dateKey}_${periodNum}`}
+                                    className={`flex flex-col items-center justify-center p-2 rounded-xl border text-center transition-all ${
+                                      isAbsent
+                                        ? 'bg-rose-500/20 border-rose-500/40 text-rose-300 shadow-[0_0_12px_rgba(244,63,94,0.2)] scale-[1.02]'
+                                        : isLate
+                                        ? 'bg-amber-500/20 border-amber-500/40 text-amber-300'
+                                        : isPresent
+                                        ? 'bg-emerald-500/15 border-emerald-500/30 text-emerald-300'
+                                        : 'bg-white/5 border-white/5 text-white/30'
+                                    }`}
+                                  >
+                                    <span className="text-[10px] font-bold">ح {periodNum}</span>
+                                    <span className="text-[11px] font-black mt-0.5">
+                                      {isAbsent ? 'غائب ❌' : isLate ? 'متأخر ⏳' : isPresent ? 'حاضر ✅' : '—'}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Detailed Class Logs for this Date */}
+                        <div className="space-y-2 pt-1">
+                          {dayLogs.map((log: any, idx: number) => {
+                            const isPresent = log.status === 'present';
+                            const isAbsent = log.status === 'absent';
+                            const isLate = log.status === 'late';
+
+                            return (
+                              <div 
+                                key={`log_row_${dateKey}_${idx}_${log.period || ''}`}
+                                className={`p-3.5 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 transition-all ${
+                                  isAbsent 
+                                    ? 'bg-rose-500/10 border-rose-500/25' 
+                                    : isLate
+                                    ? 'bg-amber-500/10 border-amber-500/25'
+                                    : 'bg-white/5 border-white/5 hover:border-emerald-500/20'
+                                }`}
+                              >
+                                <div className="flex items-center gap-3">
+                                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${
+                                    isPresent ? 'bg-emerald-500/20 text-emerald-400' :
+                                    isAbsent ? 'bg-rose-500/20 text-rose-400' :
+                                    'bg-amber-500/20 text-amber-400'
+                                  }`}>
+                                    {isPresent ? <CheckCircle2 size={16} /> : isAbsent ? <XCircle size={16} /> : <Timer size={16} />}
+                                  </div>
+                                  <div>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="text-white font-black text-xs">
+                                        {log.period === 'يوم كامل' ? 'اليوم الدراسي بالكامل' : `الحصة ${log.period}`}
+                                      </span>
+                                      <span className={`text-[10px] font-black px-2 py-0.5 rounded-md border ${
+                                        isPresent ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' :
+                                        isAbsent ? 'bg-rose-500/20 text-rose-300 border-rose-500/30' :
+                                        'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                                      }`}>
+                                        {isPresent ? 'حاضر في الحصة' : isAbsent ? 'غائب عن الحصة' : 'متأخر عن الحصة'}
+                                      </span>
+                                    </div>
+
+                                    {/* Sub details: Recorded by, time, reason */}
+                                    <div className="flex items-center gap-3 text-[11px] text-white/50 mt-1 flex-wrap">
+                                      <span className="flex items-center gap-1 font-mono text-white/70">
+                                        <Clock size={11} className="text-white/40" />
+                                        <span>{log.time || '08:00 ص'}</span>
+                                      </span>
+                                      {log.by && (
+                                        <span>• الأستاذ: <strong className="text-white/80">{log.by}</strong></span>
+                                      )}
+                                      {log.reason && (
+                                        <span className="text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20 font-bold">
+                                          السبب: {log.reason}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="text-right sm:text-left shrink-0">
+                                  <span className="text-[10px] text-white/40 font-mono">
+                                    معتمد رسمياً 🛡️
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     );
-                  })
-                ) : (
-                  <div className="p-10 border-2 border-dashed border-white/5 rounded-[2.5rem] text-center space-y-3">
-                    <Timer size={40} className="mx-auto text-white/10" />
-                    <p className="text-white/30 text-xs font-bold">لا يوجد سجل حضور مسجل بعد</p>
-                  </div>
-                )}
+                  });
+                })()}
               </div>
             </div>
           ) : activeSubPage === "excellence" ? (

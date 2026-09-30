@@ -1052,7 +1052,9 @@ async function startServer() {
   // الحصول على طالب بواسطة الكود والمدرسة (لأولياء الأمور)
   app.get('/api/students/by-code/:schoolId/:code', async (req, res) => {
     try {
-      const { schoolId, code } = req.params;
+      const { schoolId, code: pCode } = req.params;
+      const lookupCode = pCode;
+      const cleanLookup = (lookupCode || '').replace(/^st_/, '').trim();
       const sId = schoolId;
       const schoolIds = [sId];
       if (sId === 'school1' || sId === 'school_awail_ghamas') {
@@ -1062,19 +1064,74 @@ async function startServer() {
       const result = await db.select().from(students)
         .where(and(
           inArray(students.schoolId, schoolIds),
-          or(eq(students.code, code), eq(students.parentCode, code))
+          or(
+            eq(students.code, lookupCode),
+            eq(students.parentCode, lookupCode),
+            eq(students.code, cleanLookup),
+            eq(students.parentCode, cleanLookup),
+            eq(students.id, lookupCode),
+            eq(students.id, cleanLookup)
+          )
         ));
       
       let student = result[0];
       
       if (!student) {
         const fallback = await db.select().from(students)
-          .where(or(eq(students.code, code), eq(students.parentCode, code)));
+          .where(or(
+            eq(students.code, lookupCode),
+            eq(students.parentCode, lookupCode),
+            eq(students.code, cleanLookup),
+            eq(students.parentCode, cleanLookup),
+            eq(students.id, lookupCode),
+            eq(students.id, cleanLookup)
+          ));
         student = fallback[0];
       }
 
       if (!student) {
         return res.status(404).json({ success: false, message: 'Student not found' });
+      }
+
+      // Always attach computed live attendance from attendance_logs
+      try {
+        const studentCode = student.code || '';
+        const cleanStCode = studentCode.replace(/^st_/, '').trim();
+        const studentLogs = await db.select().from(attendance_logs)
+          .where(or(
+            eq(attendance_logs.studentId, student.id),
+            eq(attendance_logs.studentId, studentCode),
+            eq(attendance_logs.studentId, cleanStCode),
+            eq(attendance_logs.studentId, `st_${cleanStCode}`)
+          ))
+          .orderBy(desc(attendance_logs.timestamp));
+
+        if (studentLogs.length > 0) {
+          let present = 0, absent = 0, late = 0;
+          studentLogs.forEach(l => {
+            if (l.status === 'present') present++;
+            if (l.status === 'absent') absent++;
+            if (l.status === 'late') late++;
+          });
+          const mappedLogs = studentLogs.map(l => ({
+            date: l.date,
+            status: l.status,
+            period: l.period,
+            reason: l.reason || '',
+            time: new Date(l.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+            by: l.recordedBy || 'الأستاذ'
+          }));
+          student.attendance = {
+            present,
+            absent,
+            late,
+            logs: mappedLogs
+          };
+        } else if (!student.attendance) {
+          student.attendance = { present: 0, absent: 0, late: 0, logs: [] };
+        }
+      } catch (attErr) {
+        console.warn("Could not load attendance logs for student in by-code:", attErr);
       }
       
       // 💡 Just-in-time finance repair if missing, zero, or mismatched with school plan (only if no payments)
