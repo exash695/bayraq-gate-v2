@@ -1,4 +1,5 @@
 import jsPDF from 'jspdf';
+import { printHTML, exportToExcel } from '../lib/exportUtils';
 
 export const cleanParentStudentName = (name?: string): string => {
   if (!name) return 'الطالب';
@@ -535,42 +536,57 @@ export const generateStudentCodes = (
 };
 
 export const exportStudentsToCSV = (generatedCodes: any[]) => {
-  const headers = ['اسم الطالب', 'كود الطالب', 'كود ولي الأمر', 'الخصم', 'مبلغ الاشتراك'];
-  const rows = generatedCodes.map(code => [
-    `"${code.name}"`,
-    `"${code.student}"`,
-    `"${code.parent}"`,
-    `"${code.discountAmount} د.ع"`,
-    `"${code.totalAmount} د.ع"`
-  ]);
-  const csvContent = "\uFEFF" + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob);
-  link.download = `Students_Codes_${new Date().getTime()}.csv`;
-  link.click();
+  const excelData = generatedCodes.map(code => ({
+    'اسم الطالب': code.name,
+    'كود الطالب': code.student,
+    'كود ولي الأمر': code.parent,
+    'الخصم': `${code.discountAmount} د.ع`,
+    'مبلغ الاشتراك': `${code.totalAmount} د.ع`,
+    'المرحلة': code.grade || ''
+  }));
+  
+  exportToExcel(excelData, `قائمة_أكواد_الطلاب_${new Date().getTime()}.xlsx`, 'الأكواد');
 };
 
 export const printStudentCards = (generatedCodes: any[], schoolName: string) => {
-  const printWindow = window.open('', '_blank');
-  if (!printWindow) return;
   const rowsHtml = generatedCodes.map(code => `
-    <div style="border: 2px solid #333; padding: 15px; margin: 10px; border-radius: 10px; display: inline-block; width: 250px; direction: rtl; font-family: sans-serif; vertical-align: top;">
+    <div style="border: 2px solid #333; padding: 15px; margin: 10px; border-radius: 10px; display: inline-block; width: 250px; direction: rtl; font-family: sans-serif; vertical-align: top; background: white;">
       <div style="font-weight: bold; border-bottom: 2px solid #FFD600; margin-bottom: 10px; padding-bottom: 5px; color: #101935; display: flex; justify-content: space-between; align-items: center;">
         <span>بطاقة الطالب الذكية</span>
         <span style="font-size: 10px; color: #666;">بوابة بيرق</span>
       </div>
-      <div style="margin-bottom: 5px;"><strong>المدرسة:</strong> ${schoolName}</div>
-      <div style="margin-bottom: 5px;"><strong>الصف:</strong> ${code.grade}</div>
-      <div style="margin-bottom: 5px;"><strong>الاسم:</strong> ${code.name}</div>
-      <div style="margin-bottom: 5px;"><strong>كود الطالب:</strong> <span style="color: #d32f2f; font-weight: bold;">${code.student}</span></div>
-      <div style="margin-bottom: 5px;"><strong>كود ولي الأمر:</strong> <span style="color: #1976d2; font-weight: bold;">${code.parent}</span></div>
+      <div style="margin-bottom: 5px; font-size: 12px;"><strong>المدرسة:</strong> ${schoolName}</div>
+      <div style="margin-bottom: 5px; font-size: 12px;"><strong>الصف:</strong> ${code.grade}</div>
+      <div style="margin-bottom: 5px; font-size: 12px;"><strong>الاسم:</strong> ${code.name}</div>
+      <div style="margin-bottom: 5px; font-size: 12px;"><strong>كود الطالب:</strong> <span style="color: #d32f2f; font-weight: bold;">${code.student}</span></div>
+      <div style="margin-bottom: 5px; font-size: 12px;"><strong>كود ولي الأمر:</strong> <span style="color: #1976d2; font-weight: bold;">${code.parent}</span></div>
       <div style="font-size: 10px; color: #666; margin-top: 10px; border-top: 1px dashed #ddd; padding-top: 5px;">يرجى الاحتفاظ بهذه الأكواد للدخول للمنصة</div>
     </div>
   `).join('');
-  printWindow.document.write(`<html><head><title>Print Codes</title></head><body>${rowsHtml}</body></html>`);
-  printWindow.document.close();
-  printWindow.print();
+  
+  const html = `
+    <html dir="rtl">
+      <head>
+        <title>طباعة بطاقات الطلاب - ${schoolName}</title>
+        <style>
+          body { background: white; margin: 0; padding: 20px; }
+          @media print {
+            body { padding: 0; }
+          }
+        </style>
+      </head>
+      <body>
+        ${rowsHtml}
+        <script>
+          window.onload = function() {
+            setTimeout(function() { window.print(); }, 500);
+          };
+        </script>
+      </body>
+    </html>
+  `;
+  
+  printHTML(html);
 };
 
 export const generateSingleStudentPDF = (student: any) => {

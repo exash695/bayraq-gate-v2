@@ -8,6 +8,7 @@ import {
 import { useSchoolPlatform } from "./SchoolPlatformContext";
 import { academicService } from "../../services/academicService";
 import { getSubjectsForGrade } from "../../utils/studentUtils";
+import { printHTML } from "../../lib/exportUtils";
 
 export const TeacherControlGradesTab: React.FC = () => {
   const { 
@@ -692,59 +693,7 @@ export const TeacherControlGradesTab: React.FC = () => {
   // Robust multi-strategy print executor (hidden iframe + window popup + direct print)
   const executeDirectPrint = () => {
     const htmlContent = generateOfficialPrintHTML();
-    let triggered = false;
-
-    // 1. First try dedicated hidden IFrame (safest inside React and avoids blocking parent app)
-    try {
-      let iframe = document.getElementById('official-print-grades-frame') as HTMLIFrameElement;
-      if (!iframe) {
-        iframe = document.createElement('iframe');
-        iframe.id = 'official-print-grades-frame';
-        iframe.style.position = 'fixed';
-        iframe.style.right = '0';
-        iframe.style.bottom = '0';
-        iframe.style.width = '0';
-        iframe.style.height = '0';
-        iframe.style.border = '0';
-        iframe.style.zIndex = '-9999';
-        document.body.appendChild(iframe);
-      }
-
-      const doc = iframe.contentWindow?.document || iframe.contentDocument;
-      if (doc) {
-        doc.open();
-        doc.write(htmlContent);
-        doc.close();
-        
-        setTimeout(() => {
-          try {
-            iframe.contentWindow?.focus();
-            iframe.contentWindow?.print();
-            triggered = true;
-          } catch (e) {
-            console.warn("IFrame print failed:", e);
-          }
-        }, 500);
-      }
-    } catch (err) {
-      console.warn("Hidden iframe execution failed:", err);
-    }
-
-    // 2. Fallback: If not triggered within 600ms, open in a clean popup blob or run window.print
-    setTimeout(() => {
-      if (!triggered) {
-        try {
-          const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
-          const url = URL.createObjectURL(blob);
-          const win = window.open(url, '_blank');
-          if (!win) {
-            window.print();
-          }
-        } catch (e) {
-          window.print();
-        }
-      }
-    }, 600);
+    printHTML(htmlContent);
   };
 
   // Open full printable preview in new tab

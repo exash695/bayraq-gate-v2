@@ -1,3 +1,4 @@
+import { printHTML } from '../lib/exportUtils';
 import { collection, 
   doc, 
   getDoc, 
@@ -1541,20 +1542,6 @@ export const schoolArchiveService = {
 </html>
     `;
 
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(reportHtml);
-      printWindow.document.close();
-    } else {
-      const blob = new Blob([reportHtml], { type: 'text/html;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = `Official_Archive_Report_${archive.schoolName}_${archive.archiveNumber}.html`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    }
+    printHTML(reportHtml);
   }
 };

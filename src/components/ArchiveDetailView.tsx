@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 import { motion } from 'motion/react';
 import { ArrowRight, Database, Printer, FileSpreadsheet, Edit3, RefreshCw, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { getPrefixForGrade } from '../utils/studentUtils';
+import { printHTML, exportToExcel } from '../lib/exportUtils';
 
 interface ArchiveDetailViewProps {
   selectedArchiveList: any;
@@ -102,46 +103,60 @@ export const ArchiveDetailView: React.FC<ArchiveDetailViewProps> = ({
   };
 
   const handleExportExcel = () => {
-    const headers = ['اسم الطالب', 'كود الطالب', 'كود ولي الأمر', 'نوع الخصم', 'الاشتراك المستحق'];
-    const rows = selectedArchiveList.students.map((code: any) => {
+    const excelData = selectedArchiveList.students.map((code: any) => {
       const total = calculateTotal(code);
-      return [
-        `"${code.name}"`,
-        `"${code.student}"`,
-        `"${code.parent}"`,
-        `"${discountLabels[code.discountType] || code.discountType || 'بدون'}"`,
-        `"${total?.toLocaleString() || 0} د.ع"`
-      ];
+      return {
+        'اسم الطالب': code.name,
+        'كود الطالب': code.student,
+        'كود ولي الأمر': code.parent,
+        'نوع الخصم': discountLabels[code.discountType] || code.discountType || 'بدون',
+        'الاشتراك المستحق': `${total?.toLocaleString() || 0} د.ع`
+      };
     });
-    const csvContent = "\uFEFF" + [headers.join(','), ...rows.map((r: any) => r.join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `List_${selectedArchiveList.name}_${new Date().getTime()}.csv`;
-    link.click();
-    showToast('تم تصدير ملف Excel بنجاح');
+
+    exportToExcel(excelData, `قائمة_${selectedArchiveList.name}_${new Date().getTime()}.xlsx`, 'الأكواد');
+    showToast('تم تصدير ملف Excel بنجاح 📊');
   };
 
   const handlePrint = () => {
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
     const rowsHtml = selectedArchiveList.students.map((code: any) => `
-      <div style="border: 2px solid #333; padding: 15px; margin: 10px; border-radius: 10px; display: inline-block; width: 250px; direction: rtl; font-family: sans-serif; vertical-align: top;">
+      <div style="border: 2px solid #333; padding: 15px; margin: 10px; border-radius: 10px; display: inline-block; width: 250px; direction: rtl; font-family: sans-serif; vertical-align: top; background: white;">
         <div style="font-weight: bold; border-bottom: 2px solid #FFD600; margin-bottom: 10px; padding-bottom: 5px; color: #101935; display: flex; justify-content: space-between; align-items: center;">
           <span>بطاقة الطالب الذكية</span>
           <span style="font-size: 10px; color: #666;">بوابة بيرق</span>
         </div>
-        <div style="margin-bottom: 5px;"><strong>المدرسة:</strong> ${schoolName}</div>
-        <div style="margin-bottom: 5px;"><strong>الصف:</strong> ${code.grade || 'غير محدد'}</div>
-        <div style="margin-bottom: 5px;"><strong>الاسم:</strong> ${code.name}</div>
-        <div style="margin-bottom: 5px;"><strong>كود الطالب:</strong> <span style="color: #d32f2f; font-weight: bold; font-family: monospace;">${code.student}</span></div>
-        <div style="margin-bottom: 5px;"><strong>كود ولي الأمر:</strong> <span style="color: #1976d2; font-weight: bold; font-family: monospace;">${code.parent}</span></div>
+        <div style="margin-bottom: 5px; font-size: 12px;"><strong>المدرسة:</strong> ${schoolName}</div>
+        <div style="margin-bottom: 5px; font-size: 12px;"><strong>الصف:</strong> ${code.grade || 'غير محدد'}</div>
+        <div style="margin-bottom: 5px; font-size: 12px;"><strong>الاسم:</strong> ${code.name}</div>
+        <div style="margin-bottom: 5px; font-size: 12px;"><strong>كود الطالب:</strong> <span style="color: #d32f2f; font-weight: bold; font-family: monospace;">${code.student}</span></div>
+        <div style="margin-bottom: 5px; font-size: 12px;"><strong>كود ولي الأمر:</strong> <span style="color: #1976d2; font-weight: bold; font-family: monospace;">${code.parent}</span></div>
         <div style="font-size: 10px; color: #666; margin-top: 10px; border-top: 1px dashed #ddd; padding-top: 5px;">يرجى الاحتفاظ بهذه الأكواد للدخول للمنصة</div>
       </div>
     `).join('');
-    printWindow.document.write(`<html><head><title>Print List - ${selectedArchiveList.name}</title></head><body>${rowsHtml}</body></html>`);
-    printWindow.document.close();
-    printWindow.print();
+    
+    const html = `
+      <html dir="rtl">
+        <head>
+          <title>طباعة القائمة - ${selectedArchiveList.name}</title>
+          <style>
+            body { background: white; margin: 0; padding: 20px; }
+            @media print {
+              body { padding: 0; }
+            }
+          </style>
+        </head>
+        <body>
+          ${rowsHtml}
+          <script>
+            window.onload = function() {
+              setTimeout(function() { window.print(); }, 500);
+            };
+          </script>
+        </body>
+      </html>
+    `;
+    
+    printHTML(html);
   };
 
   return (

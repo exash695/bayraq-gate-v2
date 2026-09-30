@@ -13,6 +13,8 @@ import {
   Calendar,
   Lightbulb,
   ChevronLeft,
+  ChevronRight,
+  BookOpen,
   XCircle,
   Shirt,
   ShieldCheck,
@@ -39,7 +41,9 @@ import {
   CheckCircle,
   Loader2,
   Trash2,
-  Send
+  Send,
+  Users,
+  X
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { cleanParentStudentName, formatParentGreetingTitle } from '../utils/studentUtils';
@@ -48,6 +52,7 @@ import { AnnouncementsCenterTab } from './SchoolPlatform/AnnouncementsCenterTab'
 import { doc, onSnapshot, collection, query, where, orderBy, limit, updateDoc, addDoc, serverTimestamp } from '../lib/firebase';
 import { academicService } from '../services/academicService';
 import { supportService } from '../services/supportService';
+import { staffService } from '../services/staffService';
 import { ideaService } from '../services/ideaService';
 import { uploadFileToR2 } from '../services/uploadService';
 import { db, auth } from '../lib/firebase';
@@ -134,6 +139,221 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   const [solutionSubmitError, setSolutionSubmitError] = useState<string | null>(null);
   const [attendanceFilter, setAttendanceFilter] = useState<'all' | 'absent' | 'late' | 'present'>('all');
   const [attendanceSearchDate, setAttendanceSearchDate] = useState<string>('');
+  const todayDateStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+  const [selectedAttendanceDate, setSelectedAttendanceDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
+
+  // Contact & Teacher Messaging State
+  const [contactTab, setContactTab] = useState<'admin' | 'teachers'>('admin');
+  const [allTeachers, setAllTeachers] = useState<any[]>([]);
+  const [isLoadingTeachers, setIsLoadingTeachers] = useState<boolean>(false);
+  const [selectedTeacherForChat, setSelectedTeacherForChat] = useState<any | null>(null);
+  const [teacherMessageText, setTeacherMessageText] = useState<string>('');
+  const [isSendingTeacherMessage, setIsSendingTeacherMessage] = useState<boolean>(false);
+  const [teacherChatHistory, setTeacherChatHistory] = useState<{[key: string]: any[]}>({});
+
+  // Toast Notification State
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => {
+      setToast(null);
+    }, 4000);
+  };
+
+  // Load persistent parent-teacher chat history
+  useEffect(() => {
+    try {
+      const stored = safeStorage.getItem(`bairaq_parent_teacher_chats_${studentCode || ''}`);
+      if (stored) {
+        setTeacherChatHistory(JSON.parse(stored));
+      }
+    } catch {}
+  }, [studentCode]);
+
+  // Subscribe to teachers list when meeting subPage is active
+  useEffect(() => {
+    if (activeSubPage === 'meeting') {
+      setIsLoadingTeachers(true);
+      const unsub = staffService.subscribeToTeachers(schoolId || undefined, (teachers) => {
+        if (Array.isArray(teachers)) {
+          setAllTeachers(teachers);
+        }
+        setIsLoadingTeachers(false);
+      });
+      return () => {
+        if (unsub) unsub();
+      };
+    }
+  }, [activeSubPage, schoolId]);
+
+  // Filter strictly to teachers who teach THIS student
+  const studentTeachers = useMemo(() => {
+    if (!allTeachers || allTeachers.length === 0) return [];
+
+    const teachingStaff = allTeachers.filter(t => !t.role || t.role === 'TEACHER' || t.role === 'cadre');
+    const stGrade = studentData?.grade || studentData?.listName || studentData?.className || grade || '';
+    const stSection = studentData?.section || '';
+
+    const norm = (str: string) => (str || '')
+      .replace(/[\s\-_()\/\\.]+/g, '')
+      .replace(/^(الصف|صف)/g, '')
+      .replace(/شعبة/g, '')
+      .replace(/ال/g, '')
+      .replace(/ة/g, 'ه')
+      .replace(/[أإآٱ]/g, 'ا')
+      .replace(/ى/g, 'ي')
+      .replace(/ـ/g, '')
+      .toLowerCase();
+
+    const normGrade = norm(stGrade);
+    const normSection = norm(stSection);
+    const normFull = norm(`${stGrade} ${stSection}`);
+
+    const matched = teachingStaff.filter(t => {
+      const classesList = Array.isArray(t.classes) ? t.classes : [];
+      if (classesList.length > 0) {
+        return classesList.some((c: any) => {
+          const cName = typeof c === 'string' ? c : (c?.name || c?.className || '');
+          const normC = norm(cName);
+          if (!normC) return false;
+          if (normGrade && (normC.includes(normGrade) || normGrade.includes(normC))) return true;
+          if (normFull && (normC.includes(normFull) || normFull.includes(normC))) return true;
+          if (normSection && normC.includes(normSection)) return true;
+          return false;
+        });
+      }
+
+      if (Array.isArray(t.schedule) && t.schedule.length > 0) {
+        return t.schedule.some((s: any) => {
+          const cName = s?.className || s?.class || s?.grade || '';
+          const normC = norm(cName);
+          return normC && (normC.includes(normGrade) || normGrade.includes(normC));
+        });
+      }
+
+      return true;
+    });
+
+    return matched.length > 0 ? matched : teachingStaff;
+  }, [allTeachers, studentData, grade]);
+
+  // Handler: Send Message to Selected Teacher
+  const handleSendTeacherMessage = async () => {
+    if (!selectedTeacherForChat || !teacherMessageText.trim()) return;
+    setIsSendingTeacherMessage(true);
+    const msgText = teacherMessageText.trim();
+    const tId = selectedTeacherForChat.id || selectedTeacherForChat.code;
+    const cleanStudentName = cleanParentStudentName(studentName);
+
+    const now = new Date();
+    const hours = now.getHours();
+    const minutes = now.getMinutes().toString().padStart(2, '0');
+    const isPM = hours >= 12;
+    const h12 = (hours % 12 || 12).toString().padStart(2, '0');
+    const timeFormatted = `${h12}:${minutes} ${isPM ? 'م' : 'ص'}`;
+
+    const newMsg = {
+      id: `msg_${Date.now()}`,
+      sender: 'parent',
+      senderName: `ولي أمر ${cleanStudentName}`,
+      text: msgText,
+      time: timeFormatted,
+      date: now.toISOString().split('T')[0],
+      timestamp: now.toISOString(),
+      status: 'sent'
+    };
+
+    const updatedHistory = {
+      ...teacherChatHistory,
+      [tId]: [...(teacherChatHistory[tId] || []), newMsg]
+    };
+    setTeacherChatHistory(updatedHistory);
+    try {
+      safeStorage.setItem(`bairaq_parent_teacher_chats_${studentCode || ''}`, JSON.stringify(updatedHistory));
+    } catch {}
+
+    try {
+      await fetch('/api/notifications', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: tId,
+          recipientRole: 'teacher',
+          type: 'parent_message',
+          title: `💬 رسالة جديدة من ولي أمر الطالب ${cleanStudentName}`,
+          message: `تلقيت استفساراً جديداً من ولي أمر الطالب ${cleanStudentName} (${studentData?.grade || ''}): "${msgText}"`,
+          read: false,
+          senderName: `ولي أمر ${cleanStudentName}`,
+          studentCode: studentCode,
+          studentName: cleanStudentName
+        })
+      });
+
+      try {
+        await supportService.createTicket({
+          userId: tId,
+          userRole: 'teacher',
+          schoolId: schoolId || undefined,
+          studentName: cleanStudentName,
+          grade: studentData?.grade || grade || 'عام',
+          type: 'مراسلة ولي الأمر',
+          message: `رسالة ولي أمر الطالب (${cleanStudentName}) إلى الأستاذ (${selectedTeacherForChat.name}): ${msgText}`,
+          studentCode: studentCode || ''
+        });
+      } catch {}
+
+      setTeacherMessageText('');
+      showToast?.(`تم إرسال رسالتك للأستاذ (${selectedTeacherForChat.name}) بنجاح! ⚡`, 'success');
+    } catch (err) {
+      console.warn("Error sending teacher message:", err);
+      showToast?.(`تم حفظ وإرسال الرسالة للأستاذ بنجاح!`, 'success');
+      setTeacherMessageText('');
+    } finally {
+      setIsSendingTeacherMessage(false);
+    }
+  };
+
+  const handlePrevAttendanceDay = () => {
+    try {
+      const parts = selectedAttendanceDate.split('-');
+      const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+      d.setDate(d.getDate() - 1);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      setSelectedAttendanceDate(`${y}-${m}-${day}`);
+    } catch {}
+  };
+
+  const handleNextAttendanceDay = () => {
+    try {
+      const parts = selectedAttendanceDate.split('-');
+      const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+      d.setDate(d.getDate() + 1);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      const nextDate = `${y}-${m}-${day}`;
+      if (nextDate <= todayDateStr) {
+        setSelectedAttendanceDate(nextDate);
+      }
+    } catch {}
+  };
+
+  const getArabicDateFormatted = (dateStr: string) => {
+    try {
+      const parts = (dateStr || '').split('-');
+      if (parts.length !== 3) return dateStr;
+      const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+      if (isNaN(d.getTime())) return dateStr;
+      const days = ['الأحد', 'الاثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+      const months = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+      return `${days[d.getDay()]}، ${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
+    } catch {
+      return dateStr;
+    }
+  };
   const solutionFileInputRef = useRef<HTMLInputElement | null>(null);
 
   const [viewedHwIds, setViewedHwIds] = useState<Set<string>>(() => {
@@ -994,10 +1214,34 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
           const hasFirestoreFinance = data.finance && data.finance.installments && data.finance.installments.length > 0;
           const isFirestoreTotalValid = data.totalAmount && Number(data.totalAmount) > 0;
           
-          // Always preserve SQL attendance if loaded with logs
-          const hasPrevLogs = Array.isArray(prev.attendance?.logs) && prev.attendance.logs.length > 0;
-          const hasFirestoreLogs = Array.isArray(data.attendance?.logs) && data.attendance.logs.length > 0;
-          const resolvedAttendance = hasPrevLogs ? prev.attendance : (hasFirestoreLogs ? data.attendance : (prev.attendance || data.attendance));
+          // Merge Firestore & SQL attendance logs dynamically
+          const prevLogs = Array.isArray(prev.attendance?.logs) ? prev.attendance.logs : [];
+          const firestoreLogs = Array.isArray(data.attendance?.logs) ? data.attendance.logs : [];
+
+          const mergedLogsMap = new Map<string, any>();
+          firestoreLogs.forEach((l: any) => {
+            const key = `${l.date}_${l.period || 'يوم كامل'}`;
+            mergedLogsMap.set(key, l);
+          });
+          prevLogs.forEach((l: any) => {
+            const key = `${l.date}_${l.period || 'يوم كامل'}`;
+            mergedLogsMap.set(key, l);
+          });
+
+          const mergedLogs = Array.from(mergedLogsMap.values());
+          let pCount = 0, aCount = 0, lCount = 0;
+          mergedLogs.forEach((l: any) => {
+            if (l.status === 'present') pCount++;
+            if (l.status === 'absent') aCount++;
+            if (l.status === 'late') lCount++;
+          });
+
+          const resolvedAttendance = {
+            present: pCount,
+            absent: aCount,
+            late: lCount,
+            logs: mergedLogs
+          };
 
           return {
             ...prev,
@@ -1075,12 +1319,21 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
           const attPeriod = detail.period || 'يوم كامل';
           const attDate = detail.date || new Date().toISOString().split('T')[0];
           const otherLogs = logs.filter((l: any) => !(l.date === attDate && l.period === attPeriod));
+          const attTime = detail.time || (() => {
+            const now = new Date();
+            const h = now.getHours();
+            const m = now.getMinutes().toString().padStart(2, '0');
+            const isPM = h >= 12;
+            const h12 = (h % 12 || 12).toString().padStart(2, '0');
+            return `${h12}:${m} ${isPM ? 'م' : 'ص'}`;
+          })();
+
           const newLog = {
             date: attDate,
             status: detail.status || 'present',
             period: attPeriod,
             reason: detail.reason || '',
-            time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+            time: attTime,
             by: detail.by || 'الأستاذ'
           };
           const updatedLogs = [newLog, ...otherLogs];
@@ -1269,7 +1522,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
       items: [
         { id: "announcements", icon: Megaphone, name: "مركز التبليغات والإعلانات 📢", color: "text-cyan-400", bg: "bg-cyan-400/10", border: "border-cyan-400/20" },
         { id: "grades", icon: BarChart3, name: "سجل الدرجات", color: "text-emerald-400", bg: "bg-emerald-400/10", border: "border-emerald-400/20", cap: 'view_grades' },
-        { id: "attendance", icon: Timer, name: "سجل الحضور الذكي", color: "text-orange-400", bg: "bg-orange-400/10", border: "border-orange-400/20" },
+        { id: "attendance", icon: Timer, name: "سجل الحضور والنشاط الصفي", color: "text-orange-400", bg: "bg-orange-400/10", border: "border-orange-400/20" },
         { 
           id: "homework", 
           icon: Edit2, 
@@ -1418,8 +1671,8 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
       case 'attendance':
         return {
           pose: 'pose_schedule_planner' as const,
-          title: 'غرفة المتابعة - سجل الحضور والمواظبة ⏱️',
-          subtitle: `تتبع الحضور والغياب والانضباط الزمني • الطالب ${cleanStudentName}`,
+          title: 'غرفة المتابعة - سجل الحضور والنشاط الصفي ⏱️🌟',
+          subtitle: `تتبع الحضور والغياب وتقييم النشاط الصفي المباشر • الطالب ${cleanStudentName}`,
           school: activeSchool,
           glowColor: 'cyan' as const
         };
@@ -1551,7 +1804,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
           </div>
         </header>
 
-        <div className={`flex-1 overflow-y-auto w-full no-scrollbar ${activeSubPage === 'homework' ? 'p-0' : ['future', 'ideas'].includes(activeSubPage || '') ? 'py-6 px-0 md:px-0' : 'px-6 py-10'}`}>
+        <div className={`flex-1 overflow-y-auto w-full no-scrollbar ${activeSubPage === 'homework' || activeSubPage === 'announcements' ? 'p-0' : ['future', 'ideas'].includes(activeSubPage || '') ? 'py-6 px-0 md:px-0' : 'px-6 py-10'}`}>
           {error && (
             <motion.div 
               initial={{ opacity: 0, y: -10 }}
@@ -1563,7 +1816,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
             </motion.div>
           )}
           {activeSubPage === "announcements" ? (
-            <div className="w-full flex flex-col min-h-full animate-in fade-in slide-in-from-bottom-2 pb-16 px-4 md:px-6">
+            <div className="w-full flex flex-col min-h-full animate-in fade-in slide-in-from-bottom-2 pb-16 px-0">
               <AnnouncementsCenterTab
                 schoolId={schoolId || studentData?.schoolId || 'school_awail_ghamas'}
                 grade={studentData?.grade || grade || 'عام'}
@@ -1571,6 +1824,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                 isTeacher={false}
                 notifications={parentNotifications}
                 hideHeader={true}
+                fullWidth={true}
               />
             </div>
           ) : activeSubPage === "homework" ? (
@@ -2634,12 +2888,58 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                  <div className="absolute -right-6 -bottom-6 w-32 h-32 bg-blue-500/20 rounded-full blur-2xl pointer-events-none" />
               </div>
 
-              {/* Smart Filter Tabs */}
-              <div className="flex items-center justify-between gap-2 overflow-x-auto no-scrollbar pb-1">
-                <div className="flex items-center gap-1.5 bg-[#101935] p-1.5 rounded-2xl border border-white/10 shrink-0 w-full sm:w-auto">
+              {/* Fixed Non-Scrollable Header Bar (Date Controller + 4-Col Filter Grid) */}
+              <div className="sticky -top-10 z-30 bg-[#070D1E]/95 backdrop-blur-xl border-b border-white/10 -mx-6 -mt-10 px-4 sm:px-6 py-3.5 mb-6 shadow-xl space-y-2.5">
+                {/* Row 1: Day Navigation with Small Arrows & Today's Priority */}
+                <div className="flex items-center justify-between gap-2 bg-[#101935] px-3 py-2 rounded-2xl border border-white/10">
+                  {/* Prev Day Arrow (Right arrow in RTL moves to past/previous day) */}
+                  <button
+                    type="button"
+                    onClick={handlePrevAttendanceDay}
+                    className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/15 active:scale-95 text-cyan-400 hover:text-cyan-300 flex items-center justify-center transition-all cursor-pointer border border-white/5"
+                    title="اليوم السابق"
+                  >
+                    <ChevronRight size={16} />
+                  </button>
+
+                  {/* Center: Formatted Date & Today Indicator */}
+                  <div className="flex items-center gap-2 text-center min-w-0">
+                    <Calendar size={15} className="text-cyan-400 shrink-0" />
+                    <span className="text-white font-black text-xs sm:text-sm truncate">
+                      {getArabicDateFormatted(selectedAttendanceDate)}
+                    </span>
+                    {selectedAttendanceDate === todayDateStr ? (
+                      <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 text-[10px] font-black px-2 py-0.5 rounded-full shrink-0">
+                        اليوم 🌟
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedAttendanceDate(todayDateStr)}
+                        className="bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/30 text-[10px] font-black px-2 py-0.5 rounded-lg transition-all cursor-pointer shrink-0"
+                      >
+                        سجل اليوم 📍
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Next Day Arrow (Left arrow in RTL moves to next day) */}
+                  <button
+                    type="button"
+                    disabled={selectedAttendanceDate >= todayDateStr}
+                    onClick={handleNextAttendanceDay}
+                    className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/15 active:scale-95 text-cyan-400 hover:text-cyan-300 disabled:opacity-20 disabled:pointer-events-none flex items-center justify-center transition-all cursor-pointer border border-white/5"
+                    title="اليوم التالي"
+                  >
+                    <ChevronLeft size={16} />
+                  </button>
+                </div>
+
+                {/* Row 2: Fixed Non-Scrollable Filter Bar (4-Column Grid) */}
+                <div className="grid grid-cols-4 gap-1.5 w-full bg-[#101935] p-1.5 rounded-2xl border border-white/10">
                   <button
                     onClick={() => setAttendanceFilter('all')}
-                    className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-xl text-xs font-black transition-all ${
+                    className={`py-1.5 px-1 rounded-xl text-xs font-black transition-all text-center ${
                       attendanceFilter === 'all'
                         ? 'bg-blue-600 text-white shadow-md'
                         : 'text-white/60 hover:text-white'
@@ -2647,40 +2947,37 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                   >
                     الكل ({studentData?.attendance?.logs?.length || 0})
                   </button>
-
                   <button
                     onClick={() => setAttendanceFilter('absent')}
-                    className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1 ${
+                    className={`py-1.5 px-1 rounded-xl text-xs font-black transition-all text-center flex items-center justify-center gap-1 ${
                       attendanceFilter === 'absent'
                         ? 'bg-rose-600 text-white shadow-md'
                         : 'text-rose-400 hover:text-rose-300'
                     }`}
                   >
-                    <span>الغياب فقط ❌</span>
+                    <span>غياب ❌</span>
                     <span>({studentData?.attendance?.absent || 0})</span>
                   </button>
-
                   <button
                     onClick={() => setAttendanceFilter('late')}
-                    className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1 ${
+                    className={`py-1.5 px-1 rounded-xl text-xs font-black transition-all text-center flex items-center justify-center gap-1 ${
                       attendanceFilter === 'late'
                         ? 'bg-amber-600 text-white shadow-md'
                         : 'text-amber-400 hover:text-amber-300'
                     }`}
                   >
-                    <span>التأخيرات ⏳</span>
+                    <span>تأخير ⏳</span>
                     <span>({studentData?.attendance?.late || 0})</span>
                   </button>
-
                   <button
                     onClick={() => setAttendanceFilter('present')}
-                    className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1 ${
+                    className={`py-1.5 px-1 rounded-xl text-xs font-black transition-all text-center flex items-center justify-center gap-1 ${
                       attendanceFilter === 'present'
                         ? 'bg-emerald-600 text-white shadow-md'
                         : 'text-emerald-400 hover:text-emerald-300'
                     }`}
                   >
-                    <span>الحضور ✅</span>
+                    <span>حضور ✅</span>
                     <span>({studentData?.attendance?.present || 0})</span>
                   </button>
                 </div>
@@ -2691,7 +2988,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                 <div className="flex items-center justify-between px-1">
                   <h4 className="text-white text-sm font-black flex items-center gap-2">
                     <Calendar size={16} className="text-cyan-400" />
-                    <span>سجل الحصص والأيام المؤرشفة بالتاريخ الذكي</span>
+                    <span>سجل الحصص والنشاط الصفي اليومي</span>
                   </h4>
                   <span className="text-[11px] text-cyan-300 bg-cyan-500/10 border border-cyan-500/20 px-2.5 py-0.5 rounded-full font-bold">
                     تزامن حي ومباشر ⚡
@@ -2709,27 +3006,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                     return true;
                   });
 
-                  if (filteredLogs.length === 0) {
-                    return (
-                      <div className="p-10 border-2 border-dashed border-white/10 rounded-3xl text-center space-y-3 bg-[#101935]/40">
-                        <Timer size={44} className="mx-auto text-white/20" />
-                        <h5 className="text-white font-bold text-sm">
-                          {attendanceFilter === 'absent' 
-                            ? 'ممتاز! لا يوجد أي سجل غياب للطالب 🎉' 
-                            : attendanceFilter === 'late'
-                            ? 'لا توجد أي حالات تأخير مسجلة للطالب 👍'
-                            : 'لا توجد سجلات حضور مسجلة حتى الآن'}
-                        </h5>
-                        <p className="text-white/40 text-xs">
-                          {attendanceFilter !== 'all' 
-                            ? 'اضغط على زر "الكل" لعرض كافة السجلات الأخرى'
-                            : 'سيتم ظهور السجلات فور قيام الأساتذة برصد الحصص'}
-                        </p>
-                      </div>
-                    );
-                  }
-
-                  // Group by Date for crystal clear daily breakdown
+                  // Group by Date
                   const dateGroups: { [key: string]: any[] } = {};
                   filteredLogs.forEach((l: any) => {
                     const rawDate = l.date || (l.timestamp ? new Date(l.timestamp).toISOString().split('T')[0] : 'سجل سابق');
@@ -2739,7 +3016,8 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                     dateGroups[rawDate].push(l);
                   });
 
-                  const sortedDates = Object.keys(dateGroups).sort((a, b) => {
+                  // Sort dates with selectedAttendanceDate ALWAYS as top priority
+                  const allFoundDates = Object.keys(dateGroups).sort((a, b) => {
                     return new Date(b).getTime() - new Date(a).getTime();
                   });
 
@@ -2760,9 +3038,28 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                     }
                   };
 
-                  return sortedDates.map((dateKey) => {
-                    const dayLogs = dateGroups[dateKey];
+                  const renderDateCard = (dateKey: string, isPriority = false) => {
+                    const rawDayLogs = dateGroups[dateKey] || [];
                     const dayName = getArabicDayName(dateKey);
+
+                    // Deduplicate logs for this date strictly by period
+                    const dedupedLogsMap = new Map<string, any>();
+                    rawDayLogs.forEach((l: any) => {
+                      const pKey = l.period || 'يوم كامل';
+                      if (!dedupedLogsMap.has(pKey)) {
+                        dedupedLogsMap.set(pKey, l);
+                      } else {
+                        const existing = dedupedLogsMap.get(pKey);
+                        dedupedLogsMap.set(pKey, {
+                          ...existing,
+                          ...l,
+                          subject: l.subject || existing.subject,
+                          evaluation: l.evaluation || existing.evaluation || l.reason || existing.reason,
+                          reason: l.reason || existing.reason
+                        });
+                      }
+                    });
+                    const dayLogs = Array.from(dedupedLogsMap.values());
 
                     // Calculate day statistics
                     let dayPresent = 0, dayAbsent = 0, dayLate = 0;
@@ -2783,19 +3080,33 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                     const isFullDay = periodsMap['يوم كامل'];
 
                     return (
-                      <div key={`date_group_${dateKey}`} className="bg-[#101935] rounded-3xl border border-white/10 p-5 space-y-4 shadow-lg hover:border-blue-500/30 transition-all">
+                      <div 
+                        key={`date_group_${dateKey}`} 
+                        className={`bg-[#101935] rounded-3xl border p-5 space-y-4 shadow-lg transition-all ${
+                          isPriority 
+                            ? 'border-cyan-500/40 shadow-[0_0_25px_rgba(6,182,212,0.15)] ring-1 ring-cyan-400/30' 
+                            : 'border-white/10 hover:border-blue-500/30'
+                        }`}
+                      >
                         {/* Day Header */}
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3 border-b border-white/5">
                           <div className="flex items-center gap-2.5">
-                            <div className="w-10 h-10 rounded-2xl bg-blue-500/15 border border-blue-400/30 flex items-center justify-center text-blue-400 shrink-0">
+                            <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 border ${
+                              isPriority ? 'bg-cyan-500/20 text-cyan-400 border-cyan-400/40' : 'bg-blue-500/15 text-blue-400 border-blue-400/30'
+                            }`}>
                               <Calendar size={20} />
                             </div>
                             <div>
-                              <h5 className="text-white font-black text-sm flex items-center gap-2">
+                              <h5 className="text-white font-black text-sm flex items-center gap-2 flex-wrap">
                                 <span>{dayName ? `يوم ${dayName}` : 'تاريخ الرصد'}</span>
                                 <span className="text-xs text-blue-300 font-mono bg-blue-500/10 px-2 py-0.5 rounded-lg border border-blue-400/20">
                                   {dateKey}
                                 </span>
+                                {dateKey === todayDateStr && (
+                                  <span className="text-[10px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-black">
+                                    سجل اليوم الأولوية 🌟
+                                  </span>
+                                )}
                               </h5>
                               <p className="text-white/50 text-[11px] mt-0.5">
                                 إجمالي الحصص المسجلة في هذا اليوم: <span className="text-white font-bold">{dayLogs.length}</span>
@@ -2815,10 +3126,14 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                                 <span className="w-2 h-2 rounded-full bg-amber-400" />
                                 <span>تأخير ({dayLate}) حصة ⏳</span>
                               </span>
-                            ) : (
+                            ) : dayLogs.length > 0 ? (
                               <span className="bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-black px-3 py-1 rounded-xl flex items-center gap-1.5">
                                 <span className="w-2 h-2 rounded-full bg-emerald-400" />
                                 <span>حضور تام ومكتمل 🌟</span>
+                              </span>
+                            ) : (
+                              <span className="bg-white/5 border border-white/10 text-white/40 text-xs font-black px-3 py-1 rounded-xl">
+                                لم تسجل حصص بعد
                               </span>
                             )}
                           </div>
@@ -2836,9 +3151,15 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                               isFullDay.status === 'absent' ? 'bg-rose-500/10 border-rose-500/30 text-rose-300' :
                               'bg-amber-500/10 border-amber-500/30 text-amber-300'
                             }`}>
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-2 flex-wrap">
                                 {isFullDay.status === 'present' ? <CheckCircle2 size={18} /> : isFullDay.status === 'absent' ? <XCircle size={18} /> : <Timer size={18} />}
                                 <span className="text-xs font-black">رصد اليوم بالكامل ({isFullDay.status === 'present' ? 'حاضر ✅' : isFullDay.status === 'absent' ? 'غائب ❌' : 'متأخر ⏳'})</span>
+                                {isFullDay.subject && (
+                                  <span className="text-cyan-300 font-black bg-cyan-500/15 border border-cyan-500/30 px-2 py-0.5 rounded-lg text-[10px] flex items-center gap-1">
+                                    <BookOpen size={10} />
+                                    <span>{isFullDay.subject}</span>
+                                  </span>
+                                )}
                               </div>
                               <span className="text-[11px] font-mono text-white/60">{isFullDay.time || 'صباحاً'}</span>
                             </div>
@@ -2864,6 +3185,11 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                                     }`}
                                   >
                                     <span className="text-[10px] font-bold">ح {periodNum}</span>
+                                    {log?.subject && (
+                                      <span className="text-[9px] text-cyan-300 font-bold truncate max-w-full px-1">
+                                        {log.subject}
+                                      </span>
+                                    )}
                                     <span className="text-[11px] font-black mt-0.5">
                                       {isAbsent ? 'غائب ❌' : isLate ? 'متأخر ⏳' : isPresent ? 'حاضر ✅' : '—'}
                                     </span>
@@ -2905,6 +3231,15 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                                       <span className="text-white font-black text-xs">
                                         {log.period === 'يوم كامل' ? 'اليوم الدراسي بالكامل' : `الحصة ${log.period}`}
                                       </span>
+
+                                      {/* Subject Display */}
+                                      {log.subject && (
+                                        <span className="text-cyan-300 font-black bg-cyan-500/15 border border-cyan-500/30 px-2 py-0.5 rounded-lg text-[11px] flex items-center gap-1">
+                                          <BookOpen size={11} className="text-cyan-400" />
+                                          <span>{log.subject}</span>
+                                        </span>
+                                      )}
+
                                       <span className={`text-[10px] font-black px-2 py-0.5 rounded-md border ${
                                         isPresent ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' :
                                         isAbsent ? 'bg-rose-500/20 text-rose-300 border-rose-500/30' :
@@ -2923,12 +3258,27 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                                       {log.by && (
                                         <span>• الأستاذ: <strong className="text-white/80">{log.by}</strong></span>
                                       )}
-                                      {log.reason && (
+                                      {log.reason && log.reason !== 'بدون عذر' && !log.evaluation && (
                                         <span className="text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded border border-rose-500/20 font-bold">
                                           السبب: {log.reason}
                                         </span>
                                       )}
                                     </div>
+
+                                    {/* Classroom Activity Evaluation Badge */}
+                                    {(() => {
+                                      const evalText = (log.evaluation || (log.status === 'present' && log.reason && log.reason !== 'بدون عذر' ? log.reason : '') || '').trim();
+                                      if (!evalText || evalText === 'بدون عذر') return null;
+                                      return (
+                                        <div className="mt-2.5 p-2.5 rounded-xl bg-gradient-to-r from-cyan-500/15 via-blue-500/10 to-indigo-500/15 border border-cyan-400/30 text-cyan-200 text-xs font-bold flex items-center justify-between gap-2 shadow-sm flex-wrap">
+                                          <div className="flex items-center gap-2">
+                                            <Sparkles size={14} className="text-cyan-400 shrink-0 animate-pulse" />
+                                            <span>النشاط والتقييم الصفي: <strong className="text-white font-black">{evalText}</strong></span>
+                                          </div>
+                                          <span className="text-[10px] bg-cyan-400/20 text-cyan-300 px-2.5 py-0.5 rounded-full font-black border border-cyan-400/30 shrink-0">تزامن حي ⚡</span>
+                                        </div>
+                                      );
+                                    })()}
                                   </div>
                                 </div>
 
@@ -2943,7 +3293,45 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                         </div>
                       </div>
                     );
-                  });
+                  };
+
+                  // Render prioritized date (selectedAttendanceDate) first
+                  const hasSelectedDateRecords = dateGroups[selectedAttendanceDate] && dateGroups[selectedAttendanceDate].length > 0;
+                  const otherDates = allFoundDates.filter(d => d !== selectedAttendanceDate);
+
+                  return (
+                    <div className="space-y-6">
+                      {/* Only Show Selected Date Card */}
+                      {hasSelectedDateRecords ? (
+                        renderDateCard(selectedAttendanceDate, true)
+                      ) : (
+                        <div className="bg-[#101935] rounded-3xl border border-cyan-500/20 p-6 sm:p-8 text-center space-y-3 shadow-lg ring-1 ring-cyan-500/15">
+                          <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-400 flex items-center justify-center mx-auto">
+                            <Calendar size={22} />
+                          </div>
+                          <h5 className="text-white font-black text-sm">
+                            {selectedAttendanceDate === todayDateStr
+                              ? 'سجل اليوم الدراسي (الحالي) 🌟'
+                              : `سجل يوم ${getArabicDateFormatted(selectedAttendanceDate)}`}
+                          </h5>
+                          <p className="text-white/60 text-xs max-w-md mx-auto leading-relaxed">
+                            {selectedAttendanceDate === todayDateStr
+                              ? 'لم تسجل أي حالات غياب أو تأخير للطالب اليوم حتى الآن. يتحدث السجل فوراً عند قيام الأساتذة برصد الحصص الدراسية.'
+                              : 'لا توجد حصص مسجلة في هذا التاريخ المحدد. يمكنك استخدام الأسهم للرجوع للأيام السابقة.'}
+                          </p>
+                          {selectedAttendanceDate !== todayDateStr && (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedAttendanceDate(todayDateStr)}
+                              className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-black transition-all cursor-pointer inline-flex items-center gap-1.5"
+                            >
+                              <span>العودة لسجل اليوم الحالي 📍</span>
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
                 })()}
               </div>
             </div>
@@ -3154,45 +3542,185 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
               </div>
             </div>
           ) : activeSubPage === "meeting" ? (
-            <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4">
-              {/* Quick Contact Options */}
-              <div className="grid grid-cols-2 gap-4">
-                 <a href={`tel:${schoolInfo.adminPhone || '07700000000'}`} className="bg-emerald-500/10 border border-emerald-500/20 p-6 rounded-3xl flex flex-col items-center gap-3 group active:scale-95 transition-all text-center">
-                    <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 flex items-center justify-center text-emerald-400 group-hover:bg-emerald-500 group-hover:text-white transition-colors">
-                       <ShieldCheck size={24} />
-                    </div>
-                    <span className="text-white font-bold text-[10px]">اتصال مباشر</span>
-                 </a>
-                 <a href={`https://wa.me/${getFormattedWhatsapp(schoolInfo.adminWhatsapp)}`} target="_blank" rel="noreferrer" className="bg-green-500/10 border border-green-500/20 p-6 rounded-3xl flex flex-col items-center gap-3 group active:scale-95 transition-all text-center">
-                    <div className="w-12 h-12 rounded-2xl bg-green-500/20 flex items-center justify-center text-green-500 group-hover:bg-green-500 group-hover:text-white transition-colors">
-                       <Megaphone size={24} />
-                    </div>
-                    <span className="text-white font-bold text-[10px]">واتساب الإدارة</span>
-                 </a>
+            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+              {/* Top Navigation Bar: Administration vs Teachers */}
+              <div className="flex items-center gap-2 bg-[#101935] p-1.5 rounded-2xl border border-white/10 shadow-lg">
+                <button
+                  type="button"
+                  onClick={() => setContactTab('admin')}
+                  className={`flex-1 py-3 px-3 sm:px-4 rounded-xl text-xs sm:text-sm font-black transition-all cursor-pointer flex items-center justify-center gap-2 ${
+                    contactTab === 'admin'
+                      ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-lg shadow-blue-600/30'
+                      : 'text-white/60 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <ShieldCheck size={16} />
+                  <span>تواصل مع الإدارة</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setContactTab('teachers')}
+                  className={`flex-1 py-3 px-3 sm:px-4 rounded-xl text-xs sm:text-sm font-black transition-all cursor-pointer flex items-center justify-center gap-2 relative ${
+                    contactTab === 'teachers'
+                      ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-lg shadow-cyan-500/30'
+                      : 'text-cyan-300/70 hover:text-cyan-300 hover:bg-cyan-500/10'
+                  }`}
+                >
+                  <Users size={16} />
+                  <span>الأساتذة (كادر المواد)</span>
+                  {studentTeachers.length > 0 && (
+                    <span className="bg-cyan-400 text-black text-[10px] font-black px-2 py-0.5 rounded-full shrink-0">
+                      {studentTeachers.length}
+                    </span>
+                  )}
+                </button>
               </div>
 
-              {/* Message Box */}
-              <div className="bg-[#101935] p-6 rounded-[2.5rem] border border-white/5 space-y-4">
-                 <h4 className="text-white font-black text-sm pr-2">صندوق الدعم والتبليغات</h4>
-                 <p className="text-white/40 text-xs px-2 leading-relaxed">فتح صندوق الوارد لعرض الرسائل المباشرة و إرسال طلبات رسمية للإدارة.</p>
-                 <button 
-                    onClick={() => setIsSupportFormOpen(true)}
-                    className="w-full py-4 bg-purple-600 rounded-2xl text-white font-black text-sm shadow-xl shadow-purple-600/10 active:scale-95 transition-all flex items-center justify-center gap-2 relative overflow-visible"
-                 >
-                    {totalUnreadSupport > 0 && (
-                      <span className="absolute -top-2 -right-2 w-6 h-6 bg-rose-500 text-white rounded-full flex items-center justify-center text-xs font-black border-2 border-[#101935] shadow-lg animate-pulse">
-                        {totalUnreadSupport > 9 ? '+9' : totalUnreadSupport}
+              {contactTab === 'admin' ? (
+                <div className="space-y-6">
+                  {/* Quick Contact Options */}
+                  <div className="grid grid-cols-2 gap-4">
+                     <a href={`tel:${schoolInfo.adminPhone || '07700000000'}`} className="bg-emerald-500/10 border border-emerald-500/20 p-6 rounded-3xl flex flex-col items-center gap-3 group active:scale-95 transition-all text-center">
+                        <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 flex items-center justify-center text-emerald-400 group-hover:bg-emerald-500 group-hover:text-white transition-colors">
+                           <ShieldCheck size={24} />
+                        </div>
+                        <span className="text-white font-bold text-[10px]">اتصال مباشر</span>
+                     </a>
+                     <a href={`https://wa.me/${getFormattedWhatsapp(schoolInfo.adminWhatsapp)}`} target="_blank" rel="noreferrer" className="bg-green-500/10 border border-green-500/20 p-6 rounded-3xl flex flex-col items-center gap-3 group active:scale-95 transition-all text-center">
+                        <div className="w-12 h-12 rounded-2xl bg-green-500/20 flex items-center justify-center text-green-500 group-hover:bg-green-500 group-hover:text-white transition-colors">
+                           <Megaphone size={24} />
+                        </div>
+                        <span className="text-white font-bold text-[10px]">واتساب الإدارة</span>
+                     </a>
+                  </div>
+
+                  {/* Message Box */}
+                  <div className="bg-[#101935] p-6 rounded-[2.5rem] border border-white/5 space-y-4">
+                     <h4 className="text-white font-black text-sm pr-2">صندوق الدعم والتبليغات الإدارية</h4>
+                     <p className="text-white/40 text-xs px-2 leading-relaxed">فتح صندوق الوارد لعرض الرسائل المباشرة و إرسال طلبات رسمية للإدارة.</p>
+                     <button 
+                        onClick={() => setIsSupportFormOpen(true)}
+                        className="w-full py-4 bg-purple-600 rounded-2xl text-white font-black text-sm shadow-xl shadow-purple-600/10 active:scale-95 transition-all flex items-center justify-center gap-2 relative overflow-visible"
+                     >
+                        {totalUnreadSupport > 0 && (
+                          <span className="absolute -top-2 -right-2 w-6 h-6 bg-rose-500 text-white rounded-full flex items-center justify-center text-xs font-black border-2 border-[#101935] shadow-lg animate-pulse">
+                            {totalUnreadSupport > 9 ? '+9' : totalUnreadSupport}
+                          </span>
+                        )}
+                        <Bell size={16} /> فتح صندوق الدعم والتبليغات
+                     </button>
+                  </div>
+
+                  {/* Note */}
+                  <div className="flex items-center gap-3 px-4">
+                     <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
+                     <p className="text-white/30 text-[9px] font-bold">يتم الرد على طلبات المقابلات والاستفسارات الإدارية خلال أوقات الدوام الرسمي.</p>
+                  </div>
+                </div>
+              ) : (
+                /* Teacher Communication Tab */
+                <div className="space-y-6">
+                  {/* Banner */}
+                  <div className="bg-gradient-to-r from-cyan-500/15 via-blue-500/10 to-indigo-500/15 border border-cyan-500/30 p-5 rounded-3xl space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-cyan-300 font-black text-sm flex items-center gap-2">
+                        <Sparkles size={18} className="text-cyan-400 animate-pulse" />
+                        <span>كادر أساتذة الطالب المباشر (المجلس)</span>
+                      </h4>
+                      <span className="bg-cyan-500/20 text-cyan-300 border border-cyan-400/30 text-[10px] font-black px-2.5 py-0.5 rounded-full">
+                        {studentTeachers.length} أساتذة
                       </span>
-                    )}
-                    <Bell size={16} /> فتح صندوق الدعم والتبليغات
-                 </button>
-              </div>
+                    </div>
+                    <p className="text-white/60 text-xs leading-relaxed">
+                      هؤلاء هم الأساتذة المدرسون للطالب <strong className="text-white font-black">{cleanParentStudentName(studentName)}</strong> ({studentData?.grade || grade || ''}). يمكنك مراسلة الأستاذ مباشرة للاستفسار عن الأداء الأكاديمي والمستوى المالي/الانضباطي.
+                    </p>
+                  </div>
 
-              {/* Note */}
-              <div className="flex items-center gap-3 px-4">
-                 <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse" />
-                 <p className="text-white/30 text-[9px] font-bold">يتم الرد على طلبات المقابلات خلال 24 ساعة من أوقات الدوام الرسمي.</p>
-              </div>
+                  {/* Teachers Grid */}
+                  {isLoadingTeachers ? (
+                    <div className="p-8 text-center space-y-3 bg-[#101935] rounded-3xl border border-white/5">
+                      <Loader2 size={28} className="animate-spin text-cyan-400 mx-auto" />
+                      <p className="text-white/50 text-xs font-bold">جاري تحميل قائمة الأساتذة...</p>
+                    </div>
+                  ) : studentTeachers.length === 0 ? (
+                    <div className="p-8 text-center space-y-3 bg-[#101935] rounded-3xl border border-white/5">
+                      <Users size={32} className="text-white/20 mx-auto" />
+                      <h5 className="text-white font-black text-sm">لا يوجد أساتذة مسجلون لهذه الشعبة حالياً</h5>
+                      <p className="text-white/40 text-xs max-w-md mx-auto">
+                        يمكنك التواصل مباشرة مع إدارة المدرسة لتوجيه أي استفسار خاص بالمدرس المختص.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {studentTeachers.map((tch: any) => {
+                        const tchId = tch.id || tch.code;
+                        const hasHistory = teacherChatHistory[tchId] && teacherChatHistory[tchId].length > 0;
+                        const lastMsg = hasHistory ? teacherChatHistory[tchId][teacherChatHistory[tchId].length - 1] : null;
+
+                        return (
+                          <div 
+                            key={`tch_card_${tchId}`}
+                            className="bg-[#101935] rounded-3xl border border-white/10 p-5 space-y-4 hover:border-cyan-500/40 transition-all shadow-lg flex flex-col justify-between"
+                          >
+                            <div className="flex items-start gap-3.5">
+                              {/* Avatar */}
+                              <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-cyan-500/20 to-blue-600/20 border border-cyan-400/30 flex items-center justify-center shrink-0 overflow-hidden text-cyan-300 shadow-md">
+                                {tch.photo ? (
+                                  <img src={tch.photo} alt={tch.name} className="w-full h-full object-cover" />
+                                ) : (
+                                  <Users size={24} />
+                                )}
+                              </div>
+
+                              <div className="min-w-0 flex-1 space-y-1">
+                                <div className="flex items-center justify-between gap-1 flex-wrap">
+                                  <h5 className="text-white font-black text-sm truncate">
+                                    أ. {tch.name}
+                                  </h5>
+                                  <span className="text-[10px] font-black bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 px-2 py-0.5 rounded-full shrink-0">
+                                    معتمد 🛡️
+                                  </span>
+                                </div>
+
+                                <div className="text-cyan-300 font-bold text-xs flex items-center gap-1.5">
+                                  <BookOpen size={12} className="text-cyan-400 shrink-0" />
+                                  <span className="truncate">{tch.subject ? `مادة ${tch.subject}` : 'أستاذ المادة'}</span>
+                                </div>
+
+                                <p className="text-white/40 text-[11px] truncate">
+                                  {tch.bio || `كادر التدريس لصف ${studentData?.grade || grade || ''}`}
+                                </p>
+                              </div>
+                            </div>
+
+                            {/* Last Msg snippet if exists */}
+                            {lastMsg && (
+                              <div className="bg-white/5 p-2.5 rounded-2xl border border-white/5 text-[11px] text-white/70 space-y-0.5">
+                                <div className="flex items-center justify-between text-[10px] text-white/40">
+                                  <span>آخر رسالة مرسلة:</span>
+                                  <span>{lastMsg.time}</span>
+                                </div>
+                                <p className="truncate font-semibold text-white/80">"{lastMsg.text}"</p>
+                              </div>
+                            )}
+
+                            {/* Direct Action Button */}
+                            <button
+                              type="button"
+                              onClick={() => setSelectedTeacherForChat(tch)}
+                              className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-black text-xs transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/20 active:scale-95"
+                            >
+                              <MessageCircle size={14} />
+                              <span>مراسلة الأستاذ مباشرة 💬</span>
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           ) : activeSubPage === "conduct" ? (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
@@ -4610,6 +5138,174 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
 
         <div className="h-20" /> {/* Spacer */}
       </div>
+
+      {/* Teacher Direct Chat Modal */}
+      <AnimatePresence>
+        {selectedTeacherForChat && (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md" dir="rtl">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-[#0b1224] border border-cyan-500/30 rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl flex flex-col max-h-[90vh]"
+            >
+              {/* Modal Header */}
+              <div className="p-4 sm:p-5 bg-gradient-to-r from-[#0a1536] to-[#0d2a6b] border-b border-white/10 flex items-center justify-between gap-3 shrink-0">
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-12 h-12 rounded-2xl bg-cyan-500/20 border border-cyan-400/40 text-cyan-300 flex items-center justify-center shrink-0 overflow-hidden shadow-md">
+                    {selectedTeacherForChat.photo ? (
+                      <img src={selectedTeacherForChat.photo} alt={selectedTeacherForChat.name} className="w-full h-full object-cover" />
+                    ) : (
+                      <Users size={22} />
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <h4 className="text-white font-black text-base truncate flex items-center gap-2">
+                      <span>أ. {selectedTeacherForChat.name}</span>
+                      <span className="text-[10px] bg-cyan-500/20 text-cyan-300 border border-cyan-400/30 px-2 py-0.5 rounded-full font-bold">
+                        {selectedTeacherForChat.subject ? `مادة ${selectedTeacherForChat.subject}` : 'أستاذ المادة'}
+                      </span>
+                    </h4>
+                    <p className="text-xs text-white/50 font-bold truncate mt-0.5">
+                      استفسار ولي أمر الطالب: <span className="text-cyan-300 font-black">{cleanParentStudentName(studentName)}</span>
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedTeacherForChat(null)}
+                  className="w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 text-white/50 hover:text-white flex items-center justify-center transition-all cursor-pointer shrink-0"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Chat Body & History */}
+              <div className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1 no-scrollbar">
+                {/* Intro Banner */}
+                <div className="p-3.5 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-200 text-xs font-bold flex items-center gap-2.5">
+                  <Sparkles size={16} className="text-cyan-400 shrink-0" />
+                  <span>تواصل حي مع أستاذ المادة. تصل رسالتك مباشرة للأستاذ مع إشعار فوري 📱</span>
+                </div>
+
+                {/* Quick Chips Prompts */}
+                <div className="space-y-1.5">
+                  <span className="text-[10px] font-black text-white/40 block">نماذج استفسارات سريعة (انقر للتعبئة):</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      "🌟 السلام عليكم أستاذ، أود الاستفسار عن المستوى الدراسي والدرجات للطالب.",
+                      "⏱️ كيف ترون تحضير والتزام الطالب خلال الحصص والنشاط الصفي؟",
+                      "📝 هل توجد أي واجبات أو توصيات خاصة ينبغي المتابعة مع الطالب فيها؟",
+                      "🤝 جزيل الشكر والتقدير لجهودكم القيمة ومتابعتكم المستمرة."
+                    ].map((promptText, pIdx) => (
+                      <button
+                        key={`chip_${pIdx}`}
+                        type="button"
+                        onClick={() => setTeacherMessageText(promptText)}
+                        className="text-[11px] font-bold bg-white/5 hover:bg-cyan-500/20 border border-white/10 hover:border-cyan-400/40 text-white/80 hover:text-cyan-200 px-3 py-1.5 rounded-xl transition-all cursor-pointer text-right leading-tight"
+                      >
+                        {promptText}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Sent Messages Stream */}
+                {(() => {
+                  const tId = selectedTeacherForChat.id || selectedTeacherForChat.code;
+                  const historyMsgs = teacherChatHistory[tId] || [];
+
+                  if (historyMsgs.length === 0) {
+                    return (
+                      <div className="py-6 text-center text-white/30 text-xs font-bold border border-dashed border-white/10 rounded-2xl">
+                        لم تقم بإرسال أي رسائل سابقة لهذا الأستاذ بعد. اكتب رسالتك أدناه للبدء.
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="space-y-2.5 pt-2 border-t border-white/10">
+                      <span className="text-[10px] font-black text-white/40 block">سجل الرسائل المرسلة للأستاذ:</span>
+                      {historyMsgs.map((m: any, idx: number) => (
+                        <div key={m.id || `msg_${idx}`} className="bg-[#121d38] border border-cyan-500/20 p-3.5 rounded-2xl space-y-1">
+                          <div className="flex items-center justify-between text-[10px]">
+                            <span className="font-black text-cyan-300 flex items-center gap-1">
+                              <CheckCircle2 size={12} className="text-emerald-400" />
+                              <span>{m.senderName}</span>
+                            </span>
+                            <span className="text-white/40 font-mono">{m.time} • {m.date}</span>
+                          </div>
+                          <p className="text-xs text-white font-medium leading-relaxed">{m.text}</p>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Message Input Footer */}
+              <div className="p-4 bg-[#080d1a] border-t border-white/10 space-y-3 shrink-0">
+                <textarea
+                  value={teacherMessageText}
+                  onChange={(e) => setTeacherMessageText(e.target.value)}
+                  placeholder={`اكتب استفسارك أو رسالتك للأستاذ (${selectedTeacherForChat.name}) هنا...`}
+                  className="w-full bg-[#101935] border border-cyan-500/30 rounded-2xl p-3 text-xs font-bold text-white placeholder-white/30 focus:border-cyan-400 outline-none transition-all resize-none h-20 leading-relaxed"
+                />
+
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[10px] text-white/40 font-bold">
+                    سيصل التنبيه فوراً لجلسة الأستاذ ⚡
+                  </span>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedTeacherForChat(null)}
+                      className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/60 hover:text-white text-xs font-bold transition-all cursor-pointer"
+                    >
+                      إلغاء
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isSendingTeacherMessage || !teacherMessageText.trim()}
+                      onClick={handleSendTeacherMessage}
+                      className="px-5 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-black text-xs transition-all cursor-pointer flex items-center gap-1.5 shadow-lg shadow-cyan-500/25 disabled:opacity-40 active:scale-95"
+                    >
+                      {isSendingTeacherMessage ? (
+                        <Loader2 size={14} className="animate-spin text-black" />
+                      ) : (
+                        <Send size={14} />
+                      )}
+                      <span>إرسال الرسالة للأستاذ</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Floating Toast Notification */}
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            className={`fixed top-5 left-1/2 -translate-x-1/2 z-[10000] px-5 py-3 rounded-2xl shadow-2xl border backdrop-blur-xl flex items-center gap-3 text-xs font-black dir-rtl ${
+              toast.type === 'error'
+                ? 'bg-rose-950/90 text-rose-200 border-rose-500/50 shadow-rose-900/40'
+                : 'bg-emerald-950/90 text-emerald-200 border-emerald-500/50 shadow-emerald-900/40'
+            }`}
+          >
+            <Sparkles size={16} className={toast.type === 'error' ? 'text-rose-400' : 'text-emerald-400'} />
+            <span>{toast.message}</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };

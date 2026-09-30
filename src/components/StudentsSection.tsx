@@ -15,6 +15,7 @@ import { StudentPromotionWizard } from './StudentPromotionWizard';
 import { getSubjectsForGrade, getGradePriority, calculateStudentFinancials, getPrefixForGrade, SUBJECT_BADGES_CONFIG, computeAcademicIdentity, OUTSTANDING_BADGES } from '../utils/studentUtils';
 import { logActivity } from '../utils/auditLogger';
 import { academicService } from '../services/academicService';
+import { printHTML, exportToExcel } from '../lib/exportUtils';
 
 export const PRIDE_PRESETS = [
   "نفخر بالتطور الكبير الذي حققه هذا الشهر في مهاراته ودروسه المتميزة. 🌟",
@@ -252,30 +253,24 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
     const subjects = getSubjectsForGrade(selectedList.students[0]?.grade || '', selectedList.removedSubjects || [], subjectMapping);
     const periodName = periods.find(p => p.id === selectedPeriod)?.name;
     
-    let csvContent = "\uFEFF"; // UTF-8 BOM
-    csvContent += `بوابة بيرق - ${displaySchoolName}\n`;
-    csvContent += `القائمة: ${selectedList.name} - ${periodName}\n`;
-    csvContent += "الاسم,كود الطالب,المرحلة," + subjects.map(s => s.name).join(",") + "\n";
-    
-    selectedList.students.forEach((stu: any) => {
+    // Prepare data for real Excel export
+    const excelData = selectedList.students.map((stu: any) => {
       const periodGrades = (stu.grades?.[selectedPeriod]) || {};
+      const row: any = {
+        'الاسم': stu.name,
+        'كود الطالب': stu.student,
+        'المرحلة': stu.grade
+      };
       
-      let row = `"${stu.name}","${stu.student}","${stu.grade}",`;
-      row += subjects.map(s => periodGrades[s.id] || 0).join(",");
-      row += `\n`;
-      csvContent += row;
+      subjects.forEach(s => {
+        row[s.name] = periodGrades[s.id] || 0;
+      });
+      
+      return row;
     });
 
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    link.setAttribute("href", url);
-    link.setAttribute("download", `${selectedList.name}_${periodName}_درجات.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    showToast(`تم تصدير درجات ${periodName} بنجاح`);
+    exportToExcel(excelData, `${selectedList.name}_${periodName}_درجات.xlsx`, 'الدرجات');
+    showToast(`تم تصدير درجات ${periodName} بنجاح بصيغة Excel 📊`);
   };
 
   const printGrades = () => {
@@ -283,16 +278,13 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
     const subjects = getSubjectsForGrade(selectedList.students[0]?.grade || '', selectedList.removedSubjects || [], subjectMapping);
     const periodName = periods.find(p => p.id === selectedPeriod)?.name;
     
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) return;
-
     const html = `
       <html dir="rtl">
         <head>
           <title>كشف درجات: ${selectedList.name} - ${periodName}</title>
           <style>
             @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700;900&display=swap');
-            body { font-family: 'Tajawal', sans-serif; padding: 40px; color: #1a1a1a; }
+            body { font-family: 'Tajawal', sans-serif; padding: 40px; color: #1a1a1a; background: white; }
             .header { text-align: center; border-bottom: 4px solid #101935; padding-bottom: 20px; margin-bottom: 30px; }
             .header h1 { margin: 0; color: #101935; font-size: 28px; }
             .header p { margin: 5px 0 0; color: #666; font-size: 14px; }
@@ -304,6 +296,10 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
             .failed { color: #e11d48; font-weight: bold; }
             .passed { color: #10b981; font-weight: bold; }
             .footer { margin-top: 40px; text-align: left; font-size: 12px; color: #999; border-top: 1px solid #eee; padding-top: 10px; }
+            @media print {
+              body { padding: 0; }
+              @page { margin: 15mm; }
+            }
           </style>
         </head>
         <body>
@@ -337,12 +333,16 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
             </tbody>
           </table>
           <div class="footer">طبع بواسطة نظام الإدارة الذكي • ${new Date().toLocaleString('ar-IQ')}</div>
+          <script>
+            window.onload = function() {
+              setTimeout(function() { window.print(); }, 500);
+            };
+          </script>
         </body>
       </html>
     `;
-    printWindow.document.write(html);
-    printWindow.document.close();
-    setTimeout(() => printWindow.print(), 500);
+    
+    printHTML(html);
   };
 
 

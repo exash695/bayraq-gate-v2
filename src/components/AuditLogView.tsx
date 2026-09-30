@@ -13,10 +13,13 @@ import {
   Trash2,
   Loader2,
   Download,
-  X
+  X,
+  Printer,
+  FileSpreadsheet
 } from 'lucide-react';
 import { auditService, AuditLog } from '../services/auditService';
 import { ConfirmDialog } from './ConfirmDialog';
+import { printHTML, exportToExcel } from '../lib/exportUtils';
 
 interface AuditLogViewProps {
   showToast: (message: string, type: 'success' | 'error' | 'info') => void;
@@ -322,10 +325,21 @@ export const AuditLogView: React.FC<AuditLogViewProps> = ({ showToast }) => {
             onClick={handlePrintLogs}
             className="flex items-center justify-center gap-3 bg-white/5 hover:bg-blue-500/10 px-6 py-4 sm:py-3 rounded-2xl border border-white/10 hover:border-blue-500/20 backdrop-blur-sm transition-all group text-right shadow-xl"
           >
-            <Download size={22} className="text-blue-400 group-hover:-translate-y-1 transition-transform shrink-0" />
+            <Printer size={22} className="text-blue-400 group-hover:-translate-y-1 transition-transform shrink-0" />
             <div className="flex flex-col flex-1 sm:flex-none">
-              <span className="text-[10px] text-white/30 font-black uppercase leading-none mb-1">نسخة احتياطية</span>
+              <span className="text-[10px] text-white/30 font-black uppercase leading-none mb-1">نسخة ورقية</span>
               <span className="text-xs text-white font-black">طباعة السجلات</span>
+            </div>
+          </button>
+
+          <button
+            onClick={handleExportExcel}
+            className="flex items-center justify-center gap-3 bg-white/5 hover:bg-emerald-500/10 px-6 py-4 sm:py-3 rounded-2xl border border-white/10 hover:border-emerald-500/20 backdrop-blur-sm transition-all group text-right shadow-xl"
+          >
+            <FileSpreadsheet size={22} className="text-emerald-400 group-hover:-translate-y-1 transition-transform shrink-0" />
+            <div className="flex flex-col flex-1 sm:flex-none">
+              <span className="text-[10px] text-white/30 font-black uppercase leading-none mb-1">تصدير رقمي</span>
+              <span className="text-xs text-white font-black">تنزيل إكسل (XLSX)</span>
             </div>
           </button>
           

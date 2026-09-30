@@ -20,6 +20,7 @@ interface TeacherAIAssistantProps {
   selectedClass?: string;
   disabledModules?: string[];
   rolePrefix?: string;
+  classSwitcherBar?: React.ReactNode;
 }
 
 type AITool = 'questions' | 'summaries' | 'homework' | 'ideas' | 'competitions' | 'history' | 'activities' | 'sovereignty' | null;
@@ -29,7 +30,8 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
   teacherData, 
   selectedClass,
   disabledModules = [],
-  rolePrefix = 'teacher'
+  rolePrefix = 'teacher',
+  classSwitcherBar
 }) => {
   const remoteConfig = useRemoteConfig();
   const [activeTool, setActiveTool] = useState<AITool>(() => {
@@ -740,7 +742,7 @@ ${baseFormatting}`;
           className="relative z-10"
         >
           {/* Bairaq Standard Platform Header Banner */}
-          <div className="shrink-0 relative rounded-2xl overflow-hidden border border-white/5 bg-[#0D47A1] shadow-[0_10px_30px_rgba(13,71,161,0.3)] h-[105px] flex items-center mb-6">
+          <div className="shrink-0 relative rounded-2xl overflow-hidden border border-white/5 bg-[#0D47A1] shadow-[0_10px_30px_rgba(13,71,161,0.3)] h-[105px] flex items-center mb-4">
             {/* Background elegant pattern and overlays */}
             <div className="absolute inset-0 bg-gradient-to-r from-[#0a2342] via-[#0D47A1] to-[#0D47A1] opacity-90" />
             <div className="absolute top-0 left-0 w-36 h-36 bg-[#FFD600]/10 rounded-full blur-2xl pointer-events-none" />
@@ -772,6 +774,9 @@ ${baseFormatting}`;
               </div>
             </div>
           </div>
+
+          {/* Class Switcher Bar below the Header Banner */}
+          {classSwitcherBar && <div className="mb-6 shrink-0">{classSwitcherBar}</div>}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-5">
             {tools.map((item, idx) => (

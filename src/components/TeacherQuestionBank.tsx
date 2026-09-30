@@ -10,9 +10,10 @@ interface TeacherQuestionBankProps {
   teacherData?: any;
   schoolName?: string;
   selectedClass?: string;
+  classSwitcherBar?: React.ReactNode;
 }
 
-export const TeacherQuestionBank: React.FC<TeacherQuestionBankProps> = ({ schoolId, teacherData, schoolName, selectedClass }) => {
+export const TeacherQuestionBank: React.FC<TeacherQuestionBankProps> = ({ schoolId, teacherData, schoolName, selectedClass, classSwitcherBar }) => {
   const [mainTab, setMainTab] = useState<'questions' | 'papers'>('questions');
   const [allQuestions, setAllQuestions] = useState<any[]>([]);
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
@@ -167,7 +168,7 @@ export const TeacherQuestionBank: React.FC<TeacherQuestionBankProps> = ({ school
     const catDetails = categories.find(c => c.id === activeCategory);
     return (
       <div className="h-full flex flex-col p-6 overflow-hidden relative" dir="rtl">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8 shrink-0">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-4 shrink-0">
           <div className="flex items-center gap-4">
             <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${catDetails?.bg} ${catDetails?.border} border shrink-0`}>
               {catDetails && <catDetails.icon size={24} className={catDetails.color} />}
@@ -202,6 +203,8 @@ export const TeacherQuestionBank: React.FC<TeacherQuestionBankProps> = ({ school
             </button>
           </div>
         </div>
+
+        {classSwitcherBar && <div className="mb-6 shrink-0">{classSwitcherBar}</div>}
 
         <div className="flex-1 overflow-y-auto no-scrollbar pb-6">
         {loading ? (
@@ -383,7 +386,7 @@ export const TeacherQuestionBank: React.FC<TeacherQuestionBankProps> = ({ school
   if ((mainTab as string) === 'papers') {
     return (
       <div className="h-full flex flex-col overflow-hidden relative" dir="rtl">
-        <TeacherExamPapers schoolId={schoolId} teacherData={teacherData} selectedClass={selectedClass} onBack={() => setMainTab('questions')} />
+        <TeacherExamPapers schoolId={schoolId} teacherData={teacherData} selectedClass={selectedClass} classSwitcherBar={classSwitcherBar} onBack={() => setMainTab('questions')} />
       </div>
     );
   }
@@ -391,7 +394,7 @@ export const TeacherQuestionBank: React.FC<TeacherQuestionBankProps> = ({ school
   return (
     <div className="h-full flex flex-col p-6 overflow-y-auto no-scrollbar" dir="rtl">
       {/* Bairaq Header Banner */}
-      <div className="shrink-0 relative rounded-2xl overflow-hidden border border-white/5 bg-[#0D47A1] shadow-[0_10px_30px_rgba(13,71,161,0.3)] h-[105px] flex items-center mb-6">
+      <div className="shrink-0 relative rounded-2xl overflow-hidden border border-white/5 bg-[#0D47A1] shadow-[0_10px_30px_rgba(13,71,161,0.3)] h-[105px] flex items-center mb-4">
         <div className="absolute inset-0 bg-gradient-to-r from-[#0a2342] via-[#0D47A1] to-[#0D47A1] opacity-90" />
         <div className="absolute top-0 left-0 w-36 h-36 bg-[#FFD600]/10 rounded-full blur-2xl pointer-events-none" />
         <div className="absolute bottom-0 right-0 w-48 h-48 bg-cyan-500/5 rounded-full blur-3xl pointer-events-none" />
@@ -426,6 +429,9 @@ export const TeacherQuestionBank: React.FC<TeacherQuestionBankProps> = ({ school
           </div>
         </div>
       </div>
+
+      {/* Class Switcher Bar below the Header Banner */}
+      {classSwitcherBar && <div className="mb-6 shrink-0">{classSwitcherBar}</div>}
 
       <div className="flex gap-4 mb-8 border-b border-white/10 pb-2">
         <button 

@@ -1107,20 +1107,59 @@ async function startServer() {
           .orderBy(desc(attendance_logs.timestamp));
 
         if (studentLogs.length > 0) {
-          let present = 0, absent = 0, late = 0;
+          // Deduplicate logs by date and period (most recent timestamp wins)
+          const dedupedMap = new Map<string, any>();
+          
+          // Existing JSONB logs map for preserving subject and rich details
+          const existingLogsMap = new Map<string, any>();
+          if (student.attendance && Array.isArray(student.attendance.logs)) {
+            student.attendance.logs.forEach((el: any) => {
+              const k = `${el.date}_${el.period || 'يوم كامل'}`;
+              existingLogsMap.set(k, el);
+            });
+          }
+
           studentLogs.forEach(l => {
+            const periodKey = l.period || 'يوم كامل';
+            const key = `${l.date}_${periodKey}`;
+            if (!dedupedMap.has(key)) {
+              let cleanR = (l.reason || '').trim();
+              const pMatch = cleanR.match(/^(.+?)\s*\(\s*\1\s*\)$/);
+              if (pMatch) {
+                cleanR = pMatch[1].trim();
+              }
+              const existingMatch = existingLogsMap.get(key);
+              let logTime = (l as any).time || existingMatch?.time;
+              if (!logTime) {
+                const d = new Date(l.timestamp);
+                const h = d.getHours();
+                const m = d.getMinutes().toString().padStart(2, '0');
+                const isPM = h >= 12;
+                const h12 = (h % 12 || 12).toString().padStart(2, '0');
+                logTime = `${h12}:${m} ${isPM ? 'م' : 'ص'}`;
+              }
+              dedupedMap.set(key, {
+                date: l.date,
+                status: l.status,
+                period: l.period || 'يوم كامل',
+                subject: (l as any).subject || existingMatch?.subject || undefined,
+                reason: cleanR,
+                evaluation: cleanR || existingMatch?.evaluation || null,
+                timestamp: l.timestamp,
+                time: logTime,
+                by: l.recordedBy || existingMatch?.by || 'الأستاذ'
+              });
+            }
+          });
+
+          const mappedLogs = Array.from(dedupedMap.values());
+          let present = 0, absent = 0, late = 0;
+          mappedLogs.forEach(l => {
             if (l.status === 'present') present++;
             if (l.status === 'absent') absent++;
             if (l.status === 'late') late++;
           });
-          const mappedLogs = studentLogs.map(l => ({
-            date: l.date,
-            status: l.status,
-            period: l.period,
-            reason: l.reason || '',
-            time: new Date(l.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-            by: l.recordedBy || 'الأستاذ'
-          }));
+
           student.attendance = {
             present,
             absent,
@@ -6043,8 +6082,9 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
   app.post('/api/students/:studentId/attendance', async (req, res) => {
     try {
       const { studentId } = req.params;
-      const { status, by, reason, period, schoolId, date: customDate, studentCode, code } = req.body;
+      const { status, by, reason, period, schoolId, date: customDate, studentCode, code, evaluation, evaluationNote, customNote } = req.body;
       const date = customDate || new Date().toISOString().split('T')[0];
+      const activeEvaluation = evaluation || evaluationNote || customNote || null;
 
       // 1. Locate student record in Postgres
       let foundStudents = await db.select().from(students).where(eq(students.id, studentId));
@@ -6053,7 +6093,42 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
       }
       const rawCode = studentCode || code;
       if (foundStudents.length === 0 && rawCode) {
-        foundStudents = await db.select().from(students).where(eq(students.code, rawCode));
+        foundStudents = await db.select().from(students).where(or(
+          eq(students.code, rawCode),
+          eq(students.id, `school1_${rawCode}`),
+          eq(students.id, `${schoolId}_${rawCode}`)
+        ));
+      }
+      const reqName = req.body.name || req.body.studentName;
+      if (foundStudents.length === 0 && reqName) {
+        foundStudents = await db.select().from(students).where(eq(students.name, reqName.trim()));
+      }
+      if (foundStudents.length === 0) {
+        // Search inside academic_lists to resolve student code and name
+        try {
+          const allLists = await db.select().from(academic_lists);
+          for (const list of allLists) {
+            const listStudents = Array.isArray(list.students) ? list.students : [];
+            const matchedSt = listStudents.find((st: any) => 
+              st.id === studentId || st.code === studentId || (rawCode && (st.code === rawCode || st.student === rawCode))
+            );
+            if (matchedSt) {
+              const stCode = matchedSt.code || matchedSt.student;
+              if (stCode) {
+                foundStudents = await db.select().from(students).where(or(
+                  eq(students.code, stCode),
+                  eq(students.id, `school1_${stCode}`),
+                  eq(students.id, `${schoolId}_${stCode}`)
+                ));
+                if (foundStudents.length > 0) break;
+              }
+              if (foundStudents.length === 0 && matchedSt.name) {
+                foundStudents = await db.select().from(students).where(eq(students.name, matchedSt.name.trim()));
+                if (foundStudents.length > 0) break;
+              }
+            }
+          }
+        } catch {}
       }
 
       const actualStudentId = foundStudents.length > 0 ? foundStudents[0].id : studentId;
@@ -6061,7 +6136,39 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
       const currentSchoolId = (foundStudents.length > 0 ? foundStudents[0].schoolId : schoolId) || schoolId || '';
       const id = `att_${actualStudentId}_${date}_${period}`.replace(/\s+/g, '_');
 
-      // 2. Record in detailed log table
+      // Clean and set reason / evaluation without self-duplication
+      const activeEvalTrimmed = activeEvaluation ? String(activeEvaluation).trim() : null;
+      let finalReason = (reason ? String(reason) : '').trim();
+
+      if (activeEvalTrimmed) {
+        finalReason = activeEvalTrimmed;
+      }
+
+      // Check if duplicate parentheses exist and clean
+      const parenMatch = finalReason.match(/^(.+?)\s*\(\s*\1\s*\)$/);
+      if (parenMatch) {
+        finalReason = parenMatch[1].trim();
+      }
+
+      const activeSubject = req.body.subject || (req.body.extraData && req.body.extraData.subject) || null;
+
+      // 2. Clean prior duplicate logs for this specific student, date, and period across identifiers
+      try {
+        await db.delete(attendance_logs).where(and(
+          or(
+            eq(attendance_logs.studentId, actualStudentId),
+            eq(attendance_logs.studentId, targetCode),
+            eq(attendance_logs.studentId, (targetCode || '').replace(/^st_/, '').trim()),
+            eq(attendance_logs.studentId, studentId)
+          ),
+          eq(attendance_logs.date, date),
+          eq(attendance_logs.period, period)
+        ));
+      } catch (cleanErr) {
+        console.warn("Could not clean prior duplicate attendance logs:", cleanErr);
+      }
+
+      // 3. Record in detailed log table
       try {
         await db.insert(attendance_logs).values({
           id,
@@ -6070,18 +6177,18 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
           date,
           status,
           period,
-          reason: reason || '',
+          reason: finalReason,
           recordedBy: by || 'الأستاذ',
           timestamp: new Date()
         }).onConflictDoUpdate({
           target: attendance_logs.id,
-          set: { status, reason: reason || '', recordedBy: by || 'الأستاذ', timestamp: new Date() }
+          set: { status, reason: finalReason, recordedBy: by || 'الأستاذ', timestamp: new Date() }
         });
       } catch (dbLogErr) {
         console.warn("Could not insert to attendance_logs table:", dbLogErr);
       }
 
-      // 3. Update summary in students table
+      // 4. Update summary in students table with deduplicated logs and preserved subjects
       let updatedAttendance: any = null;
       if (foundStudents.length > 0) {
         try {
@@ -6094,21 +6201,63 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
             ))
             .orderBy(desc(attendance_logs.timestamp));
 
+          // Deduplicate logs so each (date, period) appears strictly once
+          const dedupedLogsMap = new Map<string, any>();
+          
+          // Existing student logs map to retain subjects
+          const prevStudentLogs = Array.isArray(foundStudents[0]?.attendance?.logs) ? foundStudents[0].attendance.logs : [];
+          const prevMap = new Map<string, any>();
+          prevStudentLogs.forEach((pl: any) => {
+            const pk = `${pl.date}_${pl.period || 'يوم كامل'}`;
+            prevMap.set(pk, pl);
+          });
+
+          allLogs.forEach(l => {
+            const k = `${l.date}_${l.period || 'يوم كامل'}`;
+            if (!dedupedLogsMap.has(k)) {
+              let cleanR = (l.reason || '').trim();
+              const pMatch = cleanR.match(/^(.+?)\s*\(\s*\1\s*\)$/);
+              if (pMatch) {
+                cleanR = pMatch[1].trim();
+              }
+              const prevMatch = prevMap.get(k);
+              const resolvedSubject = (l.date === date && l.period === period ? activeSubject : undefined) || 
+                                      (l as any).subject || 
+                                      prevMatch?.subject || 
+                                      undefined;
+
+              let logTime = (l.date === date && l.period === period && req.body.time) ? req.body.time : (prevMatch?.time || (l as any).time);
+              if (!logTime) {
+                const d = new Date(l.timestamp);
+                const h = d.getHours();
+                const m = d.getMinutes().toString().padStart(2, '0');
+                const isPM = h >= 12;
+                const h12 = (h % 12 || 12).toString().padStart(2, '0');
+                logTime = `${h12}:${m} ${isPM ? 'م' : 'ص'}`;
+              }
+
+              dedupedLogsMap.set(k, {
+                date: l.date,
+                status: l.status,
+                period: l.period || 'يوم كامل',
+                subject: resolvedSubject,
+                reason: cleanR,
+                evaluation: cleanR || prevMatch?.evaluation || null,
+                timestamp: l.timestamp,
+                time: logTime,
+                by: l.recordedBy || prevMatch?.by || 'الأستاذ'
+              });
+            }
+          });
+
+          const recentLogs = Array.from(dedupedLogsMap.values()).slice(0, 100);
+
           let present = 0, absent = 0, late = 0;
-          allLogs.forEach(log => {
+          recentLogs.forEach(log => {
             if (log.status === 'present') present++;
             if (log.status === 'absent') absent++;
             if (log.status === 'late') late++;
           });
-
-          const recentLogs = allLogs.slice(0, 100).map(l => ({
-            date: l.date,
-            status: l.status,
-            period: l.period,
-            reason: l.reason,
-            time: new Date(l.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-            by: l.recordedBy
-          }));
 
           updatedAttendance = {
             present,
@@ -6135,7 +6284,15 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
             status,
             period,
             reason: reason || '',
-            time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+            timestamp: new Date().toISOString(),
+            time: req.body.time || (() => {
+              const d = new Date();
+              const h = d.getHours();
+              const m = d.getMinutes().toString().padStart(2, '0');
+              const isPM = h >= 12;
+              const h12 = (h % 12 || 12).toString().padStart(2, '0');
+              return `${h12}:${m} ${isPM ? 'م' : 'ص'}`;
+            })(),
             by: by || 'الأستاذ'
           }]
         };
@@ -6151,7 +6308,8 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
             const match = st.id === actualStudentId || 
                           st.id === studentId || 
                           st.code === targetCode || 
-                          (st.code && targetCode && st.code.replace(/^st_/, '').trim() === targetCode.replace(/^st_/, '').trim());
+                          (st.code && targetCode && st.code.replace(/^st_/, '').trim() === targetCode.replace(/^st_/, '').trim()) ||
+                          (st.name && foundStudents[0]?.name && st.name.trim() === foundStudents[0].name.trim());
             if (match) {
               hasMatch = true;
               return {

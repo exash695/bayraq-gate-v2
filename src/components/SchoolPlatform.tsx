@@ -7074,19 +7074,21 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
           : (assignedClassesList[0] || academicLists?.[0]?.name || "اول ابتدائي أ");
 
         return (
-          <TeacherAttendanceTab
-            schoolId={resolvedSchoolId}
-            teacherData={currentTeacherData || teacherData}
-            schoolName={schoolName}
-            selectedClass={resolvedAttendanceClass}
-            onSelectClass={(cls) => {
-              setSelectedTeacherClass(cls);
-            }}
-            availableClasses={assignedClassesList.length > 0 ? assignedClassesList : undefined}
-            showToast={showToast}
-            initialAcademicLists={academicLists}
-            initialStudents={topStudents}
-          />
+          <div className="flex-1 flex flex-col h-full overflow-y-auto overflow-x-hidden w-full max-w-full no-scrollbar">
+            <TeacherAttendanceTab
+              schoolId={resolvedSchoolId}
+              teacherData={currentTeacherData || teacherData}
+              schoolName={schoolName}
+              selectedClass={resolvedAttendanceClass}
+              onSelectClass={(cls) => {
+                setSelectedTeacherClass(cls);
+              }}
+              availableClasses={assignedClassesList.length > 0 ? assignedClassesList : undefined}
+              showToast={showToast}
+              initialAcademicLists={academicLists}
+              initialStudents={topStudents}
+            />
+          </div>
         );
       }
       case "files":
@@ -7109,20 +7111,31 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
         return <StudentLiveWatchTab />;
       case "questions_bank":
         return (
-          <div className="flex-1 flex flex-col h-full overflow-y-auto no-scrollbar space-y-3 p-2 sm:p-4">
-            {isTeacher && renderTeacherClassSwitcherBar()}
+          <div className="flex-1 flex flex-col h-full overflow-y-auto no-scrollbar p-2 sm:p-4">
             <div className="flex-1 min-h-0">
-              <TeacherQuestionBank schoolId={resolvedSchoolId} teacherData={currentTeacherData || teacherData} schoolName={schoolName} selectedClass={selectedTeacherClass} />
+              <TeacherQuestionBank
+                schoolId={resolvedSchoolId}
+                teacherData={currentTeacherData || teacherData}
+                schoolName={schoolName}
+                selectedClass={selectedTeacherClass}
+                classSwitcherBar={isTeacher ? renderTeacherClassSwitcherBar() : null}
+              />
             </div>
           </div>
         );
 
       case "ai_assistant":
         return (
-          <div className="flex-1 flex flex-col h-full overflow-y-auto no-scrollbar space-y-3 p-2 sm:p-4">
-            {isTeacher && renderTeacherClassSwitcherBar()}
+          <div className="flex-1 flex flex-col h-full overflow-y-auto no-scrollbar p-2 sm:p-4">
             <div className="flex-1 min-h-0">
-              <TeacherAIAssistant schoolId={resolvedSchoolId} teacherData={currentTeacherData || teacherData} selectedClass={selectedTeacherClass || ((currentTeacherData?.classes || teacherData?.classes)?.[0] || "سادس علمي")} disabledModules={disabledModules} rolePrefix={rolePrefix} />
+              <TeacherAIAssistant
+                schoolId={resolvedSchoolId}
+                teacherData={currentTeacherData || teacherData}
+                selectedClass={selectedTeacherClass || ((currentTeacherData?.classes || teacherData?.classes)?.[0] || "سادس علمي")}
+                disabledModules={disabledModules}
+                rolePrefix={rolePrefix}
+                classSwitcherBar={isTeacher ? renderTeacherClassSwitcherBar() : null}
+              />
             </div>
           </div>
         );

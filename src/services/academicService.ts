@@ -487,21 +487,63 @@ export const academicService = {
   },
 
   // --- سجل الانضباط المدرسي (Attendance & Discipline) ---
-  updateAttendance: async (studentId: string, userId: string, status: string, by: string, reason: string, period: string, schoolId?: string, date?: string) => { 
+  updateAttendance: async (studentId: string, userId: string, status: string, by: string, reason: string, period: string, schoolId?: string, date?: string, evaluation?: string, extraData?: { code?: string; studentCode?: string; name?: string; subject?: string; time?: string }) => { 
+    const stCode = extraData?.code || extraData?.studentCode || (userId && userId !== studentId ? userId : undefined);
+    const stName = extraData?.name;
+    const stSubject = extraData?.subject;
+    const now = new Date();
+    const hours = now.getHours();
+    const minutes = now.getMinutes().toString().padStart(2, '0');
+    const isPM = hours >= 12;
+    const h12 = (hours % 12 || 12).toString().padStart(2, '0');
+    const stTime = extraData?.time || `${h12}:${minutes} ${isPM ? 'م' : 'ص'}`;
+
     const response = await fetch(`/api/students/${studentId}/attendance`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status, by, reason, period, schoolId, date })
+      body: JSON.stringify({ 
+        status, 
+        by, 
+        reason, 
+        period, 
+        schoolId, 
+        date, 
+        evaluation,
+        studentCode: stCode,
+        code: stCode,
+        name: stName,
+        subject: stSubject,
+        time: stTime
+      })
     });
     if (!response.ok) throw new Error('Failed to update attendance');
     const result = await response.json();
 
+    const payload = {
+      action: 'UPDATE',
+      id: studentId,
+      studentId,
+      code: stCode,
+      studentCode: stCode,
+      name: stName,
+      subject: stSubject,
+      status,
+      by,
+      reason,
+      period,
+      schoolId,
+      date,
+      evaluation,
+      time: stTime,
+      attendance: result.attendance
+    };
+
     // Trigger local real-time synchronization across Teacher, Admin, and Parent views
-    realtimeManager.trigger('students', { action: 'UPDATE', id: studentId, schoolId });
-    realtimeManager.trigger('attendance', { action: 'UPDATE', id: studentId, studentId, status, by, reason, period, schoolId, date });
+    realtimeManager.trigger('students', payload);
+    realtimeManager.trigger('attendance', payload);
     if (typeof window !== 'undefined') {
-      window.dispatchEvent(new CustomEvent('students_updated', { detail: { studentId, schoolId } }));
-      window.dispatchEvent(new CustomEvent('attendance_updated', { detail: { studentId, status, by, reason, period, schoolId, date } }));
+      window.dispatchEvent(new CustomEvent('students_updated', { detail: payload }));
+      window.dispatchEvent(new CustomEvent('attendance_updated', { detail: payload }));
     }
 
     return result;

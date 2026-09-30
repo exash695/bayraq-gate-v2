@@ -26,6 +26,7 @@ interface AnnouncementsCenterTabProps {
   isTeacher?: boolean;
   notifications: any[];
   hideHeader?: boolean;
+  fullWidth?: boolean;
 }
 
 export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
@@ -34,7 +35,8 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
   section,
   isTeacher,
   notifications = [],
-  hideHeader = false
+  hideHeader = false,
+  fullWidth = false
 }) => {
   const [activeSubTab, setActiveSubTab] = useState<"admin" | "staff" | "all">("admin");
   const [searchQuery, setSearchQuery] = useState("");
@@ -276,7 +278,7 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
   };
 
   return (
-    <div className={hideHeader ? "w-full text-right" : "w-full h-full bg-[#050A18] text-right overflow-y-auto no-scrollbar pb-24 px-4 md:px-6 pt-4"} dir="rtl">
+    <div className={hideHeader ? (fullWidth ? "w-full text-right p-0 m-0" : "w-full text-right") : "w-full h-full bg-[#050A18] text-right overflow-y-auto no-scrollbar pb-24 px-4 md:px-6 pt-4"} dir="rtl">
       
       {/* 📣 Premium Megaphone Header Banner (100% Aligned with Student/Teacher Board style) */}
       {!hideHeader && (
@@ -315,7 +317,7 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
       )}
 
       {/* 🔍 Filter & Search Bar Section */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white/[0.02] border border-white/5 p-4 rounded-2xl backdrop-blur-xl mb-6">
+      <div className={fullWidth ? "flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-[#070D1E]/95 border-b border-white/10 px-4 sm:px-6 py-3.5 backdrop-blur-xl mb-0 w-full sticky top-0 z-20 rounded-none" : "flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white/[0.02] border border-white/5 p-4 rounded-2xl backdrop-blur-xl mb-6"}>
         
         {/* Sub-tab Selectors */}
         <div className="flex p-1 bg-black/40 rounded-xl border border-white/10 w-fit shrink-0 gap-1 select-none">
@@ -416,7 +418,7 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className={fullWidth ? "flex flex-col divide-y divide-white/10 w-full p-0 m-0" : "grid grid-cols-1 md:grid-cols-2 gap-4"}>
             <AnimatePresence mode="popLayout">
               {displayItems.map((item, idx) => {
                 const isAdminType = item.type === "admin";
@@ -428,11 +430,18 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
                     animate={{ opacity: 1, y: 0, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.95 }}
                     transition={{ duration: 0.3, delay: Math.min(idx * 0.05, 0.4) }}
-                    className={`relative p-5 rounded-2xl border transition-all flex flex-col justify-between overflow-hidden shadow-lg ${
-                      isAdminType
-                        ? "bg-[#0b122b]/50 hover:bg-[#0e1b3d]/60 border-cyan-500/20 hover:border-cyan-500/35"
-                        : "bg-[#110e2d]/50 hover:bg-[#18143d]/60 border-purple-500/20 hover:border-purple-500/35"
-                    }`}
+                    className={fullWidth
+                      ? `relative px-4 sm:px-6 py-5 w-full transition-all flex flex-col justify-between overflow-hidden border-0 rounded-none shadow-none m-0 ${
+                          isAdminType
+                            ? "bg-gradient-to-r from-[#0b142c]/90 via-[#091024]/90 to-[#070c1c]/90 hover:from-[#0e1b3d]/90 hover:to-[#0a1428]/90"
+                            : "bg-gradient-to-r from-[#120d2e]/90 via-[#0d0924]/90 to-[#070c1c]/90 hover:from-[#191340]/90 hover:to-[#0a1428]/90"
+                        }`
+                      : `relative p-5 rounded-2xl border transition-all flex flex-col justify-between overflow-hidden shadow-lg ${
+                          isAdminType
+                            ? "bg-[#0b122b]/50 hover:bg-[#0e1b3d]/60 border-cyan-500/20 hover:border-cyan-500/35"
+                            : "bg-[#110e2d]/50 hover:bg-[#18143d]/60 border-purple-500/20 hover:border-purple-500/35"
+                        }`
+                    }
                   >
                     {/* Visual Glowing Edge Indicator */}
                     <div className={`absolute top-0 bottom-0 right-0 w-[4px] ${isAdminType ? "bg-gradient-to-b from-cyan-400 to-blue-500" : "bg-gradient-to-b from-purple-400 to-fuchsia-500"}`} />

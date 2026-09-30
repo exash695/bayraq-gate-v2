@@ -9,9 +9,10 @@ interface TeacherExamPapersProps {
   teacherData?: any;
   onBack?: () => void;
   selectedClass?: string;
+  classSwitcherBar?: React.ReactNode;
 }
 
-export const TeacherExamPapers: React.FC<TeacherExamPapersProps> = ({ schoolId, teacherData, onBack, selectedClass }) => {
+export const TeacherExamPapers: React.FC<TeacherExamPapersProps> = ({ schoolId, teacherData, onBack, selectedClass, classSwitcherBar }) => {
   const [papers, setPapers] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
@@ -180,6 +181,8 @@ export const TeacherExamPapers: React.FC<TeacherExamPapersProps> = ({ schoolId, 
             <span className="hidden sm:inline">إضافة ورقة</span>
           </button>
         </div>
+
+        {classSwitcherBar && <div className="my-2 shrink-0">{classSwitcherBar}</div>}
         
         <div className="flex items-center justify-between">
           {onBack && (

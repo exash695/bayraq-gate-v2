@@ -41,6 +41,7 @@ import { db, collection, getDocs, doc, setDoc, updateDoc, serverTimestamp, write
 import { schoolService, SchoolRecord } from '../../services/schoolService';
 import { getOfficialSchoolLogoUrl } from '../../lib/constants';
 import { logActivity } from '../../utils/auditLogger';
+import { exportToExcel } from '../../lib/exportUtils';
 
 export interface UnifiedUserRecord {
   id: string;
@@ -659,33 +660,24 @@ export const UsersAuditDirectorySection: React.FC<UsersAuditDirectoryProps> = ({
     }
   };
 
-  // Export CSV Report
+  // Export Excel Report
   const exportUsersCSV = () => {
-    const headers = ['المعرف (UID)', 'الاسم الكامل', 'البريد الإلكتروني', 'رقم الهاتف', 'الرتبة / الدور', 'يمتلك كود', 'كود التفعيل', 'معرف المدرسة', 'اسم المدرسة', 'الحالة', 'تاريخ الإنشاء'];
-    const rows = filteredUsers.map(u => [
-      `"${u.uid}"`,
-      `"${u.fullName.replace(/"/g, '""')}"`,
-      `"${u.email || ''}"`,
-      `"${u.phone || ''}"`,
-      `"${u.role}"`,
-      u.hasCode ? 'نعم' : 'لا (بدون كود)',
-      `"${u.code || ''}"`,
-      `"${u.schoolId || ''}"`,
-      `"${(u.schoolName || 'مستقل').replace(/"/g, '""')}"`,
-      u.isOnline ? 'متصل' : 'غير متصل',
-      u.createdAt ? new Date(u.createdAt).toISOString() : ''
-    ]);
+    const excelData = filteredUsers.map(u => ({
+      'المعرف (UID)': u.uid,
+      'الاسم الكامل': u.fullName,
+      'البريد الإلكتروني': u.email || '',
+      'رقم الهاتف': u.phone || '',
+      'الرتبة / الدور': u.role,
+      'يمتلك كود': u.hasCode ? 'نعم' : 'لا (بدون كود)',
+      'كود التفعيل': u.code || '',
+      'معرف المدرسة': u.schoolId || '',
+      'اسم المدرسة': u.schoolName || 'مستقل',
+      'الحالة': u.isOnline ? 'متصل' : 'غير متصل',
+      'تاريخ الإنشاء': u.createdAt ? new Date(u.createdAt).toLocaleString('ar-IQ') : ''
+    }));
 
-    const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `bayraq_users_directory_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    showToast('تم تصدير تقرير المستخدمين بنجاح بصيغة CSV 📊');
+    exportToExcel(excelData, `دليل_مستخدمين_بيرق_${new Date().toISOString().split('T')[0]}.xlsx`, 'المستخدمين');
+    showToast('تم تصدير تقرير المستخدمين بنجاح بصيغة Excel 📊');
   };
 
   const handleResetAllUsers = async () => {

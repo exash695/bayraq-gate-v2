@@ -1,3 +1,5 @@
+import { printHTML } from '../lib/exportUtils';
+
 export interface AttendancePrintStudent {
   name: string;
   code?: string;
@@ -568,50 +570,5 @@ export const printAttendanceReport = (options: AttendancePrintOptions) => {
 </html>`;
 
   // Printing execution:
-  // 1. Try to open popup window
-  let printWindow: Window | null = null;
-  try {
-    printWindow = window.open('', '_blank', 'width=980,height=850,menubar=no,toolbar=no,location=no');
-  } catch {
-    printWindow = null;
-  }
-
-  if (printWindow && printWindow.document) {
-    printWindow.document.open();
-    printWindow.document.write(htmlContent);
-    printWindow.document.close();
-  } else {
-    // 2. Iframe fallback for iframe-contained or popup-blocked browsers
-    const printFrame = document.createElement('iframe');
-    printFrame.style.position = 'fixed';
-    printFrame.style.right = '0';
-    printFrame.style.bottom = '0';
-    printFrame.style.width = '0';
-    printFrame.style.height = '0';
-    printFrame.style.border = 'none';
-    printFrame.style.zIndex = '-9999';
-    printFrame.style.visibility = 'hidden';
-    document.body.appendChild(printFrame);
-
-    const frameDoc = printFrame.contentWindow?.document || printFrame.contentDocument;
-    if (frameDoc) {
-      frameDoc.open();
-      frameDoc.write(htmlContent);
-      frameDoc.close();
-
-      setTimeout(() => {
-        try {
-          printFrame.contentWindow?.focus();
-          printFrame.contentWindow?.print();
-        } catch (err) {
-          console.error('Print iframe error:', err);
-        }
-        setTimeout(() => {
-          if (document.body.contains(printFrame)) {
-            document.body.removeChild(printFrame);
-          }
-        }, 3000);
-      }, 600);
-    }
-  }
+  printHTML(htmlContent);
 };

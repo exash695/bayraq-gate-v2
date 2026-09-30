@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { printHTML } from '../lib/exportUtils';
 import { 
   BookOpen, 
   Search, 
