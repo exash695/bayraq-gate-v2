@@ -510,6 +510,123 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     };
   }, [resolvedSchoolId, selectedSchoolId, schoolName]);
 
+  // Real-time synchronization for Attendance & Student updates between Teacher, Admin, and Parent
+  useEffect(() => {
+    const handleAttendancePayload = (payload: any) => {
+      const detail = payload?.payload || payload?.data || payload?.detail || payload;
+      if (!detail) return;
+      const targetId = detail.studentId || detail.id;
+      const targetCode = detail.code || detail.studentCode;
+      const targetAttendance = detail.attendance;
+      const targetStatus = detail.status;
+      const targetDate = detail.date || new Date().toISOString().split('T')[0];
+      const targetPeriod = detail.period || 'يوم كامل';
+      const targetReason = detail.reason || '';
+      const targetBy = detail.by || 'الأستاذ';
+
+      // 1. Update students array in local state
+      setStudents(prev => {
+        if (!Array.isArray(prev)) return prev;
+        return prev.map((s: any) => {
+          const match = (targetId && s.id === targetId) || 
+                        (targetCode && s.code === targetCode) || 
+                        (targetCode && s.code && s.code.replace(/^st_/, '').trim() === targetCode.replace(/^st_/, '').trim());
+          if (match) {
+            let updatedAttendance = targetAttendance;
+            if (!updatedAttendance) {
+              const currentAtt = s.attendance || { present: 0, absent: 0, late: 0, logs: [] };
+              const otherLogs = (currentAtt.logs || []).filter((l: any) => !(l.date === targetDate && l.period === targetPeriod));
+              const newLog = {
+                date: targetDate,
+                status: targetStatus,
+                period: targetPeriod,
+                reason: targetReason,
+                time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+                by: targetBy
+              };
+              const updatedLogs = [newLog, ...otherLogs];
+              let pCount = 0, aCount = 0, lCount = 0;
+              updatedLogs.forEach((l: any) => {
+                if (l.status === 'present') pCount++;
+                if (l.status === 'absent') aCount++;
+                if (l.status === 'late') lCount++;
+              });
+              updatedAttendance = { present: pCount, absent: aCount, late: lCount, logs: updatedLogs };
+            }
+            return {
+              ...s,
+              attendance: updatedAttendance
+            };
+          }
+          return s;
+        });
+      });
+
+      // 2. Update savedLists in local state
+      setSavedLists(prevLists => {
+        if (!Array.isArray(prevLists)) return prevLists;
+        return prevLists.map(list => {
+          const listStudents = Array.isArray(list.students) ? list.students : [];
+          let listChanged = false;
+          const updatedListStudents = listStudents.map((st: any) => {
+            const match = (targetId && st.id === targetId) || 
+                          (targetCode && st.code === targetCode) || 
+                          (targetCode && st.code && st.code.replace(/^st_/, '').trim() === targetCode.replace(/^st_/, '').trim());
+            if (match) {
+              listChanged = true;
+              let updatedAttendance = targetAttendance;
+              if (!updatedAttendance) {
+                const currentAtt = st.attendance || { present: 0, absent: 0, late: 0, logs: [] };
+                const otherLogs = (currentAtt.logs || []).filter((l: any) => !(l.date === targetDate && l.period === targetPeriod));
+                const newLog = {
+                  date: targetDate,
+                  status: targetStatus,
+                  period: targetPeriod,
+                  reason: targetReason,
+                  time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+                  by: targetBy
+                };
+                const updatedLogs = [newLog, ...otherLogs];
+                let pCount = 0, aCount = 0, lCount = 0;
+                updatedLogs.forEach((l: any) => {
+                  if (l.status === 'present') pCount++;
+                  if (l.status === 'absent') aCount++;
+                  if (l.status === 'late') lCount++;
+                });
+                updatedAttendance = { present: pCount, absent: aCount, late: lCount, logs: updatedLogs };
+              }
+              return {
+                ...st,
+                attendance: updatedAttendance
+              };
+            }
+            return st;
+          });
+          return listChanged ? { ...list, students: updatedListStudents } : list;
+        });
+      });
+    };
+
+    const unsubAttendance = realtimeManager.on('attendance', handleAttendancePayload);
+    const unsubStudents = realtimeManager.on('students', (payload: any) => {
+      if (payload?.action === 'UPDATE' && payload?.data?.attendance) {
+        handleAttendancePayload(payload.data);
+      }
+    });
+    const handleCustomAttendanceEvent = (e: any) => {
+      if (e?.detail) handleAttendancePayload(e.detail);
+    };
+    window.addEventListener('attendance_updated', handleCustomAttendanceEvent);
+    window.addEventListener('students_updated', handleCustomAttendanceEvent);
+
+    return () => {
+      unsubAttendance();
+      unsubStudents();
+      window.removeEventListener('attendance_updated', handleCustomAttendanceEvent);
+      window.removeEventListener('students_updated', handleCustomAttendanceEvent);
+    };
+  }, []);
+
   // Helper function to check if an admin tab is locked by the developer
   const isTabDisabled = (tabId: string): boolean => {
     if (tabId === 'pulse') return false; // Pulse dashboard is the admin home and is never disabled

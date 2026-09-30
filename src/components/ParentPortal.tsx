@@ -1034,24 +1034,38 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   // Instant real-time listener for attendance updates dispatched from teacher or admin
   useEffect(() => {
     if (!studentCode) return;
+    const cleanCurrent = (studentCode || '').toLowerCase().replace(/^(p\d*[-_]?|st[-_]?)/, '').trim();
+    const sDataId = (studentData?.id || '').toLowerCase().replace(/^(p\d*[-_]?|st[-_]?)/, '').trim();
+    const sDataCode = (studentData?.code || '').toLowerCase().replace(/^(p\d*[-_]?|st[-_]?)/, '').trim();
+    const sDataParentCode = (studentData?.parentCode || '').toLowerCase().replace(/^(p\d*[-_]?|st[-_]?)/, '').trim();
+
     const handleAttendanceUpdated = (evt: any) => {
       const detail = evt?.detail || evt?.data || evt?.payload || evt;
       if (!detail) return;
-      const targetCode = detail.code || detail.studentCode || detail.userId || '';
-      const targetId = detail.studentId || detail.id || '';
-      const currentCode = (studentCode || '').trim().toLowerCase();
-      const sDataId = (studentData?.id || '').trim().toLowerCase();
-      const sDataCode = (studentData?.code || '').trim().toLowerCase();
+      const targetCode = (detail.code || detail.studentCode || detail.userId || '').toLowerCase();
+      const targetParentCode = (detail.parentCode || '').toLowerCase();
+      const targetId = (detail.studentId || detail.id || '').toLowerCase();
+      const cleanTarget = targetCode.replace(/^(p\d*[-_]?|st[-_]?)/, '').trim();
+      const cleanTargetId = targetId.replace(/^(p\d*[-_]?|st[-_]?)/, '').trim();
+      const cleanTargetParent = targetParentCode.replace(/^(p\d*[-_]?|st[-_]?)/, '').trim();
 
       const isMatch = 
-        (targetCode && targetCode.trim().toLowerCase() === currentCode) ||
-        (targetId && targetId.trim().toLowerCase() === currentCode) ||
-        (sDataId && (targetId.trim().toLowerCase() === sDataId || targetCode.trim().toLowerCase() === sDataId)) ||
-        (sDataCode && (targetCode.trim().toLowerCase() === sDataCode || targetId.trim().toLowerCase() === sDataCode));
+        (cleanTarget && (cleanTarget === cleanCurrent || cleanTarget === sDataCode || cleanTarget === sDataId)) ||
+        (cleanTargetId && (cleanTargetId === cleanCurrent || cleanTargetId === sDataId || cleanTargetId === sDataCode)) ||
+        (cleanTargetParent && (cleanTargetParent === cleanCurrent || cleanTargetParent === sDataParentCode)) ||
+        (targetCode && (targetCode === studentCode.toLowerCase() || targetCode === studentData?.code?.toLowerCase())) ||
+        (targetId && (targetId === studentData?.id?.toLowerCase() || targetId === studentCode.toLowerCase())) ||
+        (detail.name && studentData?.name && detail.name.trim() === studentData.name.trim());
 
       if (isMatch) {
         setStudentData((prev: any) => {
           if (!prev) return prev;
+          if (detail.attendance && Array.isArray(detail.attendance.logs) && detail.attendance.logs.length > 0) {
+            return {
+              ...prev,
+              attendance: detail.attendance
+            };
+          }
           const currentAttendance = prev.attendance || { present: 0, absent: 0, late: 0, logs: [] };
           const logs = Array.isArray(currentAttendance.logs) ? currentAttendance.logs : [];
           const attPeriod = detail.period || 'يوم كامل';
@@ -1063,7 +1077,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
             period: attPeriod,
             reason: detail.reason || '',
             time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-            by: detail.by || 'إدارة المدرسة'
+            by: detail.by || 'الأستاذ'
           };
           const updatedLogs = [newLog, ...otherLogs];
           let present = 0, absent = 0, late = 0;
@@ -1085,17 +1099,9 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
     });
 
     const unsubStudents = realtimeManager.on('students', (data: any) => {
-      if (data?.action === 'UPDATE' && (data?.payload?.attendance || data?.data?.attendance)) {
-        const payload = data.payload || data.data;
-        handleAttendanceUpdated({
-          code: payload.code,
-          studentId: payload.id,
-          date: new Date().toISOString().split('T')[0],
-          status: payload.attendance?.logs?.[0]?.status || 'present',
-          period: payload.attendance?.logs?.[0]?.period || 'يوم كامل',
-          reason: payload.attendance?.logs?.[0]?.reason || '',
-          by: payload.attendance?.logs?.[0]?.by || 'إدارة المدرسة'
-        });
+      if (data?.action === 'UPDATE') {
+        const payload = data.payload || data.data || data;
+        handleAttendanceUpdated(payload);
       }
     });
 

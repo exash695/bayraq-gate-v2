@@ -6087,7 +6087,11 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         try {
           const allLogs = await db.select()
             .from(attendance_logs)
-            .where(eq(attendance_logs.studentId, actualStudentId))
+            .where(or(
+              eq(attendance_logs.studentId, actualStudentId),
+              eq(attendance_logs.studentId, targetCode),
+              eq(attendance_logs.studentId, (targetCode || '').replace(/^st_/, '').trim())
+            ))
             .orderBy(desc(attendance_logs.timestamp));
 
           let present = 0, absent = 0, late = 0;
@@ -6097,7 +6101,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
             if (log.status === 'late') late++;
           });
 
-          const recentLogs = allLogs.slice(0, 50).reverse().map(l => ({
+          const recentLogs = allLogs.slice(0, 100).map(l => ({
             date: l.date,
             status: l.status,
             period: l.period,
@@ -6137,28 +6141,61 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         };
       }
 
-      // 4. Instant WebSocket broadcast to all connected clients
+      // 4. Update attendance inside academic_lists for Admin & Teacher views
+      try {
+        const allLists = await db.select().from(academic_lists);
+        for (const list of allLists) {
+          const listStudents = Array.isArray(list.students) ? list.students : [];
+          let hasMatch = false;
+          const updatedListStudents = listStudents.map((st: any) => {
+            const match = st.id === actualStudentId || 
+                          st.id === studentId || 
+                          st.code === targetCode || 
+                          (st.code && targetCode && st.code.replace(/^st_/, '').trim() === targetCode.replace(/^st_/, '').trim());
+            if (match) {
+              hasMatch = true;
+              return {
+                ...st,
+                attendance: updatedAttendance
+              };
+            }
+            return st;
+          });
+
+          if (hasMatch) {
+            await db.update(academic_lists)
+              .set({ students: updatedListStudents, updatedAt: new Date() })
+              .where(eq(academic_lists.id, list.id));
+            realtimeServerInstance?.broadcastManual('academic_lists', list.id, 'UPDATE', {
+              ...list,
+              students: updatedListStudents
+            });
+          }
+        }
+      } catch (listSyncErr) {
+        console.warn("Could not sync attendance to academic_lists:", listSyncErr);
+      }
+
+      // 5. Instant WebSocket broadcast to all connected clients (Admin, Teacher, Parent)
       try {
         const studentPayload = {
           id: actualStudentId,
+          studentId: actualStudentId,
           code: targetCode,
+          studentCode: targetCode,
+          parentCode: foundStudents[0]?.parentCode || `P-${targetCode}`,
           name: foundStudents[0]?.name || '',
           grade: foundStudents[0]?.grade || '',
           schoolId: currentSchoolId,
-          attendance: updatedAttendance
-        };
-        realtimeServerInstance?.broadcastManual('students', actualStudentId, 'UPDATE', studentPayload);
-        realtimeServerInstance?.broadcastManual('attendance', actualStudentId, 'UPDATE', {
-          studentId: actualStudentId,
-          schoolId: currentSchoolId,
-          code: targetCode,
           date,
           period,
           status,
           reason: reason || '',
           by: by || 'الأستاذ',
           attendance: updatedAttendance
-        });
+        };
+        realtimeServerInstance?.broadcastManual('students', actualStudentId, 'UPDATE', studentPayload);
+        realtimeServerInstance?.broadcastManual('attendance', actualStudentId, 'UPDATE', studentPayload);
       } catch (wsErr) {
         console.warn("Failed to broadcast attendance update:", wsErr);
       }
