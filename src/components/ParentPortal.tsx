@@ -53,6 +53,7 @@ import { uploadFileToR2 } from '../services/uploadService';
 import { db, auth } from '../lib/firebase';
 import { handleFirestoreError, OperationType } from '../lib/firestoreUtils';
 import { safeStorage } from '../lib/storage';
+import { realtimeManager } from '../lib/realtimeManager';
 import { ParentPaymentView } from './ParentPaymentView';
 import { DigitalReceiptModal } from './DigitalReceiptModal';
 import { StudentSupportForm } from './StudentSupportForm';
@@ -1073,20 +1074,21 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
       }
     };
 
-    const unsubAttendance = realtimeManager.subscribe('attendance', (data) => {
+    const unsubAttendance = realtimeManager.on('attendance', (data: any) => {
       handleAttendanceUpdated(data);
     });
 
-    const unsubStudents = realtimeManager.subscribe('students', (data) => {
-      if (data?.action === 'UPDATE' && data?.payload?.attendance) {
+    const unsubStudents = realtimeManager.on('students', (data: any) => {
+      if (data?.action === 'UPDATE' && (data?.payload?.attendance || data?.data?.attendance)) {
+        const payload = data.payload || data.data;
         handleAttendanceUpdated({
-          code: data.payload.code,
-          studentId: data.payload.id,
+          code: payload.code,
+          studentId: payload.id,
           date: new Date().toISOString().split('T')[0],
-          status: data.payload.attendance?.logs?.[0]?.status || 'present',
-          period: data.payload.attendance?.logs?.[0]?.period || 'يوم كامل',
-          reason: data.payload.attendance?.logs?.[0]?.reason || '',
-          by: data.payload.attendance?.logs?.[0]?.by || 'إدارة المدرسة'
+          status: payload.attendance?.logs?.[0]?.status || 'present',
+          period: payload.attendance?.logs?.[0]?.period || 'يوم كامل',
+          reason: payload.attendance?.logs?.[0]?.reason || '',
+          by: payload.attendance?.logs?.[0]?.by || 'إدارة المدرسة'
         });
       }
     });
