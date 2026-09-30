@@ -223,6 +223,69 @@ export const VideoComments: React.FC<VideoCommentsProps> = ({
       } else {
         setNewComment("");
       }
+
+      // If a student commented (top-level or reply), notify the teacher responsible for the lesson
+      if (!isTeacher) {
+        try {
+          const foundLesson = (context as any)?.recordedLessons?.find((l: any) => l.id === lessonId);
+          const resolvedTeacherId = 
+            teacherData?.code || 
+            teacherData?.id || 
+            foundLesson?.teacherId || 
+            foundLesson?.teacherCode || 
+            foundLesson?.teacher_id || 
+            'teacher';
+          
+          const cleanLessonTitle = lessonTitle || foundLesson?.title || "محاضرة مرئية";
+          const teacherNoticeMsg = `قام الطالب ${authorName} بالتعليق على المحاضرة: (${cleanLessonTitle})`;
+          const teacherNoticeTitle = "تعليق جديد على محاضرة 💬";
+          const schoolIdTarget = (context as any)?.resolvedSchoolId || (context as any)?.schoolId || currentUser?.schoolId || "";
+
+          // 1. Send via Notification Service
+          await notificationService.sendNotification({
+            userId: resolvedTeacherId,
+            recipientId: resolvedTeacherId,
+            recipientRole: "teacher",
+            title: teacherNoticeTitle,
+            message: teacherNoticeMsg,
+            body: teacherNoticeMsg,
+            type: "video_comment",
+            icon: "MessageCircle",
+            schoolId: schoolIdTarget,
+            metadata: {
+              lessonId,
+              lessonTitle: cleanLessonTitle,
+              studentName: authorName,
+              studentId: currentUserId,
+              commentText: text.trim()
+            }
+          }).catch(err => console.warn("Teacher notification via service failed:", err));
+
+          // 2. Add directly to Firestore notifications for instant onSnapshot sync
+          try {
+            await addDoc(collection(db, "notifications"), {
+              recipientId: resolvedTeacherId,
+              userId: resolvedTeacherId,
+              recipientRole: "teacher",
+              title: teacherNoticeTitle,
+              message: teacherNoticeMsg,
+              body: teacherNoticeMsg,
+              type: "video_comment",
+              read: false,
+              schoolId: schoolIdTarget,
+              lessonId,
+              lessonTitle: cleanLessonTitle,
+              studentName: authorName,
+              createdAt: new Date().toISOString(),
+              timestamp: new Date()
+            });
+          } catch (fErr) {
+            console.warn("Firestore teacher notification write failed:", fErr);
+          }
+        } catch (notifErr) {
+          console.error("Error creating teacher comment notification:", notifErr);
+        }
+      }
     } catch (e) {
       console.error(e);
     }

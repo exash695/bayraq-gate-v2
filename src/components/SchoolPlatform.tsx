@@ -6865,6 +6865,199 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
       );
     }
 
+    const renderTeacherClassSwitcherBar = () => {
+      if (!isTeacher) return null;
+      return (
+        <div className={`w-full bg-gradient-to-r from-[#0C1229]/95 via-[#0F1738]/95 to-[#0A0E23]/95 backdrop-blur-xl p-3 sm:p-4 rounded-2xl border border-cyan-500/20 shadow-[0_8px_30px_rgba(0,0,0,0.5),0_0_15px_rgba(0,229,255,0.05)] flex flex-col sm:flex-row sm:items-center justify-between gap-3 relative ${isSectionDropdownOpen ? "z-[120]" : "z-30"}`}>
+          {/* Info / Title Section */}
+          <div className="flex items-center justify-between sm:justify-start gap-3 min-w-0">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shrink-0 shadow-inner">
+                <Layers size={20} />
+              </div>
+              <div className="flex flex-col text-right min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs sm:text-sm font-black text-white truncate">
+                    الشعبة والصف الأكاديمي النشط
+                  </span>
+                  <span className="bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 px-2 py-0.5 rounded-full text-[10px] font-black shrink-0">
+                    {teacherAssignedSections.length} {teacherAssignedSections.length === 1 ? "شعبة موكلة" : "شُعب موكلة"}
+                  </span>
+                </div>
+                <span className="text-[10px] sm:text-xs text-white/60 font-medium truncate mt-0.5">
+                  {selectedTeacherClass === "ALL" || !selectedTeacherClass
+                    ? `عرض شامل لكافة الشُعب (${formatStudentCount(activeClassStudents.length)} مسجلين)`
+                    : `الشعبة الحالية: ${selectedTeacherClass} (${formatStudentCount(activeClassStudents.length)})`}
+                </span>
+              </div>
+            </div>
+
+            {/* Quick Link Button on Mobile */}
+            <button
+              type="button"
+              onClick={() => setShowLinkCodeModal(true)}
+              className="sm:hidden text-[10px] text-amber-400 hover:text-amber-300 bg-amber-400/10 hover:bg-amber-400/20 border border-amber-400/30 px-2.5 py-1.5 rounded-xl font-bold transition-all flex items-center gap-1 cursor-pointer shrink-0 active:scale-95"
+              title="ربط كود شعبة إضافية"
+            >
+              <Plus size={12} />
+              <span>ربط شعبة</span>
+            </button>
+          </div>
+
+          {/* Dropdown & Actions */}
+          <div className="flex items-center gap-2.5 w-full sm:w-auto">
+            {/* Interactive Dropdown Trigger */}
+            <div className="relative flex-1 sm:w-64 md:w-72" ref={sectionDropdownRef}>
+              <button
+                type="button"
+                onClick={() => setIsSectionDropdownOpen(!isSectionDropdownOpen)}
+                className={`w-full bg-[#070C1E] border ${
+                  isSectionDropdownOpen ? "border-cyan-400 shadow-[0_0_15px_rgba(0,229,255,0.2)]" : "border-white/10 hover:border-cyan-500/40"
+                } rounded-xl px-3 py-2 text-right flex items-center justify-between gap-2 text-white transition-all cursor-pointer group outline-none`}
+              >
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <span className="text-cyan-400 shrink-0 text-sm">
+                    {selectedTeacherClass === "ALL" || !selectedTeacherClass ? "🌟" : "📌"}
+                  </span>
+                  <span className="text-xs sm:text-sm font-black truncate text-white">
+                    {selectedTeacherClass === "ALL" || !selectedTeacherClass
+                      ? `كافة الشُعب الموكلة (${activeClassStudents.length})`
+                      : `${selectedTeacherClass} (${activeClassStudents.length})`}
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="text-[10px] font-bold bg-white/5 text-white/50 px-1.5 py-0.5 rounded-md">
+                    تبديل
+                  </span>
+                  <ChevronDown
+                    size={16}
+                    className={`text-cyan-400 transition-transform duration-300 ${
+                      isSectionDropdownOpen ? "rotate-180" : "group-hover:translate-y-0.5"
+                    }`}
+                  />
+                </div>
+              </button>
+
+              {/* Click-away backdrop overlay */}
+              {isSectionDropdownOpen && (
+                <div
+                  className="fixed inset-0 z-[115] bg-black/40 backdrop-blur-[2px]"
+                  onClick={() => setIsSectionDropdownOpen(false)}
+                />
+              )}
+
+              {/* Dropdown Menu Popover */}
+              <AnimatePresence>
+                {isSectionDropdownOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -5, scale: 0.97 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -5, scale: 0.97 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute right-0 top-full mt-2 w-full sm:w-80 bg-[#070C1E] border border-cyan-500/40 rounded-2xl shadow-[0_25px_60px_rgba(0,0,0,0.9),0_0_30px_rgba(0,229,255,0.2)] p-2 z-[130] text-right space-y-1 backdrop-blur-2xl"
+                  >
+                    <div className="px-3 py-1.5 border-b border-white/5 flex items-center justify-between text-[10px] text-white/50 font-bold">
+                      <span>اختر الشعبة لعرض بياناتها وطلابها:</span>
+                      <span className="text-cyan-400">{teacherAssignedSections.length} متاح</span>
+                    </div>
+
+                    {/* Option 1: All Classes (Comprehensive View) */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedTeacherClass("ALL");
+                        setIsSectionDropdownOpen(false);
+                      }}
+                      className={`w-full px-3 py-2.5 rounded-xl text-right flex items-center justify-between gap-2 transition-all cursor-pointer ${
+                        selectedTeacherClass === "ALL" || !selectedTeacherClass
+                          ? "bg-gradient-to-r from-amber-500/20 to-amber-500/10 border border-amber-500/40 text-amber-300 font-black"
+                          : "hover:bg-white/5 text-white/80 font-bold"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-amber-400 text-sm shrink-0">🌟</span>
+                        <div className="flex flex-col min-w-0">
+                          <span className="text-xs font-black truncate">
+                            كافة الشُعب الموكلة
+                          </span>
+                          <span className="text-[9px] text-white/40 font-medium">لوحة شاملة موحدة لجميع الفرسان</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-400/20 text-amber-300 font-mono font-bold">
+                          {formatStudentCount(allTeacherAssignedStudents.length)}
+                        </span>
+                        {(selectedTeacherClass === "ALL" || !selectedTeacherClass) && (
+                          <Check size={14} className="text-amber-400" />
+                        )}
+                      </div>
+                    </button>
+
+                    <div className="h-px bg-white/5 my-1" />
+
+                    {/* Individual Sections List */}
+                    <div className="max-h-60 overflow-y-auto space-y-1 no-scrollbar">
+                      {teacherAssignedSections.map((sec) => {
+                        const isSelected = selectedTeacherClass === sec.name;
+                        return (
+                          <button
+                            key={sec.name}
+                            type="button"
+                            onClick={() => {
+                              setSelectedTeacherClass(sec.name);
+                              setIsSectionDropdownOpen(false);
+                            }}
+                            className={`w-full px-3 py-2 rounded-xl text-right flex items-center justify-between gap-2 transition-all cursor-pointer ${
+                              isSelected
+                                ? "bg-cyan-500/20 border border-cyan-500/40 text-cyan-300 font-black"
+                                : "hover:bg-white/5 text-white/80 font-bold"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2 min-w-0 flex-1">
+                              <span className="text-cyan-400 text-xs shrink-0">📌</span>
+                              <div className="flex flex-col min-w-0">
+                                <span className="text-xs truncate font-black text-white">
+                                  {sec.name}
+                                </span>
+                                {sec.grade && sec.grade !== sec.name && (
+                                  <span className="text-[9px] text-white/40 font-medium truncate">
+                                    {sec.grade}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 font-mono font-bold">
+                                {formatStudentCount(sec.studentCount)}
+                              </span>
+                              {isSelected && (
+                                <Check size={14} className="text-cyan-400" />
+                              )}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+
+            {/* Quick Link Button on Desktop */}
+            <button
+              type="button"
+              onClick={() => setShowLinkCodeModal(true)}
+              className="hidden sm:flex text-xs text-amber-400 hover:text-amber-300 bg-amber-400/10 hover:bg-amber-400/20 border border-amber-400/30 px-3 py-2 rounded-xl font-bold transition-all items-center gap-1.5 cursor-pointer shrink-0 active:scale-95 shadow-sm"
+              title="ربط كود شعبة إضافية للتدريس"
+            >
+              <Plus size={14} />
+              <span>ربط شعبة</span>
+            </button>
+          </div>
+        </div>
+      );
+    };
+
     const placeholderStyle =
       "flex-1 flex flex-col items-center justify-center text-center p-10 space-y-6";
 
@@ -6915,10 +7108,24 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
       case "live_watch":
         return <StudentLiveWatchTab />;
       case "questions_bank":
-        return <TeacherQuestionBank schoolId={resolvedSchoolId} teacherData={currentTeacherData || teacherData} schoolName={schoolName} selectedClass={selectedTeacherClass} />;
+        return (
+          <div className="flex-1 flex flex-col h-full overflow-y-auto no-scrollbar space-y-3 p-2 sm:p-4">
+            {isTeacher && renderTeacherClassSwitcherBar()}
+            <div className="flex-1 min-h-0">
+              <TeacherQuestionBank schoolId={resolvedSchoolId} teacherData={currentTeacherData || teacherData} schoolName={schoolName} selectedClass={selectedTeacherClass} />
+            </div>
+          </div>
+        );
 
       case "ai_assistant":
-        return <TeacherAIAssistant schoolId={resolvedSchoolId} teacherData={currentTeacherData || teacherData} selectedClass={selectedTeacherClass || ((currentTeacherData?.classes || teacherData?.classes)?.[0] || "سادس علمي")} disabledModules={disabledModules} rolePrefix={rolePrefix} />;
+        return (
+          <div className="flex-1 flex flex-col h-full overflow-y-auto no-scrollbar space-y-3 p-2 sm:p-4">
+            {isTeacher && renderTeacherClassSwitcherBar()}
+            <div className="flex-1 min-h-0">
+              <TeacherAIAssistant schoolId={resolvedSchoolId} teacherData={currentTeacherData || teacherData} selectedClass={selectedTeacherClass || ((currentTeacherData?.classes || teacherData?.classes)?.[0] || "سادس علمي")} disabledModules={disabledModules} rolePrefix={rolePrefix} />
+            </div>
+          </div>
+        );
       
       case "dev_dashboard":
         return <DevDashboard schoolId={resolvedSchoolId} userProfile={userProfile} showToast={showToast} />;

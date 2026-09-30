@@ -96,31 +96,146 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
     return () => unsub();
   }, [schoolId, grade, section, isTeacher]);
 
-  // 2. Filter notifications received by user/staff/student
-  const staffAnnouncements = useMemo(() => {
-    return (notifications || [])
-      .map(n => ({
+  // 2. Classify announcements into Admin (Radio/Administration/Finance) vs Teachers (Control panel)
+  const isTeacherItem = (item: any) => {
+    const author = (item.author || item.metadata?.senderName || item.metadata?.teacherName || "").toLowerCase();
+    const subject = (item.subject || item.metadata?.subject || "").toLowerCase();
+    const type = (item.type || item.metadata?.type || "").toLowerCase();
+    const msg = (item.message || item.body || item.title || "").toLowerCase();
+
+    // Explicit Administration & Finance keywords -> ALWAYS Admin
+    if (
+      author.includes("إدارة") || 
+      author.includes("ادارة") || 
+      author.includes("الإذاعة") || 
+      author.includes("المالية") || 
+      author.includes("الحسابات") ||
+      author.includes("الأكاديمية") ||
+      author.includes("الأقساط")
+    ) {
+      return false;
+    }
+    if (
+      subject.includes("إذاعة") || 
+      subject.includes("اذاعة") || 
+      subject.includes("إداري") || 
+      subject.includes("مالي") || 
+      subject.includes("قسط") || 
+      subject.includes("أقساط") ||
+      subject.includes("رسوم")
+    ) {
+      return false;
+    }
+    if (
+      type.includes("admin") || 
+      type.includes("finance") || 
+      type.includes("payment") || 
+      type.includes("installment")
+    ) {
+      return false;
+    }
+    if (
+      msg.includes("قسطك") || 
+      msg.includes("الأقساط") || 
+      msg.includes("الدفعة") || 
+      msg.includes("تسديد") || 
+      msg.includes("القسم المالي") ||
+      msg.includes("الإذاعة المدرسية")
+    ) {
+      return false;
+    }
+
+    // Explicit Teacher markers (from Teacher Control Panel)
+    if (
+      item.metadata?.isTeacher || 
+      item.isTeacher || 
+      type.includes("teacher") || 
+      author.startsWith("أ.") || 
+      author.startsWith("الاستاذ") || 
+      author.startsWith("الأستاذ") || 
+      author.startsWith("المعلم") || 
+      author.startsWith("المعلمة") || 
+      author.startsWith("الست") ||
+      (author !== "" && author !== "كادر المدرسة 🎓" && author !== "كادر المدرسة" && !author.includes("إدارة"))
+    ) {
+      return true;
+    }
+
+    // If subject is an academic course -> Teacher announcement
+    const academicSubjects = ["رياضيات", "فيزياء", "كيمياء", "أحياء", "احياء", "عربي", "لغة عربية", "انجليزي", "لغة انكليزية", "اسلامية", "تربية اسلامية", "حاسوب", "اجتماعيات", "تاريخ", "جغرافيا", "وطنية", "علوم", "قرآن", "واجب", "امتحان", "كويز", "تحضير"];
+    if (academicSubjects.some(sub => subject.includes(sub))) {
+      return true;
+    }
+
+    return false;
+  };
+
+  // Map notifications
+  const mappedNotifications = useMemo(() => {
+    return (notifications || []).map(n => {
+      const isTeacher = isTeacherItem(n);
+      const isFinance = (n.body || n.title || '').includes('قسط') || (n.body || n.title || '').includes('تسديد');
+      return {
         id: n.id,
         message: n.body || n.title,
         title: n.title,
-        author: n.metadata?.senderName || n.metadata?.teacherName || "كادر المدرسة 🎓",
-        subject: n.metadata?.subject || "تبليغ صفي",
+        author: isTeacher 
+          ? (n.metadata?.senderName || n.metadata?.teacherName || "أستاذ المادة 🎓")
+          : isFinance ? "القسم المالي والإداري 🏛️" : "الإدارة المدرسية 🏛️",
+        subject: isTeacher ? (n.metadata?.subject || "تبليغ صفي") : (isFinance ? "متابعة الأقساط والرسوم" : "تبليغ إداري رسمي"),
         createdAt: n.createdAt,
         timestampMs: n.createdAt ? new Date(n.createdAt).getTime() : Date.now(),
         read: n.read || false,
-        type: "staff"
-      }))
-      .sort((a, b) => b.timestampMs - a.timestampMs);
+        type: isTeacher ? "staff" : "admin"
+      };
+    });
   }, [notifications]);
+
+  // Combined broadcasts + notifications categorized accurately
+  const { adminItems, staffItems } = useMemo(() => {
+    const adminList: any[] = [];
+    const staffList: any[] = [];
+
+    // Process broadcasts
+    (broadcasts || []).forEach(b => {
+      if (isTeacherItem(b)) {
+        staffList.push({
+          ...b,
+          type: "staff",
+          author: b.author || "أستاذ المادة 🎓",
+          subject: b.subject || "تبليغ من قسم التحكم"
+        });
+      } else {
+        adminList.push({
+          ...b,
+          type: "admin",
+          author: b.author || "الإدارة المدرسية 🏛️",
+          subject: b.subject || "الإذاعة المدرسية 📻"
+        });
+      }
+    });
+
+    // Process notifications
+    mappedNotifications.forEach(n => {
+      if (n.type === "staff") {
+        staffList.push(n);
+      } else {
+        adminList.push(n);
+      }
+    });
+
+    return { adminItems: adminList, staffItems: staffList };
+  }, [broadcasts, mappedNotifications]);
 
   // 3. Combined & Searched items list
   const displayItems = useMemo(() => {
     let combined: any[] = [];
-    if (activeSubTab === "admin" || activeSubTab === "all") {
-      combined = [...combined, ...broadcasts.map(b => ({ ...b, type: "admin" }))];
-    }
-    if (activeSubTab === "staff" || activeSubTab === "all") {
-      combined = [...combined, ...staffAnnouncements];
+    if (activeSubTab === "admin") {
+      combined = [...adminItems];
+    } else if (activeSubTab === "staff") {
+      combined = [...staffItems];
+    } else {
+      combined = [...adminItems, ...staffItems];
     }
 
     // Sort by timestamp
@@ -142,7 +257,7 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
     }
 
     return combined;
-  }, [activeSubTab, broadcasts, staffAnnouncements, searchQuery]);
+  }, [activeSubTab, adminItems, staffItems, searchQuery]);
 
   // Helper to format date
   const formatTimeAgo = (item: any) => {
@@ -217,9 +332,9 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
           >
             <Building2 size={13} />
             <span>إعلانات الإدارة 🏛️</span>
-            {broadcasts.length > 0 && (
+            {adminItems.length > 0 && (
               <span className={`px-1.5 h-4 text-[9px] font-bold rounded-full flex items-center justify-center ${activeSubTab === "admin" ? "bg-white text-cyan-600" : "bg-cyan-500/20 text-cyan-300"}`}>
-                {broadcasts.length}
+                {adminItems.length}
               </span>
             )}
           </button>
@@ -237,9 +352,9 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
           >
             <UserCheck size={13} />
             <span>تبليغات الأساتذة 🎓</span>
-            {staffAnnouncements.length > 0 && (
+            {staffItems.length > 0 && (
               <span className={`px-1.5 h-4 text-[9px] font-bold rounded-full flex items-center justify-center ${activeSubTab === "staff" ? "bg-white text-purple-600" : "bg-purple-500/20 text-purple-300"}`}>
-                {staffAnnouncements.length}
+                {staffItems.length}
               </span>
             )}
           </button>

@@ -2870,7 +2870,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                initial={{ opacity: 0 }} 
                animate={{ opacity: 1 }} 
                exit={{ opacity: 0 }}
-               className={`space-y-6 transition-all duration-500 ${glowingTab === 'broadcast' ? 'ring-4 ring-rose-400 ring-offset-4 ring-offset-[#050B14] rounded-2xl p-2' : ''}`}
+               className={`space-y-6 w-full transition-all duration-500 ${glowingTab === 'broadcast' ? 'ring-4 ring-rose-400 ring-offset-4 ring-offset-[#050B14] rounded-2xl p-2' : ''}`}
             >
               <BroadcastSection 
                 schoolId={selectedSchoolId || undefined}

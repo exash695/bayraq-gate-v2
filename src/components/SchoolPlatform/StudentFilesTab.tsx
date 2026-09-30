@@ -299,6 +299,16 @@ export const StudentFilesTab: React.FC<{ disabledModules?: string[], rolePrefix?
           return isCompetitionItem(r) && matchesGrade && matchesSection && !studentSubmissions.some(sub => sub.taskId === r.id && sub.type === 'competition');
         }).length;
 
+        const [lastSeenDocs, setLastSeenDocs] = useState<number>(() => {
+          return Number(safeStorage.getItem('s6_last_seen_docs') || safeStorage.getItem('s6_last_seen_materials') || 0);
+        });
+        const [lastSeenVideos, setLastSeenVideos] = useState<number>(() => {
+          return Number(safeStorage.getItem('s6_last_seen_videos') || 0);
+        });
+        const [lastSeenQuestions, setLastSeenQuestions] = useState<number>(() => {
+          return Number(safeStorage.getItem('s6_last_seen_questions') || 0);
+        });
+
         const filteredDocs = schoolFiles.filter((doc) => {
           const searchLower = String(studentLibrarySearch || '').toLowerCase();
           const matchesSearch = !searchLower || String(doc.title || '').toLowerCase().includes(searchLower) || 
@@ -332,6 +342,45 @@ export const StudentFilesTab: React.FC<{ disabledModules?: string[], rolePrefix?
           const matchesSection = isSectionMatch((q as any).section, (q as any).targetSections);
           return matchesSearch && matchesSubject && matchesGrade && matchesSection;
         });
+
+        const unreadDocsCount = useMemo(() => {
+          if (studentLibraryTab === "document") return 0;
+          return filteredDocs.filter((d: any) => {
+            const ts = d.createdAt?.toMillis ? d.createdAt.toMillis() : (d.createdAt ? new Date(d.createdAt).getTime() : 0);
+            return ts > lastSeenDocs;
+          }).length;
+        }, [filteredDocs, lastSeenDocs, studentLibraryTab]);
+
+        const unreadVideosCount = useMemo(() => {
+          if (studentLibraryTab === "video") return 0;
+          return filteredVideos.filter((v: any) => {
+            const ts = v.createdAt?.toMillis ? v.createdAt.toMillis() : (v.createdAt ? new Date(v.createdAt).getTime() : 0);
+            return ts > lastSeenVideos;
+          }).length;
+        }, [filteredVideos, lastSeenVideos, studentLibraryTab]);
+
+        const unreadQuestionsCount = useMemo(() => {
+          if (studentLibraryTab === "question_bank") return 0;
+          return filteredQuestions.filter((q: any) => {
+            const ts = q.createdAt?.toMillis ? q.createdAt.toMillis() : (q.createdAt ? new Date(q.createdAt).getTime() : 0);
+            return ts > lastSeenQuestions;
+          }).length;
+        }, [filteredQuestions, lastSeenQuestions, studentLibraryTab]);
+
+        useEffect(() => {
+          const now = Date.now();
+          if (studentLibraryTab === "document") {
+            setLastSeenDocs(now);
+            safeStorage.setItem('s6_last_seen_docs', String(now));
+            safeStorage.setItem('s6_last_seen_materials', String(now));
+          } else if (studentLibraryTab === "video") {
+            setLastSeenVideos(now);
+            safeStorage.setItem('s6_last_seen_videos', String(now));
+          } else if (studentLibraryTab === "question_bank") {
+            setLastSeenQuestions(now);
+            safeStorage.setItem('s6_last_seen_questions', String(now));
+          }
+        }, [studentLibraryTab]);
 
         const filteredPapers = schoolExamPapers.filter((p) => {
           const paperTitle = p.title || `${p.subject || ''} ${p.role || ''} ${p.year || ''}`.trim() || "ورقة امتحانية";
@@ -432,6 +481,11 @@ export const StudentFilesTab: React.FC<{ disabledModules?: string[], rolePrefix?
                   {studentLibraryTab === "document" && (
                     <div className="absolute inset-0 bg-amber-500/10 opacity-30" />
                   )}
+                  {unreadDocsCount > 0 && (
+                    <div className="absolute top-2 right-2 bg-amber-500 text-black text-[10px] font-black min-w-[20px] h-5 px-1 rounded-full flex items-center justify-center shadow-lg border border-white/20 animate-bounce">
+                      {unreadDocsCount}
+                    </div>
+                  )}
                   <FileText 
                     size={studentLibraryTab === "document" ? 28 : 24} 
                     strokeWidth={studentLibraryTab === "document" ? 2.5 : 2}
@@ -458,6 +512,11 @@ export const StudentFilesTab: React.FC<{ disabledModules?: string[], rolePrefix?
                   {studentLibraryTab === "video" && (
                     <div className="absolute inset-0 bg-[#00E5FF]/10 opacity-30" />
                   )}
+                  {unreadVideosCount > 0 && (
+                    <div className="absolute top-2 right-2 bg-[#00E5FF] text-black text-[10px] font-black min-w-[20px] h-5 px-1 rounded-full flex items-center justify-center shadow-lg border border-white/20 animate-bounce">
+                      {unreadVideosCount}
+                    </div>
+                  )}
                   <Video 
                     size={studentLibraryTab === "video" ? 28 : 24} 
                     strokeWidth={studentLibraryTab === "video" ? 2.5 : 2}
@@ -483,6 +542,11 @@ export const StudentFilesTab: React.FC<{ disabledModules?: string[], rolePrefix?
                   )}
                   {studentLibraryTab === "question_bank" && (
                     <div className="absolute inset-0 bg-indigo-500/10 opacity-30" />
+                  )}
+                  {unreadQuestionsCount > 0 && (
+                    <div className="absolute top-2 right-2 bg-indigo-500 text-white text-[10px] font-black min-w-[20px] h-5 px-1 rounded-full flex items-center justify-center shadow-lg border border-white/20 animate-bounce">
+                      {unreadQuestionsCount}
+                    </div>
                   )}
                   <Database 
                     size={studentLibraryTab === "question_bank" ? 26 : 22} 

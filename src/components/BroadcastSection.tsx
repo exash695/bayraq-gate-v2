@@ -462,7 +462,7 @@ export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
   const currentGrades = gradeMap[level];
 
   return (
-    <div className="space-y-6 px-4 md:px-0">
+    <div className="space-y-6 w-full -mx-3 md:-mx-6 px-0 pb-12">
       <ConfirmDialog 
          isOpen={!!confirmDelete}
          onClose={() => setConfirmDelete(null)}
@@ -470,14 +470,16 @@ export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
          title="تأكيد الحذف"
          message="هل أنت متأكد من حذف هذا البث الإذاعي نهائياً؟"
       />
-      <div className="bg-gradient-to-br from-rose-500/20 to-rose-600/10 border-b md:border border-rose-500/20 rounded-none md:rounded-[40px] p-8 text-center space-y-6 shadow-2xl -mx-4 md:mx-0">
-         <div className="w-20 h-20 bg-rose-500 rounded-[30px] flex items-center justify-center text-white mx-auto shadow-xl shadow-rose-900/40 animate-pulse">
-            <Megaphone size={40} />
+      <div className="bg-gradient-to-br from-rose-500/20 via-[#101426] to-[#0A0D1E] border-y md:border border-rose-500/20 rounded-none md:rounded-[36px] p-6 sm:p-8 text-center space-y-6 shadow-2xl w-full">
+         <div className="w-20 h-20 bg-rose-500 rounded-[28px] flex items-center justify-center text-white mx-auto shadow-xl shadow-rose-900/40 animate-pulse">
+            <Megaphone size={38} />
          </div>
          <div>
-           <h3 className="text-white font-black text-xl mb-2">رادار الذكاء الإذاعي</h3>
-           <p className="text-white/40 text-xs leading-relaxed max-w-sm mx-auto font-bold px-4">
-              أرسل تنبيهات ذكية، استنتاجات من الملازم، أو إعلانات عاجلة لطلابك بكل احترافية، مع توجيه دقيق للشُعب المحددة.
+           <h3 className="text-white font-black text-xl mb-2 flex items-center justify-center gap-2">
+             <span>رادار الذكاء الإذاعي والإعلانات المركزية 📢</span>
+           </h3>
+           <p className="text-white/60 text-xs leading-relaxed max-w-xl mx-auto font-medium px-4">
+              أرسل إعلانات الإذاعة المدرسية، التوجيهات المركزية، أو التبليغات الموجهة لأولياء الأمور والطلاب بكل احترافية، مع توجيه دقيق للمراحل والشُعب المحددة.
            </p>
          </div>
 
@@ -673,10 +675,15 @@ export const BroadcastSection: React.FC<BroadcastSectionProps> = ({
          </div>
       </div>
       
-      <div className="bg-[#101935] p-6 md:p-8 rounded-none md:rounded-[40px] border-t md:border border-white/5 space-y-6 shadow-2xl min-h-[300px] -mx-4 md:mx-0">
+      <div className="bg-[#101935] p-6 md:p-8 rounded-none md:rounded-[36px] border-y md:border border-white/5 space-y-6 shadow-2xl min-h-[300px] w-full">
          <div className="flex items-center justify-between px-2">
-           <h4 className="text-white font-black text-sm uppercase tracking-widest text-white/50">سجل البث الذكي</h4>
-           <History className="text-white/20" size={18} />
+           <h4 className="text-white font-black text-sm uppercase tracking-widest flex items-center gap-2">
+             <History className="text-rose-400" size={18} />
+             <span>سجل البث الذكي والإعلانات المعتمدة</span>
+           </h4>
+           <span className="text-[10px] text-white/40 font-mono">
+             {history.length} إعلان مؤرشف
+           </span>
          </div>
          <div className="space-y-4">
            {history.map((br) => {
