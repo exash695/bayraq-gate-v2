@@ -953,12 +953,16 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
 
     fetchStudentData();
 
-    // Add realtimeManager listener for SQL updates (finance repairs/updates)
+    // Add realtimeManager listener for SQL updates (grade changes, finance repairs/updates, pride messages)
     let unsubRealtime: (() => void) | null = null;
     import('../lib/realtimeManager').then(({ realtimeManager }) => {
       unsubRealtime = realtimeManager.on('students', (payload: any) => {
-        if (payload.action === 'UPDATE' && (payload.id === studentDocId || (payload.data && payload.data.studentCode === studentCode))) {
-           console.log("[Finance] Received real-time student update from SQL", payload);
+        const payloadData = payload?.data || {};
+        const pCode = (payloadData.studentCode || payloadData.code || payloadData.student || '').toString().toLowerCase().trim();
+        const targetCode = (studentCode || '').toString().toLowerCase().trim();
+
+        if (payload.action === 'UPDATE' && (payload.id === studentDocId || pCode === targetCode || payload.id?.includes(targetCode))) {
+           console.log("[ParentPortal] Received real-time student update from SQL:", payload);
            if (payload.data) {
              setStudentData(prev => {
                if (!prev) return payload.data;
@@ -972,7 +976,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
       });
     }).catch(console.warn);
 
-    // Still keep Firestore subscription for real-time updates (attendance, points, etc.)
+    // Keep Firestore subscription for real-time updates (attendance, points, grade, prideMessage)
     const q = query(
       collection(db, 'school_students'),
       where('studentCode', '==', studentCode)
@@ -4454,6 +4458,32 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
             </div>
           </div>
         </div>
+
+        {/* إشعار خطاب مستشار ولي الأمر التفاعلي المباشر */}
+        {Boolean(studentData?.prideMessage) && (
+          <div 
+            onClick={() => {
+              setActiveSubPage('excellence');
+              if (studentDocId) {
+                updateDoc(doc(db, "school_students", studentDocId), { hasUnreadPrideMessage: false }).catch(() => {});
+              }
+            }}
+            className="w-full bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 text-black px-4 py-2 font-black text-xs flex items-center justify-between shadow-lg cursor-pointer hover:brightness-105 transition-all animate-pulse"
+            dir="rtl"
+          >
+            <div className="flex items-center gap-2 truncate">
+              <span className="text-base animate-bounce">✉️</span>
+              <span className="font-extrabold text-[11px] sm:text-xs">
+                خطاب جديد من مستشار ولي الأمر ({studentData?.prideMessageSubject || 'مادة الأستاذ'}):
+              </span>
+              <span className="truncate opacity-90 font-bold text-[10.5px]">"{studentData.prideMessage}"</span>
+            </div>
+            <div className="bg-black/80 text-amber-300 px-2.5 py-1 rounded-lg text-[9.5px] font-black shrink-0 border border-amber-400/30 flex items-center gap-1 shadow-md">
+              <span>عرض الخطاب</span>
+              <ArrowLeft size={12} />
+            </div>
+          </div>
+        )}
 
         {/* شريط التبليغات الجماعية (Broadcast) مدمج مع إشعارات ولي الأمر */}
         <div className="w-full bg-[#fbbf24] font-sans text-black flex items-center h-10 border-b border-black/10 relative overflow-hidden" dir="rtl">
