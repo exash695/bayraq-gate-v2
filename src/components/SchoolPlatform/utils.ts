@@ -1,3 +1,5 @@
+import { downloadFileFromUrl } from '../../lib/exportUtils';
+
 export const debugLog = (...args: any[]) => {
   if (process.env.NODE_ENV === "development") console.log(...args);
 };
@@ -540,117 +542,23 @@ export const downloadDocumentFile = async (
   onNotify?: (msg: string, type: "info" | "success" | "error") => void,
   onProgress?: (progress: number) => void
 ) => {
+  if (!url) return;
   try {
     if (onNotify) onNotify("جاري تجهيز وتنزيل الملف... 📥", "info");
+    if (onProgress) onProgress(10);
 
-    const cleanFilename = filename.toLowerCase().endsWith(".pdf")
-      ? filename
-      : `${filename}.pdf`;
+    const cleanFilename = filename.replace(/[<>:"/\\|?*]/g, "_").trim() || "document";
 
     if (fileId) {
-      try {
-        fetch(`/api/school-files/${fileId}/download`, { method: "POST" }).catch(() => {});
-      } catch (e) {}
+      fetch(`/api/school-files/${fileId}/download`, { method: "POST" }).catch(() => {});
     }
 
-    // Handle Data URL (Base64)
-    if (url.startsWith("data:")) {
-      const parts = url.split(",");
-      const mime = parts[0]?.split(";")[0]?.split(":")[1] || "application/pdf";
-      const byteCharacters = atob(parts[1] || "");
-      const byteNumbers = new Array(byteCharacters.length);
-      for (let i = 0; i < byteCharacters.length; i++) {
-        byteNumbers[i] = byteCharacters.charCodeAt(i);
-      }
-      const byteArray = new Uint8Array(byteNumbers);
-      const blob = new Blob([byteArray], { type: mime });
-      const blobUrl = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = blobUrl;
-      link.download = cleanFilename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
-      if (typeof onProgress === 'function') onProgress(100);
-      if (onNotify) onNotify("تم تنزيل وحفظ الملف بنجاح! ✅", "success");
-      return;
-    }
+    await downloadFileFromUrl(url, cleanFilename);
 
-    // Handle Blob URL
-    if (url.startsWith("blob:")) {
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = cleanFilename;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      if (typeof onProgress === 'function') onProgress(100);
-      if (onNotify) onNotify("تم تنزيل وحفظ الملف بنجاح! ✅", "success");
-      return;
-    }
-
-    // Attempt direct blob download first with stream for progress
-    try {
-      const resp = await fetch(url, { mode: "cors" });
-      if (resp.ok && resp.body) {
-        const contentLength = resp.headers.get("content-length");
-        const total = parseInt(contentLength || "0", 10);
-        let loaded = 0;
-
-        const reader = resp.body.getReader();
-        const stream = new ReadableStream({
-          start(controller) {
-            function push() {
-              reader.read().then(({ done, value }) => {
-                if (done) {
-                  controller.close();
-                  return;
-                }
-                loaded += value.byteLength;
-                if (total && typeof onProgress === 'function') {
-                  onProgress(Math.round((loaded / total) * 100));
-                }
-                controller.enqueue(value);
-                push();
-              });
-            }
-            push();
-          }
-        });
-        const newResponse = new Response(stream);
-        const blob = await newResponse.blob();
-        
-        const blobUrl = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.href = blobUrl;
-        link.download = cleanFilename;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        setTimeout(() => URL.revokeObjectURL(blobUrl), 2000);
-        if (typeof onProgress === 'function') onProgress(100);
-        if (onNotify) onNotify("تم تنزيل وحفظ الملف بنجاح! ✅", "success");
-        return;
-      }
-    } catch (directErr) {
-      // CORS blocked or failed, fallback to server proxy
-    }
-
-    // Fallback: use server download proxy
-    if (typeof onProgress === 'function') onProgress(100);
-    const proxyUrl = `/api/download-proxy?url=${encodeURIComponent(url)}&filename=${encodeURIComponent(cleanFilename)}`;
-    const link = document.createElement("a");
-    link.href = proxyUrl;
-    link.download = cleanFilename;
-    link.target = "_blank";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    if (onNotify) onNotify("تم بدء تنزيل الملف! ✅", "success");
+    if (onProgress) onProgress(100);
+    if (onNotify) onNotify("تم بدء تنزيل الملف بنجاح! ✅", "success");
   } catch (error) {
-    console.error("Document download failed, fallback to window.open", error);
-    window.open(url, "_blank");
-    if (onNotify) onNotify("تم فتح الملف في نافذة جديدة للتنزيل", "info");
+    console.error("Document download failed", error);
+    if (onNotify) onNotify("فشل تنزيل الملف، يرجى المحاولة لاحقاً", "error");
   }
 };

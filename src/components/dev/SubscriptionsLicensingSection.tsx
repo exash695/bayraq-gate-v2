@@ -40,6 +40,7 @@ import { SchoolArchiveManager } from './SchoolArchiveManager';
 import { schoolService, SchoolRecord } from '../../services/schoolService';
 import { db, collection, getDocs, doc, setDoc } from '@/src/lib/firebase';
 import { getOfficialSchoolLogoUrl } from '../../lib/constants';
+import { saveOrSharePDF, printHTML, downloadFileFromUrl } from '../../lib/exportUtils';
 
 export type PlanTier = 'trial' | 'standard' | 'premium' | 'enterprise' | 'custom';
 export type LicenseStatus = 'active' | 'expiring_soon' | 'expired' | 'suspended' | 'archived';
@@ -919,12 +920,11 @@ export const SubscriptionsLicensingSection: React.FC = () => {
       pdf.addImage(imgData, 'PNG', 0, 0, 210, 297, undefined, 'FAST');
 
       const fileName = `Official_License_Receipt_${lic.schoolName.replace(/[\s\W]+/g, '_')}_${lic.receiptNumber}.pdf`;
-      pdf.save(fileName);
+      await saveOrSharePDF(pdf, fileName);
       showToast('✅ تم تصدير وتحميل مستند PDF الرسمي بنجاح!');
     } catch (e) {
       console.error('Failed to export PDF:', e);
-      showToast('❌ تعذر التصدير التلقائي. يتم فتح نافذة الطباعة...');
-      window.print();
+      showToast('❌ تعذر التصدير التلقائي. يرجى المحاولة لاحقاً', 'error');
     } finally {
       setIsGeneratingDoc(false);
     }
@@ -957,14 +957,7 @@ export const SubscriptionsLicensingSection: React.FC = () => {
         }
       }
 
-      const fileUrl = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = fileUrl;
-      link.download = fileName;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(fileUrl);
+      await downloadFileFromUrl(dataUrl, fileName);
       showToast('✅ تم تنزيل وحفظ صورة الوصل بنجاح!');
     } catch (e) {
       console.error('Failed to download image:', e);

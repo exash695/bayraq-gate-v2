@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { printHTML } from '../../lib/exportUtils';
 import { 
   GraduationCap, 
   UserCheck, 
@@ -715,7 +716,43 @@ export const AcademyManagementSection: React.FC = () => {
                   </button>
 
                   <button
-                    onClick={() => window.print()}
+                    onClick={() => {
+                      const printArea = document.getElementById('print-area-academy');
+                      if (printArea) {
+                        const html = `
+                          <html dir="rtl">
+                            <head>
+                              <title>كروت اشتراك أكاديمية بيرق</title>
+                              <style>
+                                @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;700;900&display=swap');
+                                body { font-family: 'Cairo', sans-serif; background: #080d1e; padding: 20px; color: white; }
+                                .grid { display: grid; grid-template-cols: repeat(3, 1fr); gap: 15px; }
+                                .card { border: 2px dashed #fbbf24; border-radius: 15px; padding: 15px; background: #0F172A; margin-bottom: 10px; break-inside: avoid; }
+                                .card-header { border-bottom: 1px solid #ffffff20; padding-bottom: 5px; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; }
+                                .course-info { text-align: right; }
+                                .code-box { background: #000; border: 1px solid #fbbf24; border-radius: 10px; padding: 10px; text-align: center; margin: 10px 0; }
+                                .code { color: #fbbf24; font-family: monospace; font-weight: bold; font-size: 16px; }
+                                .instructions { font-size: 10px; color: #ffffff60; text-align: center; }
+                                @media print {
+                                  body { padding: 0; }
+                                  .grid { grid-template-cols: repeat(3, 1fr); }
+                                }
+                              </style>
+                            </head>
+                            <body>
+                              <div class="grid">
+                                ${Array.from(printArea.children).map(child => `
+                                  <div class="card">
+                                    ${child.innerHTML}
+                                  </div>
+                                `).join('')}
+                              </div>
+                            </body>
+                          </html>
+                        `;
+                        printHTML(html);
+                      }
+                    }}
                     className="h-9 px-4 rounded-xl bg-amber-400 hover:bg-amber-300 text-black text-xs font-black flex items-center gap-1.5 shadow-lg"
                   >
                     <Printer size={14} />
@@ -732,7 +769,7 @@ export const AcademyManagementSection: React.FC = () => {
               </div>
 
               {/* Cards Grid Sheet (Printable Layout) */}
-              <div className="p-6 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 bg-[#080d1e]">
+              <div id="print-area-academy" className="p-6 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 bg-[#080d1e]">
                 {generatedBatchForPrint.codes.map((code, idx) => (
                   <div
                     key={idx}

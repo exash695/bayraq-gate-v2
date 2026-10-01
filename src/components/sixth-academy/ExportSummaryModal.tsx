@@ -2,6 +2,7 @@ import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Printer, Download, X, FileText, CheckCircle2, Sparkles, Lightbulb } from 'lucide-react';
 import { NoteItem, NormalizedPage, PageIllustration } from './types';
+import { printHTML } from '../../lib/exportUtils';
 
 interface ExportSummaryModalProps {
   isOpen: boolean;
@@ -24,7 +25,31 @@ export const ExportSummaryModal: React.FC<ExportSummaryModalProps> = ({
   if (!isOpen) return null;
 
   const handlePrint = () => {
-    window.print();
+    const printArea = document.getElementById('print-area-summary');
+    if (printArea) {
+      const html = `
+        <html dir="rtl">
+          <head>
+            <title>ملخص أكاديمية السادس</title>
+            <style>
+              @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;700;900&display=swap');
+              body { font-family: 'Tajawal', sans-serif; padding: 30px; color: black; background: white; }
+              h4 { color: #d97706; border-bottom: 2px solid #eee; padding-bottom: 10px; margin-top: 30px; }
+              .grid { display: grid; grid-template-cols: 1fr 1fr; gap: 15px; }
+              .note-box { padding: 15px; border: 1px solid #ddd; border-radius: 10px; background: #f9f9f9; }
+              .tag { font-size: 10px; font-weight: bold; color: #d97706; }
+              @media print {
+                body { padding: 0; }
+              }
+            </style>
+          </head>
+          <body>
+            ${printArea.innerHTML}
+          </body>
+        </html>
+      `;
+      printHTML(html);
+    }
   };
 
   return (
@@ -71,7 +96,7 @@ export const ExportSummaryModal: React.FC<ExportSummaryModalProps> = ({
           </div>
 
           {/* Printable Content Body */}
-          <div className="flex-1 overflow-y-auto space-y-6 py-4 no-scrollbar print:overflow-visible">
+          <div id="print-area-summary" className="flex-1 overflow-y-auto space-y-6 py-4 no-scrollbar print:overflow-visible">
             
             {/* Section 1: Idea Bank Notes */}
             <div className="space-y-3">

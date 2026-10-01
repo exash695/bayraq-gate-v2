@@ -31,6 +31,7 @@ import {
 import jsPDF from 'jspdf';
 import { html2canvasSafe } from '../lib/html2canvasSafe';
 import { safeStorage, safeSessionStorage } from '../lib/storage';
+import { saveOrSharePDF } from '../lib/exportUtils';
 
 interface Teacher {
   id: string;
@@ -203,7 +204,7 @@ export const EliteTeachers: React.FC<{ language: 'ar' | 'en'; onBack: () => void
       
       doc.addImage(imgData, 'JPEG', 10, 10, imgWidth, imgHeight);
       // Use ASCII safe filename for absolute compatibility
-      doc.save(`Bayraq_Notes_${selectedTeacher.id || 'teacher'}.pdf`);
+      saveOrSharePDF(doc, `Bayraq_Notes_${selectedTeacher.id || 'teacher'}.pdf`);
     } catch (error) {
       console.error("PDF generation failed:", error);
       alert(isAr ? 'فشل تصدير الملف بصيغة PDF. يرجى المحاولة مرة أخرى.' : 'Failed to export PDF. Please try again.');

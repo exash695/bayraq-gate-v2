@@ -8,7 +8,7 @@ import {
 import { useSchoolPlatform } from "./SchoolPlatformContext";
 import { academicService } from "../../services/academicService";
 import { getSubjectsForGrade } from "../../utils/studentUtils";
-import { printHTML } from "../../lib/exportUtils";
+import { printHTML, downloadFileFromUrl } from "../../lib/exportUtils";
 
 export const TeacherControlGradesTab: React.FC = () => {
   const { 
@@ -699,24 +699,18 @@ export const TeacherControlGradesTab: React.FC = () => {
   // Open full printable preview in new tab
   const openInNewWindow = () => {
     const htmlContent = generateOfficialPrintHTML();
-    const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    window.open(url, '_blank');
+    printHTML(htmlContent); // Standardized to use the same logic that handles mobile
   };
 
   // Download printable HTML document directly
-  const downloadAsHTML = () => {
+  const downloadAsHTML = async () => {
     const htmlContent = generateOfficialPrintHTML();
-    const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `كشف-درجات-${selectedSectionName}-${activeSubjectObj?.name || teacherRawSubject}-${selectedPeriod}.html`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    showToast("تم تحميل ملف الكشف بنجاح! 📄", "success");
+    const fileName = `كشف-درجات-${selectedSectionName}-${activeSubjectObj?.name || teacherRawSubject}-${selectedPeriod}.html`;
+    
+    // Create a data URL from the HTML content
+    const dataUrl = `data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`;
+    await downloadFileFromUrl(dataUrl, fileName);
+    showToast("تم بدء تحميل ملف الكشف بنجاح! 📄", "success");
   };
 
   const periodObj = periods.find(p => p.id === selectedPeriod);

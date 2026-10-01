@@ -1,5 +1,5 @@
 import jsPDF from 'jspdf';
-import { printHTML, exportToExcel } from '../lib/exportUtils';
+import { printHTML, exportToExcel, saveOrSharePDF } from '../lib/exportUtils';
 
 export const cleanParentStudentName = (name?: string): string => {
   if (!name) return 'الطالب';
@@ -616,7 +616,7 @@ export const generateSingleStudentPDF = (student: any) => {
   doc.setFontSize(6);
   doc.text('QR', 70, 31, { align: 'center' });
 
-  doc.save(`ID_${student.student || student.code}.pdf`);
+  saveOrSharePDF(doc, `ID_${student.student || student.code}.pdf`);
 };
 
 export const getSubjectsForGrade = (grade: string, removedIds: string[] = [], customMapping: any = null) => {
