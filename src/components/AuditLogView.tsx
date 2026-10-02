@@ -183,6 +183,25 @@ export const AuditLogView: React.FC<AuditLogViewProps> = ({ showToast }) => {
     printHTML(htmlContent);
   };
 
+  const handleExportExcel = () => {
+    if (logs.length === 0) {
+      alert("لا توجد سجلات لتصديرها.");
+      return;
+    }
+    const dataToExport = logs.map((log, index) => ({
+      "#": index + 1,
+      "المسؤول عن الإجراء": getDisplayUserEmail(log),
+      "الاسم": log.userName || "",
+      "نوع العملية": log.action,
+      "تفاصيل النشاط": log.details,
+      "الهدف": log.targetName || "",
+      "التاريخ والوقت": log.timestamp ? new Date(log.timestamp).toLocaleString('ar-IQ') : "غير محدد"
+    }));
+
+    exportToExcel(dataToExport, "سجل_النشاطات_الإدارية", "سجل النشاطات");
+    showToast("تم تصدير سجل النشاطات إلى ملف إكسل بنجاح", "success");
+  };
+
   const filteredLogs = logs.filter(log => {
     const searchLower = searchQuery.trim().toLowerCase();
     const matchesSearch = 

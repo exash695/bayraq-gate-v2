@@ -204,6 +204,7 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
   const [adminPostContent, setAdminPostContent] = useState('');
   const [adminPostTargetStage, setAdminPostTargetStage] = useState<string>('all');
   const [adminPostTargetGrade, setAdminPostTargetGrade] = useState<string>('all_grades');
+  const [adminPostTargetSection, setAdminPostTargetSection] = useState<string>('all_sections');
   const [adminPostTargetSchool, setAdminPostTargetSchool] = useState<string>('all');
   const [isPublishingAdminPost, setIsPublishingAdminPost] = useState(false);
 
@@ -1298,7 +1299,7 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
       const targetSchoolId = selectedSchoolId || 'all';
       const targetSchoolName = schoolName || 'جميع المدارس';
 
-      // Determine target grade/stage
+      // Determine target grade/stage/section
       let selectedGradeLabel = 'جميع الصفوف';
       if (adminPostTargetStage !== 'all') {
         if (adminPostTargetGrade === 'all_grades') {
@@ -1308,6 +1309,10 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
           const stageCfg = (STAGES_CONFIG as any)[adminPostTargetStage];
           const grd = stageCfg?.grades?.find((g: any) => g.id === adminPostTargetGrade);
           if (grd) selectedGradeLabel = grd.label;
+        }
+
+        if (adminPostTargetSection !== 'all_sections') {
+          selectedGradeLabel += ` - ${adminPostTargetSection}`;
         }
       }
 
@@ -1832,6 +1837,75 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
   }, [users, searchQuery, activeRole, showOnlyActiveCadre, selectedStage, selectedGrade, selectedStatus]);
 
 
+  // Helper to calculate available sections from Codes Center lists and student data
+  const availableSectionsForSelectedGrade = useMemo(() => {
+    if (adminPostTargetStage === 'all') return [];
+
+    const sectionsSet = new Set<string>();
+
+    // 1. From academic lists (aData) - Codes Center lists
+    if (Array.isArray(aData)) {
+      aData.forEach((list: any) => {
+        const listGrade = String(list.grade || '').trim().toLowerCase();
+        const listStage = String(list.stage || '').trim().toLowerCase();
+        const listName = String(list.name || list.sectionName || '').trim();
+
+        const targetGradeLabel = adminPostTargetGrade !== 'all_grades' ? getGradeLabel(adminPostTargetGrade) : '';
+        const matchesGrade = adminPostTargetGrade === 'all_grades' ||
+          listGrade === adminPostTargetGrade.toLowerCase() ||
+          (targetGradeLabel && normalizeArabic(getGradeLabel(listGrade)).includes(normalizeArabic(targetGradeLabel))) ||
+          (targetGradeLabel && normalizeArabic(listName).includes(normalizeArabic(targetGradeLabel)));
+
+        const matchesStage = listStage === adminPostTargetStage.toLowerCase() ||
+          (STAGES_CONFIG[adminPostTargetStage as keyof typeof STAGES_CONFIG]?.grades.some(g => g.id.toLowerCase() === listGrade));
+
+        if (matchesGrade && matchesStage) {
+          if (list.sectionName && typeof list.sectionName === 'string' && list.sectionName.trim()) {
+            sectionsSet.add(list.sectionName.trim());
+          } else if (list.section && typeof list.section === 'string' && list.section.trim()) {
+            sectionsSet.add(list.section.trim());
+          } else if (listName) {
+            sectionsSet.add(listName);
+          }
+
+          if (Array.isArray(list.students)) {
+            list.students.forEach((st: any) => {
+              if (st.section) sectionsSet.add(String(st.section).trim());
+              if (st.group) sectionsSet.add(String(st.group).trim());
+            });
+          }
+        }
+      });
+    }
+
+    // 2. From registered student users
+    users.forEach((u: any) => {
+      const uGrade = String(u.grade || '').trim().toLowerCase();
+      const targetGradeLabel = adminPostTargetGrade !== 'all_grades' ? getGradeLabel(adminPostTargetGrade) : '';
+      const matchesGrade = adminPostTargetGrade === 'all_grades' ||
+        uGrade === adminPostTargetGrade.toLowerCase() ||
+        (targetGradeLabel && normalizeArabic(getGradeLabel(uGrade)).includes(normalizeArabic(targetGradeLabel)));
+
+      if (matchesGrade) {
+        if (u.section && typeof u.section === 'string' && u.section.trim()) {
+          sectionsSet.add(u.section.trim());
+        }
+        if (u.group && typeof u.group === 'string' && u.group.trim()) {
+          sectionsSet.add(u.group.trim());
+        }
+      }
+    });
+
+    const extracted = Array.from(sectionsSet).filter(Boolean);
+
+    // Fallbacks if no specific lists exist in Codes Center
+    if (extracted.length === 0) {
+      return ['شعبة (أ)', 'شعبة (ب)', 'شعبة (ج)', 'شعبة (د)'];
+    }
+
+    return extracted;
+  }, [aData, users, adminPostTargetStage, adminPostTargetGrade]);
+
   // Helper to get grade label
   const getGradeLabel = (gradeId: string) => {
     if (!gradeId) return 'غير محدد';
@@ -2008,7 +2082,7 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
                   </div>
 
                   {/* Target Selectors */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     {/* Target Stage (الفئة المستهدفة) */}
                     <div className="space-y-1 text-right">
                       <label className="block text-[11px] text-[#00E5FF] font-bold">المرحلة المستهدفة:</label>
@@ -2017,6 +2091,7 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
                         onChange={(e) => {
                           setAdminPostTargetStage(e.target.value);
                           setAdminPostTargetGrade('all_grades');
+                          setAdminPostTargetSection('all_sections');
                         }}
                         className="w-full bg-slate-950 hover:bg-slate-950 border border-white/15 rounded-xl px-3 py-2.5 text-white text-xs font-bold focus:outline-none focus:border-[#00E5FF]"
                       >
@@ -2032,7 +2107,10 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
                       <label className="block text-[11px] text-[#00E5FF] font-bold">الصف المستهدف:</label>
                       <select
                         value={adminPostTargetGrade}
-                        onChange={(e) => setAdminPostTargetGrade(e.target.value)}
+                        onChange={(e) => {
+                          setAdminPostTargetGrade(e.target.value);
+                          setAdminPostTargetSection('all_sections');
+                        }}
                         disabled={adminPostTargetStage === 'all'}
                         className="w-full bg-slate-950 hover:bg-slate-950 border border-white/15 disabled:opacity-40 rounded-xl px-3 py-2.5 text-white text-xs font-bold focus:outline-none focus:border-[#00E5FF]"
                       >
@@ -2040,6 +2118,24 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
                         {adminPostTargetStage !== 'all' && 
                           (STAGES_CONFIG as any)[adminPostTargetStage]?.grades?.map((g: any) => (
                             <option key={g.id} value={g.id}>{g.label}</option>
+                          ))
+                        }
+                      </select>
+                    </div>
+
+                    {/* Specific target section (من مركز الأكواد) */}
+                    <div className="space-y-1 text-right">
+                      <label className="block text-[11px] text-[#00E5FF] font-bold">الشعبة المستهدفة (من مركز الأكواد):</label>
+                      <select
+                        value={adminPostTargetSection}
+                        onChange={(e) => setAdminPostTargetSection(e.target.value)}
+                        disabled={adminPostTargetStage === 'all'}
+                        className="w-full bg-slate-950 hover:bg-slate-950 border border-white/15 disabled:opacity-40 rounded-xl px-3 py-2.5 text-white text-xs font-bold focus:outline-none focus:border-[#00E5FF]"
+                      >
+                        <option value="all_sections">جميع الشعب المتاحة لهذا الصف 👥</option>
+                        {adminPostTargetStage !== 'all' && 
+                          availableSectionsForSelectedGrade.map((sec: string, idx: number) => (
+                            <option key={idx} value={sec}>{sec}</option>
                           ))
                         }
                       </select>

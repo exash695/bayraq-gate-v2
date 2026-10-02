@@ -562,20 +562,21 @@ export const BerqCharacter: React.FC<BerqCharacterProps> = ({
 
   const effectiveVideoSrc = isVideoFile ? resolveMediaUrl(getInMemoryCachedUrl(imageUrl) || cachedUrl || imageUrl) : '';
   const fallbackImageSrc = resolveMediaUrl(getBerqFallbackImage(pose));
-  const finalImageSrc = videoError ? fallbackImageSrc : imageUrl;
+  const finalImageSrc = videoError ? fallbackImageSrc : (isVideoFile ? fallbackImageSrc : imageUrl);
 
   // Robust Autoplay Effect
   React.useEffect(() => {
     if (isVideoFile && !videoError && videoRef.current) {
-      videoRef.current.muted = true;
-      videoRef.current.playsInline = true;
-      videoRef.current.play().then(() => {
+      const v = videoRef.current;
+      v.muted = true;
+      v.defaultMuted = true;
+      v.playsInline = true;
+      // @ts-ignore
+      v.webkitPlaysInline = true;
+      v.play().then(() => {
         setIsVideoPlaying(true);
       }).catch(err => {
-        console.log('[BERQ VIDEO] Autoplay status:', err?.message || err);
-        if (videoRef.current?.error || String(err).includes('NotSupportedError') || String(err).includes('source') || String(err).includes('format')) {
-          setVideoError(true);
-        }
+        console.log('[BERQ VIDEO] Autoplay play status:', err?.message || err);
       });
     }
   }, [effectiveVideoSrc, isVideoFile, videoError]);
@@ -607,7 +608,7 @@ export const BerqCharacter: React.FC<BerqCharacterProps> = ({
       onClick={onClick}
     >
       <motion.div
-        className="w-full h-full flex items-center justify-center relative z-10"
+        className="w-full h-full flex items-center justify-center relative z-10 overflow-hidden"
         animate={animate ? { y: [0, -6, 0] } : false}
         transition={animate ? { duration: 4, repeat: Infinity, ease: "easeInOut" } : undefined}
       >
@@ -623,8 +624,39 @@ export const BerqCharacter: React.FC<BerqCharacterProps> = ({
           />
         )}
 
-        {/* Guaranteed Strict Rendering: Video file goes to <video> ONLY, Image file goes to <img> ONLY */}
-        {isVideoFile && !videoError ? (
+        {/* BASELINE STATIC IMAGE: Displays IMMEDIATELY without delay or video play buttons */}
+        <img
+          src={finalImageSrc}
+          alt={altText}
+          loading="eager"
+          onLoad={(e) => {
+            addBerqDebugLog({
+              timestamp: new Date().toLocaleTimeString(),
+              pose: String(pose),
+              imageUrl: String(finalImageSrc),
+              srcPath: String(finalImageSrc),
+              fetchStatus: 'Image onLoad success',
+              imgSrc: finalImageSrc,
+              currentSrc: e.currentTarget.currentSrc,
+              complete: e.currentTarget.complete,
+              naturalWidth: e.currentTarget.naturalWidth,
+              hasError: false
+            });
+          }}
+          onError={(e) => {
+            const imgTarget = e.currentTarget;
+            if (imgTarget.src && !imgTarget.src.endsWith('/mascot/connect.jpg') && !imgTarget.src.endsWith('/mascot/welcome.jpg')) {
+              imgTarget.src = '/mascot/connect.jpg';
+            }
+          }}
+          className={`cursor-pointer select-none ${fitClass} ${glowShadows[glowColor]} relative z-10 transition-opacity duration-300 ${
+            isVideoFile && isVideoPlaying ? 'opacity-0 absolute' : 'opacity-100'
+          }`}
+          style={{ height: height }}
+        />
+
+        {/* OVERLAID VIDEO ELEMENT: Hidden with opacity-0 & pointer-events-none until video is actively playing */}
+        {isVideoFile && !videoError && (
           <video
             ref={(el) => {
               videoRef.current = el;
@@ -635,11 +667,9 @@ export const BerqCharacter: React.FC<BerqCharacterProps> = ({
                 // @ts-ignore
                 el.webkitPlaysInline = true;
                 el.loop = true;
-                el.play().catch(err => {
-                  console.log('[BERQ VIDEO] Ref play notice - falling back to static image:', err?.message || err);
-                  // Force fallback to static image if browser blocks autoplay (e.g. low power mode, slow network, or no user gesture)
-                  setVideoError(true);
-                });
+                el.play().then(() => {
+                  setIsVideoPlaying(true);
+                }).catch(() => {});
               }
             }}
             key={effectiveVideoSrc}
@@ -651,112 +681,27 @@ export const BerqCharacter: React.FC<BerqCharacterProps> = ({
             controls={false}
             disablePictureInPicture
             preload="auto"
-            poster={finalImageSrc}
-            onEnded={(e) => {
-              const v = e.currentTarget;
-              v.currentTime = 0;
-              v.play().catch(() => {});
-            }}
-            onPause={(e) => {
-              const v = e.currentTarget;
-              if (v && !v.ended) {
-                v.play().catch(() => {});
-              }
-            }}
-            onLoadedData={(e) => {
-              console.log(`[BERQ DEBUG] Element: video | Pose: ${pose} | URL: ${effectiveVideoSrc} | Event: onLoadedData`);
-              setIsVideoPlaying(true);
-              addBerqDebugLog({
-                timestamp: new Date().toLocaleTimeString(),
-                pose: String(pose),
-                imageUrl: String(effectiveVideoSrc),
-                srcPath: String(effectiveVideoSrc),
-                fetchStatus: 'Video onLoadedData success',
-                imgSrc: 'video',
-                currentSrc: e.currentTarget.currentSrc,
-                complete: true,
-                naturalWidth: e.currentTarget.videoWidth || 0,
-                hasError: false
-              });
-            }}
+            poster={fallbackImageSrc}
+            onPlaying={() => setIsVideoPlaying(true)}
+            onLoadedData={() => setIsVideoPlaying(true)}
             onCanPlay={(e) => {
-              console.log(`[BERQ DEBUG] Element: video | Pose: ${pose} | URL: ${effectiveVideoSrc} | Event: onCanPlay`);
-              e.currentTarget.play().catch((err) => {
-                console.log('[BERQ VIDEO] onCanPlay play failed - falling back to static image:', err);
-                setVideoError(true);
-              });
+              e.currentTarget.play().then(() => setIsVideoPlaying(true)).catch(() => {});
             }}
             onError={(e) => {
-              const err = e.currentTarget.error;
-              console.warn(`[BERQ DEBUG] Element: video | Pose: ${pose} | URL: ${effectiveVideoSrc} | Event: onError | Code: ${err?.code} | Message: ${err?.message}`);
+              console.warn(`[BERQ DEBUG] Video error, staying on static image: ${effectiveVideoSrc}`);
               setVideoError(true);
-              addBerqDebugLog({
-                timestamp: new Date().toLocaleTimeString(),
-                pose: String(pose),
-                imageUrl: String(effectiveVideoSrc),
-                srcPath: String(effectiveVideoSrc),
-                fetchStatus: `Video Error Code ${err?.code}: ${err?.message}`,
-                imgSrc: 'video',
-                currentSrc: '',
-                complete: false,
-                naturalWidth: 0,
-                hasError: true
-              });
+              setIsVideoPlaying(false);
             }}
-            className={`cursor-pointer select-none rounded-2xl ${fitClass} ${glowShadows[glowColor]} relative z-10`}
+            className={`cursor-pointer select-none rounded-2xl ${fitClass} ${glowShadows[glowColor]} absolute inset-0 z-20 pointer-events-none transition-opacity duration-300 [&::-webkit-media-controls]:hidden [&::-webkit-media-controls-start-playback-button]:hidden [&::-webkit-media-controls-panel]:hidden [&::-webkit-media-controls-play-button]:hidden ${
+              isVideoPlaying ? 'opacity-100' : 'opacity-0'
+            }`}
             style={{ 
               height: height,
-              // Strictly hide native overlay elements
               // @ts-ignore
               WebkitMediaControlsStartPlaybackButton: 'none !important',
               WebkitMediaControlsPlayButton: 'none !important',
               WebkitMediaControlsOverlayPlayButton: 'none !important'
             }}
-          />
-        ) : (
-          <img
-            src={finalImageSrc}
-            alt={altText}
-            loading="eager"
-            onLoad={(e) => {
-              console.log(`[BERQ DEBUG] Element: img | Pose: ${pose} | URL: ${finalImageSrc} | Event: onLoad`);
-              addBerqDebugLog({
-                timestamp: new Date().toLocaleTimeString(),
-                pose: String(pose),
-                imageUrl: String(finalImageSrc),
-                srcPath: String(finalImageSrc),
-                fetchStatus: 'Image onLoad success',
-                imgSrc: finalImageSrc,
-                currentSrc: e.currentTarget.currentSrc,
-                complete: e.currentTarget.complete,
-                naturalWidth: e.currentTarget.naturalWidth,
-                hasError: false
-              });
-            }}
-            onError={(e) => {
-              console.warn(`[BERQ DEBUG] Element: img | Pose: ${pose} | URL: ${finalImageSrc} | Event: onError`);
-              const imgTarget = e.currentTarget;
-              if (imgTarget.src && !imgTarget.src.endsWith('/mascot/connect.jpg') && !imgTarget.src.endsWith('/mascot/welcome.png')) {
-                imgTarget.src = '/mascot/connect.jpg';
-              } else {
-                imgTarget.onerror = null;
-                imgTarget.style.display = 'none';
-              }
-              addBerqDebugLog({
-                timestamp: new Date().toLocaleTimeString(),
-                pose: String(pose),
-                imageUrl: String(finalImageSrc),
-                srcPath: String(finalImageSrc),
-                fetchStatus: 'Image onError handled',
-                imgSrc: finalImageSrc,
-                currentSrc: e.currentTarget.currentSrc,
-                complete: false,
-                naturalWidth: 0,
-                hasError: true
-              });
-            }}
-            className={`cursor-pointer select-none ${fitClass} ${glowShadows[glowColor]} relative z-10`}
-            style={{ height: height }}
           />
         )}
       </motion.div>

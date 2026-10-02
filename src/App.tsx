@@ -3600,7 +3600,8 @@ export default function App() {
               {/* 1. Daily Homework / الواجبات اليومية */}
               <div
                 onClick={() => {
-                  safeStorage.setItem("s6_target_tab", "tasks");
+                  safeStorage.setItem("s6_target_tab", "files");
+                  safeStorage.setItem("s6_target_library_tab", "homework");
                   let targetSchool = selectedSchoolId;
                   if (!targetSchool) {
                     targetSchool = safeStorage.getItem("s6_selectedSchoolId") || safeStorage.getItem("s6_preferred_school") || userProfile?.schoolId || null;
@@ -3716,12 +3717,14 @@ export default function App() {
               <div 
                 onClick={() => {
                   safeStorage.setItem("s6_target_tab", "files");
+                  safeStorage.setItem("s6_target_library_tab", "document");
                   let targetSchool = selectedSchoolId;
                   if (!targetSchool) {
                     targetSchool = safeStorage.getItem("s6_selectedSchoolId") || safeStorage.getItem("s6_preferred_school") || userProfile?.schoolId || "school1";
                     setSelectedSchoolId(targetSchool);
                     safeStorage.setItem("s6_selectedSchoolId", targetSchool);
                   }
+                  setHighlightTasksSection(false);
                   setIsChoosingSchool(false);
                   setActiveSection("school-content");
                 }}

@@ -923,7 +923,13 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     }
     setActiveTabState(newTab);
     if (newTab === "files") {
-      setStudentLibraryTab("document");
+      const targetSub = safeStorage.getItem("s6_target_library_tab");
+      if (targetSub) {
+        safeStorage.removeItem("s6_target_library_tab");
+        setStudentLibraryTab(targetSub as any);
+      } else {
+        setStudentLibraryTab("document");
+      }
     }
   };
   const [selectedControlTab, setSelectedControlTab] = useState<string>(() => {
@@ -3547,9 +3553,26 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
   const [uploadedVideoLock, setUploadedVideoLock] = useState(false);
   const [documentXhr, setDocumentXhr] = useState<XMLHttpRequest | null>(null);
   const [videoXhr, setVideoXhr] = useState<XMLHttpRequest | null>(null);
-  const [studentLibraryTab, setStudentLibraryTab] = useState<"document" | "video" | "question_bank" | "homework" | "competitions">("document");
+  const [studentLibraryTab, setStudentLibraryTab] = useState<"document" | "video" | "question_bank" | "homework" | "competitions">(() => {
+    const targetSub = safeStorage.getItem("s6_target_library_tab");
+    if (targetSub) {
+      safeStorage.removeItem("s6_target_library_tab");
+      return targetSub as any;
+    }
+    return "document";
+  });
   const [visitedHomework, setVisitedHomework] = useState(false);
   const [visitedCompetitions, setVisitedCompetitions] = useState(false);
+
+  useEffect(() => {
+    if (activeTab === "files") {
+      const targetSub = safeStorage.getItem("s6_target_library_tab");
+      if (targetSub) {
+        safeStorage.removeItem("s6_target_library_tab");
+        setStudentLibraryTab(targetSub as any);
+      }
+    }
+  }, [activeTab]);
 
   useEffect(() => {
     if (studentLibraryTab === "homework") {
