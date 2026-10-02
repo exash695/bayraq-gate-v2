@@ -4632,7 +4632,7 @@ export default function App() {
                 )}
 
                 <div
-                  className={`relative z-10 flex-1 flex flex-col min-h-screen transition-all duration-300 w-full overflow-x-hidden ${user && portalType !== "driver" && activeSection !== "school-content" && !isChoosingSchool && isSidebarOpen ? (settings.language === "ar" ? "lg:pr-72" : "lg:pl-72") : ""}`}
+                  className={`relative z-10 flex-1 flex flex-col min-h-screen transition-all duration-300 w-full overflow-x-hidden safe-area-pt ${user && portalType !== "driver" && activeSection !== "school-content" && !isChoosingSchool && isSidebarOpen ? (settings.language === "ar" ? "lg:pr-72" : "lg:pl-72") : ""}`}
                 >
                   {/* Seasonal Cloud Theme Banner & Ambiance */}
                   {user && portalType !== "driver" && activeSection !== "school-content" && <SeasonalThemeBanner />}
