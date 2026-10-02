@@ -164,18 +164,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [isDeletingAccount, setIsDeletingAccount] = useState(false);
 
-  // Check if current view or role is a specialized dashboard (إدارة، أستاذ، طالب، ولي أمر)
-  const isDashboardRoleOrSection = 
+  // The side arrow handle should be VISIBLE on the Home screen ("hub") and main hub pages for all roles,
+  // and HIDE only when entering deep inner platform views (school-content, admin-hub, gate-6)
+  const shouldHideHandle = 
     activeSection === "admin-hub" ||
     activeSection === "school-content" ||
-    portalType === "admin-boys" ||
-    portalType === "admin-girls" ||
-    portalType === "admin-observer" ||
-    portalType === "teacher" ||
-    portalType === "parent" ||
-    userProfile?.role === "admin" ||
-    userProfile?.role === "teacher" ||
-    userProfile?.role === "parent";
+    activeSection === "gate-6";
 
   // Rank display
   const rankDisplay = {
@@ -349,7 +343,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </AnimatePresence>
 
       {/* Collapsed Handle */}
-      {!isOpen && !isDashboardRoleOrSection && (
+      {!isOpen && !shouldHideHandle && (
         <button
           onClick={() => setIsOpen(true)}
           className={`fixed top-[120px] ${isRtl ? 'right-3' : 'left-3'} z-50 p-2.5 bg-[#0d1533]/90 hover:bg-[#14214d]/95 hover:border-cyan-500/50 text-cyan-400 transition-all rounded-full shadow-[0_0_15px_rgba(34,211,238,0.2)] border border-white/10 flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95`}
