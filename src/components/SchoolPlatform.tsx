@@ -7129,16 +7129,30 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
         return <StudentMaterialsTab />;
       case "excellence":
         return <StudentExcellenceTab />;
-      case "announcements":
+      case "announcements": {
+        const resolvedAnnouncementsSection = 
+          resolvedStudentSection || 
+          userProfile?.section || 
+          (userProfile as any)?.studentSection || 
+          userProfile?.class || 
+          verifiedStudentInfo?.section || 
+          verifiedStudentInfo?.studentSection || 
+          verifiedStudentInfo?.class || 
+          (userProfile?.grade && extractSectionLetter(userProfile.grade) ? userProfile.grade : "") || 
+          gradeName || 
+          grade || 
+          "";
+
         return (
           <AnnouncementsCenterTab
             schoolId={resolvedSchoolId}
             grade={grade}
-            section={userProfile?.section || ""}
+            section={resolvedAnnouncementsSection}
             isTeacher={isTeacher}
             notifications={notifications}
           />
         );
+      }
       case "live_watch":
         return <StudentLiveWatchTab />;
       case "questions_bank":

@@ -124,7 +124,7 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
             return matchesBroadcastAudience(b, {
               grade,
               section,
-              className: section || grade,
+              className: section && grade ? `${grade} ${section}` : (section || grade),
               isTeacher
             });
           })
@@ -237,13 +237,18 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
     return (notifications || []).map(n => {
       const isTeacher = isTeacherItem(n);
       const isFinance = (n.body || n.title || '').includes('قسط') || (n.body || n.title || '').includes('تسديد');
+      const nAuthor = n.metadata?.senderName || n.metadata?.teacherName || n.author || "";
+      const isAuthorDefault = !nAuthor || nAuthor === "مستخدم" || nAuthor === "مستخدم 🏛️" || nAuthor === "مستخدم 🎓" || nAuthor === "user" || nAuthor === "admin";
+      
+      const cleanAuthor = isAuthorDefault
+        ? (isTeacher ? "أستاذ المادة 🎓" : isFinance ? "القسم المالي والإداري 🏛️" : "الإدارة المدرسية 🏛️")
+        : nAuthor;
+
       return {
         id: n.id,
         message: n.body || n.title,
         title: n.title,
-        author: isTeacher 
-          ? (n.metadata?.senderName || n.metadata?.teacherName || "أستاذ المادة 🎓")
-          : isFinance ? "القسم المالي والإداري 🏛️" : "الإدارة المدرسية 🏛️",
+        author: cleanAuthor,
         subject: isTeacher ? (n.metadata?.subject || "تبليغ صفي") : (isFinance ? "متابعة الأقساط والرسوم" : "تبليغ إداري رسمي"),
         createdAt: n.createdAt,
         timestampMs: n.createdAt ? new Date(n.createdAt).getTime() : Date.now(),
@@ -260,18 +265,26 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
 
     // Process broadcasts
     (broadcasts || []).forEach(b => {
-      if (isTeacherItem(b)) {
+      const isTeacher = isTeacherItem(b);
+      const bAuthor = b.author || b.metadata?.senderName || b.metadata?.teacherName || "";
+      const isAuthorDefault = !bAuthor || bAuthor === "مستخدم" || bAuthor === "مستخدم 🏛️" || bAuthor === "مستخدم 🎓" || bAuthor === "user" || bAuthor === "admin";
+      
+      const cleanAuthor = isAuthorDefault 
+        ? (isTeacher ? "أستاذ المادة 🎓" : "الإدارة المدرسية 🏛️")
+        : bAuthor;
+
+      if (isTeacher) {
         staffList.push({
           ...b,
           type: "staff",
-          author: b.author || "أستاذ المادة 🎓",
-          subject: b.subject || "تبليغ من قسم التحكم"
+          author: cleanAuthor,
+          subject: b.subject || "تبليغ صفي"
         });
       } else {
         adminList.push({
           ...b,
           type: "admin",
-          author: b.author || "الإدارة المدرسية 🏛️",
+          author: cleanAuthor,
           subject: b.subject || "الإذاعة المدرسية 📻"
         });
       }
