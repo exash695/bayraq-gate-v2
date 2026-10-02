@@ -212,6 +212,10 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
       const isForThisStudent = isAll || matchesId || matchesCode || matchesParentCode || matchesName;
 
       if (isForThisStudent) {
+        // Prevent showing notifications for old activities on component load
+        const activityTime = new Date(payload?.createdAt || Date.now()).getTime();
+        if (Date.now() - activityTime > 60000) return; 
+
         setUnreadLensCount(prev => prev + 1);
 
         const teacherName = payload?.authorName || 'الأستاذ';
