@@ -1610,14 +1610,14 @@ export const SubscriptionsLicensingSection: React.FC = () => {
                   <span>حفظ صورة (PNG)</span>
                 </button>
 
-                {/* Direct Print Button */}
+                {/* Direct PDF Button */}
                 <button
                   onClick={() => window.print()}
                   className="px-3.5 py-2 bg-white/10 hover:bg-white/15 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer border border-white/10"
-                  title="طباعة ورقية مباشرة على ورق A4"
+                  title="تحميل الوصل بصيغة PDF"
                 >
-                  <Printer size={15} />
-                  <span>طباعة فورية</span>
+                  <FileText size={15} />
+                  <span>تحميل PDF</span>
                 </button>
 
                 {/* Close Button */}

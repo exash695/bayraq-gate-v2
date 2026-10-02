@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   Users, Search, CheckCircle2, GraduationCap, ArrowRight, Save, Printer, FileSpreadsheet, Send, Plus, X, RotateCcw, Trash2, Layout,
-  DollarSign, CreditCard, TrendingUp, Star, BookOpen, Award, Camera, Filter, Share2, Archive, FolderOpen, Settings
+  DollarSign, CreditCard, TrendingUp, Star, BookOpen, Award, Camera, Filter, Share2, Archive, FolderOpen, Settings, FileText
 } from 'lucide-react';
 import { collection, query, where, getDocs, updateDoc, doc, writeBatch } from '../lib/firebase';
 import { db } from '../lib/firebase';
@@ -2169,8 +2169,8 @@ export const StudentsSection: React.FC<StudentsSectionProps> = ({
             onClick={printGrades}
             className="flex-1 h-12 bg-white/5 border border-white/10 rounded-xl text-white/60 text-xs font-black hover:bg-white/10 hover:text-white flex items-center justify-center gap-2 transition-all"
           >
-            <Printer size={16} />
-            طباعة كشف الدرجات
+            <FileText size={16} />
+            تحميل كشف الدرجات PDF
           </button>
           <button 
             onClick={exportToDigitalList}

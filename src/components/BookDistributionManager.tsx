@@ -16,7 +16,8 @@ import {
   AlertCircle,
   Sparkles,
   Users,
-  Layers
+  Layers,
+  FileText
 } from 'lucide-react';
 
 interface BookDistributionManagerProps {
@@ -599,10 +600,10 @@ export const BookDistributionManager: React.FC<BookDistributionManagerProps> = (
               <button
                 onClick={handleExportPrint}
                 className="h-10 px-3.5 bg-white/5 hover:bg-white/10 text-white/80 hover:text-white border border-white/10 rounded-xl text-xs font-black flex items-center justify-center gap-1.5 transition-all cursor-pointer active:scale-95"
-                title="طباعة استمارة التسليم الرسمية"
+                title="تحميل استمارة التسليم بصيغة PDF"
               >
-                <Printer size={14} />
-                <span className="hidden sm:inline">طباعة الاستمارة</span>
+                <FileText size={14} />
+                <span className="hidden sm:inline">تحميل PDF</span>
               </button>
             </div>
           </div>

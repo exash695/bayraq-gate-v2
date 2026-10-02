@@ -32,6 +32,8 @@ import {
 } from 'lucide-react';
 import { useAppLogo } from './BerqCharacterManager';
 
+import { printHTML } from '../lib/exportUtils';
+
 interface PrivacyPolicyProps {
   onBack?: () => void;
 }
@@ -41,7 +43,15 @@ export const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onBack }) => {
   const [activeLang, setActiveLang] = useState<'ar' | 'en'>('ar');
 
   const handlePrint = () => {
-    window.print();
+    const el = document.getElementById('privacy-policy-view');
+    if (el) {
+      // Create a clean version for PDF/Print without the sticky header
+      const content = el.cloneNode(true) as HTMLElement;
+      const header = content.querySelector('header');
+      if (header) header.remove();
+      
+      printHTML(content.outerHTML);
+    }
   };
 
   return (
@@ -94,10 +104,10 @@ export const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onBack }) => {
           <button
             onClick={handlePrint}
             className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/70 hover:text-white transition-all border border-white/5 hidden sm:flex items-center gap-1.5 text-xs font-bold"
-            title="طباعة الوثيقة"
+            title={activeLang === 'ar' ? 'تحميل الوثيقة PDF' : 'Download PDF'}
           >
-            <Printer size={16} />
-            <span>{activeLang === 'ar' ? 'طباعة' : 'Print'}</span>
+            <FileText size={16} />
+            <span>{activeLang === 'ar' ? 'تحميل PDF' : 'Download PDF'}</span>
           </button>
         </div>
       </header>

@@ -562,7 +562,10 @@ export default function App() {
         const saved = safeStorage.getItem("s6_activeSection");
 
         // Role-based smart auto-landing for returning users:
-        if (role === "parent" || role === "teacher" || role === "driver") {
+        if (role === "parent" || role === "teacher") {
+          return "hub";
+        }
+        if (role === "driver") {
           return "school-content";
         }
         if (role === "admin-boys" || role === "admin-girls") {
@@ -2265,9 +2268,12 @@ export default function App() {
     setActiveSection("unit-detail");
   };
 
+  const [hubResetKey, setHubResetKey] = useState(0);
+
   const handleHomeNavigation = useCallback(() => {
     setIsChoosingSchool(false);
     setActiveSection("hub");
+    setHubResetKey(prev => prev + 1);
   }, []);
 
   const [isChoosingSchool, setIsChoosingSchool] = useState(false);
@@ -2532,8 +2538,8 @@ export default function App() {
               } else if (user.role === "parent" || (isParent && user.role !== "student") || code.trim().toUpperCase().startsWith('PAR-') || code.trim().toUpperCase().startsWith('PCODE-')) {
                 setPortalType("parent");
                 safeStorage.setItem("bayraq_user_role", "parent");
-                safeStorage.setItem("s6_activeSection", "school-content");
-                setActiveSection("school-content");
+                safeStorage.setItem("s6_activeSection", "hub");
+                setActiveSection("hub");
 
                 const studentGrade =
                   (user as any).grade ||
@@ -2749,6 +2755,7 @@ export default function App() {
         if (portalType === "parent") {
           return (
             <ParentPortal
+              key={`parent-portal-${hubResetKey}`}
               studentName={
                 verifiedStudentInfo?.studentName ||
                 verifiedStudentInfo?.fullName ||
@@ -2765,7 +2772,7 @@ export default function App() {
               grade={verifiedStudentInfo?.grade || selectedStudentGrade || ""}
               parentNotifications={notifications}
               onBack={() => {
-                setActiveSection("mayadeen");
+                handleHomeNavigation();
               }}
             />
           );
@@ -2988,6 +2995,7 @@ export default function App() {
         if (isParentUser) {
           return (
             <ParentPortal
+              key={`parent-portal-${hubResetKey}`}
               studentName={
                 verifiedStudentInfo?.studentName ||
                 verifiedStudentInfo?.fullName ||
@@ -3000,7 +3008,7 @@ export default function App() {
               }
               schoolId={verifiedStudentInfo?.schoolId || selectedSchoolId || "school1-boys"}
               onBack={() => {
-                setActiveSection("mayadeen");
+                handleHomeNavigation();
               }}
               onOpenNotifications={() => setIsNotificationDrawerOpen(true)}
             />
@@ -3060,6 +3068,7 @@ export default function App() {
           : selectedSchoolId ? getOfficialSchoolName(selectedSchoolId) : "مدرسة غير محددة";
         return (
           <motion.div
+            key={`student-hub-${hubResetKey}`}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.4 }}
@@ -4626,10 +4635,16 @@ export default function App() {
                   <div className="absolute inset-0 opacity-[0.03] mix-blend-screen bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMjAwIj48ZmlsdGVyIGlkPSJub2lzZSI+PGZlVHVyYnVsZW5jZSB0eXBlPSJmcmFjdGFsTm9pc2UiIGJhc2VGcmVxdWVuY3k9IjAuODUiIG51bU9jdGF2ZXM9IjMiIHN0aXRjaFRpbGVzPSJzdGl0Y2giLz48L2ZpbHRlcj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWx0ZXI9InVybCgibm9pc2UpIiBvcGFjaXR5PSIwLjE1Ii8+PC9zdmc+')]"></div>
                 </div>
 
-                {user && portalType !== "driver" && activeSection !== "school-content" && activeSection !== "gate-6" && !isChoosingSchool && (
+                {user && portalType !== "driver" && activeSection !== "gate-6" && !isChoosingSchool && (
                   <Sidebar
                     activeSection={activeSection}
-                    onSelectSection={setActiveSection}
+                    onSelectSection={(section) => {
+                      if (section === "hub") {
+                        handleHomeNavigation();
+                      } else {
+                        setActiveSection(section);
+                      }
+                    }}
                     onSelectUnit={handleSelectUnit}
                     unlockedUnits={progress.unlockedUnits}
                     language={settings.language}
@@ -5127,7 +5142,12 @@ export default function App() {
                 <div className="w-full max-w-[320px] pointer-events-auto bg-[#0A0F1D]/80 backdrop-blur-xl border border-white/5 rounded-[2rem] px-2 py-1.5 flex items-center justify-between shadow-[0_8px_32px_rgba(0,0,0,0.3)] min-h-[64px]">
                   {/* Nav: Home (Right) */}
                   <button
-                    onClick={handleHomeNavigation}
+                    onClick={() => {
+                      handleHomeNavigation();
+                      if (userProfile?.role === 'parent' || portalType === 'parent') {
+                        setPortalType('parent');
+                      }
+                    }}
                     className={`flex-1 flex flex-col justify-center items-center h-full transition-all duration-300 ${activeSection === "hub" && !isChoosingSchool ? "text-indigo-400" : "text-white/30 hover:text-white/60"}`}
                   >
                     <Home
@@ -5175,8 +5195,12 @@ export default function App() {
                   ) : userProfile?.role === "parent" ? (
                     <button
                       onClick={() => {
-                        setActiveSection("school-content");
-                        setPortalType("parent");
+                        if (activeSection === "school-content" && portalType === "parent") {
+                          handleHomeNavigation();
+                        } else {
+                          setActiveSection("school-content");
+                          setPortalType("parent");
+                        }
                       }}
                       className={`flex-1 flex flex-col justify-center items-center h-full transition-all duration-300 ${activeSection === "school-content" && portalType === "parent" && !isChoosingSchool ? "text-amber-400" : "text-white/30 hover:text-white/60"}`}
                     >

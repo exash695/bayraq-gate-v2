@@ -154,7 +154,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   progress,
   userProfile,
   onOpenNotifications,
-  notifications
+  notifications,
+  onNavigateHome
 }) => {
   const t = translations[language];
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);

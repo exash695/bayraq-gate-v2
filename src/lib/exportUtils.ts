@@ -4,6 +4,9 @@ import { Share } from '@capacitor/share';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { Device } from '@capacitor/device';
 
+import { jsPDF } from 'jspdf';
+import html2canvas from 'html2canvas';
+
 /**
  * Platform Detective
  */
@@ -36,56 +39,92 @@ const toBase64 = (data: Blob | ArrayBuffer): Promise<string> => {
 /**
  * Universal print helper.
  * Web: uses iframe.print()
- * Mobile: shares HTML file to be printed via OS share sheet.
+ * Mobile: Converts to PDF and shares via OS share sheet.
  */
 export const printHTML = async (html: string) => {
   const platform = Capacitor.getPlatform();
   
-  if (platform !== 'web') {
-    try {
-      const fileName = `Print_${new Date().getTime()}.html`;
-      // Use standard btoa for mobile-safe HTML sharing
-      const base64 = btoa(unescape(encodeURIComponent(html)));
-      
-      const savedFile = await Filesystem.writeFile({
-        path: fileName,
-        data: base64,
-        directory: Directory.Cache,
-      });
-
-      await Share.share({
-        title: 'طباعة المستند',
-        url: savedFile.uri,
-      });
-      return;
-    } catch (err) {
-      console.error('Native print share failed:', err);
-    }
+  // Create hidden iframe to render the HTML
+  let iframe = document.getElementById('bairaq-universal-render-frame') as HTMLIFrameElement;
+  if (!iframe) {
+    iframe = document.createElement('iframe');
+    iframe.id = 'bairaq-universal-render-frame';
+    iframe.style.position = 'fixed';
+    iframe.style.top = '-10000px';
+    iframe.style.left = '-10000px';
+    iframe.style.width = '1200px'; // Wide enough for high-quality rendering
+    iframe.style.height = '1600px';
+    document.body.appendChild(iframe);
   }
 
-  // Web logic (unchanged to maintain production stability)
-  try {
-    let iframe = document.getElementById('bairaq-universal-print-frame') as HTMLIFrameElement;
-    if (!iframe) {
-      iframe = document.createElement('iframe');
-      iframe.id = 'bairaq-universal-print-frame';
-      iframe.style.position = 'fixed';
-      iframe.style.visibility = 'hidden';
-      document.body.appendChild(iframe);
-    }
-
+  const renderPromise = new Promise<void>((resolve) => {
     const doc = iframe.contentWindow?.document || iframe.contentDocument;
-    if (doc) {
+    if (doc && iframe.contentWindow) {
+      // Disable print command to prevent browser dialog from appearing during PDF generation
+      (iframe.contentWindow as any).print = () => { console.log('Internal print disabled during PDF generation'); };
+      
       doc.open();
       doc.write(html);
       doc.close();
-      setTimeout(() => {
-        iframe.contentWindow?.focus();
-        iframe.contentWindow?.print();
-      }, 500);
+      
+      // Wait for fonts and images to load
+      const checkLoaded = () => {
+        if (doc.readyState === 'complete') {
+          // Additional delay for any scripts or font rendering
+          setTimeout(resolve, 1000);
+        } else {
+          setTimeout(checkLoaded, 100);
+        }
+      };
+      checkLoaded();
+    } else {
+      resolve();
+    }
+  });
+
+  await renderPromise;
+
+  try {
+    const docElement = iframe.contentWindow?.document.body;
+    if (!docElement) throw new Error('Render frame body not found');
+
+    const canvas = await html2canvas(docElement, {
+      scale: 2, // High quality
+      useCORS: true,
+      logging: false,
+      backgroundColor: '#ffffff'
+    });
+
+    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+    const pdf = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4'
+    });
+
+    const imgProps = pdf.getImageProperties(imgData);
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+
+    pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+
+    const fileName = `Bairaq_Report_${new Date().getTime()}.pdf`;
+
+    if (platform !== 'web') {
+      const pdfBase64 = pdf.output('datauristring').split(',')[1];
+      await saveAndShareFile(pdfBase64, fileName, 'application/pdf', true);
+    } else {
+      pdf.save(fileName);
     }
   } catch (err) {
-    window.print(); // Last resort fallback
+    console.error('PDF generation failed:', err);
+    // Fallback to basic print if PDF generation fails
+    if (platform === 'web') {
+      iframe.contentWindow?.print();
+    } else {
+      const base64 = btoa(unescape(encodeURIComponent(html)));
+      await saveAndShareFile(base64, `Print_${Date.now()}.html`, 'text/html', true);
+    }
   }
 };
 

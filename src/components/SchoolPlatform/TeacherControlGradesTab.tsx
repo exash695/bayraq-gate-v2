@@ -3,7 +3,7 @@ import {
   Award, CheckCircle2, ChevronDown, Download, FileSpreadsheet, Lock, 
   Printer, RefreshCw, Save, Search, User, Users, 
   AlertCircle, Check, HelpCircle, ArrowUpDown, Flame, TrendingUp,
-  BookOpen, ShieldCheck, CheckCheck, X, Eye, ExternalLink
+  BookOpen, ShieldCheck, CheckCheck, X, Eye, ExternalLink, FileText
 } from "lucide-react";
 import { useSchoolPlatform } from "./SchoolPlatformContext";
 import { academicService } from "../../services/academicService";
@@ -585,7 +585,7 @@ export const TeacherControlGradesTab: React.FC = () => {
 </head>
 <body>
   <div class="floating-bar">
-    <button class="floating-btn" onclick="window.print()">🖨️ طباعة الآن (Print / PDF)</button>
+    <button class="floating-btn" onclick="window.print()">📄 تحميل بصيغة PDF</button>
   </div>
 
   <div class="print-container">
@@ -771,10 +771,10 @@ export const TeacherControlGradesTab: React.FC = () => {
             <button
               onClick={() => setShowPrintModal(true)}
               className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl font-bold text-xs sm:text-sm shadow-lg transition-all bg-gradient-to-r from-cyan-500 to-blue-600 hover:brightness-110 text-white shadow-cyan-500/25"
-              title="طباعة كشف الدرجات الرسمي"
+              title="تحميل كشف الدرجات الرسمي PDF"
             >
-              <Printer className="w-4 h-4 text-white" />
-              <span>طباعة كشف الدرجات</span>
+              <FileText className="w-4 h-4 text-white" />
+              <span>تحميل كشف الدرجات</span>
             </button>
           </div>
         </div>
@@ -1134,7 +1134,7 @@ export const TeacherControlGradesTab: React.FC = () => {
                   <Printer className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-base sm:text-lg font-black text-white">معاينة وطباعة كشف درجات المادة</h3>
+                  <h3 className="text-base sm:text-lg font-black text-white">معاينة وتحميل كشف درجات المادة PDF</h3>
                   <p className="text-xs text-slate-400">كشف رسمي معتمد بتوقيع مدرس المادة ومصادقة الإدارة</p>
                 </div>
               </div>
@@ -1144,10 +1144,10 @@ export const TeacherControlGradesTab: React.FC = () => {
                   type="button"
                   onClick={executeDirectPrint}
                   className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-black text-xs shadow-lg shadow-cyan-500/25 transition-all cursor-pointer active:scale-95"
-                  title="طباعة مباشرة عبر الطابعة أو حفظ PDF"
+                  title="تحميل الكشف كملف PDF"
                 >
-                  <Printer className="w-4 h-4" />
-                  <span>طباعة الآن (A4)</span>
+                  <FileText className="w-4 h-4" />
+                  <span>تحميل PDF (A4)</span>
                 </button>
 
                 <button

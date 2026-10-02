@@ -1200,8 +1200,8 @@ export const schoolArchiveService = {
   <div class="no-print top-actions-bar">
     <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
       <button onclick="window.print()" class="print-btn">
-        <span>🖨️</span>
-        <span>طباعة الأرشيف الرسمي المعتمد / حفظ كـ PDF</span>
+        <span>📄</span>
+        <span>تحميل الأرشيف بصيغة PDF</span>
       </button>
       <div class="hint-chip">
         <span>💡</span>

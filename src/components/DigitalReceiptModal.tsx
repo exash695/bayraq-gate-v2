@@ -1,6 +1,8 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ShieldCheck, QrCode, Lock, Verified, Download, RefreshCw, CheckCircle2, X, ArrowRight } from 'lucide-react';
+import { jsPDF } from 'jspdf';
+import { saveOrSharePDF } from '../lib/exportUtils';
+import { ShieldCheck, QrCode, Lock, Verified, Download, RefreshCw, CheckCircle2, X, ArrowRight, FileText } from 'lucide-react';
 import { db } from '../lib/firebase';
 import { collection, addDoc, doc, getDoc, updateDoc } from '../lib/firebase';
 import { getOfficialSchoolLogoUrl, getOfficialSchoolName } from '../lib/constants';
@@ -639,49 +641,26 @@ export const DigitalReceiptModal: React.FC<DigitalReceiptModalProps> = ({
       const securityText = 'S E C U R E • V E R I F I E D • O F F I C I A L • B A Y R A Q';
       ctx.fillText(securityText, canvas.width / 2, canvas.height - 70);
 
-      const dataUrl = canvas.toDataURL('image/png', 1.0);
-      const res = await fetch(dataUrl);
-      const blob = await res.blob();
-      const fileName = `Official_Receipt_${(receipt?.studentName || 'Student').replace(/[\s\W]+/g, '_')}_${Date.now()}.png`;
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.95);
+      
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4'
+      });
 
-      const fileObj = new File([blob], fileName, { type: 'image/png' });
-        
-      if (navigator.share && navigator.canShare && navigator.canShare({ files: [fileObj] })) {
-          try {
-            await navigator.share({
-              files: [fileObj],
-              title: 'وصل استلام رسمي',
-              text: `مرفق لكم الوصل الرقمي الرسمي من ${displaySchoolName}`
-            });
-            setStatusMessage('✅ تمت المشاركة بنجاح');
-            return;
-          } catch (shareErr: any) {
-            console.log('Share error or cancelled', shareErr);
-            const errMsg = shareErr?.message || '';
-            if (
-              shareErr?.name === 'AbortError' || 
-              errMsg.includes('aborted') || 
-              errMsg.includes('abort') || 
-              errMsg.includes('cancel') || 
-              errMsg.includes('without reason')
-            ) {
-              return;
-            }
-          }
-      }
-        
-      const fileUrl = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = fileUrl;
-      link.download = fileName;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(fileUrl);
-      setStatusMessage('✅ تم تنزيل الوصل بنجاح!');
+      const imgProps = pdf.getImageProperties(dataUrl);
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
 
+      pdf.addImage(dataUrl, 'JPEG', 0, 0, pdfWidth, pdfHeight);
+
+      const fileName = `Official_Receipt_${(receipt?.studentName || 'Student').replace(/[\s\W]+/g, '_')}_${Date.now()}.pdf`;
+      
+      await saveOrSharePDF(pdf, fileName);
+      setStatusMessage('✅ تم حفظ الوصل بنماذج PDF');
     } catch (e) {
-      console.error('Canvas generation failed:', e);
+      console.error('PDF generation failed:', e);
       setStatusMessage('❌ فشل توليد الوصل.');
     } finally {
       setIsGeneratingPDF(false);
@@ -923,8 +902,8 @@ export const DigitalReceiptModal: React.FC<DigitalReceiptModalProps> = ({
                     </>
                   ) : (
                     <>
-                      <Download size={16} className="hidden md:block" />
-                      <span>تنزيل الوصل</span>
+                      <FileText size={16} className="hidden md:block" />
+                      <span>تحميل PDF</span>
                     </>
                   )}
                 </button>

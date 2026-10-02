@@ -453,8 +453,8 @@ export const printAttendanceReport = (options: AttendancePrintOptions) => {
   <div class="no-print-bar">
     <div style="display: flex; align-items: center; gap: 10px;">
       <button class="print-btn-main" onclick="window.print()">
-        <span>🖨️</span>
-        <span>طباعة المستند الآن (أو حفظ بتنسيق PDF)</span>
+        <span>📄</span>
+        <span>تحميل التقرير بصيغة PDF</span>
       </button>
       <span style="font-size: 11px; color: #94a3b8;">💡 تم ضبط الكشف بأبعاد صفحة A4 الرسمية ونسبة وضوح عالية</span>
     </div>

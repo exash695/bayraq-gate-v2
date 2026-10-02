@@ -15,7 +15,8 @@ import {
   Download,
   X,
   Printer,
-  FileSpreadsheet
+  FileSpreadsheet,
+  FileText
 } from 'lucide-react';
 import { auditService, AuditLog } from '../services/auditService';
 import { ConfirmDialog } from './ConfirmDialog';
@@ -316,10 +317,10 @@ export const AuditLogView: React.FC<AuditLogViewProps> = ({ showToast }) => {
             onClick={handlePrintLogs}
             className="flex items-center justify-center gap-3 bg-white/5 hover:bg-blue-500/10 px-6 py-4 sm:py-3 rounded-2xl border border-white/10 hover:border-blue-500/20 backdrop-blur-sm transition-all group text-right shadow-xl"
           >
-            <Printer size={22} className="text-blue-400 group-hover:-translate-y-1 transition-transform shrink-0" />
+            <FileText size={22} className="text-blue-400 group-hover:-translate-y-1 transition-transform shrink-0" />
             <div className="flex flex-col flex-1 sm:flex-none">
-              <span className="text-[10px] text-white/30 font-black uppercase leading-none mb-1">نسخة ورقية</span>
-              <span className="text-xs text-white font-black">طباعة السجلات</span>
+              <span className="text-[10px] text-white/30 font-black uppercase leading-none mb-1">نسخة PDF</span>
+              <span className="text-xs text-white font-black">تحميل السجلات</span>
             </div>
           </button>
 
