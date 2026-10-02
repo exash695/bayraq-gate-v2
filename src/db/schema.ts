@@ -132,6 +132,8 @@ export const school_configs = pgTable("school_configs", {
   financePIN: varchar("finance_pin", { length: 20 }),
   paymentMethods: jsonb("payment_methods").default({}),
   stats: jsonb("stats").default({ totalRevenue: 0, todayRevenue: 0 }),
+  telegramBotToken: text("telegram_bot_token"),
+  telegramChannelsMapping: jsonb("telegram_channels_mapping").default({}),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
@@ -666,5 +668,20 @@ export const system_settings = pgTable("system_settings", {
   description: text("description"),
   updatedBy: varchar("updated_by", { length: 255 }),
   updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+// جدول "عين على الصف" للأنشطة الصفية الحية وتضمين التليجرام
+export const bairaq_activities = pgTable("bairaq_activities", {
+  id: varchar("id", { length: 128 }).primaryKey(),
+  studentId: varchar("student_id", { length: 128 }).references(() => students.id),
+  schoolId: varchar("school_id", { length: 128 }).references(() => schools.id),
+  mediaUrl: text("media_url").notNull(), // Original t.me link for reference
+  telegramFileId: text("telegram_file_id"), // Unique ID to fetch file from Telegram
+  telegramMessageId: integer("telegram_message_id"),
+  telegramChatId: text("telegram_chat_id"),
+  mediaType: varchar("media_type", { length: 50 }), // photo, video, document
+  description: text("description"),
+  authorName: varchar("author_name", { length: 255 }),
+  createdAt: timestamp("created_at").defaultNow(),
 });
 

@@ -482,7 +482,9 @@ export const TeacherControlAssessmentTab: React.FC = () => {
                                       const latestGradeInfo = getLatestGrade(s, activeTeacherSubject);
                                       return (
                                         <span className="text-[8px] text-white/40 font-black block">
-                                          آخر درجة: {latestGradeInfo.grade} ({latestGradeInfo.periodName})
+                                          {latestGradeInfo.hasGrade && latestGradeInfo.grade !== null
+                                            ? `آخر درجة: ${latestGradeInfo.grade} (${latestGradeInfo.periodName})`
+                                            : `آخر درجة: لم تُرصد بعد`}
                                         </span>
                                       );
                                     })()}
@@ -702,8 +704,8 @@ export const TeacherControlAssessmentTab: React.FC = () => {
                           const getAutomatedStudentStats = (student: any) => {
                             // Check if student has grades in active teacher's subject
                             const latestGradeInfo = getLatestGrade(student, activeTeacherSubject);
-                            const numericGrade = parseFloat(latestGradeInfo.grade);
-                            const hasSubjectGrade = !isNaN(numericGrade) && numericGrade > 0;
+                            const numericGrade = latestGradeInfo.grade !== null ? Number(latestGradeInfo.grade) : NaN;
+                            const hasSubjectGrade = Boolean(latestGradeInfo.hasGrade && !isNaN(numericGrade) && numericGrade > 0);
 
                             // Check if student has opened files/tests/quizzes/homeworks for active teacher subject
                             const openedFilesList = student.openedFiles || student.viewedFiles || [];
@@ -806,6 +808,18 @@ export const TeacherControlAssessmentTab: React.FC = () => {
                                       <span className="text-[8px] text-white/40 font-black block uppercase">آخر درجة في مادة {activeTeacherSubject}</span>
                                       {(() => {
                                         const latestGradeInfo = getLatestGrade(student, activeTeacherSubject);
+                                        if (!latestGradeInfo.hasGrade || latestGradeInfo.grade === null) {
+                                          return (
+                                            <>
+                                              <span className="text-sm font-black text-white/40 font-mono block">
+                                                - / 100
+                                              </span>
+                                              <span className="text-[7px] text-white/30 block mt-0.5">
+                                                (لم تُرصد بعد)
+                                              </span>
+                                            </>
+                                          );
+                                        }
                                         return (
                                           <>
                                             <span className="text-sm font-black text-blue-400 font-mono block">

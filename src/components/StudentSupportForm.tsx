@@ -298,6 +298,9 @@ export const StudentSupportForm: React.FC<StudentSupportFormProps> = ({
       unique.push(item);
     }
     return unique.filter(n => {
+      // Exclude lounge and parent chat messages from administrative support/reports
+      if (n.type === 'lounge_message' || n.type === 'parent_message') return false;
+
       // Always show administrative messages
       if (n.type === 'admin_broadcast' || n.type === 'broadcast' || n.type === 'individual_admin' || n.isTicket) return true;
       

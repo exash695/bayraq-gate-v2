@@ -355,11 +355,6 @@ class RealtimeManager {
     };
   }
 
-  public on(eventOrCollection: string, callback: RealtimeCallback | (() => void)): () => void {
-    return this.subscribe(eventOrCollection, callback as RealtimeCallback);
-  }
-
-
   public off(eventOrCollection: string, callback: RealtimeCallback | (() => void)) {
     const subKey = eventOrCollection.split('/')[0];
     const cleanKey = eventOrCollection.includes('/') ? eventOrCollection.replace(/\//g, '_') : eventOrCollection;
@@ -406,6 +401,43 @@ class RealtimeManager {
 
   public emit(eventOrCollection: string, data?: any) {
     this.trigger(eventOrCollection, data);
+  }
+
+  public broadcast(eventName: string, data?: any) {
+    this.trigger(eventName, data);
+    if (typeof window !== 'undefined') {
+      try {
+        window.dispatchEvent(new CustomEvent(eventName, { detail: data }));
+      } catch (e) {
+        console.warn('[RealtimeManager] Broadcast error:', e);
+      }
+    }
+  }
+
+  public on(eventName: string, callback: (data?: any) => void): () => void {
+    const customHandler = (e: any) => {
+      try {
+        callback(e.detail);
+      } catch (err) {
+        console.error('[RealtimeManager] on error:', err);
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener(eventName, customHandler);
+    }
+    const unsub = this.subscribe(eventName, (ev: any) => {
+      try {
+        callback(ev.data || ev);
+      } catch (err) {
+        console.error('[RealtimeManager] on error:', err);
+      }
+    });
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener(eventName, customHandler);
+      }
+      unsub();
+    };
   }
 
   private dispatch(event: RealtimeEvent) {

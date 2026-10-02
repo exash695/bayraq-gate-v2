@@ -165,6 +165,7 @@ import { StudentLounge } from "./components/StudentLounge";
 import { SchoolContent } from "./components/SchoolContent";
 import { SchoolAccessGate } from "./components/SchoolAccessGate";
 import { saveAccessCode } from "./lib/savedAccessCodes";
+import { getPrimaryUserSession, savePrimaryUserSession, clearPrimaryUserSession } from "./lib/deviceSessionVault";
 import { BayraqAcademyHub } from "./components/BayraqAcademyHub";
 import { ParentPortal } from "./components/ParentPortal";
 import { AdminDashboard } from "./components/AdminDashboard";
@@ -295,15 +296,36 @@ export default function App() {
     }
   }, []);
 
-  const [authReady, setAuthReady] = useState(false);
-  const [splashFinished, setSplashFinished] = useState(false);
+  const [authReady, setAuthReady] = useState(() => {
+    try {
+      return (
+        !!safeStorage.getItem("bayraq_cached_user_profile") ||
+        !!safeStorage.getItem("bairaq_jwt_token") ||
+        safeStorage.getItem("app_has_seen_onboarding") === "true"
+      );
+    } catch {
+      return true;
+    }
+  });
 
-  // FAILSAFE DEADLOCK PREVENTION: Force readiness after 3.5 seconds to prevent permanent black screen on app reopen
+  const [splashFinished, setSplashFinished] = useState(() => {
+    try {
+      // Returning users skip splash screen completely for instant startup
+      return (
+        safeStorage.getItem("app_has_seen_onboarding") === "true" ||
+        !!safeStorage.getItem("bayraq_cached_user_profile")
+      );
+    } catch {
+      return true;
+    }
+  });
+
+  // Rapid failsafe: ensure readiness within 500ms max for any first-time visitor
   useEffect(() => {
     const timer = setTimeout(() => {
       setAuthReady(true);
       setSplashFinished(true);
-    }, 3500);
+    }, 500);
     return () => clearTimeout(timer);
   }, []);
   const [hasSeenOnboarding, setHasSeenOnboarding] = useState(() => {
@@ -366,6 +388,10 @@ export default function App() {
     "student" | "parent" | "admin-boys" | "admin-girls" | "teacher" | "admin-observer" | "driver" | "developer" | "superadmin"
   >(() => {
     try {
+      const primary = getPrimaryUserSession();
+      if (primary && primary.role && ["student", "parent", "admin-boys", "admin-girls", "teacher", "admin-observer", "driver", "developer", "superadmin"].includes(primary.role)) {
+        return primary.role as any;
+      }
       const savedRole = safeStorage.getItem("bayraq_user_role");
       if (savedRole && ["student", "parent", "admin-boys", "admin-girls", "teacher", "admin-observer", "driver", "developer", "superadmin"].includes(savedRole)) {
         return savedRole as any;
@@ -380,44 +406,52 @@ export default function App() {
       const isDevUser = userProfile.email?.toLowerCase() === 'mntzralghanm527@gmail.com' || userProfile.role === 'developer' || userProfile.role === 'dev' || userProfile.role === 'superadmin';
       const savedRole = safeStorage.getItem("bayraq_user_role");
       
-      let role = userProfile.role === "admin" 
-        ? (userProfile.adminBranch === "boys" ? "admin-boys" : "admin-girls")
-        : userProfile.role;
+       let adminBranchVal = userProfile.adminBranch;
+       const codeVal = (userProfile.studentCode || "").trim().toUpperCase();
+       if (codeVal.startsWith("ADM-B") || codeVal.startsWith("ADMB")) {
+         adminBranchVal = "boys";
+       } else if (codeVal.startsWith("ADM-G") || codeVal.startsWith("ADMG")) {
+         adminBranchVal = "girls";
+       }
 
-      const validRoles = ["student", "parent", "admin-boys", "admin-girls", "teacher", "admin-observer", "driver", "developer", "superadmin"];
-      
-      // If we have a saved role, validate it against the profile role
-      if (savedRole && validRoles.includes(savedRole)) {
-        if (isDevUser) {
-          // Developer has full freedom to inspect any portal (parent, student, teacher, admin)
-          setPortalType(savedRole as any);
-        } else {
-          const isAdminProfile = userProfile.role === 'admin' || userProfile.role === 'developer' || userProfile.role === 'superadmin';
-          const isTeacherProfile = userProfile.role === 'teacher';
-          const isParentProfile = userProfile.role === 'parent';
-          const isDriverProfile = userProfile.role === 'driver';
-          const isStudentProfile = userProfile.role === 'student';
-
-          if (isStudentProfile) {
-             setPortalType('student');
-             safeStorage.setItem("bayraq_user_role", "student");
-          } else if (isParentProfile) {
-             setPortalType('parent');
-             safeStorage.setItem("bayraq_user_role", "parent");
-          } else if (isTeacherProfile) {
-             setPortalType('teacher');
-             safeStorage.setItem("bayraq_user_role", "teacher");
-          } else if (isDriverProfile) {
-             setPortalType('driver');
-             safeStorage.setItem("bayraq_user_role", "driver");
-          } else if (isAdminProfile) {
-             const adminBranch = userProfile.adminBranch === "boys" ? "admin-boys" : "admin-girls";
-             setPortalType(adminBranch as any);
-             safeStorage.setItem("bayraq_user_role", adminBranch);
-          } else {
-             setPortalType(savedRole as any);
-          }
-        }
+       let role = userProfile.role === "admin" 
+         ? (adminBranchVal === "boys" ? "admin-boys" : "admin-girls")
+         : userProfile.role;
+ 
+       const validRoles = ["student", "parent", "admin-boys", "admin-girls", "teacher", "admin-observer", "driver", "developer", "superadmin"];
+       
+       // If we have a saved role, validate it against the profile role
+       if (savedRole && validRoles.includes(savedRole)) {
+         if (isDevUser) {
+           // Developer has full freedom to inspect any portal (parent, student, teacher, admin)
+           setPortalType(savedRole as any);
+         } else {
+           const isAdminProfile = userProfile.role === 'admin' || userProfile.role === 'developer' || userProfile.role === 'superadmin';
+           const isTeacherProfile = userProfile.role === 'teacher';
+           const isParentProfile = userProfile.role === 'parent';
+           const isDriverProfile = userProfile.role === 'driver';
+           const isStudentProfile = userProfile.role === 'student';
+ 
+           if (isStudentProfile) {
+              setPortalType('student');
+              safeStorage.setItem("bayraq_user_role", "student");
+           } else if (isParentProfile) {
+              setPortalType('parent');
+              safeStorage.setItem("bayraq_user_role", "parent");
+           } else if (isTeacherProfile) {
+              setPortalType('teacher');
+              safeStorage.setItem("bayraq_user_role", "teacher");
+           } else if (isDriverProfile) {
+              setPortalType('driver');
+              safeStorage.setItem("bayraq_user_role", "driver");
+           } else if (isAdminProfile) {
+              const finalBranch = adminBranchVal === "boys" ? "admin-boys" : "admin-girls";
+              setPortalType(finalBranch as any);
+              safeStorage.setItem("bayraq_user_role", finalBranch);
+           } else {
+              setPortalType(savedRole as any);
+           }
+         }
       } else if (validRoles.includes(role)) {
         setPortalType(role as any);
         safeStorage.setItem("bayraq_user_role", role);
@@ -523,7 +557,18 @@ export default function App() {
   const [activeSectionState, setActiveSectionState] = useState<AppSection>(
     () => {
       try {
+        const primary = getPrimaryUserSession();
+        const role = primary?.role || safeStorage.getItem("bayraq_user_role");
         const saved = safeStorage.getItem("s6_activeSection");
+
+        // Role-based smart auto-landing for returning users:
+        if (role === "parent" || role === "teacher" || role === "driver") {
+          return "school-content";
+        }
+        if (role === "admin-boys" || role === "admin-girls") {
+          return (saved === "admin-hub" || saved === "hub") ? (saved as AppSection) : "admin-hub";
+        }
+
         if (saved === "gate-6") {
           safeStorage.setItem("s6_activeSection", "hub");
           return "hub";
@@ -635,6 +680,11 @@ export default function App() {
         const hasLoggedOut = safeStorage.getItem("s6_user_logged_out") === "true";
         if (hasLoggedOut) return null;
 
+        const primary = getPrimaryUserSession();
+        if (primary?.schoolId && primary.schoolId !== "general" && primary.schoolId !== "null") {
+          return primary.schoolId;
+        }
+
         const saved = safeStorage.getItem("s6_selectedSchoolId");
         if (saved && saved !== "general" && saved !== "null" && saved !== "undefined") return saved;
 
@@ -653,6 +703,9 @@ export default function App() {
     try {
       const hasLoggedOut = safeStorage.getItem("s6_user_logged_out") === "true";
       if (hasLoggedOut) return false;
+
+      const primary = getPrimaryUserSession();
+      if (primary && primary.code) return true;
 
       const saved = safeStorage.getItem("s6_isSchoolVerified");
       if (saved === "true") return true;
@@ -699,6 +752,22 @@ export default function App() {
 
   const [verifiedStudentInfo, setVerifiedStudentInfo] = useState<any>(() => {
     try {
+      const primary = getPrimaryUserSession();
+      if (primary && primary.code) {
+        return {
+          id: primary.code,
+          code: primary.code,
+          studentCode: primary.studentCode || primary.code,
+          parentCode: primary.parentCode || primary.code,
+          name: primary.studentName || primary.code,
+          studentName: primary.studentName || primary.code,
+          role: primary.role,
+          schoolId: primary.schoolId,
+          grade: primary.grade,
+          section: primary.section,
+          gender: primary.gender
+        };
+      }
       const cached = safeStorage.getItem("s6_verified_student_info");
       if (cached) return JSON.parse(cached);
     } catch {}
@@ -781,6 +850,7 @@ export default function App() {
   }, [selectedSchoolId, userProfile?.role, portalType]);
 
   const performSuspensionLogout = () => {
+    clearPrimaryUserSession();
     setSuspendedSchoolName(null);
     setSelectedSchoolId(null);
     setIsSchoolVerified(false);
@@ -1470,7 +1540,34 @@ export default function App() {
           }).catch(console.error);
         }
 
-        setUserProfile({ uid: user.uid, ...profileData });
+        let finalBranch = profileData.adminBranch;
+        const studentCode = (profileData.studentCode || (user as any).studentCode || "").trim().toUpperCase();
+        if (profileData.role === "admin" || profileData.isAdmin) {
+          if (studentCode.startsWith("ADM-B") || studentCode.startsWith("ADMB")) {
+            finalBranch = "boys";
+          } else if (studentCode.startsWith("ADM-G") || studentCode.startsWith("ADMG")) {
+            finalBranch = "girls";
+          }
+          
+          let finalSchoolId = profileData.schoolId || user.schoolId;
+          if (finalSchoolId && finalBranch) {
+            const baseId = finalSchoolId.replace('-boys', '').replace('-girls', '');
+            finalSchoolId = `${baseId}-${finalBranch}`;
+          }
+
+          if ((finalBranch && finalBranch !== profileData.adminBranch) || (finalSchoolId && finalSchoolId !== profileData.schoolId)) {
+            profileData.adminBranch = finalBranch;
+            profileData.schoolId = finalSchoolId;
+            updateDoc(docRef, { adminBranch: finalBranch, schoolId: finalSchoolId }).catch(console.error);
+          }
+        }
+
+        setUserProfile((prev: any) => ({
+          ...prev,
+          uid: user.uid,
+          studentCode: (user as any).studentCode || prev?.studentCode || profileData.studentCode,
+          ...profileData
+        }));
 
         if (profileData.isBanned) {
           customAuth.logout();
@@ -1800,11 +1897,28 @@ export default function App() {
                }
                
                let showToast = !isInitialLoad && Date.now() - lastProfileSwitchTime.current > 3000;
+               let isNew = false;
                if (doc.createdAt) {
                  const notifTime = new Date(doc.createdAt).getTime();
-                 if (Date.now() - notifTime > 60000) showToast = false;
+                 if (Date.now() - notifTime > 60000) {
+                   showToast = false;
+                 } else {
+                   isNew = true;
+                 }
+               } else {
+                 isNew = !isInitialLoad;
                }
-               if (portalType === "parent") showToast = false;
+               if (portalType === "parent" && doc.type !== "classroom_lens") showToast = false;
+               
+               // Show native/system push notification (Messenger / Facebook style)
+               if (isNew) {
+                 pushNotificationManager.showLocalNotification(title, {
+                   body: message,
+                   icon: '/logo.png',
+                   tag: `app_notif_${doc.id}`,
+                   data: { url: doc.data?.url || '/' }
+                 });
+               }
                
                addNotification(title, message, type as any, doc.id, doc.recipientRole || doc.type, showToast, doc.metadata?.broadcastId);
                processedFirestoreNotifs.current.add(doc.id);
@@ -2293,13 +2407,8 @@ export default function App() {
 
         if (!isSchoolVerified) {
           const isAcademy =
-            selectedSchoolId === "general" ||
-            selectedSchoolId === "academy" ||
-            (institutionName &&
-              (institutionName.includes("أكاديمية") ||
-                institutionName.includes("اكاديمية")) &&
-              !institutionName.includes("إبداعنا") &&
-              !institutionName.includes("ابداعنا"));
+            (selectedSchoolId === "general" || selectedSchoolId === "academy") &&
+            !verifiedStudentInfo?.code;
 
           const handleAccessVerify = async (code: string, isParent: boolean) => {
             setIsVerifying(true);
@@ -2309,23 +2418,33 @@ export default function App() {
                 selectedSchoolId || undefined,
               );
               setIsSchoolVerified(true);
+              safeStorage.setItem("s6_isSchoolVerified", "true");
+              safeStorage.setItem("s6_user_logged_out", "false");
+
+              const resolvedSchool = user.schoolId || selectedSchoolId || "school1-boys";
+              setSelectedSchoolId(resolvedSchool);
+              safeStorage.setItem("s6_selectedSchoolId", resolvedSchool);
               
               // Save to device Keychain/Local Storage for instant auto-fill
               try {
                 saveAccessCode({
                   code: code.trim().toUpperCase(),
                   role: user.role,
-                  schoolId: selectedSchoolId || user.schoolId,
+                  schoolId: resolvedSchool,
                   schoolName: institutionName,
                   studentName: user.displayName || (user as any).name || (user as any).studentName
                 });
               } catch (saveErr) {}
+
               if (
                 user.role === "teacher" ||
                 (user as any).role === "TEACHER"
               ) {
                 setPortalType("teacher");
                 safeStorage.setItem("bayraq_user_role", "teacher");
+                safeStorage.setItem("s6_activeSection", "school-content");
+                setActiveSection("school-content");
+
                 const teacherObj = {
                   id: user.uid || (user as any).id,
                   code: code, // Add the login code here
@@ -2333,7 +2452,7 @@ export default function App() {
                     user.displayName ||
                     (user as any).name ||
                     "الأستاذ المحاضر",
-                  schoolId: user.schoolId || selectedSchoolId || "school8",
+                  schoolId: resolvedSchool,
                   subject: (user as any).subject || "المنهج الوزاري",
                   grade: (user as any).grade || "السادس العلمي",
                   classes: (user as any).classes || [],
@@ -2346,17 +2465,45 @@ export default function App() {
                   role: "teacher",
                   name: teacherObj.name,
                 }));
+
+                savePrimaryUserSession({
+                  role: "teacher",
+                  schoolId: resolvedSchool,
+                  schoolName: institutionName,
+                  code: code.trim().toUpperCase(),
+                  studentName: teacherObj.name
+                });
               } else if (
                 user.role === "admin" ||
                 (user as any).role === "ADMIN"
               ) {
-                const branch = user.schoolId && user.schoolId.includes("boys") ? "admin-boys" : "admin-girls";
+                const cleanCode = code.trim().toUpperCase();
+                let branch: "admin-boys" | "admin-girls" = "admin-girls";
+                if (cleanCode.startsWith("ADM-B") || cleanCode.startsWith("ADMB")) {
+                  branch = "admin-boys";
+                } else if (cleanCode.startsWith("ADM-G") || cleanCode.startsWith("ADMG")) {
+                  branch = "admin-girls";
+                } else if ((user as any).adminBranch === "boys") {
+                  branch = "admin-boys";
+                } else if ((user as any).adminBranch === "girls") {
+                  branch = "admin-girls";
+                } else {
+                  branch = resolvedSchool.includes("boys") ? "admin-boys" : "admin-girls";
+                }
+                
                 setPortalType(branch);
                 safeStorage.setItem("bayraq_user_role", branch);
+                safeStorage.setItem("s6_activeSection", "admin-hub");
+                setActiveSection("admin-hub");
                 
                 try {
                   const docRef = doc(db, "users", user.uid || (user as any).id);
-                  setDoc(docRef, { role: "admin", adminBranch: user.schoolId && user.schoolId.includes("boys") ? "boys" : "girls" }, { merge: true });
+                  setDoc(docRef, { 
+                    role: "admin", 
+                    studentCode: code.trim().toUpperCase(), 
+                    adminBranch: branch === "admin-boys" ? "boys" : "girls",
+                    schoolId: resolvedSchool
+                  }, { merge: true });
                 } catch(e) {}
 
                 setVerifiedStudentInfo({
@@ -2364,7 +2511,7 @@ export default function App() {
                   code: code,
                   name: user.displayName || "",
                   role: "admin",
-                  schoolId: user.schoolId,
+                  schoolId: resolvedSchool,
                 });
                 setUserProfile((prev: any) => ({
                   ...prev,
@@ -2372,9 +2519,20 @@ export default function App() {
                   role: "admin",
                   adminBranch: branch === "admin-boys" ? "boys" : "girls",
                 }));
+
+                savePrimaryUserSession({
+                  role: branch,
+                  schoolId: resolvedSchool,
+                  schoolName: institutionName,
+                  code: code.trim().toUpperCase(),
+                  studentName: user.displayName || "مدير المدرسة"
+                });
               } else if (user.role === "parent" || (isParent && user.role !== "student") || code.trim().toUpperCase().startsWith('PAR-') || code.trim().toUpperCase().startsWith('PCODE-')) {
                 setPortalType("parent");
                 safeStorage.setItem("bayraq_user_role", "parent");
+                safeStorage.setItem("s6_activeSection", "school-content");
+                setActiveSection("school-content");
+
                 const studentGrade =
                   (user as any).grade ||
                   (user as any).academicLevel ||
@@ -2398,7 +2556,7 @@ export default function App() {
                   role: "parent",
                   grade: studentGrade,
                   section: (user as any).section || (user as any).studentSection || (user as any).class || "",
-                  schoolId: user.schoolId || selectedSchoolId,
+                  schoolId: resolvedSchool,
                   gender: (user as any).gender,
                 };
                 setVerifiedStudentInfo(parentInfo);
@@ -2408,25 +2566,52 @@ export default function App() {
                   ...parentInfo,
                   role: "parent",
                 }));
+
+                savePrimaryUserSession({
+                  role: "parent",
+                  schoolId: resolvedSchool,
+                  schoolName: institutionName,
+                  code: code.trim().toUpperCase(),
+                  studentName: parentInfo.studentName,
+                  parentCode: code.trim().toUpperCase(),
+                  studentCode: parentInfo.studentCode,
+                  grade: studentGrade,
+                  section: parentInfo.section,
+                  gender: parentInfo.gender
+                });
               } else if (user.role === "driver") {
                 setPortalType("driver");
                 safeStorage.setItem("bayraq_user_role", "driver");
+                safeStorage.setItem("s6_activeSection", "school-content");
+                setActiveSection("school-content");
+
                 setVerifiedStudentInfo({
                   id: user.uid,
                   code: code,
                   name: user.displayName || "",
                   role: "driver",
-                  schoolId: user.schoolId,
+                  schoolId: resolvedSchool,
                 });
                 setUserProfile((prev: any) => ({
                   ...prev,
                   ...user,
                   role: "driver",
                 }));
+
+                savePrimaryUserSession({
+                  role: "driver",
+                  schoolId: resolvedSchool,
+                  schoolName: institutionName,
+                  code: code.trim().toUpperCase(),
+                  studentName: user.displayName || "كابتن الباص"
+                });
               } else {
                 // Student
                 setPortalType("student");
                 safeStorage.setItem("bayraq_user_role", "student");
+                safeStorage.setItem("s6_activeSection", "school-content");
+                setActiveSection("school-content");
+
                 const studentGrade =
                   (user as any).grade ||
                   (user as any).academicLevel ||
@@ -2446,8 +2631,7 @@ export default function App() {
                   grade: studentGrade || "سادس علمي",
                   section: (user as any).section || (user as any).studentSection || (user as any).class || "",
                   class: (user as any).class || (user as any).className || (user as any).section || "",
-                  schoolId:
-                    user.schoolId || selectedSchoolId || "school8",
+                  schoolId: resolvedSchool,
                   gender: (user as any).gender,
                 };
                 setVerifiedStudentInfo(stuInfo);
@@ -2457,6 +2641,18 @@ export default function App() {
                   ...stuInfo,
                   role: "student",
                 }));
+
+                savePrimaryUserSession({
+                  role: "student",
+                  schoolId: resolvedSchool,
+                  schoolName: institutionName,
+                  code: code.trim().toUpperCase(),
+                  studentName: stuInfo.name,
+                  studentCode: stuInfo.studentCode,
+                  grade: studentGrade,
+                  section: stuInfo.section,
+                  gender: stuInfo.gender
+                });
               }
             } catch (e: any) {
               if (e.message === 'SCHOOL_SUSPENDED' || e.isSchoolSuspended) {
@@ -2565,8 +2761,9 @@ export default function App() {
               schoolName={institutionName}
               gender={verifiedStudentInfo?.gender}
               grade={verifiedStudentInfo?.grade || selectedStudentGrade || ""}
+              parentNotifications={notifications}
               onBack={() => {
-                setActiveSection("hub");
+                setActiveSection("mayadeen");
               }}
             />
           );
@@ -2634,7 +2831,7 @@ export default function App() {
             grade={selectedStudentGrade || verifiedStudentInfo?.grade || userProfile?.grade || ""}
             gradeName={selectedStudentGrade || verifiedStudentInfo?.grade || userProfile?.grade || ""}
             onBack={() => {
-              setActiveSection("hub");
+              setActiveSection("mayadeen");
             }}
             language={settings.language}
             portalType={portalType}
@@ -2785,6 +2982,51 @@ export default function App() {
           (userProfile?.schoolName && userProfile?.schoolName !== "أكاديمية بيرق الرقمية" ? userProfile.schoolName : null) ||
           (targetAdminSchoolId && targetAdminSchoolId !== "general" ? getOfficialSchoolName(targetAdminSchoolId) : null) ||
           "ثانوية اوائل غماس الاهلية";
+
+        if (isParentUser) {
+          return (
+            <ParentPortal
+              studentName={
+                verifiedStudentInfo?.studentName ||
+                verifiedStudentInfo?.fullName ||
+                verifiedStudentInfo?.name ||
+                verifiedStudentInfo?.userName ||
+                "طالب مجهول"
+              }
+              studentCode={
+                verifiedStudentInfo?.studentCode || verifiedStudentInfo?.code || verifiedStudentInfo?.parentCode
+              }
+              schoolId={verifiedStudentInfo?.schoolId || selectedSchoolId || "school1-boys"}
+              onBack={() => {
+                setActiveSection("mayadeen");
+              }}
+              onOpenNotifications={() => setIsNotificationDrawerOpen(true)}
+            />
+          );
+        }
+
+        if (isTeacherUser) {
+          return (
+            <SchoolSelection
+              language={settings.language}
+              user={user}
+              userProfile={userProfile}
+              notifications={memoizedNotifications}
+              onBack={() => {
+                setIsChoosingSchool(false);
+                setShowRoleSelectionModal(true);
+                safeStorage.removeItem("bayraq_user_role");
+              }}
+              onSelectSchool={(id) => {
+                safeStorage.setItem("s6_selectedSchoolId", id);
+                setSelectedSchoolId(id);
+                setIsSchoolVerified(false);
+                safeStorage.setItem("s6_isSchoolVerified", "false");
+                setActiveSection("school-content");
+              }}
+            />
+          );
+        }
 
         if (isAdminUser) {
           return (
@@ -4152,9 +4394,8 @@ export default function App() {
             }}
             onSelectSchool={(id) => {
               setSelectedSchoolId(id);
-              const currentRole = portalType || safeStorage.getItem("bayraq_user_role") || "student";
-              const isUserAdmin = currentRole === "admin-boys" || currentRole === "admin-girls" || currentRole === "admin" || currentRole === "dev" || String(currentRole).includes("admin");
-              setIsSchoolVerified(Boolean(isUserAdmin));
+              setIsSchoolVerified(false);
+              safeStorage.setItem("s6_isSchoolVerified", "false");
               safeStorage.setItem("s6_selectedSchoolId", id);
               setIsChoosingSchool(false);
               setActiveSection("school-content");
@@ -4879,7 +5120,8 @@ export default function App() {
 
           {/* Universal Mobile Bottom Tab Bar - Floating Minimal */}
           {user &&
-            (activeSection === "hub" || activeSection === "hall-of-fame" || activeSection === "mayadeen" || activeSection === "admin-hub" || isChoosingSchool) && (
+            activeSection !== "admin-hub" &&
+            (activeSection === "hub" || activeSection === "hall-of-fame" || activeSection === "mayadeen" || isChoosingSchool) && (
               <div className="fixed bottom-0 left-0 right-0 z-[60] px-6 pb-6 pt-2 bg-gradient-to-t from-[#02050F] via-[#02050F]/80 to-transparent pointer-events-none flex justify-center">
                 <div className="w-full max-w-[320px] pointer-events-auto bg-[#0A0F1D]/80 backdrop-blur-xl border border-white/5 rounded-[2rem] px-2 py-1.5 flex items-center justify-between shadow-[0_8px_32px_rgba(0,0,0,0.3)] min-h-[64px]">
                   {/* Nav: Home (Right) */}
@@ -4914,7 +5156,7 @@ export default function App() {
                   </div>
 
                   {/* Nav: Knights Club / Hall of Fame / Admin Panel / Parent Portal (Left) */}
-                  {userProfile?.role === "admin" || userProfile?.role === "dev" ? (
+                  {userProfile?.role === "admin" || userProfile?.role === "dev" || portalType === "admin-boys" || portalType === "admin-girls" ? (
                     <button
                       onClick={() => {
                         setActiveSection("admin-hub");

@@ -12,6 +12,7 @@ interface StudentLoungeProps {
   schoolId: string;
   grade: string | null;
   isTeacher: boolean;
+  isParent?: boolean;
   teacherData?: any;
   initialSelectedUser?: any;
   isLocked?: boolean;
@@ -38,6 +39,7 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
   schoolId,
   grade,
   isTeacher,
+  isParent,
   teacherData,
   initialSelectedUser,
   isLocked
@@ -50,13 +52,15 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const [knights, setKnights] = useState<any[]>([]); 
+  const [parents, setParents] = useState<any[]>([]);
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
   const [teachersList, setTeachersList] = useState<any[]>([]);
+  const [recentChatsTimestamps, setRecentChatsTimestamps] = useState<Record<string, string>>({});
   const [isGeneralChat, setIsGeneralChat] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [pendingFile, setPendingFile] = useState<{ file: File; previewUrl: string; type: 'image' | 'video' | 'audio' | 'file' } | null>(null);
   const [fullMediaPreview, setFullMediaPreview] = useState<{ url: string; type: 'image' | 'video' | 'audio' | 'file'; name?: string } | null>(null);
-  const [activeTab, setActiveTab] = useState<'chat' | 'knights' | 'teachers'>(initialSelectedUser ? 'chat' : 'knights');
+  const [activeTab, setActiveTab] = useState<'chat' | 'knights' | 'teachers' | 'parents'>(initialSelectedUser ? 'chat' : (isTeacher ? 'knights' : 'teachers'));
   const [selectedChatUser, setSelectedChatUser] = useState<any>(initialSelectedUser || null);
   const [searchQuery, setSearchQuery] = useState('');
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -130,12 +134,12 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
   useEffect(() => {
     if (!schoolId) return;
     
-    const fetchKnights = async () => {
+    const fetchUsers = async () => {
       try {
         const res = await fetch(`/api/users?schoolId=${schoolId}`);
         const data = await res.json();
         if (data.success && Array.isArray(data.users)) {
-          let users = data.users.map((u: any) => ({
+          const allUsers = data.users.map((u: any) => ({
             id: u.id,
             name: u.name || u.fullName || 'مستخدم',
             photo: u.photo || u.photoURL || u.avatar || null,
@@ -145,27 +149,30 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
             lastActive: u.lastActive || u.lastLogin
           }));
           
-          // Filter out current user and non-students
-          users = users.filter((u: any) => u.id !== currentUserUid && u.role === 'student');
-          
-          // Filter strictly to student's own grade (including all sections of that grade)
-          if (!isTeacher && grade && grade !== 'غير محدد' && grade !== 'all') {
-            users = users.filter((u: any) => isGradeMatch(u.grade, grade));
+          // Filter students
+          let studentKnights = allUsers.filter((u: any) => u.id !== currentUserUid && u.role === 'student');
+          if (!isTeacher && !isParent && grade && grade !== 'غير محدد' && grade !== 'all') {
+            studentKnights = studentKnights.filter((u: any) => isGradeMatch(u.grade, grade));
           }
+          setKnights(studentKnights);
 
-          setKnights(users);
+          // Filter parents (only for teachers/admins)
+          if (isTeacher || userProfile?.role === 'admin') {
+            const parentUsers = allUsers.filter((u: any) => u.role === 'parent');
+            setParents(parentUsers);
+          }
         }
       } catch (err) {
-        console.warn("Notice: error fetching knights:", err);
+        console.warn("Notice: error fetching users:", err);
       }
     };
 
-    fetchKnights();
+    fetchUsers();
     const unsub = realtimeManager.subscribe('users', () => {
-      fetchKnights();
+      fetchUsers();
     });
     return () => unsub();
-  }, [schoolId, currentUserUid, grade, isTeacher]);
+  }, [schoolId, currentUserUid, grade, isTeacher, isParent]);
 
 
   // Track unread messages per user (PostgreSQL)
@@ -190,6 +197,40 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
     });
     return () => unsubUnread();
   }, [currentUserUid]);
+
+  // Load recent chats timestamps to sort conversations (Messenger style)
+  useEffect(() => {
+    if (!currentUserUid) return;
+    const fetchRecentChats = async () => {
+      try {
+        const res = await fetch(`/api/lounge-messages/recent-chats/${currentUserUid}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.success && data.latestTimestamps) {
+            setRecentChatsTimestamps(data.latestTimestamps);
+          }
+        }
+      } catch (e) {
+        console.warn("Notice: error fetching recent chats:", e);
+      }
+    };
+    fetchRecentChats();
+    const unsubRecent = realtimeManager.subscribe('lounge_messages', () => {
+      fetchRecentChats();
+    });
+    return () => unsubRecent();
+  }, [currentUserUid]);
+
+  const sortByRecentChat = (a: any, b: any) => {
+    const tsA = recentChatsTimestamps[a.id] || '';
+    const tsB = recentChatsTimestamps[b.id] || '';
+    if (tsA && tsB) {
+      return tsB.localeCompare(tsA); // Descending (latest first)
+    }
+    if (tsA) return -1;
+    if (tsB) return 1;
+    return (a.name || '').localeCompare(b.name || '', 'ar-IQ');
+  };
 
   // Load private messages (PostgreSQL)
   useEffect(() => {
@@ -237,38 +278,54 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
 
   const startRecording = async () => {
     try {
+      if (typeof navigator === 'undefined' || !navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
+        setUploadError('المتصفح لا يدعم تسجيل الصوت أو يتطلب اتصالاً آمناً.');
+        setTimeout(() => setUploadError(null), 5000);
+        return;
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       
-      let mimeType = 'audio/webm';
-      if (typeof MediaRecorder !== 'undefined' && !MediaRecorder.isTypeSupported(mimeType)) {
-        mimeType = 'audio/mp4'; // Safari fallback
-      }
+      const mimeType = typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/webm')
+        ? 'audio/webm'
+        : (typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : undefined);
       
-      const mediaRecorder = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported(mimeType) ? mimeType : undefined });
+      const mediaRecorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
       
       mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
+        if (e.data && e.data.size > 0) {
           audioChunksRef.current.push(e.data);
         }
       };
       
       mediaRecorder.onstop = async () => {
-        if (audioChunksRef.current.length > 0) {
-           const ext = mimeType === 'audio/mp4' ? 'mp4' : 'webm';
-           const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
-           const audioFile = new File([audioBlob], `voice_message.${ext}`, { type: mimeType });
-           await uploadVoiceMessage(audioFile);
+        try {
+          if (audioChunksRef.current.length > 0) {
+             const finalType = mimeType || mediaRecorder.mimeType || 'audio/webm';
+             const ext = finalType.includes('mp4') ? 'mp4' : 'webm';
+             const audioBlob = new Blob(audioChunksRef.current, { type: finalType });
+             const audioFile = new File([audioBlob], `voice_message.${ext}`, { type: finalType });
+             await uploadVoiceMessage(audioFile);
+          }
+        } catch (blobErr) {
+          console.error("Error finalizing audio blob:", blobErr);
+        } finally {
+          stream.getTracks().forEach(track => track.stop());
         }
-        stream.getTracks().forEach(track => track.stop());
       };
       
       mediaRecorder.start();
       setIsRecording(true);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error accessing microphone:', err);
-      setUploadError('لا يمكن الوصول إلى الميكروفون. يرجى التحقق من الصلاحيات واستخدام متصفح حديث.');
+      const errName = err?.name || "";
+      if (errName === "NotAllowedError" || errName === "PermissionDeniedError") {
+        setUploadError("تم رفض إذن الميكروفون. يرجى تفعيل الصلاحية في إعدادات جهازك.");
+      } else {
+        setUploadError('لا يمكن الوصول إلى الميكروفون حالياً. يرجى التحقق من التوصيل والإذن.');
+      }
       setTimeout(() => setUploadError(null), 5000);
     }
   };
@@ -307,9 +364,9 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
       if (!uploadRes.ok) throw new Error(uploadData.error || 'Failed to upload');
       
       const fileUrl = uploadData.publicUrl || uploadData.url;
-      const currentName = isTeacher ? (teacherData?.name || auth.currentUser.displayName) : (userProfile?.name || userProfile?.fullName || 'طالب');
+      const currentName = isTeacher ? (teacherData?.name || auth.currentUser.displayName) : (userProfile?.name || userProfile?.fullName || (isParent ? 'ولي أمر' : 'طالب'));
       const currentPhoto = isTeacher ? teacherData?.photoURL : userProfile?.photoURL;
-      const currentRole = isTeacher ? 'teacher' : (userProfile?.role === 'admin' ? 'admin' : 'student');
+      const currentRole = isTeacher ? 'teacher' : (isParent ? 'parent' : (userProfile?.role === 'admin' ? 'admin' : 'student'));
       
       await fetch('/api/lounge-messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
         text: 'بصمة صوتية',
@@ -377,9 +434,9 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
       return;
     }
 
-    const currentName = isTeacher ? (teacherData?.name || auth.currentUser.displayName) : (userProfile?.name || userProfile?.fullName || 'طالب');
+    const currentName = isTeacher ? (teacherData?.name || auth.currentUser.displayName) : (userProfile?.name || userProfile?.fullName || (isParent ? 'ولي أمر' : 'طالب'));
     const currentPhoto = isTeacher ? teacherData?.photoURL : userProfile?.photoURL;
-    const currentRole = isTeacher ? 'teacher' : (userProfile?.role === 'admin' ? 'admin' : 'student');
+    const currentRole = isTeacher ? 'teacher' : (isParent ? 'parent' : (userProfile?.role === 'admin' ? 'admin' : 'student'));
     const msgText = newMessage.trim();
 
     try {
@@ -518,18 +575,28 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
 
       {/* Tabs */}
       <div className="flex border-b border-white/5 bg-[#0D142A] shrink-0">
-        <button 
-          onClick={() => setActiveTab('knights')}
-          className={`flex-1 py-3 text-sm font-bold text-center border-b-2 transition-colors ${activeTab === 'knights' ? 'border-amber-400 text-amber-400' : 'border-transparent text-white/50 hover:text-white/80'}`}
-        >
-          الفرسان
-        </button>
+        {!isParent && (
+          <button 
+            onClick={() => setActiveTab('knights')}
+            className={`flex-1 py-3 text-sm font-bold text-center border-b-2 transition-colors ${activeTab === 'knights' ? 'border-amber-400 text-amber-400' : 'border-transparent text-white/50 hover:text-white/80'}`}
+          >
+            الفرسان
+          </button>
+        )}
+        {(isTeacher || userProfile?.role === 'admin') && (
+           <button 
+            onClick={() => setActiveTab('parents')}
+            className={`flex-1 py-3 text-sm font-bold text-center border-b-2 transition-colors ${activeTab === 'parents' ? 'border-blue-400 text-blue-400' : 'border-transparent text-white/50 hover:text-white/80'}`}
+          >
+            أولياء الأمور
+          </button>
+        )}
         {!isTeacher && (
           <button 
             onClick={() => setActiveTab('teachers')}
             className={`flex-1 py-3 text-sm font-bold text-center border-b-2 transition-colors ${activeTab === 'teachers' ? 'border-emerald-400 text-emerald-400' : 'border-transparent text-white/50 hover:text-white/80'}`}
           >
-            أساتذتي
+            {isParent ? 'الكادر التدريسي' : 'أساتذتي'}
           </button>
         )}
         <button 
@@ -593,7 +660,7 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                         <p className="text-white/40 text-sm font-bold">لا يوجد فرسان نشطين في صفك حالياً</p>
                     </div>
                 ) : (
-                    filteredKnights.map((user) => (
+                    [...filteredKnights].sort(sortByRecentChat).map((user) => (
                         <div 
                           key={user.id} 
                         onClick={() => {
@@ -639,6 +706,67 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
           </div>
       )}
 
+      {activeTab === 'parents' && (isTeacher || userProfile?.role === 'admin') && (
+          <div className="flex-1 overflow-y-auto px-4 py-6 bg-[#050A18] flex flex-col gap-2">
+              <div className="mb-4 relative">
+                 <input 
+                    type="text" 
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="ابحث عن ولي أمر..." 
+                    className="w-full bg-[#1A233A] text-white text-sm rounded-xl px-4 py-3 pr-10 border border-white/10 outline-none focus:border-blue-400 focus:bg-[#0D142A] transition-all"
+                 />
+                 <Search size={18} className="absolute right-3 top-3.5 text-white/40" />
+              </div>
+              
+              {parents.filter(p => p.name?.includes(searchQuery)).length === 0 ? (
+                  <div className="flex-1 flex flex-col items-center justify-center opacity-50 grayscale mt-10">
+                      <User size={48} className="text-white/20 mb-4" />
+                      <p className="text-white/40 text-sm font-bold">لا يوجد أولياء أمور مسجلين</p>
+                  </div>
+              ) : (
+                  [...parents.filter(p => p.name?.includes(searchQuery))].sort(sortByRecentChat).map((parent) => (
+                      <div 
+                        key={parent.id} 
+                        onClick={() => {
+                          setSelectedChatUser({...parent, role: 'parent'});
+                          setActiveTab('chat');
+                        }}
+                        className="flex items-center justify-between p-3 bg-white/[0.02] hover:bg-white/5 border border-white/5 rounded-2xl cursor-pointer transition-colors group"
+                      >
+                          <div className="flex items-center gap-3">
+                              <div className="relative">
+                                  <div className="w-11 h-11 rounded-full border border-white/10 overflow-hidden ring-1 ring-blue-400/50">
+                                      {parent.photo ? (
+                                         <img src={parent.photo} alt={parent.name} className="w-full h-full object-cover" />
+                                      ) : (
+                                         <div className="w-full h-full bg-white/5 flex items-center justify-center">
+                                             <User size={18} className="text-white/30" />
+                                         </div>
+                                      )}
+                                  </div>
+                                  {unreadCounts[parent.id] > 0 && (
+                                     <div className="absolute -top-1 -left-1 bg-red-600 rounded-full min-w-[16px] h-[16px] px-1 flex items-center justify-center shadow-lg border-2 border-[#050A18]">
+                                        <span className="text-[9px] font-black text-white">{unreadCounts[parent.id]}</span>
+                                     </div>
+                                  )}
+                              </div>
+                              <div className="flex flex-col text-right">
+                                  <span className="text-[13px] text-white/90 font-bold">{parent.name}</span>
+                                  <span className="text-[9px] font-bold text-blue-400">ولي أمر</span>
+                              </div>
+                          </div>
+                          <button 
+                            className="w-10 h-10 rounded-full bg-[#00E5FF]/10 text-[#00E5FF] flex items-center justify-center opacity-50 group-hover:opacity-100 transition-all shrink-0 ml-1"
+                          >
+                            <MessageCircle size={18} />
+                          </button>
+                      </div>
+                  ))
+              )}
+          </div>
+      )}
+
       {activeTab === 'teachers' && !isTeacher && (
           <div className="flex-1 overflow-y-auto px-4 py-6 bg-[#050A18] flex flex-col gap-2">
               <div className="mb-4 relative">
@@ -655,13 +783,51 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
               {(() => {
                 const teacherMatch = (t: any) => {
                    if (isTeacher || !grade || grade === 'غير محدد') return true;
-                   const tClasses = Array.isArray(t.classes) ? t.classes : [];
+                   
+                   const norm = (str: string) => (str || '')
+                     .replace(/[\s\-_()\/\\.]+/g, '')
+                     .replace(/^(الصف|صف)/g, '')
+                     .replace(/شعبة/g, '')
+                     .replace(/ال/g, '')
+                     .replace(/ة/g, 'ه')
+                     .replace(/[أإآٱ]/g, 'ا')
+                     .replace(/ى/g, 'ي')
+                     .replace(/ـ/g, '')
+                     .toLowerCase();
+
+                   const normGrade = norm(grade);
+                   const classesList = Array.isArray(t.classes) ? t.classes : [];
+                   
+                   if (classesList.length > 0) {
+                     return classesList.some((c: any) => {
+                       const cName = typeof c === 'string' ? c : (c?.name || c?.className || '');
+                       const normC = norm(cName);
+                       if (!normC) return false;
+                       return normGrade.includes(normC) || normC.includes(normGrade);
+                     });
+                   }
+
+                   if (Array.isArray(t.schedule) && t.schedule.length > 0) {
+                     return t.schedule.some((s: any) => {
+                       const cName = s?.className || s?.class || s?.grade || '';
+                       const normC = norm(cName);
+                       return normC && (normC.includes(normGrade) || normGrade.includes(normC));
+                     });
+                   }
+
                    const tGrade = t.grade || '';
-                   if (tClasses.includes(grade) || tClasses.some((c: string) => isGradeMatch(c, grade))) return true;
-                   if (tGrade === grade || isGradeMatch(tGrade, grade)) return true;
-                   return false;
+                   if (tGrade) {
+                     const normT = norm(tGrade);
+                     return normGrade.includes(normT) || normT.includes(normGrade);
+                   }
+
+                   return true;
                 };
-                const filteredTeachers = teachersList.filter(t => t.name?.includes(searchQuery) && t.role === 'TEACHER' && teacherMatch(t));
+                const filteredTeachers = teachersList.filter(t => 
+                  (t.name || '').includes(searchQuery) && 
+                  (!t.role || t.role.toUpperCase() === 'TEACHER' || t.role.toLowerCase() === 'cadre' || t.role.toLowerCase() === 'teacher') && 
+                  teacherMatch(t)
+                );
 
                 return filteredTeachers.length === 0 ? (
                     <div className="flex-1 flex flex-col items-center justify-center opacity-50 grayscale mt-10">
@@ -669,7 +835,7 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                         <p className="text-white/40 text-sm font-bold">لا يوجد أساتذة حالياً</p>
                     </div>
                 ) : (
-                    filteredTeachers.map((teacher) => (
+                    [...filteredTeachers].sort(sortByRecentChat).map((teacher) => (
                         <div 
                           key={teacher.id} 
                         onClick={() => {
@@ -734,21 +900,22 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                         {messages.map((msg, index) => {
                             const isMe = msg.userId === currentUserUid;
                             const showAvatar = !isMe && (index === 0 || messages[index - 1].userId !== msg.userId);
-                            const isTeacherMode = msg.userRole === 'teacher';
-                            const isAdminMode = msg.userRole === 'admin';
-                            
-                            return (
-                              <motion.div 
-                                  key={msg.id}
-                                  initial={{ opacity: 0, y: 10 }}
-                                  animate={{ opacity: 1, y: 0 }}
-                                  className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'} ${!showAvatar && !isMe ? 'mt-1' : 'mt-4'}`}
-                              >
-                                  {!isMe && (
-                                      <div className="w-8 shrink-0 ml-2 flex flex-col justify-end pb-1">
-                                          {showAvatar && (
-                                              <div className={`w-8 h-8 rounded-full overflow-hidden border ${isTeacherMode ? 'border-amber-500/50' : (isAdminMode ? 'border-blue-500/50' : 'border-white/10')}`}>
-                                                  {msg.userPhoto ? (
+                             const isTeacherMode = msg.userRole === 'teacher';
+                             const isAdminMode = msg.userRole === 'admin';
+                             const isParentMode = msg.userRole === 'parent';
+                             
+                             return (
+                               <motion.div 
+                                   key={msg.id}
+                                   initial={{ opacity: 0, y: 10 }}
+                                   animate={{ opacity: 1, y: 0 }}
+                                   className={`flex w-full ${isMe ? 'justify-end' : 'justify-start'} ${!showAvatar && !isMe ? 'mt-1' : 'mt-4'}`}
+                               >
+                                   {!isMe && (
+                                       <div className="w-8 shrink-0 ml-2 flex flex-col justify-end pb-1">
+                                           {showAvatar && (
+                                               <div className={`w-8 h-8 rounded-full overflow-hidden border ${isTeacherMode ? 'border-amber-500/50' : (isAdminMode ? 'border-blue-500/50' : (isParentMode ? 'border-emerald-500/50' : 'border-white/10'))}`}>
+                                                   {msg.userPhoto ? (
                                                       <img src={msg.userPhoto} alt={msg.userName} className="w-full h-full object-cover" />
                                                   ) : (
                                                       <div className="w-full h-full bg-white/5 flex items-center justify-center">

@@ -33,7 +33,7 @@ import {
   attendance_logs, behavior_logs, audit_logs, council_polls, transport_drivers,
   transport_routes, transport_students_status, transport_fees, lounge_messages, admin_outbox,
   firestore_docs, security_bans, user_device_tokens,
-  system_poses, system_pose_history, system_settings
+  system_poses, system_pose_history, system_settings, bairaq_activities
 } from "./src/db/schema";
 import { sql } from "drizzle-orm";
 
@@ -55,9 +55,14 @@ import fsPromises from 'fs/promises';
 import { AnalyticsManager } from "./src/server/ai/AnalyticsManager";
 import { decisionEngine } from "./src/server/ai/DecisionEngine";
 
+const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
+if (!fs.existsSync(UPLOADS_DIR)) {
+  fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+}
+
 const upload = multer({ 
-  dest: os.tmpdir(),
-  limits: { fileSize: 500 * 1024 * 1024 }
+  dest: UPLOADS_DIR,
+  limits: { fileSize: 500 * 1024 * 1024 } // 500MB max video file size
 });
 import { statusRouter } from "./server-status";
 const memoryUpload = multer({ storage: multer.memoryStorage() });
@@ -250,6 +255,9 @@ const authLimiter = rateLimit({
 async function startServer() {
   const app = express();
 
+  // Trust reverse proxy (Cloud Run, load balancers, Cloudflare)
+  app.set('trust proxy', 1);
+
   // High-Throughput Performance: Gzip/Deflate Compression Middleware
   app.use(compression({
     threshold: 1024, // Compress responses > 1KB
@@ -358,6 +366,391 @@ async function startServer() {
     }
     next();
   };
+
+  // --- [HIGH PRIORITY] - Classroom Lens Upload Route ---
+  // Moved up to avoid middleware interference and improve response time
+  app.post('/api/bairaq-activities/upload', (req, res, next) => {
+    console.log(`[Activity Upload] NEW REQUEST at ${new Date().toISOString()}`);
+    next();
+  }, upload.single('file'), async (req: any, res: any) => {
+    const file = req.file;
+    try {
+      const { studentId, schoolId, description, authorName, subject, isAllStudents } = req.body;
+      const isBroadcastToAll = isAllStudents === 'true' || studentId === 'ALL' || String(studentId).startsWith('ALL');
+      
+      if (!file) {
+        console.error(`[Activity Upload] Multer failed to capture file. Body:`, req.body);
+        return res.status(400).json({ success: false, message: "لم يتم استلام الملف في السيرفر. تأكد من جودة الإنترنت." });
+      }
+
+      console.log(`[Activity Upload] Processing ${file.originalname} (${file.size} bytes) for student: ${studentId}, isAll: ${isBroadcastToAll}`);
+
+      // 1. Get school config
+      const config = await db.select().from(school_configs).where(eq(school_configs.id, schoolId)).limit(1);
+      if (!config.length || !config[0].telegramBotToken) {
+        await fsPromises.unlink(file.path).catch(() => {});
+        return res.status(400).json({ success: false, message: "إعدادات البث غير مكتملة للمدرسة" });
+      }
+
+      const botToken = String(config[0].telegramBotToken).trim().replace(/^bot/i, '');
+      const mapping = config[0].telegramChannelsMapping as any || {};
+
+      // 2. Resolve students
+      let targetStudents: any[] = [];
+      let grade = 'عام';
+
+      if (isBroadcastToAll) {
+        // Broadcast to all students of the specified grade/class in this school
+        const reqGrade = req.body.grade || '';
+        const allSchoolStudents = await db.select().from(students).where(eq(students.schoolId, schoolId));
+        if (reqGrade) {
+          targetStudents = allSchoolStudents.filter(s => (s.grade || '').trim() === reqGrade.trim() || (s.grade || '').includes(reqGrade));
+        }
+        if (targetStudents.length === 0) {
+          targetStudents = allSchoolStudents;
+        }
+        grade = reqGrade || targetStudents[0]?.grade || 'عام';
+      } else {
+        // Resolve student by ID, code, or name strictly for this school
+        let studentResult = await db.select().from(students).where(
+          and(
+            schoolId ? eq(students.schoolId, schoolId) : undefined,
+            or(
+              eq(students.id, studentId),
+              eq(students.code, studentId),
+              req.body.studentCode ? eq(students.code, req.body.studentCode) : undefined,
+              req.body.studentName ? eq(students.name, req.body.studentName) : undefined
+            )
+          )
+        ).limit(1);
+
+        const allAliases = new Set<string>();
+        allAliases.add(studentId);
+        if (req.body.studentCode) allAliases.add(req.body.studentCode);
+        if (req.body.parentCode) allAliases.add(req.body.parentCode);
+        if (req.body.studentName) allAliases.add(req.body.studentName);
+
+        // Also check academic_lists for school to find student by UUID, code, or name
+        try {
+          const effectiveSchoolId = schoolId;
+          const listsQuery = effectiveSchoolId
+            ? await db.select().from(academic_lists).where(eq(academic_lists.schoolId, effectiveSchoolId))
+            : await db.select().from(academic_lists);
+
+          for (const l of listsQuery) {
+            const found = (l.students as any[] || []).find((s: any) => 
+              s.id === studentId || s.code === studentId || s.student === studentId || 
+              (req.body.studentCode && (s.code === req.body.studentCode || s.student === req.body.studentCode)) ||
+              (req.body.studentName && s.name === req.body.studentName)
+            );
+            if (found) {
+              if (found.id) allAliases.add(found.id);
+              if (found.code) allAliases.add(found.code);
+              if (found.student) allAliases.add(found.student);
+              if (found.name) allAliases.add(found.name);
+              if (found.parent) allAliases.add(found.parent);
+              if (found.parentCode) allAliases.add(found.parentCode);
+
+              if (!studentResult.length) {
+                // Try finding primary student record in students table by code or name within this school
+                const dbMatch = await db.select().from(students).where(
+                  and(
+                    schoolId ? eq(students.schoolId, schoolId) : undefined,
+                    or(
+                      eq(students.code, found.code || found.student || req.body.studentCode || ''),
+                      eq(students.name, found.name || req.body.studentName || '')
+                    )
+                  )
+                ).limit(1);
+
+                if (dbMatch.length) {
+                  studentResult = dbMatch;
+                } else {
+                  targetStudents = [{
+                    id: found.id || studentId,
+                    code: found.code || found.student || req.body.studentCode || studentId,
+                    name: found.name || req.body.studentName || studentId,
+                    grade: found.grade || req.body.grade || 'عام',
+                    schoolId: schoolId,
+                    parentCode: found.parent || found.parentCode || req.body.parentCode || ''
+                  }];
+                }
+              }
+              break;
+            }
+          }
+        } catch (e) {
+          console.warn('[Upload] Error resolving student in academic_lists:', e);
+        }
+
+        if (studentResult.length) {
+          targetStudents = [studentResult[0]];
+          grade = targetStudents[0].grade || 'عام';
+          if (targetStudents[0].id) allAliases.add(targetStudents[0].id);
+          if (targetStudents[0].code) allAliases.add(targetStudents[0].code);
+          if (targetStudents[0].name) allAliases.add(targetStudents[0].name);
+          if (targetStudents[0].parentCode) allAliases.add(targetStudents[0].parentCode);
+          if (req.body.parentCode && !targetStudents[0].parentCode) {
+            targetStudents[0].parentCode = req.body.parentCode;
+          }
+        } else if (!targetStudents.length) {
+          targetStudents = [{
+            id: studentId,
+            code: req.body.studentCode || studentId,
+            name: req.body.studentName || studentId,
+            grade: req.body.grade || 'عام',
+            schoolId: schoolId,
+            parentCode: req.body.parentCode || ''
+          }];
+          grade = req.body.grade || 'عام';
+        }
+        
+        // Store all known aliases in req for broadcast later
+        (req as any).studentAliases = Array.from(allAliases);
+      }
+
+      const primaryStudent = targetStudents[0];
+      const targetChannel = mapping[grade] || mapping['default'] || mapping['الكل'] || Object.values(mapping)[0];
+
+      if (!targetChannel) {
+        await fsPromises.unlink(file.path).catch(() => {});
+        return res.status(400).json({ success: false, message: `الصف (${grade}) غير مرتبط بقناة تليجرام` });
+      }
+
+      // 3. Detect File Type Accurately (Handling Android Filenames like mp4.1000113444 and magic bytes)
+      const origName = (file.originalname || '').toLowerCase();
+      const mime = (file.mimetype || '').toLowerCase();
+      const clientMediaType = (req.body.mediaType || '').toLowerCase();
+      
+      let isVideo = clientMediaType === 'video' ||
+                    mime.startsWith('video/') || 
+                    origName.endsWith('.mp4') || origName.endsWith('.mov') || origName.endsWith('.webm') || origName.endsWith('.mkv') || origName.endsWith('.3gp') ||
+                    origName.startsWith('mp4.') || origName.includes('.mp4.') || origName.includes('mp4') || origName.includes('video');
+      
+      if (!isVideo) {
+        try {
+          const fd = fs.openSync(file.path, 'r');
+          const buffer = Buffer.alloc(16);
+          fs.readSync(fd, buffer, 0, 16, 0);
+          fs.closeSync(fd);
+          const magic = buffer.toString('ascii', 4, 8);
+          if (magic === 'ftyp' || magic === 'moov' || magic === 'mdat') {
+            isVideo = true;
+          }
+        } catch (e) {}
+      }
+
+      const isImage = !isVideo && (mime.startsWith('image/') || 
+                      origName.endsWith('.jpg') || origName.endsWith('.jpeg') || origName.endsWith('.png') || origName.endsWith('.webp') ||
+                      origName.startsWith('jpg.') || origName.startsWith('jpeg.') || origName.includes('image'));
+
+      // Keep a permanent local copy for instant, bufferless streaming
+      const localFileExt = isVideo ? 'mp4' : isImage ? 'jpg' : 'bin';
+      const localFileName = `lens_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${localFileExt}`;
+      const permanentFilePath = path.join(UPLOADS_DIR, localFileName);
+      
+      try {
+        await fsPromises.copyFile(file.path, permanentFilePath);
+      } catch (copyErr) {
+        console.error("[Activity Upload] Failed to copy local file:", copyErr);
+      }
+
+      const localMediaUrl = `/api/media/local/${localFileName}`;
+      const teacherDisplay = subject ? `${(authorName || 'الأستاذ').trim()} (${subject.trim()})` : (authorName || 'الأستاذ').trim();
+      const studentLabel = isBroadcastToAll ? `جميع طلاب شعبة ${grade}` : primaryStudent.name;
+      
+      const captionText = `🌟 عين على الصف ${isBroadcastToAll ? '(نشاط جماعي) ' : ''}🌟\n\n📌 ${isBroadcastToAll ? 'المشاركون' : 'التلميذ'}: ${studentLabel}\n📚 الصف: ${grade}\n💬 تفاصيل النشاط: ${description || 'مشاركة وتفاعل صفي ممتاز'}\n\n👨‍🏫 بإشراف: ${teacherDisplay}`;
+
+      let msgId: number | null = null;
+      let telegramFileId: string | null = null;
+
+      // Telegram Bot API limit is 50MB for file uploads.
+      // If file > 48MB, we post a rich notification on Telegram and stream the full video locally!
+      const TELEGRAM_MAX_FILE_SIZE = 48 * 1024 * 1024; // 48 MB safe limit
+      const isLargeFile = file.size > TELEGRAM_MAX_FILE_SIZE;
+
+      if (!isLargeFile) {
+        // Normal Telegram upload (< 48MB)
+        const telegramMethod = isVideo ? 'sendVideo' : isImage ? 'sendPhoto' : 'sendDocument';
+        const telegramUrl = `https://api.telegram.org/bot${botToken}/${telegramMethod}`;
+        const fileBuffer = await fsPromises.readFile(file.path);
+        const blob = new Blob([fileBuffer], { type: file.mimetype || (isVideo ? 'video/mp4' : 'image/jpeg') });
+        const formData = new FormData();
+        formData.append('chat_id', String(targetChannel));
+        formData.append(isVideo ? 'video' : isImage ? 'photo' : 'document', blob, file.originalname);
+        formData.append('caption', captionText);
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minutes
+
+        try {
+          const tgRes = await fetch(telegramUrl, { method: 'POST', body: formData, signal: controller.signal });
+          clearTimeout(timeoutId);
+          const tgData: any = await tgRes.json();
+          if (tgData.ok) {
+            msgId = tgData.result.message_id;
+            if (tgData.result.video) telegramFileId = tgData.result.video.file_id;
+            else if (tgData.result.photo) telegramFileId = tgData.result.photo[tgData.result.photo.length - 1].file_id;
+            else if (tgData.result.document) telegramFileId = tgData.result.document.file_id;
+          } else {
+            console.warn("[Activity Upload] Telegram direct upload failed, falling back to message:", tgData.description);
+          }
+        } catch (tgErr: any) {
+          clearTimeout(timeoutId);
+          console.warn("[Activity Upload] Telegram upload network error:", tgErr.message);
+        }
+      }
+
+      // If large file or direct file upload skipped/failed: send a formatted Telegram message
+      if (!msgId) {
+        try {
+          const msgUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
+          const largeFileNote = isLargeFile 
+            ? `\n\n🎬 تم رفع وتوثيق فيديو فائق الدقة (بحجم ${(file.size / (1024 * 1024)).toFixed(1)} ميغابايت).\n✨ الفيديو متاح الآن للمشاهدة المباشرة بجودة فائقة داخل تطبيق المنصة!`
+            : '';
+          const msgRes = await fetch(msgUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              chat_id: String(targetChannel),
+              text: `${captionText}${largeFileNote}`
+            })
+          });
+          const msgData: any = await msgRes.json();
+          if (msgData.ok) {
+            msgId = msgData.result.message_id;
+          }
+        } catch (e) {
+          console.error("[Activity Upload] Failed to send Telegram announcement:", e);
+        }
+      }
+
+      // Clean up original multer temp file
+      await fsPromises.unlink(file.path).catch(() => {});
+
+      // 4. Save Activity Records in SQL for each target student
+      const channelUsername = String(targetChannel).replace('@', '');
+      const embedUrl = msgId ? `https://t.me/${channelUsername}/${msgId}` : localMediaUrl;
+      const mediaType = isVideo ? 'video' : isImage ? 'photo' : 'document';
+      const createdActivityIds: string[] = [];
+
+      if (isBroadcastToAll) {
+        const actId = `act_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        await db.insert(bairaq_activities).values({
+          id: actId,
+          studentId: 'ALL',
+          schoolId,
+          mediaUrl: localMediaUrl, // Prefer direct streaming for seamless playback
+          telegramFileId: telegramFileId || `local:${localFileName}`,
+          telegramMessageId: msgId,
+          telegramChatId: String(targetChannel),
+          mediaType: mediaType,
+          description: description || '',
+          authorName: teacherDisplay
+        });
+        createdActivityIds.push(actId);
+
+        // 5. Notify Parent
+        for (const st of targetStudents) {
+          try {
+            const notifId = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+            const recId = st.parentCode || st.code;
+            const notifPayload = {
+              id: notifId,
+              schoolId,
+              recipientId: recId,
+              title: "عين على الصف (نشاط جماعي) 📸✨",
+              body: `تم نشر لقطة نشاط صفي جماعي لشعبة (${grade}) بإشراف ${teacherDisplay}.`,
+              type: "classroom_lens",
+              read: false,
+              createdAt: new Date()
+            };
+            await db.insert(notifications).values(notifPayload);
+            realtimeServerInstance?.broadcastManual('notifications', recId, 'INSERT', notifPayload);
+          } catch (notifErr) {}
+        }
+        realtimeServerInstance?.broadcastManual('notifications_updated', undefined, 'UPDATE', { schoolId });
+      } else {
+        for (const st of targetStudents) {
+          const actId = `act_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+          await db.insert(bairaq_activities).values({
+            id: actId,
+            studentId: st.id,
+            schoolId,
+            mediaUrl: localMediaUrl, // Prefer direct streaming for seamless playback
+            telegramFileId: telegramFileId || `local:${localFileName}`,
+            telegramMessageId: msgId,
+            telegramChatId: String(targetChannel),
+            mediaType: mediaType,
+            description: description || '',
+            authorName: teacherDisplay
+          });
+          createdActivityIds.push(actId);
+
+          // 5. Notify Parent
+          const parentRecipient = st.parentCode || req.body.parentCode || st.code;
+          const notifId = `notif_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+          const notifPayload = {
+            id: notifId,
+            schoolId,
+            recipientId: parentRecipient,
+            title: "عين على الصف 📸✨",
+            body: `تم نشر لقطة جديدة لطفلك (${st.name}) بإشراف ${teacherDisplay}.`,
+            type: "classroom_lens",
+            read: false,
+            createdAt: new Date()
+          };
+          try {
+            await db.insert(notifications).values(notifPayload);
+            realtimeServerInstance?.broadcastManual('notifications', parentRecipient, 'INSERT', notifPayload);
+            realtimeServerInstance?.broadcastManual('notifications_updated', undefined, 'UPDATE', { recipientId: parentRecipient });
+          } catch (notifErr) {
+            console.warn('[Activity Upload] Error creating notification:', notifErr);
+          }
+        }
+      }
+
+      // Broadcast real-time update to all connected parent & teacher portals
+      try {
+        const payload = {
+          id: createdActivityIds[0],
+          studentId: isBroadcastToAll ? 'ALL' : (primaryStudent.id || req.body.studentId),
+          studentName: primaryStudent.name || req.body.studentName || '',
+          studentCode: primaryStudent.code || req.body.studentCode || '',
+          parentCode: primaryStudent.parentCode || req.body.parentCode || '',
+          aliases: (req as any).studentAliases || [],
+          schoolId,
+          mediaUrl: localMediaUrl,
+          mediaType,
+          description: description || '',
+          authorName: teacherDisplay,
+          createdAt: new Date().toISOString()
+        };
+        realtimeServerInstance?.broadcastManual('lens_activities', schoolId, 'CREATE', payload);
+        realtimeServerInstance?.broadcastManual('bairaq_activities', schoolId, 'CREATE', payload);
+        realtimeServerInstance?.broadcastManual('notifications_updated', undefined, 'UPDATE', { schoolId });
+      } catch (broadcastErr) {
+        console.warn('[Activity Upload] Realtime broadcast warning:', broadcastErr);
+      }
+
+      console.log(`[Activity Upload] Successfully saved ${createdActivityIds.length} activities. Media: ${localMediaUrl}`);
+      return res.json({
+        success: true,
+        message: isBroadcastToAll 
+          ? `تم بث ونشر اللقطة بنجاح وتوثيقها لجميع طلاب الشعبة (${targetStudents.length} طالب)! 🎉` 
+          : "تم النشر والتزامن بنجاح! 🎉",
+        activityId: createdActivityIds[0],
+        mediaUrl: localMediaUrl,
+        isAll: isBroadcastToAll,
+        count: targetStudents.length
+      });
+
+    } catch (err: any) {
+      if (file) await fsPromises.unlink(file.path).catch(() => {});
+      console.error("[Activity Upload] Global Error:", err);
+      res.status(500).json({ success: false, message: `خطأ في معالجة الرفع: ${err.message}` });
+    }
+  });
 
   const requireDeveloper = (req: any, res: any, next: any) => {
     const headerEmail = (req.headers['x-user-email'] || req.headers['x-developer-email'] || '').toString().toLowerCase().trim();
@@ -1231,9 +1624,15 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
     try {
       const existing = await db.select().from(schools).where(eq(schools.id, schoolId));
       if (existing.length === 0) {
+        let name = schoolName || 'مدرسة غير معرفة';
+        if (schoolId.endsWith('-boys')) {
+          name = 'ثانوية أوائل غماس الأهلية - للبنين';
+        } else if (schoolId.endsWith('-girls')) {
+          name = 'ثانوية أوائل غماس الأهلية - للبنات';
+        }
         await db.insert(schools).values({
           id: schoolId,
-          name: schoolName || 'مدرسة غير معرفة',
+          name: name,
           governorate: 'الديوانية - غماس',
           status: 'active'
         }).onConflictDoNothing();
@@ -2521,6 +2920,349 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
     } catch (error: any) {
       console.error('Error putting school config:', error);
       res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // ==========================================
+  // 📸 قنوات التواصل و "عين على الصف"
+  // ==========================================
+
+  // جلب كافة أنشطة طالب معين أو أنشطة المدرسة والصف بالكامل
+  app.get('/api/bairaq-activities', async (req, res) => {
+    try {
+      const { studentId, schoolId, date, grade, isBroadcast } = req.query;
+
+      if (studentId) {
+        if (studentId === 'ALL') {
+          let list = await db.select()
+            .from(bairaq_activities)
+            .where(
+              or(
+                eq(bairaq_activities.studentId, 'ALL'),
+                isNull(bairaq_activities.studentId)
+              )
+            )
+            .orderBy(desc(bairaq_activities.createdAt));
+          if (schoolId) {
+            list = list.filter(a => !a.schoolId || a.schoolId === schoolId);
+          }
+          return res.json({ success: true, activities: list, data: list });
+        }
+
+        // Find student across both students table and academic_lists
+        const targetIdStr = String(studentId).trim();
+        const idsToQuery = new Set<string>();
+        idsToQuery.add(targetIdStr);
+        idsToQuery.add(targetIdStr.toLowerCase());
+
+        let studentName = '';
+        let studentCode = '';
+
+        // 1. Search in students table
+        const studentMatch = await db.select().from(students).where(
+          or(
+            eq(students.id, studentId as string),
+            eq(students.code, studentId as string),
+            eq(students.name, studentId as string),
+            eq(students.parentCode, studentId as string)
+          )
+        );
+
+        for (const st of studentMatch) {
+          if (st.id) { idsToQuery.add(st.id); idsToQuery.add(st.id.toLowerCase()); }
+          if (st.code) { idsToQuery.add(st.code); idsToQuery.add(st.code.toLowerCase()); }
+          if (st.parentCode) { idsToQuery.add(st.parentCode); idsToQuery.add(st.parentCode.toLowerCase()); }
+          if (st.name) {
+            idsToQuery.add(st.name);
+            studentName = st.name;
+          }
+          if (st.code) studentCode = st.code;
+        }
+
+        // 2. Search in academic_lists for school to find aliases and primary student record
+        try {
+          const effectiveSchoolId = (schoolId as string) || (studentMatch[0]?.schoolId);
+          const listsQuery = effectiveSchoolId
+            ? await db.select().from(academic_lists).where(eq(academic_lists.schoolId, effectiveSchoolId))
+            : await db.select().from(academic_lists);
+
+          for (const l of listsQuery) {
+            for (const st of (l.students as any[] || [])) {
+              const matches = 
+                (st.id && (idsToQuery.has(st.id) || idsToQuery.has(String(st.id).toLowerCase()))) ||
+                (st.code && (idsToQuery.has(st.code) || idsToQuery.has(String(st.code).toLowerCase()))) ||
+                (st.student && (idsToQuery.has(st.student) || idsToQuery.has(String(st.student).toLowerCase()))) ||
+                (st.name && (idsToQuery.has(st.name) || (studentName && st.name === studentName))) ||
+                (st.parent && idsToQuery.has(st.parent)) ||
+                (st.parentCode && idsToQuery.has(st.parentCode));
+
+              if (matches) {
+                if (st.id) { idsToQuery.add(st.id); idsToQuery.add(String(st.id).toLowerCase()); }
+                if (st.code) { idsToQuery.add(st.code); idsToQuery.add(String(st.code).toLowerCase()); }
+                if (st.student) { idsToQuery.add(st.student); idsToQuery.add(String(st.student).toLowerCase()); }
+                if (st.name) {
+                  idsToQuery.add(st.name);
+                  if (!studentName) studentName = st.name;
+                }
+                if (st.parentCode) idsToQuery.add(st.parentCode);
+                if (st.parent) idsToQuery.add(st.parent);
+
+                // IMPORTANT: Try to find the primary student record in the 'students' table 
+                // using aliases found in the list, strictly within this school
+                const dbMatch = await db.select().from(students).where(
+                  and(
+                    effectiveSchoolId ? eq(students.schoolId, effectiveSchoolId) : undefined,
+                    or(
+                      st.code ? eq(students.code, st.code) : (undefined as any),
+                      st.student ? eq(students.code, st.student) : (undefined as any),
+                      st.name ? eq(students.name, st.name) : (undefined as any)
+                    )
+                  )
+                ).limit(1);
+
+                if (dbMatch.length) {
+                  const s = dbMatch[0];
+                  if (s.id) { idsToQuery.add(s.id); idsToQuery.add(s.id.toLowerCase()); }
+                  if (s.code) { idsToQuery.add(s.code); idsToQuery.add(s.code.toLowerCase()); }
+                  if (s.name) idsToQuery.add(s.name);
+                }
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('[Activities] Error querying academic_lists in GET:', e);
+        }
+
+        const idsArray = Array.from(idsToQuery).map(id => String(id).toLowerCase());
+        
+        // Add "clean" versions of codes (removing school prefixes)
+        const cleanIds = new Set<string>();
+        idsArray.forEach(id => {
+          cleanIds.add(id);
+          cleanIds.add(id.replace(/^(school\d+[-_]?boys|school\d+[-_]?girls|school\d+)/i, '').replace(/^[_st-]+/i, ''));
+        });
+        const finalIdsArray = Array.from(cleanIds).filter(id => id.length > 2);
+
+        // Fetch all activities for the school and filter flexibly
+        let queryBuilder = db.select().from(bairaq_activities);
+        if (schoolId) {
+          queryBuilder = queryBuilder.where(eq(bairaq_activities.schoolId, schoolId as string)) as any;
+        }
+        let list = await queryBuilder.orderBy(desc(bairaq_activities.createdAt));
+
+        // Filter activities that belong to this student or are group broadcasts (ALL)
+        let filtered = list.filter(act => {
+          if (!act.studentId) return true;
+          if (act.studentId === 'ALL') return true;
+          
+          const actStId = String(act.studentId).toLowerCase();
+          const cleanActStId = actStId.replace(/^(school\d+[-_]?boys|school\d+[-_]?girls|school\d+)/i, '').replace(/^[_st-]+/i, '');
+
+          // Direct match
+          if (idsArray.includes(actStId)) return true;
+          // Clean match
+          if (finalIdsArray.some(id => id === cleanActStId || cleanActStId.includes(id) || id.includes(cleanActStId))) return true;
+
+          return false;
+        });
+
+        return res.json({ success: true, activities: filtered, data: filtered });
+      }
+
+      if (schoolId) {
+        let queryBuilder = db.select().from(bairaq_activities).where(eq(bairaq_activities.schoolId, schoolId as string));
+        const list = await queryBuilder.orderBy(desc(bairaq_activities.createdAt));
+        
+        let filtered = list;
+        if (isBroadcast === 'true') {
+          filtered = filtered.filter(act => act.studentId === 'ALL' || !act.studentId);
+        }
+        if (date) {
+          const targetDateStr = String(date).split('T')[0];
+          filtered = filtered.filter(act => {
+            if (!act.createdAt) return false;
+            const actDateStr = new Date(act.createdAt).toISOString().split('T')[0];
+            return actDateStr === targetDateStr;
+          });
+        }
+
+        return res.json({ success: true, activities: filtered, data: filtered });
+      }
+
+      return res.status(400).json({ success: false, message: "studentId or schoolId is required" });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // حذف لقطة "عين على الصف"
+  app.delete('/api/bairaq-activities/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      await db.delete(bairaq_activities).where(eq(bairaq_activities.id, id));
+      res.json({ success: true, message: "تم حذف النشاط بنجاح" });
+    } catch (err: any) {
+      res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // ==========================================
+  // 🎥 بث الفيديو والوسائط المحلية الآمن مع دعم Range Requests (HTTP 206)
+  // ==========================================
+  app.get('/api/media/local/:filename', (req, res) => {
+    const filename = req.params.filename;
+    // Prevent directory traversal
+    const safeFilename = path.basename(filename);
+    const filePath = path.join(UPLOADS_DIR, safeFilename);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).send('Media file not found');
+    }
+
+    const stat = fs.statSync(filePath);
+    const fileSize = stat.size;
+    const range = req.headers.range;
+
+    const ext = path.extname(safeFilename).toLowerCase();
+    const contentType = ext === '.mp4' ? 'video/mp4' :
+                        ext === '.webm' ? 'video/webm' :
+                        ext === '.mov' ? 'video/quicktime' :
+                        ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
+                        ext === '.png' ? 'image/png' : 'application/octet-stream';
+
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+
+    if (range) {
+      const parts = range.replace(/bytes=/, "").split("-");
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+      const chunksize = (end - start) + 1;
+      const file = fs.createReadStream(filePath, { start, end });
+      const head = {
+        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+        'Content-Length': chunksize,
+        'Content-Type': contentType,
+      };
+      res.writeHead(206, head);
+      file.pipe(res);
+    } else {
+      const head = {
+        'Content-Length': fileSize,
+        'Content-Type': contentType,
+      };
+      res.writeHead(200, head);
+      fs.createReadStream(filePath).pipe(res);
+    }
+  });
+
+  // رفع نشاط جديد وتلقائياً نشره في مركز البث وحفظه في الـ SQL
+  // ==========================================
+  // 🎥 نظام بث الوسائط الآمن من تليجرام (Proxy) مع تخزين محلي ودعم Range (HTTP 206)
+  // ==========================================
+  app.get('/api/media/telegram/:schoolId/:fileId', async (req, res) => {
+    try {
+      const { schoolId, fileId } = req.params;
+      const cleanFileId = fileId.replace(/[^a-zA-Z0-9_-]/g, '_');
+      
+      const isVideoFile = fileId.startsWith('BAAC');
+      const isPhotoFile = fileId.startsWith('AgAC');
+      const ext = isVideoFile ? 'mp4' : isPhotoFile ? 'jpg' : 'bin';
+      const cachedFileName = `tg_${cleanFileId}.${ext}`;
+      const cachedFilePath = path.join(UPLOADS_DIR, cachedFileName);
+
+      // If already cached locally, stream directly with Range support
+      if (fs.existsSync(cachedFilePath)) {
+        const stat = fs.statSync(cachedFilePath);
+        const fileSize = stat.size;
+        const range = req.headers.range;
+        const contentType = isVideoFile ? 'video/mp4' : isPhotoFile ? 'image/jpeg' : 'application/octet-stream';
+
+        res.setHeader('Accept-Ranges', 'bytes');
+        res.setHeader('Cache-Control', 'public, max-age=86400');
+
+        if (range) {
+          const parts = range.replace(/bytes=/, "").split("-");
+          const start = parseInt(parts[0], 10);
+          const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+          const chunksize = (end - start) + 1;
+          const file = fs.createReadStream(cachedFilePath, { start, end });
+          res.writeHead(206, {
+            'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+            'Content-Length': chunksize,
+            'Content-Type': contentType,
+          });
+          return file.pipe(res);
+        } else {
+          res.writeHead(200, {
+            'Content-Length': fileSize,
+            'Content-Type': contentType,
+          });
+          return fs.createReadStream(cachedFilePath).pipe(res);
+        }
+      }
+
+      // 1. جلب التوكن الخاص بالمدرسة
+      const config = await db.select().from(school_configs).where(eq(school_configs.id, schoolId)).limit(1);
+      if (!config.length || !config[0].telegramBotToken) {
+        return res.status(404).send('School bot not configured');
+      }
+      
+      const botToken = String(config[0].telegramBotToken).trim().replace(/^bot/i, '');
+      
+      // 2. طلب رابط الملف من تليجرام
+      const getFileUrl = `https://api.telegram.org/bot${botToken}/getFile?file_id=${fileId}`;
+      const fileRes = await fetch(getFileUrl);
+      const fileData: any = await fileRes.json();
+      
+      if (!fileData.ok || !fileData.result?.file_path) {
+        return res.status(404).send('File not found on Telegram');
+      }
+      
+      const filePath = fileData.result.file_path;
+      const downloadUrl = `https://api.telegram.org/file/bot${botToken}/${filePath}`;
+      
+      // 3. تحميل الملف وحفظه محلياً للبث الفوري والسريع
+      const mediaRes = await fetch(downloadUrl);
+      if (!mediaRes.ok || !mediaRes.body) {
+        return res.status(404).send('Media body is empty');
+      }
+
+      const arrayBuffer = await mediaRes.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      await fsPromises.writeFile(cachedFilePath, buffer);
+
+      const fileSize = buffer.length;
+      const range = req.headers.range;
+      const isVideo = isVideoFile || filePath.endsWith('.mp4') || (mediaRes.headers.get('content-type') || '').includes('video');
+      const contentType = isVideo ? 'video/mp4' : isPhotoFile ? 'image/jpeg' : (mediaRes.headers.get('content-type') || 'application/octet-stream');
+
+      res.setHeader('Accept-Ranges', 'bytes');
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+
+      if (range) {
+        const parts = range.replace(/bytes=/, "").split("-");
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+        const chunksize = (end - start) + 1;
+        const file = fs.createReadStream(cachedFilePath, { start, end });
+        res.writeHead(206, {
+          'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+          'Content-Length': chunksize,
+          'Content-Type': contentType,
+        });
+        return file.pipe(res);
+      } else {
+        res.writeHead(200, {
+          'Content-Length': fileSize,
+          'Content-Type': contentType,
+        });
+        return fs.createReadStream(cachedFilePath).pipe(res);
+      }
+      
+    } catch (err: any) {
+      console.error("[Media Proxy Error]", err);
+      res.status(500).send(err.message);
     }
   });
 
@@ -5129,17 +5871,29 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
     }
   });
 
-  app.post('/api/activation-codes/generate', requireRole(['admin', 'admin-boys', 'admin-girls', 'manager', 'developer']), async (req, res) => {
+   app.post('/api/activation-codes/generate', requireRole(['admin', 'admin-boys', 'admin-girls', 'manager', 'developer']), async (req, res) => {
     try {
       const { schoolId, role, count, prefix } = req.body;
       const numCount = Number(count) || 1;
       const results = [];
       
       for (let i = 0; i < numCount; i++) {
-        const randomStr = Math.random().toString(36).substring(2, 8).toUpperCase();
-        const code = `${prefix || 'ACT'}-${randomStr}`;
+        let code = '';
+        let exists = true;
+        let retries = 0;
+        
+        while (exists && retries < 15) {
+          const randomStr = Math.random().toString(36).substring(2, 10).toUpperCase(); // 8 characters for extreme uniqueness
+          code = `${prefix || 'ACT'}-${randomStr}`;
+          const existing = await db.select().from(activation_codes).where(eq(activation_codes.code, code)).limit(1);
+          if (existing.length === 0) {
+            exists = false;
+          }
+          retries++;
+        }
+
         const newCode = await db.insert(activation_codes).values({
-          id: `act_${Date.now()}_${i}`,
+          id: `act_${Date.now()}_${i}_${Math.floor(Math.random() * 1000)}`,
           code,
           schoolId: schoolId || 'general',
           used: false,
@@ -7956,7 +8710,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
     const norm = (s: string) => {
       const cleaned = s.trim().toLowerCase();
       if (cleaned === 'school_awail_ghamas' || cleaned === 'ghamas_awail') return 'school1';
-      return cleaned;
+      return cleaned.replace('-boys', '').replace('-girls', '');
     };
     const nCode = norm(codeSchoolId);
     const nReq = norm(requestedSchoolId);
@@ -8059,7 +8813,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
       };
 
       const isTeacherPrefix = cleanCode.startsWith('TCH-');
-      const isAdminPrefix = cleanCode.startsWith('ADM-') || cleanCode === '112233';
+      const isAdminPrefix = cleanCode.startsWith('ADM-') || cleanCode.startsWith('ADMB-') || cleanCode.startsWith('ADMG-') || cleanCode === '112233';
       const isParentPrefix = cleanCode.startsWith('PAR-') || cleanCode.startsWith('PCODE-');
       const isDriverPrefix = cleanCode.startsWith('DRI-') || cleanCode.startsWith('DRV-');
       const isStudentPrefix = 
@@ -8460,7 +9214,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         // Refine role based on code prefix
         if (effectiveRole === 'student') {
           const upperCode = code.toUpperCase();
-          if (upperCode.startsWith('ADM-') || upperCode === '112233') effectiveRole = 'admin';
+          if (upperCode.startsWith('ADM-') || upperCode.startsWith('ADMB-') || upperCode.startsWith('ADMG-') || upperCode === '112233') effectiveRole = 'admin';
           else if (upperCode.startsWith('TCH-')) effectiveRole = 'teacher';
           else if (upperCode.startsWith('PAR-') || upperCode.startsWith('PCODE-')) effectiveRole = 'parent';
           else if (upperCode.startsWith('DRV-') || upperCode.startsWith('DRI-')) effectiveRole = 'driver';
@@ -8494,11 +9248,20 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
           return res.status(400).json({ success: false, isBanned: true, message: 'ACCOUNT_BANNED' });
         }
         clearFailedAuthAttempt(req);
+        const cleanUpper = code.trim().toUpperCase();
+        const branchVal = (cleanUpper.startsWith('ADM-B') || cleanUpper.startsWith('ADMB')) ? 'boys' : (cleanUpper.startsWith('ADM-G') || cleanUpper.startsWith('ADMG')) ? 'girls' : null;
+
+        const baseSchoolId = act.schoolId || targetSchoolId || 'school1';
+        const finalSchoolId = (effectiveRole === 'admin' && branchVal) ? `${baseSchoolId}-${branchVal}` : baseSchoolId;
+
+        await ensureSchoolExists(finalSchoolId);
+
         const token = jwt.sign(
-          { uid: act.id, name: act.role, role: effectiveRole, schoolId: act.schoolId || 'school8' },
+          { uid: act.id, name: act.role, role: effectiveRole, schoolId: finalSchoolId },
           JWT_SECRET,
           { expiresIn: '30d' }
         );
+
         return res.json({ 
           success: true, 
           token, 
@@ -8509,7 +9272,8 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
             name: effectiveRole === 'teacher' ? 'الأستاذ المحاضر' : effectiveRole === 'admin' ? 'abdulradhaalmayali@gmail.com' : 'مشترك الدورة',
             email: effectiveRole === 'admin' ? 'abdulradhaalmayali@gmail.com' : null,
             role: effectiveRole, 
-            schoolId: act.schoolId || targetSchoolId || 'school8',
+            adminBranch: branchVal,
+            schoolId: finalSchoolId,
             studentCode: code,
             subject: 'المنهج العام',
             grade: 'السادس العلمي'
@@ -9583,6 +10347,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
           uid: tempId,
           name: user.name,
           role: user.role,
+          adminBranch: (user as any).adminBranch,
           schoolId: user.schoolId
         }
       });
@@ -9606,6 +10371,30 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
         }
       });
       res.json({ success: true, counts });
+    } catch (error: any) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  app.get('/api/lounge-messages/recent-chats/:uid', async (req, res) => {
+    try {
+      const { uid } = req.params;
+      const msgs = await db.select().from(lounge_messages).where(or(
+        eq(lounge_messages.userId, uid),
+        eq(lounge_messages.recipientId, uid)
+      ));
+      
+      const latestTimestamps: Record<string, string> = {};
+      msgs.forEach(msg => {
+        const otherId = msg.userId === uid ? msg.recipientId : msg.userId;
+        if (otherId && otherId !== 'all') {
+          const ts = msg.timestamp ? new Date(msg.timestamp).toISOString() : '';
+          if (!latestTimestamps[otherId] || ts > latestTimestamps[otherId]) {
+            latestTimestamps[otherId] = ts;
+          }
+        }
+      });
+      res.json({ success: true, latestTimestamps });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }
@@ -10231,6 +11020,8 @@ app.delete('/api/system_errors/:id', async (req, res) => {
   app.patch('/api/lounge-messages/read/:roomId/:uid', async (req, res) => {
     try {
       const { roomId, uid } = req.params;
+      
+      // Update lounge_messages to read: true
       await db.update(lounge_messages)
         .set({ read: true })
         .where(and(
@@ -10238,6 +11029,24 @@ app.delete('/api/system_errors/:id', async (req, res) => {
           eq(lounge_messages.recipientId, uid),
           eq(lounge_messages.read, false)
         ));
+      
+      // Also update notifications of type 'lounge_message' or 'parent_message' where recipientId is uid
+      await db.update(notifications)
+        .set({ read: true })
+        .where(and(
+          eq(notifications.recipientId, uid),
+          or(
+            eq(notifications.type, 'lounge_message'),
+            eq(notifications.type, 'parent_message')
+          ),
+          eq(notifications.read, false)
+        ));
+
+      // Emit realtime broadcasts so both clients and counts sync instantly
+      realtimeServerInstance?.broadcastManual('lounge_messages', roomId, 'UPDATE', { roomId, read: true });
+      realtimeServerInstance?.broadcastManual('notifications', uid, 'UPDATE', { recipientId: uid, read: true });
+      realtimeServerInstance?.broadcastManual('notifications_updated', undefined, 'UPDATE', {});
+
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
@@ -10265,6 +11074,33 @@ app.delete('/api/system_errors/:id', async (req, res) => {
       
       // Broadcast to both sender and recipient for realtime updates
       realtimeServerInstance?.broadcastManual('lounge_messages', newMsg.id, 'INSERT', newMsg);
+
+      // Send push notification for private messages
+      if (newMsg.recipientId && newMsg.recipientId !== 'all') {
+        try {
+          const notificationId = uuidv4();
+          const notifPayload = {
+            id: notificationId,
+            schoolId: msg.realSchoolId || msg.schoolId || 'global',
+            recipientId: newMsg.recipientId,
+            title: `💬 رسالة جديدة من ${newMsg.userName}`,
+            body: newMsg.text === 'بصمة صوتية' ? 'أرسل لك بصمة صوتية 🎙️' : (newMsg.text.length > 50 ? newMsg.text.substring(0, 50) + '...' : newMsg.text),
+            type: 'lounge_message',
+            data: { 
+              roomId: newMsg.schoolId, 
+              senderId: newMsg.userId,
+              senderName: newMsg.userName,
+              senderRole: newMsg.userRole
+            },
+            read: false,
+            createdAt: new Date()
+          };
+          await db.insert(notifications).values(notifPayload);
+          realtimeServerInstance?.broadcastManual('notifications', notificationId, 'INSERT', notifPayload);
+        } catch (notifErr) {
+          console.warn("Failed to send lounge message notification", notifErr);
+        }
+      }
       
       res.json({ success: true, message: newMsg });
     } catch (error: any) {
@@ -10332,8 +11168,8 @@ app.delete('/api/system_errors/:id', async (req, res) => {
         lastActive: s.lastLogin
       }));
       
-      const nonStudents = userList.filter(u => u.role !== 'student' && u.role !== 'parent' && u.role !== 'driver');
-      const combined = [...nonStudents, ...mappedStudents];
+      const systemUsers = userList.filter(u => u.role !== 'student' && u.role !== 'driver');
+      const combined = [...systemUsers, ...mappedStudents];
       
       for (const st of combined) {
         if (st.role === 'student') {
@@ -13717,6 +14553,24 @@ app.post('/api/admin/maintenance/purge-cache', async (req, res) => {
     await sqlRaw`ALTER TABLE schools ADD COLUMN IF NOT EXISTS "logo_url" text;`;
     await sqlRaw`ALTER TABLE schools ADD COLUMN IF NOT EXISTS "location" text;`;
     await sqlRaw`ALTER TABLE schools ADD COLUMN IF NOT EXISTS "type" varchar(100);`;
+    
+    // Add telegram config columns to school_configs
+    await sqlRaw`ALTER TABLE school_configs ADD COLUMN IF NOT EXISTS "telegram_bot_token" text;`;
+    await sqlRaw`ALTER TABLE school_configs ADD COLUMN IF NOT EXISTS "telegram_channels_mapping" jsonb DEFAULT '{}'::jsonb;`;
+
+    // Create bairaq_activities table
+    await sqlRaw`
+      CREATE TABLE IF NOT EXISTS "bairaq_activities" (
+        "id" varchar(128) PRIMARY KEY NOT NULL,
+        "student_id" varchar(128) NOT NULL,
+        "school_id" varchar(128) NOT NULL,
+        "media_url" text NOT NULL,
+        "description" text,
+        "author_name" varchar(255),
+        "created_at" timestamp DEFAULT now()
+      );
+    `;
+
     // High-concurrency performance indexes
     await sqlRaw`CREATE INDEX IF NOT EXISTS idx_schools_status ON schools(status);`;
     await sqlRaw`CREATE INDEX IF NOT EXISTS idx_students_school_id ON students(school_id);`;
@@ -13725,7 +14579,7 @@ app.post('/api/admin/maintenance/purge-cache', async (req, res) => {
     await sqlRaw`CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);`;
     await sqlRaw`CREATE INDEX IF NOT EXISTS idx_teachers_school_id ON teachers(school_id);`;
   } catch (schemaErr) {
-    // Non-blocking fallback
+    console.error("Failed to execute school startup migrations:", schemaErr);
   }
 
   // Ensure school_announcements table allows global/system-wide broadcasts ('all', 'general', etc.)

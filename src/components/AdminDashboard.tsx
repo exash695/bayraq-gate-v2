@@ -198,7 +198,14 @@ const MascotHeaderVideo: React.FC<{ activeTab: string }> = ({ activeTab }) => {
   }, [resolvedUrl]);
 
   if (hasError || !resolvedUrl) {
-    const fallbackSrc = resolveMediaUrl(mascotVideos[activeTab]?.src || '/mascot/connect.jpg');
+    const imageMapping: Record<string, string> = {
+      pulse: '/mascot/connect.jpg',
+      audit_logs: '/mascot/study.jpg',
+      content_monitoring: '/mascot/study.jpg',
+      school_settings: '/mascot/welcome.jpg',
+      excellence: '/mascot/achieve.jpg',
+    };
+    const fallbackSrc = imageMapping[activeTab] || '/mascot/welcome.jpg';
     return (
       <img
         key={`mascot-bg-fallback-${activeTab}`}
@@ -769,7 +776,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   }, [schoolSettings?.uniformConfigs]);
   
   // Behaviour Control Hook States
-  const [attendanceSubTab, setAttendanceSubTab] = useState<'attendance' | 'behavior' | 'uniform'>('attendance');
+  const [attendanceSubTab, setAttendanceSubTab] = useState<'attendance' | 'behavior' | 'uniform' | 'broadcast'>('attendance');
   const [selectedBehaviorStudent, setSelectedBehaviorStudent] = useState<any | null>(null);
   const [behaviorType, setBehaviorType] = useState<'positive' | 'negative'>('positive');
   const [behaviorAction, setBehaviorAction] = useState<string>('كتاب شكر وتقدير');
@@ -783,6 +790,51 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [isResettingBehavior, setIsResettingBehavior] = useState<boolean>(false);
   const [isSyncingBehavior, setIsSyncingBehavior] = useState<boolean>(false);
   
+  // Broadcast "Classroom Lens" Config States
+  const [tgBotToken, setTgBotToken] = useState<string>('');
+  const [tgChannelsMapping, setTgChannelsMapping] = useState<Record<string, string>>({});
+  const [isSavingTgConfig, setIsSavingTgConfig] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (schoolSettings) {
+      setTgBotToken(schoolSettings.telegramBotToken || '');
+      setTgChannelsMapping(schoolSettings.telegramChannelsMapping || {});
+    }
+  }, [schoolSettings]);
+
+  const handleSaveBroadcastConfig = async () => {
+    setIsSavingTgConfig(true);
+    try {
+      const response = await fetch(`/api/school-configs/${selectedSchoolId || 'school1'}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          telegramBotToken: tgBotToken,
+          telegramChannelsMapping: tgChannelsMapping
+        })
+      });
+      const data = await response.json();
+      if (data.success) {
+        showToast('تم حفظ وتحديث إعدادات البث وقنوات التواصل بنجاح! 📸🚀', 'success');
+      } else {
+        showToast(data.message || 'فشل حفظ الإعدادات', 'error');
+      }
+    } catch (err: any) {
+      showToast(err.message || 'حدث خطأ غير متوقع', 'error');
+    } finally {
+      setIsSavingTgConfig(false);
+    }
+  };
+  
+  const dynamicGrades = React.useMemo(() => {
+    const grades = new Set<string>();
+    activeSavedLists.forEach(list => {
+      if (list.name) grades.add(list.name);
+    });
+    // Fallback to AVAILABLE_GRADES if no active lists found (e.g. initial setup)
+    return grades.size > 0 ? Array.from(grades) : AVAILABLE_GRADES;
+  }, [activeSavedLists]);
+
   // Track sectional sub-views to hide top-level exit button
   const [studentsSubView, setStudentsSubView] = useState(false);
   const [financeSubView, setFinanceSubView] = useState(false);
@@ -1916,15 +1968,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                initial={{ opacity: 0 }} 
                animate={{ opacity: 1 }} 
                exit={{ opacity: 0 }}
-               className="space-y-6 px-4"
+               className={`space-y-6 transition-all ${attendanceSubTab === 'broadcast' ? 'w-full' : 'px-4'}`}
             >
                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-2 text-right" style={{ direction: 'rtl' }}>
                  <h2 className="text-white font-black text-xl">نظام سجل الانضباط المدرسي المتكامل</h2>
                  <span className="text-[10px] text-[#FFD600] font-black bg-[#FFD600]/10 border border-[#FFD600]/20 px-3 py-1 rounded-full">{schoolName}</span>
                </div>
                
-               {/* Smart and Smooth Tab Switcher (Glassy Design with 3 options) */}
-               <div className="grid grid-cols-1 md:grid-cols-3 gap-2 bg-[#101935]/85 p-1.5 rounded-2xl border border-white/5 w-full hover:border-white/10 transition-all backdrop-blur-md">
+               {/* Smart and Smooth Tab Switcher (Glassy Design with 4 options) */}
+               <div className="grid grid-cols-1 md:grid-cols-4 gap-2 bg-[#101935]/85 p-1.5 rounded-2xl border border-white/5 w-full hover:border-white/10 transition-all backdrop-blur-md">
                  <button
                    onClick={() => setAttendanceSubTab('attendance')}
                    className={`py-3 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all duration-300 ${attendanceSubTab === 'attendance' ? 'bg-gradient-to-r from-emerald-600 to-teal-500 text-white shadow-lg shadow-emerald-500/15 font-black scale-[1.01]' : 'text-white/40 hover:text-white/80'}`}
@@ -1946,9 +1998,114 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                    <span className="text-[14px]">👔</span>
                    <span>الزي المدرسي الرسمي</span>
                  </button>
+                 <button
+                   onClick={() => setAttendanceSubTab('broadcast')}
+                   className={`py-3 px-4 rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition-all duration-300 ${attendanceSubTab === 'broadcast' ? 'bg-gradient-to-r from-blue-600 to-cyan-500 text-white shadow-lg shadow-blue-500/15 font-black scale-[1.01]' : 'text-white/40 hover:text-white/80'}`}
+                 >
+                   <span className="text-[14px]">📸</span>
+                   <span>ربط بث الأنشطة (عين على الصف)</span>
+                 </button>
                </div>
 
-               {attendanceSubTab === 'uniform' ? (
+                {attendanceSubTab === 'broadcast' ? (
+                  <div className="space-y-6 text-right animate-in fade-in w-full" style={{ direction: 'rtl' }}>
+                    <div className="bg-gradient-to-br from-[#0c1329] to-[#080d1d] border-y border-white/10 p-6 relative overflow-hidden shadow-xl min-h-[60vh]">
+                      <div className="absolute top-0 left-0 w-64 h-64 bg-blue-500/10 blur-[100px] rounded-full pointer-events-none" />
+                      
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8 border-b border-white/5 pb-6">
+                        <div className="flex items-center gap-4">
+                          <div className="w-16 h-16 bg-blue-500/10 rounded-2xl flex items-center justify-center text-blue-400 border border-blue-500/20 shadow-inner">
+                            <span className="text-3xl">📸</span>
+                          </div>
+                          <div>
+                            <h3 className="text-2xl font-black text-white">إعدادات قنوات بث الأنشطة (عين على الصف)</h3>
+                            <p className="text-white/40 text-sm font-bold mt-1">اربط صفوف وشعب المدرسة بقنوات التواصل المخصصة لتفعيل الرفع المباشر والآمن دون عناء للأستاذ</p>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={handleSaveBroadcastConfig}
+                          disabled={isSavingTgConfig}
+                          className="h-12 px-8 rounded-2xl bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20 disabled:opacity-50 transition-all cursor-pointer self-end sm:self-auto"
+                        >
+                          {isSavingTgConfig ? (
+                            <>
+                              <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                              <span>جاري الحفظ والمزامنة...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Save size={18} />
+                              <span>حفظ ومزامنة البوت والقنوات 📡</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+
+                      <div className="space-y-8">
+                        {/* Bot Token Configuration */}
+                        <div className="bg-black/30 p-6 rounded-3xl border border-white/5 space-y-4">
+                          <h4 className="text-lg font-black text-cyan-400 flex items-center gap-2">
+                            <span>🤖</span>
+                            <span>إعداد رمز البوت الموحد (Broadcast Bot Token)</span>
+                          </h4>
+                          <p className="text-white/40 text-xs font-bold">هذا الرمز السري يتم الحصول عليه من المسؤول التقني لتمكين النظام من النشر التلقائي الصامت نيابة عن الأساتذة.</p>
+                          
+                          <div className="space-y-2">
+                            <label className="text-xs text-white/55 font-bold block">توكن البوت (API Access Token)</label>
+                            <input
+                              type="text"
+                              value={tgBotToken}
+                              onChange={(e) => setTgBotToken(e.target.value)}
+                              placeholder="مثال: 123456789:ABCdefGhIJKlmNoPQRsTUV..."
+                              className="w-full h-12 px-5 bg-[#0d1428] border border-white/10 rounded-2xl text-sm text-white placeholder-white/20 outline-none focus:border-blue-500 transition-all shadow-inner text-left"
+                              style={{ direction: 'ltr' }}
+                            />
+                          </div>
+                        </div>
+
+                        {/* Grade to Channel Mapping Configuration */}
+                        <div className="bg-black/30 p-6 rounded-3xl border border-white/5 space-y-5">
+                          <div className="flex items-center justify-between">
+                            <h4 className="text-lg font-black text-emerald-400 flex items-center gap-2">
+                              <span>🗺️</span>
+                              <span>ربط الصفوف بالقنوات (Grade to Broadcast Channels Map)</span>
+                            </h4>
+                            <span className="text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-3 py-1 rounded-full font-black">
+                              تم جلب {dynamicGrades.length} صف من مركز الأكواد
+                            </span>
+                          </div>
+                          <p className="text-white/40 text-xs font-bold">حدد القناة الخاصة بكل صف دراسي (مثال: @my_class_channel أو معرف القناة الرقمي للخاصة). يرجى التأكد من إضافة البوت كمشرف في كل هذه القنوات وصلاحية النشر مفعلة له.</p>
+
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                            {dynamicGrades.map((grade) => {
+                              const currentVal = tgChannelsMapping[grade] || '';
+                              return (
+                                <div key={grade} className="bg-black/20 p-5 rounded-2xl border border-white/5 flex flex-col gap-3 hover:border-emerald-500/20 transition-all group">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-sm font-black text-white group-hover:text-emerald-400 transition-colors">{grade}</span>
+                                    <div className="w-2 h-2 rounded-full bg-emerald-500/40 animate-pulse" />
+                                  </div>
+                                  <input
+                                    type="text"
+                                    value={currentVal}
+                                    onChange={(e) => {
+                                      const updated = { ...tgChannelsMapping, [grade]: e.target.value };
+                                      setTgChannelsMapping(updated);
+                                    }}
+                                    placeholder="مثال: @class_channel_name"
+                                    className="h-11 px-4 bg-[#0a0f20] border border-white/10 rounded-xl text-xs text-white placeholder-white/20 outline-none focus:border-emerald-500 transition-all text-left shadow-inner"
+                                    style={{ direction: 'ltr' }}
+                                  />
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ) : attendanceSubTab === 'uniform' ? (
                  <div className="space-y-6 text-right animate-in fade-in" style={{ direction: 'rtl' }}>
                    <div className="bg-gradient-to-br from-[#0c1329] to-[#080d1d] border border-white/10 rounded-3xl p-6 relative overflow-hidden shadow-xl">
                      <div className="absolute top-0 left-0 w-44 h-44 bg-indigo-500/10 blur-3xl rounded-full pointer-events-none" />

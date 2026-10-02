@@ -19,11 +19,11 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ onFinish, videoSrc
   }, [onFinish]);
 
   useEffect(() => {
-    // If onFinish is provided, guarantee dismissal within 1.5 seconds max
+    // Dismiss loading screen quickly to avoid delay
     if (onFinishRef.current) {
       const fallbackTimer = setTimeout(() => {
         onFinishRef.current?.();
-      }, 1500);
+      }, 400);
       return () => clearTimeout(fallbackTimer);
     }
   }, []);

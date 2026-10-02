@@ -180,11 +180,6 @@ export const BookDistributionManager: React.FC<BookDistributionManagerProps> = (
   // Export & Print Official Delivery Sheet
   const handleExportPrint = () => {
     if (!selectedList) return;
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      showToast('يرجى السماح بالنوافذ المنبثقة للطباعة', 'error');
-      return;
-    }
 
     const schoolName = document.querySelector('.school-name-header')?.textContent || 'ثانوية أوائل غماس الأهلية للبنين';
 
@@ -332,8 +327,7 @@ export const BookDistributionManager: React.FC<BookDistributionManagerProps> = (
         </body>
       </html>
     `;
-    printWindow.document.write(html);
-    printWindow.document.close();
+    printHTML(html);
   };
 
   return (

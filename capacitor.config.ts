@@ -26,6 +26,16 @@ const config = {
       scopes: ['profile', 'email'],
       serverClientId: '728585268376-hf25klmd55cjomn0cuhso6qno10gn977.apps.googleusercontent.com',
       forceCodeForRefreshToken: true
+    },
+    SplashScreen: {
+      launchShowDuration: 0,
+      launchAutoHide: true,
+      backgroundColor: '#020617',
+      showSpinner: false,
+      androidSplashResourceName: 'splash',
+      androidScaleType: 'CENTER_CROP',
+      splashFullScreen: true,
+      splashImmersive: true
     }
   },
   android: {

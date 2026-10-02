@@ -22,8 +22,19 @@ import {
   ChevronDown,
   Layers,
   Info,
-  X
+  Camera,
+  Upload,
+  Loader2,
+  X,
+  Video,
+  Play,
+  Trash2,
+  Eye,
+  Download,
+  Share2,
+  Film
 } from 'lucide-react';
+import { ClassroomVideoPlayer } from './ClassroomVideoPlayer';
 import { academicService, SchoolStudent, AcademicList } from '../services/academicService';
 import { staffService } from '../services/staffService';
 import { safeStorage } from '../lib/storage';
@@ -448,6 +459,157 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
   const [customEvalText, setCustomEvalText] = useState<string>('');
   const [isSavingEval, setIsSavingEval] = useState<boolean>(false);
 
+  // Classroom Lens ("عين على الصف") State
+  const [activeMainTab, setActiveMainTab] = useState<'attendance' | 'lens'>('attendance');
+  const [showLensModal, setShowLensModal] = useState<boolean>(false);
+  const [selectedLensStudent, setSelectedLensStudent] = useState<any | null>(null);
+  const [isBroadcastToAllMode, setIsBroadcastToAllMode] = useState<boolean>(false);
+  const [lensDescription, setLensDescription] = useState<string>('مشاركة وتفاعل صفي ممتاز 🌟');
+  const [lensFile, setLensFile] = useState<File | null>(null);
+  const [lensUploadStatus, setLensUploadStatus] = useState<string>('');
+  const [isUploadingLens, setIsUploadingLens] = useState<boolean>(false);
+  const activeUploadXhrRef = useRef<XMLHttpRequest | null>(null);
+
+  // Cancel running upload
+  const handleCancelUpload = () => {
+    if (activeUploadXhrRef.current) {
+      try {
+        activeUploadXhrRef.current.abort();
+      } catch (e) {
+        console.warn("Could not abort XHR:", e);
+      }
+      activeUploadXhrRef.current = null;
+    }
+    setIsUploadingLens(false);
+    setLensUploadStatus('');
+    setShowLensModal(false);
+    setLensFile(null);
+    setSelectedLensStudent(null);
+    setIsBroadcastToAllMode(false);
+    showToast('تم إلغاء عملية الرفع 🛑', 'info');
+  };
+
+  // Classroom Lens Feed and Gallery State
+  const [classLensActivities, setClassLensActivities] = useState<any[]>([]);
+  const [isLoadingClassLens, setIsLoadingClassLens] = useState<boolean>(false);
+
+  // Student Lens History Modal State
+  const [viewingLensHistoryStudent, setViewingLensHistoryStudent] = useState<any | null>(null);
+  const [studentLensHistory, setStudentLensHistory] = useState<any[]>([]);
+  const [isLoadingStudentHistory, setIsLoadingStudentHistory] = useState<boolean>(false);
+
+  // Delete Snapshot Confirmation State (Avoids window.confirm blocked by iframes)
+  const [activityToDelete, setActivityToDelete] = useState<{ id: string; desc?: string } | null>(null);
+  const [isDeletingLensActivity, setIsDeletingLensActivity] = useState<boolean>(false);
+
+  // Broadcast / Group Lens History Modal State
+  const [showBroadcastHistoryModal, setShowBroadcastHistoryModal] = useState<boolean>(false);
+  const [broadcastHistory, setBroadcastHistory] = useState<any[]>([]);
+  const [isLoadingBroadcastHistory, setIsLoadingBroadcastHistory] = useState<boolean>(false);
+
+  // Open broadcast history modal
+  const handleOpenBroadcastHistory = () => {
+    setShowBroadcastHistoryModal(true);
+    setIsLoadingBroadcastHistory(true);
+    fetch(`/api/bairaq-activities?studentId=ALL&schoolId=${schoolId || 'school1'}`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && Array.isArray(data.activities)) {
+          // Strictly only group broadcasts
+          const broadcastActs = data.activities.filter((act: any) => act.studentId === 'ALL' || !act.studentId);
+          setBroadcastHistory(broadcastActs);
+        } else {
+          setBroadcastHistory([]);
+        }
+      })
+      .catch(err => console.error("Failed to load broadcast history:", err))
+      .finally(() => setIsLoadingBroadcastHistory(false));
+  };
+
+  // Teacher Subject for Classroom Lens
+  const [lensSubject, setLensSubject] = useState<string>(() => {
+    return teacherData?.subject || teacherData?.specialization || internalTeacherData?.subject || 'الرياضيات';
+  });
+  const [lensTeacherName, setLensTeacherName] = useState<string>(() => {
+    return teacherData?.name || teacherData?.fullName || internalTeacherData?.name || 'الأستاذ';
+  });
+
+  useEffect(() => {
+    const name = teacherData?.name || teacherData?.fullName || internalTeacherData?.name || '';
+    if (name && (lensTeacherName === 'الأستاذ' || !lensTeacherName)) setLensTeacherName(name);
+    const sub = teacherData?.subject || teacherData?.specialization || internalTeacherData?.subject || '';
+    if (sub && (lensSubject === 'الرياضيات' || !lensSubject)) setLensSubject(sub);
+  }, [teacherData, internalTeacherData]);
+
+  // Fetch Class Activities for Classroom Lens Tab
+  const fetchClassLensActivities = () => {
+    if (!schoolId) return;
+    setIsLoadingClassLens(true);
+    fetch(`/api/bairaq-activities?schoolId=${schoolId}&date=${selectedDate}&grade=${encodeURIComponent(activeClass)}`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && Array.isArray(data.activities)) {
+          setClassLensActivities(data.activities);
+        } else {
+          setClassLensActivities([]);
+        }
+      })
+      .catch(err => console.error("Failed to load class lens activities:", err))
+      .finally(() => setIsLoadingClassLens(false));
+  };
+
+  useEffect(() => {
+    if (activeMainTab === 'lens') {
+      fetchClassLensActivities();
+    }
+  }, [activeMainTab, selectedDate, activeClass, schoolId]);
+
+  // Open individual student's lens history
+  const handleOpenStudentLensHistory = (student: any) => {
+    setViewingLensHistoryStudent(student);
+    setIsLoadingStudentHistory(true);
+    const stId = student.id || student.code || student.name;
+    const schId = student.schoolId || schoolId;
+    fetch(`/api/bairaq-activities?studentId=${encodeURIComponent(stId)}&schoolId=${encodeURIComponent(schId)}`)
+      .then(res => res.json())
+      .then(data => {
+        if (data.success && Array.isArray(data.activities)) {
+          // Strictly exclude group broadcasts ('ALL') from teacher student history modal
+          const individualActs = data.activities.filter((act: any) => act.studentId && act.studentId !== 'ALL');
+          setStudentLensHistory(individualActs);
+        } else {
+          setStudentLensHistory([]);
+        }
+      })
+      .catch(err => console.error("Failed to load student lens history:", err))
+      .finally(() => setIsLoadingStudentHistory(false));
+  };
+
+  // Perform deletion of snapshot with API call
+  const handleConfirmDeleteSnapshot = async () => {
+    if (!activityToDelete) return;
+    const targetId = activityToDelete.id;
+    setIsDeletingLensActivity(true);
+    try {
+      const res = await fetch(`/api/bairaq-activities/${targetId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        showToast('تم حذف اللقطة بنجاح 🗑️', 'success');
+        setClassLensActivities(prev => prev.filter(a => a.id !== targetId));
+        setStudentLensHistory(prev => prev.filter(a => a.id !== targetId));
+        setBroadcastHistory(prev => prev.filter(a => a.id !== targetId));
+        setActivityToDelete(null);
+        realtimeManager.broadcast('lens_activities_changed', { deletedId: targetId });
+      } else {
+        showToast(data.message || 'فشل حذف اللقطة', 'error');
+      }
+    } catch (e) {
+      showToast('فشل حذف اللقطة', 'error');
+    } finally {
+      setIsDeletingLensActivity(false);
+    }
+  };
+
   // 1. Subscribe to students and academic lists via PostgreSQL / REST backend
   useEffect(() => {
     const unsubStudents = academicService.subscribeToStudents(schoolId || 'school1', (students) => {
@@ -814,6 +976,124 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
     }
   };
 
+  const handleUploadLensActivity = async () => {
+    if (!lensFile) {
+      showToast('⚠️ يرجى تحديد فيديو أو صورة للرفع أولاً', 'error');
+      return;
+    }
+    if (!selectedLensStudent && !isBroadcastToAllMode) {
+      showToast('يرجى تحديد التلميذ أو اختيار النشر لجميع طلاب الصف', 'error');
+      return;
+    }
+
+    // Client-side file size validation (Up to 500MB for high-definition classroom recordings)
+    const MAX_SIZE = 500 * 1024 * 1024; // 500MB
+    if (lensFile.size > MAX_SIZE) {
+      showToast(`⚠️ حجم الملف كبير جداً (${(lensFile.size / (1024 * 1024)).toFixed(1)}MB). الحد الأقصى هو 500MB.`, 'error');
+      return;
+    }
+    
+    console.log('[Lens Upload] Initiating upload...', {
+      studentId: isBroadcastToAllMode ? 'ALL' : (selectedLensStudent?.id || selectedLensStudent?.code),
+      isAll: isBroadcastToAllMode,
+      schoolId: schoolId,
+      fileName: lensFile.name,
+      fileSize: lensFile.size,
+      fileType: lensFile.type
+    });
+
+    setIsUploadingLens(true);
+    setLensUploadStatus('جاري تجهيز الملف... 0%');
+    
+    try {
+      const formData = new FormData();
+      formData.append('file', lensFile);
+      formData.append('studentId', isBroadcastToAllMode ? 'ALL' : (selectedLensStudent?.id || selectedLensStudent?.code || 'ALL'));
+      formData.append('studentName', selectedLensStudent?.name || '');
+      formData.append('studentCode', selectedLensStudent?.code || '');
+      formData.append('parentCode', selectedLensStudent?.parentCode || '');
+      formData.append('isAllStudents', isBroadcastToAllMode ? 'true' : 'false');
+      formData.append('grade', activeClass);
+      formData.append('schoolId', selectedLensStudent?.schoolId || schoolId || 'school1');
+      formData.append('description', lensDescription);
+      formData.append('authorName', lensTeacherName || teacherData?.name || internalTeacherData?.name || 'الأستاذ');
+      formData.append('subject', lensSubject || teacherData?.subject || internalTeacherData?.subject || '');
+      formData.append('mediaType', lensFile.type.startsWith('video/') ? 'video' : 'photo');
+
+      // Use XMLHttpRequest for progress tracking
+      const xhr = new XMLHttpRequest();
+      activeUploadXhrRef.current = xhr;
+      
+      // Handle progress
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) {
+          const percent = Math.round((event.loaded / event.total) * 100);
+          const loadedMB = (event.loaded / (1024 * 1024)).toFixed(1);
+          const totalMB = (event.total / (1024 * 1024)).toFixed(1);
+          setLensUploadStatus(`جاري رفع الملف للسيرفر: ${percent}% (${loadedMB} / ${totalMB} MB)`);
+        }
+      };
+
+      // Create a promise to handle the XHR
+      const uploadPromise = new Promise((resolve, reject) => {
+        xhr.open('POST', '/api/bairaq-activities/upload');
+        
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const res = JSON.parse(xhr.responseText);
+              resolve(res);
+            } catch (e) {
+              reject(new Error('رد غير صالح من السيرفر'));
+            }
+          } else {
+            let errorMsg = `فشل الرفع: كود ${xhr.status}`;
+            try {
+              const res = JSON.parse(xhr.responseText);
+              errorMsg = res.message || errorMsg;
+            } catch (e) {}
+            reject(new Error(errorMsg));
+          }
+        };
+
+        xhr.onerror = () => reject(new Error('حدث خطأ في الاتصال بالشبكة'));
+        xhr.ontimeout = () => reject(new Error('انتهت مهلة الرفع، قد يكون الملف كبيراً جداً أو الإنترنت ضعيفاً'));
+        xhr.onabort = () => reject(new Error('UPLOAD_ABORTED'));
+        
+        xhr.timeout = 600000; // 10 minutes timeout for video up to 500MB
+        xhr.send(formData);
+      });
+
+      const resData: any = await uploadPromise;
+      
+      if (resData.success) {
+        showToast(resData.message || 'تم رفع لقطة "عين على الصف" وبثها وتوثيقها فورياً لولي الأمر! 🎉📸', 'success');
+        setShowLensModal(false);
+        setLensFile(null);
+        setLensDescription('مشاركة وتفاعل صفي ممتاز 🌟');
+        setLensUploadStatus('');
+        setIsBroadcastToAllMode(false);
+        fetchClassLensActivities();
+        realtimeManager.broadcast('lens_activities_changed', { created: true });
+      } else {
+        const msg = resData.message || 'فشل نشر اللقطة على مركز البث';
+        showToast(msg, 'error');
+        setLensUploadStatus(`توقف: ${msg}`);
+      }
+    } catch (err: any) {
+      if (err.message === 'UPLOAD_ABORTED') {
+        console.log('[Lens Upload] Upload aborted by user.');
+        return;
+      }
+      console.error('[Lens Upload Error]', err);
+      showToast(err.message || 'حدث خطأ غير متوقع أثناء الرفع', 'error');
+      setLensUploadStatus(`فشل: ${err.message}`);
+    } finally {
+      activeUploadXhrRef.current = null;
+      setIsUploadingLens(false);
+    }
+  };
+
   // Handler: 1-Click Status Update (Instant Real-time Sync with Backend)
   const handleQuickStatus = async (student: any, status: 'present' | 'absent' | 'late') => {
     const teacherName = teacherData?.name || 'الأستاذ';
@@ -1101,6 +1381,37 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
         </div>
       </div>
 
+      {/* 🌟 Top-Level Tab Switcher: [سجل الحضور والتقييم ⚡] vs [عين على الصف 📸✨] */}
+      <div className="flex items-center gap-2 p-1.5 bg-[#0a1124] border border-cyan-500/25 rounded-2xl shadow-xl">
+        <button
+          type="button"
+          onClick={() => setActiveMainTab('attendance')}
+          className={`flex-1 py-3 px-4 rounded-xl font-black text-xs sm:text-sm flex items-center justify-center gap-2.5 transition-all cursor-pointer ${
+            activeMainTab === 'attendance'
+              ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 text-white shadow-[0_0_20px_rgba(16,185,129,0.35)] scale-[1.01]'
+              : 'text-white/60 hover:text-white hover:bg-white/5'
+          }`}
+        >
+          <UserCheck size={18} className={activeMainTab === 'attendance' ? 'animate-pulse' : ''} />
+          <span>سجل الحضور والتقييم اليومي ⚡</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveMainTab('lens')}
+          className={`flex-1 py-3 px-4 rounded-xl font-black text-xs sm:text-sm flex items-center justify-center gap-2.5 transition-all cursor-pointer ${
+            activeMainTab === 'lens'
+              ? 'bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white shadow-[0_0_20px_rgba(59,130,246,0.35)] scale-[1.01]'
+              : 'text-white/60 hover:text-white hover:bg-white/5'
+          }`}
+        >
+          <Camera size={18} className={activeMainTab === 'lens' ? 'animate-pulse text-cyan-300' : ''} />
+          <span>عين على الصف (اللقطات والبث الصفي) 📸✨</span>
+        </button>
+      </div>
+
+      {activeMainTab === 'attendance' ? (
+        <>
       {/* 1. Action Controls Bar: Class Selector, Date Navigation & Print */}
       <div className="bg-gradient-to-r from-[#0d162d] via-[#101c3d] to-[#0d162d] p-3.5 sm:p-4 rounded-2xl border border-cyan-500/20 shadow-[0_10px_30px_rgba(6,182,212,0.08)] flex flex-col lg:flex-row lg:items-center justify-between gap-3">
         
@@ -1705,6 +2016,211 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
           })}
         </div>
       )}
+        </>
+      ) : (
+        /* ==================================================== */
+        /* 📸 DEDICATED CLASSROOM LENS TAB (عين على الصف) */
+        /* ==================================================== */
+        <div className="space-y-5 animate-in fade-in duration-300">
+          
+          {/* 1. Classroom Lens Controls Bar: Class Switcher & Date Controls */}
+          <div className="bg-gradient-to-r from-[#0c152e] via-[#0f1b3b] to-[#0c152e] p-3.5 sm:p-4 rounded-2xl border border-blue-500/25 shadow-[0_10px_30px_rgba(59,130,246,0.1)] flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+            
+            {/* Left Info & Live Indicator */}
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500/25 to-purple-500/25 border border-blue-400/40 flex items-center justify-center text-blue-300 shadow-[0_0_15px_rgba(59,130,246,0.25)] shrink-0">
+                <Camera size={22} className="animate-pulse" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h3 className="text-sm sm:text-base font-black text-white tracking-wide">
+                    عين على الصف • شعبة {activeClass}
+                  </h3>
+                  <span className="px-2 py-0.5 rounded-full text-[9.5px] font-black bg-blue-500/20 text-blue-300 border border-blue-500/40 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-ping" />
+                    بث مباشر وتوثيق
+                  </span>
+                </div>
+                <p className="text-[11px] text-white/50 font-medium">
+                  تاريخ الأنشطة: {selectedDate} {isToday && <span className="text-cyan-400 font-bold">(اليوم)</span>}
+                </p>
+              </div>
+            </div>
+
+            {/* Right Controls: Class Switcher & Date Navigation */}
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+              {/* Date Picker & Fast Navigator */}
+              <div className="flex items-center bg-[#080d1a] p-1 rounded-2xl border border-white/10 shadow-inner">
+                <button
+                  onClick={() => {
+                    const prev = new Date(selectedDate);
+                    prev.setDate(prev.getDate() - 1);
+                    setSelectedDate(prev.toISOString().split('T')[0]);
+                  }}
+                  title="اليوم السابق"
+                  className="w-7 h-7 rounded-xl bg-white/5 hover:bg-white/10 text-white/70 hover:text-white flex items-center justify-center transition-all cursor-pointer"
+                >
+                  <ChevronRight size={15} />
+                </button>
+
+                <div className="px-2.5 flex items-center gap-1.5">
+                  <Calendar size={13} className="text-blue-400" />
+                  <input
+                    type="date"
+                    value={selectedDate}
+                    onChange={(e) => setSelectedDate(e.target.value)}
+                    className="bg-transparent text-xs font-bold text-blue-200 outline-none cursor-pointer [color-scheme:dark]"
+                  />
+                </div>
+
+                <button
+                  onClick={() => {
+                    const next = new Date(selectedDate);
+                    next.setDate(next.getDate() + 1);
+                    setSelectedDate(next.toISOString().split('T')[0]);
+                  }}
+                  title="اليوم التالي"
+                  className="w-7 h-7 rounded-xl bg-white/5 hover:bg-white/10 text-white/70 hover:text-white flex items-center justify-center transition-all cursor-pointer"
+                >
+                  <ChevronLeft size={15} />
+                </button>
+              </div>
+
+              {/* Reset to Today Button */}
+              {!isToday && (
+                <button
+                  onClick={() => setSelectedDate(new Date().toISOString().split('T')[0])}
+                  className="px-3 py-1.5 rounded-xl bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/30 text-blue-300 text-xs font-black transition-all cursor-pointer flex items-center gap-1"
+                >
+                  <RefreshCw size={12} />
+                  <span>اليوم</span>
+                </button>
+              )}
+
+              {/* Refresh Feed */}
+              <button
+                onClick={fetchClassLensActivities}
+                disabled={isLoadingClassLens}
+                className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/70 hover:text-white border border-white/10 transition-all cursor-pointer"
+                title="تحديث قائمة اللقطات"
+              >
+                <RefreshCw size={14} className={isLoadingClassLens ? "animate-spin text-blue-400" : ""} />
+              </button>
+            </div>
+          </div>
+
+          {/* 2. Elegant Slim Broadcast Action Bar */}
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-gradient-to-r from-blue-950/80 via-indigo-950/70 to-purple-950/80 border border-blue-500/30 shadow-lg space-y-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="w-9 h-9 rounded-xl bg-blue-500/20 text-blue-300 flex items-center justify-center shrink-0 border border-blue-400/30 shadow-sm text-base">
+                📢
+              </div>
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h4 className="text-xs sm:text-sm font-black text-white truncate">
+                    المشاركات واللقطات الجماعية
+                  </h4>
+                  <span className="px-2 py-0.5 rounded-full text-[9.5px] font-bold bg-blue-500/25 text-blue-200 border border-blue-400/30 shrink-0">
+                    شعبة {activeClass}
+                  </span>
+                </div>
+                <p className="text-[10px] text-white/50 truncate">
+                  رفع نشاط صفي أو تكريم جماعي ليصل فوراً لكافة أولياء أمور الشعبة
+                </p>
+              </div>
+            </div>
+
+            {/* Action Buttons: 2-column grid on mobile / flex on desktop */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-white/10">
+              <button
+                type="button"
+                onClick={handleOpenBroadcastHistory}
+                className="w-full py-2.5 px-3 rounded-xl bg-purple-600/25 hover:bg-purple-600/35 border border-purple-500/40 text-purple-200 font-black text-xs transition-all cursor-pointer flex items-center justify-center gap-2 shadow-md active:scale-98"
+                title="عرض أرشيف وسجل اللقطات الجماعية المنشورة للشعبة"
+              >
+                <Film size={15} className="text-purple-400 shrink-0" />
+                <span>سجل المشاركات الجماعية 📢</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedLensStudent({ isAll: true, name: `جميع طلاب شعبة ${activeClass}` });
+                  setIsBroadcastToAllMode(true);
+                  setLensFile(null);
+                  setLensDescription('نشاط ومشاركة صفية جماعية ممتازة لجميع طلاب الصف 🌟👏');
+                  setShowLensModal(true);
+                }}
+                className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-500 hover:to-purple-500 text-white font-black text-xs transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-blue-600/30 active:scale-98"
+              >
+                <Camera size={15} className="shrink-0" />
+                <span>مشاركة مع الشعبة 🚀</span>
+              </button>
+            </div>
+          </div>
+
+          {/* 3. Student List for Quick Individual Uploads & History Archive */}
+          <div className="space-y-3 pt-2">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-black text-white flex items-center gap-2">
+                <span>👥 طلاب شعبة {activeClass} ({classStudents.length} طالب):</span>
+              </h4>
+              <span className="text-[11px] text-white/40">اختر طالباً لرفع لقطة خاصة به أو مراجعة سجله</span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {classStudents.map((student, idx) => {
+                return (
+                  <div
+                    key={student.id || student.code || idx}
+                    className="bg-[#0c142b] border border-white/10 hover:border-blue-500/30 rounded-2xl p-3 flex items-center justify-between gap-3 shadow-md transition-all"
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <div className="w-8 h-8 rounded-xl bg-blue-500/15 border border-blue-400/20 text-blue-300 flex items-center justify-center font-black text-xs shrink-0">
+                        {idx + 1}
+                      </div>
+                      <div className="min-w-0">
+                        <h5 className="text-xs sm:text-sm font-black text-white truncate">{student.name}</h5>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {/* Upload moment for this student */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedLensStudent(student);
+                          setIsBroadcastToAllMode(false);
+                          setLensFile(null);
+                          setLensDescription('مشاركة وتفاعل صفي ممتاز 🌟');
+                          setShowLensModal(true);
+                        }}
+                        className="px-2.5 py-1.5 rounded-xl bg-blue-500/20 hover:bg-blue-500/30 border border-blue-400/30 text-blue-300 hover:text-white font-bold text-xs transition-all flex items-center gap-1 shadow-sm active:scale-95 cursor-pointer"
+                        title="رفع لقطة جديدة لهذا الطالب"
+                      >
+                        <Camera size={13} />
+                        <span>رفع لقطة</span>
+                      </button>
+
+                      {/* View student history */}
+                      <button
+                        type="button"
+                        onClick={() => handleOpenStudentLensHistory(student)}
+                        className="px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-white/80 hover:text-white font-bold text-xs transition-all flex items-center gap-1 cursor-pointer"
+                        title="عرض سجل اللقطات السابقة لهذا الطالب"
+                      >
+                        <History size={13} />
+                        <span>عرض السجل</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+        </div>
+      )}
 
       {/* 5. Student History Logs Modal */}
       <AnimatePresence>
@@ -1937,6 +2453,526 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
                     <Sparkles size={14} />
                   )}
                   <span>إرسال التقييم المباشر لولي الأمر 🚀</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 7. Classroom Lens ("عين على الصف") Modal */}
+      <AnimatePresence>
+        {showLensModal && (selectedLensStudent || isBroadcastToAllMode) && (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md" dir="rtl">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="w-full max-w-lg bg-gradient-to-b from-[#0e172e] via-[#091022] to-[#050812] rounded-3xl border border-blue-500/30 p-5 sm:p-6 shadow-2xl space-y-5 text-right relative overflow-hidden max-h-[90vh] overflow-y-auto no-scrollbar"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-white/10 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500/20 to-indigo-500/20 border border-blue-400/40 text-blue-300 flex items-center justify-center shadow-lg shadow-blue-500/10 shrink-0">
+                    <Camera size={24} className="animate-pulse" />
+                  </div>
+                  <div>
+                    <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
+                      <span>عين على الصف 📸✨</span>
+                    </h3>
+                    <p className="text-xs text-blue-300 font-bold mt-0.5">
+                      {isBroadcastToAllMode ? (
+                        <span className="text-white font-black">📢 مشاركة جماعية لجميع طلاب شعبة {activeClass}</span>
+                      ) : (
+                        <>التلميذ: <span className="text-white font-black">{selectedLensStudent?.name}</span> • الشعبة: {activeClass}</>
+                      )}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleCancelUpload}
+                  className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 text-white/50 hover:text-white flex items-center justify-center transition-all cursor-pointer shrink-0"
+                  title="إغلاق وإلغاء الرفع"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Target Mode Banner: Strictly Locked to Selected Mode without Confusing Switcher */}
+              {isBroadcastToAllMode ? (
+                <div className="p-3.5 rounded-2xl bg-gradient-to-r from-blue-900/40 via-indigo-900/40 to-purple-900/40 border border-blue-500/30 flex items-center justify-between gap-3 shadow-md">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-blue-500/20 text-blue-300 flex items-center justify-center font-bold text-sm shrink-0">
+                      📢
+                    </div>
+                    <div>
+                      <h4 className="text-xs sm:text-sm font-black text-white">مشاركة جماعية لكافة أولياء أمور الشعبة</h4>
+                      <p className="text-[10.5px] text-blue-200/80">مخصص للبث والتوثيق لجميع طلاب شعبة ({activeClass})</p>
+                    </div>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-xl text-[10px] font-black bg-blue-500/30 text-blue-200 border border-blue-400/30 shrink-0">
+                    شعبة {activeClass}
+                  </span>
+                </div>
+              ) : (
+                <div className="p-3.5 rounded-2xl bg-gradient-to-r from-cyan-900/40 via-blue-900/40 to-indigo-900/40 border border-cyan-500/30 flex items-center justify-between gap-3 shadow-md">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-cyan-500/20 text-cyan-300 flex items-center justify-center font-bold text-sm shrink-0">
+                      🎯
+                    </div>
+                    <div>
+                      <h4 className="text-xs sm:text-sm font-black text-white">لقطة خاصة بالتلميذ: {selectedLensStudent?.name}</h4>
+                      <p className="text-[10.5px] text-cyan-200/80">توثيق مباشر في سجل التلميذ وإشعار فوري لولي أمره</p>
+                    </div>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-xl text-[10px] font-black bg-cyan-500/30 text-cyan-200 border border-cyan-400/30 shrink-0">
+                    لقطة فردية
+                  </span>
+                </div>
+              )}
+
+              {/* Teacher & Subject Selector */}
+              <div className="p-3 rounded-2xl bg-black/40 border border-white/10 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-black text-white/90 flex items-center gap-1.5">
+                    <span>👨‍🏫 الأستاذ والمادة الدراسية:</span>
+                  </label>
+                  <span className="text-[10px] text-cyan-300 font-bold">تظهر على اللقطة في لوحة ولي الأمر</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div className="space-y-1">
+                    <span className="text-[10px] text-white/50 block font-bold">اسم الأستاذ:</span>
+                    <div className="relative group">
+                      <input
+                        type="text"
+                        value={lensTeacherName}
+                        onChange={(e) => setLensTeacherName(e.target.value)}
+                        className="w-full bg-[#080e1c] border border-white/10 focus:border-blue-500/50 rounded-xl pr-9 pl-3 py-2 text-xs font-bold text-white outline-none transition-all"
+                        placeholder="اسم الأستاذ..."
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-400">👨‍🏫</span>
+                    </div>
+                  </div>
+                  <div className="space-y-1">
+                    <span className="text-[10px] text-white/50 block font-bold">المادة الدراسية (حسب الاختصاص):</span>
+                    <div className="w-full bg-[#080e1c] border border-cyan-500/40 rounded-xl px-3 py-2 text-xs font-bold text-cyan-300 flex items-center gap-2">
+                      <span className="text-cyan-400">📚</span>
+                      <span className="truncate">{lensSubject || teacherData?.subject || teacherData?.specialization || internalTeacherData?.subject || 'عام'}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Info banner */}
+              <div className="p-3 rounded-2xl bg-blue-500/10 border border-blue-500/20 text-blue-200 text-xs font-bold flex items-center gap-2">
+                <Info size={16} className="text-blue-400 shrink-0" />
+                <span>
+                  {isBroadcastToAllMode 
+                    ? `سيتم نشر اللقطة وتوثيقها فورياً في حسابات جميع أولياء أمور طلاب شعبة (${activeClass}) وقناة البث! 📡` 
+                    : `سيتم نشر لقطة النشاط مباشرة في قناة التواصل المخصصة للصف، وإشعار ولي أمر الطالب في نفس اللحظة! 📡📱`}
+                </span>
+              </div>
+
+              {/* File Select */}
+              <div className="space-y-2">
+                <label className="text-xs font-black text-white/80 block">⚡ اختر الفيديو أو الصورة (مشاركة التلميذ في الصف):</label>
+                <div className="border-2 border-dashed border-white/10 hover:border-blue-500/50 rounded-2xl p-6 text-center cursor-pointer transition-all relative bg-black/20 group">
+                  <input
+                    type="file"
+                    accept="image/*,video/*"
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files[0]) {
+                        setLensFile(e.target.files[0]);
+                      }
+                    }}
+                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                  />
+                  {lensFile ? (
+                    <div className="space-y-2">
+                      <span className="text-3xl block">🎥</span>
+                      <span className="text-xs font-black text-emerald-400 block">{lensFile.name}</span>
+                      <span className="text-[10px] text-white/50 block">({(lensFile.size / 1024 / 1024).toFixed(2)} MB) - انقر لتغيير الملف</span>
+                      {lensFile.size > 48 * 1024 * 1024 && (
+                        <div className="inline-block px-3 py-1 rounded-xl bg-blue-500/20 text-blue-300 text-[10px] font-bold border border-blue-500/30">
+                          ⚡ فيديو فائق الدقة - سيتم بثه بجودة سينمائية وحفظه دون أي اقتطاع
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="space-y-2 group-hover:scale-105 transition-transform duration-300">
+                      <Upload size={28} className="text-white/30 mx-auto group-hover:text-blue-400" />
+                      <span className="text-xs font-black text-white/60 block">انقر هنا لتحديد النشاط (فيديو أو صورة)</span>
+                      <span className="text-[10px] text-white/30 block">يدعم مقاطع الفيديو والصور فائقة الدقة حتى 500 ميغابايت</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Comments Selector */}
+              <div className="space-y-2">
+                <label className="text-xs font-black text-white/80 block">💬 عبارات تفاعلية جاهزة (اختر أو اكتب تفاصيل النشاط):</label>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    "مشاركة وتفاعل صفي ممتاز 🌟",
+                    "إجابة ممتازة وذكية على السؤال الصعب 💡",
+                    "قراءة معبرة ومتميزة لدرس اليوم 📚",
+                    "انضباط وهدوء ومثابرة رائعة داخل القاعة 👑",
+                    "أداء استثنائي وتفوق مميز في الدرس 👏"
+                  ].map((phrase) => {
+                    const isSelected = lensDescription === phrase;
+                    return (
+                      <button
+                        key={phrase}
+                        type="button"
+                        onClick={() => setLensDescription(phrase)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                          isSelected
+                            ? "bg-blue-500 text-white border-blue-400 shadow-md shadow-blue-500/20 scale-[1.01]"
+                            : "bg-blue-500/10 text-blue-300 border-blue-500/15 hover:bg-blue-500/20"
+                        }`}
+                      >
+                        {phrase}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Custom Description Textarea */}
+              <div className="space-y-1.5">
+                <textarea
+                  value={lensDescription}
+                  onChange={(e) => setLensDescription(e.target.value)}
+                  placeholder="اكتب ملاحظة أو تعديل مخصص هنا..."
+                  className="w-full bg-[#080e1c] border border-blue-500/30 rounded-2xl p-3 text-xs font-bold text-white placeholder-white/30 focus:border-blue-400 outline-none transition-all resize-none h-16 leading-relaxed"
+                />
+              </div>
+
+              {/* Actions */}
+              <div className="pt-3 border-t border-white/10 flex items-center justify-end gap-2.5">
+                <button
+                  type="button"
+                  onClick={handleCancelUpload}
+                  className={`px-4 py-2.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                    isUploadingLens
+                      ? 'bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 font-black'
+                      : 'bg-white/5 hover:bg-white/10 text-white/60 hover:text-white'
+                  }`}
+                >
+                  {isUploadingLens ? 'إلغاء الرفع فوراً 🛑' : 'إلغاء'}
+                </button>
+                <button
+                  type="button"
+                  disabled={isUploadingLens}
+                  onClick={handleUploadLensActivity}
+                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-blue-500 to-indigo-600 hover:from-blue-400 hover:to-indigo-500 text-white font-black text-xs transition-all cursor-pointer flex items-center gap-2 shadow-lg shadow-blue-500/25 active:scale-95 disabled:opacity-50"
+                >
+                  {isUploadingLens ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" />
+                      <div className="flex flex-col items-start">
+                        <span>جاري معالجة وبث النشاط...</span>
+                        {lensUploadStatus && (
+                          <span className="text-[10px] text-white/60 font-bold">{lensUploadStatus}</span>
+                        )}
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <Camera size={14} />
+                      <span>{isBroadcastToAllMode ? 'بث اللقطة لجميع أولياء الأمور 🚀' : 'بث اللقطة لولي الأمر 🚀'}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 8. Student Classroom Lens History Archive Modal */}
+      <AnimatePresence>
+        {viewingLensHistoryStudent && (
+          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md" dir="rtl">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="w-full max-w-2xl bg-gradient-to-b from-[#0e172e] via-[#091022] to-[#050812] rounded-3xl border border-blue-500/30 p-5 sm:p-6 shadow-2xl space-y-4 text-right relative overflow-hidden max-h-[90vh] flex flex-col"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-white/10 pb-4 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500/20 to-purple-500/20 border border-blue-400/30 text-blue-300 flex items-center justify-center shadow-lg shadow-blue-500/10 shrink-0">
+                    <Camera size={24} className="animate-pulse" />
+                  </div>
+                  <div>
+                    <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
+                      <span>سجل لقطات "عين على الصف" 📸✨</span>
+                    </h3>
+                    <p className="text-xs text-blue-300 font-bold mt-0.5">
+                      التلميذ: <span className="text-white font-black">{viewingLensHistoryStudent.name}</span> • الشعبة: {activeClass}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setViewingLensHistoryStudent(null)}
+                  className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 text-white/50 hover:text-white flex items-center justify-center transition-all cursor-pointer shrink-0"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Summary Banner */}
+              <div className="bg-blue-500/10 border border-blue-500/20 p-3 rounded-2xl shrink-0 flex items-center justify-between">
+                <span className="text-xs font-bold text-blue-200">
+                  إجمالي اللقطات الموثقة خصيصاً للتلميذ: <span className="font-mono text-white font-black">{studentLensHistory.length}</span> لقطة
+                </span>
+                <span className="text-[10px] text-blue-300 font-bold">سجل فردي 👨‍🎓</span>
+              </div>
+
+              {/* History Items Feed */}
+              <div className="flex-1 overflow-y-auto space-y-3 no-scrollbar pr-1">
+                {isLoadingStudentHistory ? (
+                  <div className="py-16 text-center space-y-3">
+                    <Loader2 size={28} className="text-blue-400 animate-spin mx-auto" />
+                    <span className="text-xs text-white/60 font-bold">جاري تحميل سجل اللقطات...</span>
+                  </div>
+                ) : studentLensHistory.length === 0 ? (
+                  <div className="py-16 text-center space-y-3 bg-white/5 rounded-2xl border border-white/5 p-6">
+                    <span className="text-3xl block">📸</span>
+                    <h4 className="text-sm font-black text-white">لا توجد لقطات موثقة لهذا الطالب بعد</h4>
+                    <p className="text-xs text-white/50">يمكنك رفع أول فيديو أو صورة لتوثيق مشاركته الصفية وبثها فورياً لولي أمره.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {studentLensHistory.map((act) => {
+                      const mediaSrc = act.mediaUrl && act.mediaUrl.startsWith('/api/media/local/')
+                        ? act.mediaUrl
+                        : act.telegramFileId?.startsWith('local:')
+                          ? `/api/media/local/${act.telegramFileId.replace('local:', '')}`
+                          : act.telegramFileId
+                            ? `/api/media/telegram/${act.schoolId || schoolId}/${act.telegramFileId}`
+                            : act.mediaUrl || '';
+
+                      const isVid = act.mediaType === 'video' || 
+                                    Boolean(mediaSrc && (mediaSrc.endsWith('.mp4') || mediaSrc.includes('mp4') || mediaSrc.includes('video')));
+
+                      return (
+                        <div key={act.id} className="bg-black/40 border border-white/10 rounded-2xl p-3 space-y-2 relative group hover:border-blue-500/40 transition-all flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between text-[10px] text-white/50 mb-1.5">
+                              <span className="text-blue-300 font-bold truncate">👨‍🏫 {act.authorName || 'الأستاذ'}</span>
+                              <span className="font-mono">{act.createdAt ? new Date(act.createdAt).toLocaleDateString('ar-EG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}</span>
+                            </div>
+
+                            <div className="w-full aspect-video rounded-xl overflow-hidden bg-black border border-white/10 relative flex items-center justify-center shadow-inner">
+                              {isVid ? (
+                                <ClassroomVideoPlayer src={mediaSrc} />
+                              ) : (
+                                <img src={mediaSrc} alt="لقطة صفية" className="w-full h-full object-contain" />
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="space-y-2 pt-1 border-t border-white/5">
+                            {act.description && (
+                              <p className="text-xs text-white/90 font-bold line-clamp-2">💬 {act.description}</p>
+                            )}
+                            <div className="flex items-center justify-end">
+                              <button
+                                type="button"
+                                onClick={() => setActivityToDelete({ id: act.id, desc: act.description })}
+                                className="px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-[10px] font-black transition-all flex items-center gap-1 border border-rose-500/20 cursor-pointer"
+                              >
+                                <Trash2 size={12} />
+                                <span>حذف</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="pt-3 border-t border-white/10 flex justify-end shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setViewingLensHistoryStudent(null)}
+                  className="px-5 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white font-black text-xs transition-all cursor-pointer"
+                >
+                  إغلاق
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 8. Broadcast / Group Activities History Modal */}
+      <AnimatePresence>
+        {showBroadcastHistoryModal && (
+          <div className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md" dir="rtl">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="w-full max-w-2xl bg-gradient-to-b from-[#0e172e] via-[#091022] to-[#050812] rounded-3xl border border-purple-500/40 p-5 sm:p-6 shadow-2xl space-y-4 text-right relative overflow-hidden max-h-[90vh] flex flex-col"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-white/10 pb-4 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-purple-500/20 border border-purple-500/30 text-purple-300 flex items-center justify-center text-xl font-bold shadow-md shadow-purple-500/10">
+                    📢
+                  </div>
+                  <div>
+                    <h3 className="text-base sm:text-lg font-black text-white">
+                      سجل المشاركات واللقطات الجماعية للشعبة
+                    </h3>
+                    <p className="text-xs text-purple-300 font-bold">
+                      شعبة {activeClass} • كافة المنشورات والبثوث العامة لجميع أولياء الأمور
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowBroadcastHistoryModal(false)}
+                  className="w-8 h-8 rounded-xl bg-white/10 hover:bg-rose-500/20 text-white/70 hover:text-rose-400 transition-all flex items-center justify-center cursor-pointer"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Broadcast Items Feed */}
+              <div className="flex-1 overflow-y-auto space-y-3 no-scrollbar pr-1">
+                {isLoadingBroadcastHistory ? (
+                  <div className="py-16 text-center space-y-3">
+                    <Loader2 size={28} className="text-purple-400 animate-spin mx-auto" />
+                    <span className="text-xs text-white/60 font-bold">جاري تحميل سجل المشاركات الجماعية...</span>
+                  </div>
+                ) : broadcastHistory.length === 0 ? (
+                  <div className="py-16 text-center space-y-3 bg-white/5 rounded-2xl border border-white/5 p-6">
+                    <span className="text-3xl block">📢</span>
+                    <h4 className="text-sm font-black text-white">لا توجد مشاركات جماعية موثقة لهذه الشعبة بعد</h4>
+                    <p className="text-xs text-white/50">يمكنك رفع أول فيديو أو صورة جماعية عبر زر "مشاركة مع الشعبة 🚀" لتصل فوراً لكافة أولياء الأمور.</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    {broadcastHistory.map((act) => {
+                      const mediaSrc = act.mediaUrl && act.mediaUrl.startsWith('/api/media/local/')
+                        ? act.mediaUrl
+                        : act.telegramFileId?.startsWith('local:')
+                          ? `/api/media/local/${act.telegramFileId.replace('local:', '')}`
+                          : act.telegramFileId
+                            ? `/api/media/telegram/${act.schoolId || schoolId}/${act.telegramFileId}`
+                            : act.mediaUrl || '';
+
+                      const isVid = act.mediaType === 'video' || 
+                                    Boolean(mediaSrc && (mediaSrc.endsWith('.mp4') || mediaSrc.includes('mp4') || mediaSrc.includes('video')));
+
+                      return (
+                        <div key={act.id} className="bg-black/40 border border-purple-500/20 rounded-2xl p-3 space-y-2 relative group hover:border-purple-500/50 transition-all flex flex-col justify-between">
+                          <div>
+                            <div className="flex items-center justify-between text-[10px] text-white/50 mb-1.5">
+                              <span className="text-purple-300 font-bold truncate">👨‍🏫 {act.authorName || 'الأستاذ'}</span>
+                              <span className="font-mono">{act.createdAt ? new Date(act.createdAt).toLocaleDateString('ar-EG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}</span>
+                            </div>
+
+                            <div className="w-full aspect-video rounded-xl overflow-hidden bg-black border border-white/10 relative flex items-center justify-center shadow-inner">
+                              {isVid ? (
+                                <ClassroomVideoPlayer src={mediaSrc} />
+                              ) : (
+                                <img src={mediaSrc} alt="لقطة جماعية" className="w-full h-full object-contain" />
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="space-y-2 pt-1 border-t border-white/5">
+                            {act.description && (
+                              <p className="text-xs text-white/90 font-bold line-clamp-2">💬 {act.description}</p>
+                            )}
+                            <div className="flex items-center justify-between">
+                              <span className="px-2 py-0.5 rounded-md bg-purple-500/20 text-purple-300 border border-purple-500/30 text-[9px] font-black">
+                                📢 بث جماعي
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setActivityToDelete({ id: act.id, desc: act.description })}
+                                className="px-2.5 py-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 text-[10px] font-black transition-all flex items-center gap-1 border border-rose-500/20 cursor-pointer"
+                              >
+                                <Trash2 size={12} />
+                                <span>حذف</span>
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="pt-3 border-t border-white/10 flex justify-end shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setShowBroadcastHistoryModal(false)}
+                  className="px-5 py-2 rounded-xl bg-white/10 hover:bg-white/15 text-white font-black text-xs transition-all cursor-pointer"
+                >
+                  إغلاق
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 9. Delete Snapshot Confirmation Modal */}
+      <AnimatePresence>
+        {activityToDelete && (
+          <div className="fixed inset-0 z-[10001] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md" dir="rtl">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="w-full max-w-md bg-gradient-to-b from-[#161d36] via-[#0e1428] to-[#070b18] border border-rose-500/40 rounded-3xl p-6 shadow-2xl space-y-4 text-right relative overflow-hidden"
+            >
+              <div className="w-14 h-14 rounded-2xl bg-rose-500/20 border border-rose-500/40 text-rose-400 flex items-center justify-center mx-auto text-3xl shadow-lg shadow-rose-500/20">
+                <Trash2 size={28} />
+              </div>
+              <div className="text-center space-y-2">
+                <h3 className="text-base sm:text-lg font-black text-white">تأكيد حذف اللقطة نهائياً ⚠️</h3>
+                <p className="text-xs text-white/70 leading-relaxed px-2">
+                  هل أنت متأكد من رغبتك بحذف هذه اللقطة من سجل الطالب وبث ولي الأمر؟
+                  <br />
+                  <span className="text-rose-400 font-bold block mt-1">هذا الإجراء فوري ولا يمكن التراجع عنه بعد التأكيد.</span>
+                </p>
+              </div>
+              <div className="pt-3 flex items-center justify-center gap-3">
+                <button
+                  type="button"
+                  disabled={isDeletingLensActivity}
+                  onClick={() => setActivityToDelete(null)}
+                  className="flex-1 py-2.5 px-4 rounded-xl bg-white/10 hover:bg-white/15 text-white text-xs font-bold transition-all cursor-pointer"
+                >
+                  إلغاء التراجع
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingLensActivity}
+                  onClick={handleConfirmDeleteSnapshot}
+                  className="flex-1 py-2.5 px-4 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white text-xs font-black transition-all cursor-pointer flex items-center justify-center gap-2 shadow-lg shadow-rose-600/30 active:scale-95 disabled:opacity-50"
+                >
+                  {isDeletingLensActivity ? (
+                    <RefreshCw size={14} className="animate-spin" />
+                  ) : (
+                    <Trash2 size={14} />
+                  )}
+                  <span>تأكيد الحذف 🗑️</span>
                 </button>
               </div>
             </motion.div>

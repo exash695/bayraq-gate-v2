@@ -103,6 +103,7 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
   const [schools, setSchools] = useState<SchoolRecord[]>([]);
   const [loadingSchools, setLoadingSchools] = useState(true);
   const [configuringSchoolModules, setConfiguringSchoolModules] = useState<SchoolRecord | null>(null);
+  const [adminCodeChoiceSchool, setAdminCodeChoiceSchool] = useState<SchoolRecord | null>(null);
   const [activeModuleTab, setActiveModuleTab] = useState<'admin' | 'student' | 'teacher' | 'parent'>('admin');
 
   const SCHOOL_MODULES = [
@@ -1766,9 +1767,10 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
     setGenCode(prefix + randomPart);
   };
 
-  const generateAdminCodeForSchool = async (school: SchoolRecord) => {
+  const generateAdminCodeForSchool = async (school: SchoolRecord, branch: 'boys' | 'girls' = 'boys') => {
     setIsGenerating(true);
     try {
+      const prefix = branch === 'girls' ? 'ADM-G' : 'ADM-B';
       const adminCodeResponse = await fetch('/api/activation-codes/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1776,7 +1778,7 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
            schoolId: school.id,
            role: 'admin',
            count: 1,
-           prefix: 'ADM'
+           prefix: prefix
         })
       });
       const adminCodeData = await adminCodeResponse.json();
@@ -1793,6 +1795,7 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
         schoolName: school.name,
         governorate: school.governorate,
         role: "admin",
+        adminBranch: branch,
         status: "active",
         usedCount: 0,
         maxUses: 1,
@@ -1801,7 +1804,7 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
       });
 
       await addDoc(collection(db, "developer_logs"), {
-        action: `توليد كود إدارة AI للمدرسة: ${school.name}`,
+        action: `توليد كود إدارة (${branch === 'girls' ? 'بنات' : 'بنين'}) للمدرسة: ${school.name}`,
         code: adminCode,
         schoolId: school.id,
         schoolName: school.name,
@@ -1810,7 +1813,7 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
         status: "success"
       });
 
-      triggerToast(`تم توليد كود الإدارة بنجاح: ${adminCode}`, "success");
+      triggerToast(`تم توليد كود إدارة ${branch === 'girls' ? 'البنات' : 'البنين'} بنجاح: ${adminCode}`, "success");
       handleCopyCode(adminCode);
     } catch (err: any) {
       triggerToast("فشل في توليد كود الإدارة", "error");
@@ -3078,7 +3081,7 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              generateAdminCodeForSchool(school);
+                              setAdminCodeChoiceSchool(school);
                             }}
                             className="flex-1 py-2.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/20 rounded-xl text-[10px] font-black transition-all flex flex-col items-center justify-center gap-1 cursor-pointer"
                           >
@@ -3381,6 +3384,87 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
                         className="px-6 py-2 rounded-xl bg-indigo-500 hover:bg-indigo-600 text-black font-black text-xs transition-all cursor-pointer"
                       >
                         حفظ وإغلاق
+                      </button>
+                    </div>
+                  </motion.div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Admin Code Choice Modal (Boys / Girls Selection) */}
+            <AnimatePresence>
+              {adminCodeChoiceSchool && (
+                <motion.div
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-[10000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md"
+                  onClick={() => setAdminCodeChoiceSchool(null)}
+                >
+                  <motion.div
+                    initial={{ scale: 0.95, y: 15 }}
+                    animate={{ scale: 1, y: 0 }}
+                    exit={{ scale: 0.95, y: 15 }}
+                    className="w-full max-w-sm bg-[#0E1225] border border-white/10 rounded-3xl overflow-hidden shadow-2xl relative"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {/* Header */}
+                    <div className="p-5 border-b border-white/5 bg-white/5 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Sparkles size={18} className="text-amber-400" />
+                        <h3 className="text-xs font-black text-white">توليد كود إدارة مخصص</h3>
+                      </div>
+                      <button
+                        onClick={() => setAdminCodeChoiceSchool(null)}
+                        className="text-white/40 hover:text-white transition-colors"
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+
+                    {/* Content */}
+                    <div className="p-6 space-y-4 text-center">
+                      <p className="text-[11px] text-white/60 font-semibold leading-relaxed">
+                        اختر القسم المطلوب لتوليد كود الإدارة الخاص بمدرسة: <br />
+                        <span className="text-amber-400 font-black text-xs">{adminCodeChoiceSchool.name}</span>
+                      </p>
+
+                      <div className="grid grid-cols-2 gap-3 pt-2">
+                        {/* Boys Option */}
+                        <button
+                          onClick={async () => {
+                            const school = adminCodeChoiceSchool;
+                            setAdminCodeChoiceSchool(null);
+                            await generateAdminCodeForSchool(school, 'boys');
+                          }}
+                          className="py-4 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 rounded-2xl flex flex-col items-center justify-center gap-2 transition-all cursor-pointer group hover:border-emerald-500/40"
+                        >
+                          <span className="text-xl">👦</span>
+                          <span className="text-[11px] font-black">إدارة البنين (بنين)</span>
+                        </button>
+
+                        {/* Girls Option */}
+                        <button
+                          onClick={async () => {
+                            const school = adminCodeChoiceSchool;
+                            setAdminCodeChoiceSchool(null);
+                            await generateAdminCodeForSchool(school, 'girls');
+                          }}
+                          className="py-4 bg-pink-500/10 hover:bg-pink-500/20 text-pink-400 border border-pink-500/20 rounded-2xl flex flex-col items-center justify-center gap-2 transition-all cursor-pointer group hover:border-pink-500/40"
+                        >
+                          <span className="text-xl">👧</span>
+                          <span className="text-[11px] font-black">إدارة البنات (بنات)</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Footer */}
+                    <div className="p-4 bg-black/20 border-t border-white/5 flex justify-end">
+                      <button
+                        onClick={() => setAdminCodeChoiceSchool(null)}
+                        className="px-4 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-white/60 text-[10px] font-bold transition-all cursor-pointer"
+                      >
+                        إلغاء
                       </button>
                     </div>
                   </motion.div>
@@ -3867,7 +3951,13 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
       </main>
 
       {/* Universal Developer Bottom Tab Bar */}
-      <nav className="fixed bottom-0 left-0 right-0 z-[999] h-20 bg-[#050A18]/95 backdrop-blur-xl border-t border-white/10 flex items-center justify-around px-2 pb-6 pt-2 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] overflow-x-auto no-scrollbar">
+      <nav 
+        className="fixed bottom-0 left-0 right-0 z-[999] bg-[#050A18]/95 backdrop-blur-xl border-t border-white/10 flex items-center justify-around px-2 pt-2 shadow-[0_-10px_40px_rgba(0,0,0,0.5)] overflow-x-auto no-scrollbar"
+        style={{
+          paddingBottom: 'max(14px, env(safe-area-inset-bottom, 14px))',
+          minHeight: 'calc(70px + env(safe-area-inset-bottom, 0px))'
+        }}
+      >
         {[
           { id: 'users_directory', name: 'المستخدمون', icon: Users },
           { id: 'support_audit', name: 'الدعم والتدقيق', icon: Shield },

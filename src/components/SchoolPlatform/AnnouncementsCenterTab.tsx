@@ -13,7 +13,9 @@ import {
   Calendar,
   Filter,
   CheckCircle,
-  Inbox
+  Inbox,
+  ChevronRight,
+  ChevronLeft
 } from "lucide-react";
 import { broadcastService } from "../../services/broadcastService";
 import { matchesBroadcastAudience, isSchoolMatch } from "../../utils/gradeMatcher";
@@ -42,6 +44,50 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
   const [searchQuery, setSearchQuery] = useState("");
   const [broadcasts, setBroadcasts] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Date filter state (مطابق لتبويب سجل الحضور)
+  const todayStr = useMemo(() => new Date().toISOString().split("T")[0], []);
+  const [selectedDate, setSelectedDate] = useState<string>(todayStr);
+  const [isDateFilterActive, setIsDateFilterActive] = useState<boolean>(false);
+
+  // Read/seen status for badge disappearance upon opening
+  const [hasSeenAdmin, setHasSeenAdmin] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("bairaq_seen_announcements_admin") === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  const [hasSeenStaff, setHasSeenStaff] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("bairaq_seen_announcements_staff") === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  // Whenever a tab is active, mark it as read immediately so the notification number disappears!
+  useEffect(() => {
+    if (activeSubTab === "admin") {
+      setHasSeenAdmin(true);
+      try {
+        localStorage.setItem("bairaq_seen_announcements_admin", "true");
+      } catch {}
+    } else if (activeSubTab === "staff") {
+      setHasSeenStaff(true);
+      try {
+        localStorage.setItem("bairaq_seen_announcements_staff", "true");
+      } catch {}
+    } else if (activeSubTab === "all") {
+      setHasSeenAdmin(true);
+      setHasSeenStaff(true);
+      try {
+        localStorage.setItem("bairaq_seen_announcements_admin", "true");
+        localStorage.setItem("bairaq_seen_announcements_staff", "true");
+      } catch {}
+    }
+  }, [activeSubTab]);
 
   // 1. Subscribe to administrative & school radio announcements
   useEffect(() => {
@@ -247,6 +293,20 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
       return timeB - timeA;
     });
 
+    // Apply date filter if active (مطابق لسجل الحضور)
+    if (isDateFilterActive && selectedDate) {
+      combined = combined.filter(item => {
+        const ts = item.timestampMs || item.timestamp_ms || (item.createdAt ? new Date(item.createdAt).getTime() : null);
+        if (!ts) return false;
+        try {
+          const itemDateStr = new Date(ts).toISOString().split("T")[0];
+          return itemDateStr === selectedDate;
+        } catch {
+          return false;
+        }
+      });
+    }
+
     // Apply search filter
     if (searchQuery.trim() !== "") {
       const q = searchQuery.toLowerCase();
@@ -259,7 +319,7 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
     }
 
     return combined;
-  }, [activeSubTab, adminItems, staffItems, searchQuery]);
+  }, [activeSubTab, adminItems, staffItems, searchQuery, isDateFilterActive, selectedDate]);
 
   // Helper to format date
   const formatTimeAgo = (item: any) => {
@@ -320,61 +380,120 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
       <div className={fullWidth ? "flex flex-col lg:flex-row lg:items-center justify-between gap-3 bg-[#070D1E]/95 border-b border-white/10 px-4 sm:px-6 py-3.5 backdrop-blur-xl mb-0 w-full sticky top-0 z-20 rounded-none" : "flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white/[0.02] border border-white/5 p-4 rounded-2xl backdrop-blur-xl mb-6"}>
         
         {/* Sub-tab Selectors */}
-        <div className="flex p-1 bg-black/40 rounded-xl border border-white/10 w-fit shrink-0 gap-1 select-none">
-          <button
-            onClick={() => {
-              if (typeof window !== "undefined" && (window as any).sounds?.playClick) (window as any).sounds.playClick();
-              setActiveSubTab("admin");
-            }}
-            className={`px-4 py-2 text-xs font-black rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
-              activeSubTab === "admin"
-                ? "bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-lg shadow-cyan-500/15"
-                : "text-white/50 hover:text-white/80"
-            }`}
-          >
-            <Building2 size={13} />
-            <span>إعلانات الإدارة 🏛️</span>
-            {adminItems.length > 0 && (
-              <span className={`px-1.5 h-4 text-[9px] font-bold rounded-full flex items-center justify-center ${activeSubTab === "admin" ? "bg-white text-cyan-600" : "bg-cyan-500/20 text-cyan-300"}`}>
-                {adminItems.length}
-              </span>
-            )}
-          </button>
-          
-          <button
-            onClick={() => {
-              if (typeof window !== "undefined" && (window as any).sounds?.playClick) (window as any).sounds.playClick();
-              setActiveSubTab("staff");
-            }}
-            className={`px-4 py-2 text-xs font-black rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
-              activeSubTab === "staff"
-                ? "bg-gradient-to-r from-purple-500 to-fuchsia-500 text-white shadow-lg shadow-purple-500/15"
-                : "text-white/50 hover:text-white/80"
-            }`}
-          >
-            <UserCheck size={13} />
-            <span>تبليغات الأساتذة 🎓</span>
-            {staffItems.length > 0 && (
-              <span className={`px-1.5 h-4 text-[9px] font-bold rounded-full flex items-center justify-center ${activeSubTab === "staff" ? "bg-white text-purple-600" : "bg-purple-500/20 text-purple-300"}`}>
-                {staffItems.length}
-              </span>
-            )}
-          </button>
+        <div className="flex flex-wrap items-center gap-2 select-none">
+          <div className="flex p-1 bg-black/40 rounded-xl border border-white/10 w-fit shrink-0 gap-1 select-none">
+            <button
+              onClick={() => {
+                if (typeof window !== "undefined" && (window as any).sounds?.playClick) (window as any).sounds.playClick();
+                setActiveSubTab("admin");
+              }}
+              className={`px-4 py-2 text-xs font-black rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
+                activeSubTab === "admin"
+                  ? "bg-gradient-to-r from-cyan-500 to-blue-500 text-white shadow-lg shadow-cyan-500/15"
+                  : "text-white/50 hover:text-white/80"
+              }`}
+            >
+              <Building2 size={13} />
+              <span>إعلانات الإدارة 🏛️</span>
+              {/* يختفي الرقم عند فتح التبويب أو عند الاطلاع عليه */}
+              {!hasSeenAdmin && activeSubTab !== "admin" && adminItems.length > 0 && (
+                <span className="px-1.5 h-4 text-[9px] font-bold rounded-full flex items-center justify-center bg-cyan-500/20 text-cyan-300">
+                  {adminItems.length}
+                </span>
+              )}
+            </button>
+            
+            <button
+              onClick={() => {
+                if (typeof window !== "undefined" && (window as any).sounds?.playClick) (window as any).sounds.playClick();
+                setActiveSubTab("staff");
+              }}
+              className={`px-4 py-2 text-xs font-black rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
+                activeSubTab === "staff"
+                  ? "bg-gradient-to-r from-purple-500 to-fuchsia-500 text-white shadow-lg shadow-purple-500/15"
+                  : "text-white/50 hover:text-white/80"
+              }`}
+            >
+              <UserCheck size={13} />
+              <span>تبليغات الأساتذة 🎓</span>
+              {/* يختفي الرقم عند فتح التبويب أو عند الاطلاع عليه */}
+              {!hasSeenStaff && activeSubTab !== "staff" && staffItems.length > 0 && (
+                <span className="px-1.5 h-4 text-[9px] font-bold rounded-full flex items-center justify-center bg-purple-500/20 text-purple-300">
+                  {staffItems.length}
+                </span>
+              )}
+            </button>
 
-          <button
-            onClick={() => {
-              if (typeof window !== "undefined" && (window as any).sounds?.playClick) (window as any).sounds.playClick();
-              setActiveSubTab("all");
-            }}
-            className={`px-4 py-2 text-xs font-black rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
-              activeSubTab === "all"
-                ? "bg-white/10 text-white border border-white/10"
-                : "text-white/50 hover:text-white/80"
-            }`}
-          >
-            <Inbox size={13} />
-            <span>الكل 📬</span>
-          </button>
+            <button
+              onClick={() => {
+                if (typeof window !== "undefined" && (window as any).sounds?.playClick) (window as any).sounds.playClick();
+                setActiveSubTab("all");
+              }}
+              className={`px-4 py-2 text-xs font-black rounded-lg transition-all flex items-center gap-2 cursor-pointer ${
+                activeSubTab === "all"
+                  ? "bg-white/10 text-white border border-white/10"
+                  : "text-white/50 hover:text-white/80"
+              }`}
+            >
+              <Inbox size={13} />
+              <span>الكل 📬</span>
+            </button>
+          </div>
+
+          {/* Date Picker & Fast Navigator with arrows (مزود بأسهم لعرض التاريخ كما في تبويب سجل الحضور) */}
+          <div className="flex items-center gap-1 bg-black/40 p-1 rounded-xl border border-white/10 shadow-inner">
+            <button
+              type="button"
+              onClick={() => {
+                setIsDateFilterActive(true);
+                const prev = new Date(selectedDate);
+                prev.setDate(prev.getDate() - 1);
+                setSelectedDate(prev.toISOString().split("T")[0]);
+              }}
+              title="اليوم السابق"
+              className="w-7 h-7 rounded-lg bg-white/5 hover:bg-white/10 text-white/70 hover:text-white flex items-center justify-center transition-all cursor-pointer"
+            >
+              <ChevronRight size={15} />
+            </button>
+
+            <div className="px-2 flex items-center gap-1.5">
+              <Calendar size={13} className="text-cyan-400 shrink-0" />
+              <input
+                type="date"
+                value={selectedDate}
+                onChange={(e) => {
+                  setSelectedDate(e.target.value);
+                  setIsDateFilterActive(true);
+                }}
+                className="bg-transparent text-xs font-bold text-cyan-200 outline-none cursor-pointer [color-scheme:dark]"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setIsDateFilterActive(true);
+                const next = new Date(selectedDate);
+                next.setDate(next.getDate() + 1);
+                setSelectedDate(next.toISOString().split("T")[0]);
+              }}
+              title="اليوم التالي"
+              className="w-7 h-7 rounded-lg bg-white/5 hover:bg-white/10 text-white/70 hover:text-white flex items-center justify-center transition-all cursor-pointer"
+            >
+              <ChevronLeft size={15} />
+            </button>
+
+            {isDateFilterActive && (
+              <button
+                type="button"
+                onClick={() => setIsDateFilterActive(false)}
+                className="px-2 py-0.5 text-[10px] font-bold text-amber-300 bg-amber-400/10 hover:bg-amber-400/20 rounded-md border border-amber-400/20 transition-all cursor-pointer mr-0.5"
+                title="عرض كافة التواريخ"
+              >
+                عرض الكل
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Real-time Search input */}
@@ -414,8 +533,19 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
             <p className="text-xs text-white/40 font-bold mt-1.5 max-w-sm leading-relaxed">
               {searchQuery 
                 ? "لا توجد نتائج تطابق بحثك المكتوب، جرب كلمات مفتاحية أخرى!" 
-                : "لم يتم نشر أي تبليغات رسمية في هذا القسم للدوائر المحددة بعد."}
+                : isDateFilterActive
+                  ? `لا توجد تبليغات منشورة بتاريخ ${selectedDate}.`
+                  : "لم يتم نشر أي تبليغات رسمية في هذا القسم للدوائر المحددة بعد."}
             </p>
+            {isDateFilterActive && (
+              <button
+                type="button"
+                onClick={() => setIsDateFilterActive(false)}
+                className="mt-3 px-3 py-1.5 text-xs font-bold text-cyan-300 bg-cyan-500/10 hover:bg-cyan-500/20 border border-cyan-500/30 rounded-xl transition-all cursor-pointer"
+              >
+                عرض كافة التواريخ 📅
+              </button>
+            )}
           </div>
         ) : (
           <div className={fullWidth ? "flex flex-col divide-y divide-white/10 w-full p-0 m-0" : "grid grid-cols-1 md:grid-cols-2 gap-4"}>

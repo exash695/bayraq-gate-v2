@@ -113,13 +113,6 @@ export const AuditLogView: React.FC<AuditLogViewProps> = ({ showToast }) => {
       return;
     }
     
-    // Create popup for printing format
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      alert("يرجى السماح بالنوافذ المنبثقة (Pop-ups) لطباعة السجلات.");
-      return;
-    }
-
     const htmlContent = `
       <html dir="rtl">
         <head>
@@ -146,11 +139,11 @@ export const AuditLogView: React.FC<AuditLogViewProps> = ({ showToast }) => {
           <table>
             <thead>
               <tr>
-                <th width="5%">#</th>
-                <th width="25%">المسؤول عن الإجراء</th>
-                <th width="15%">نوع العملية</th>
-                <th width="35%">التفاصيل</th>
-                <th width="20%">الوقت والتاريخ</th>
+                <th>#</th>
+                <th>المسؤول عن الإجراء</th>
+                <th>نوع العملية</th>
+                <th>التفاصيل</th>
+                <th>الوقت والتاريخ</th>
               </tr>
             </thead>
             <tbody>
@@ -186,9 +179,7 @@ export const AuditLogView: React.FC<AuditLogViewProps> = ({ showToast }) => {
       </html>
     `;
     
-    printWindow.document.open();
-    printWindow.document.write(htmlContent);
-    printWindow.document.close();
+    printHTML(htmlContent);
   };
 
   const filteredLogs = logs.filter(log => {

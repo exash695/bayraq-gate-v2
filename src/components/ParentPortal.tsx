@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { pushNotificationManager } from '../services/pushNotificationManager';
 import { 
   ArrowRight, 
   Megaphone, 
@@ -43,7 +44,16 @@ import {
   Trash2,
   Send,
   Users,
-  X
+  User,
+  X,
+  Camera,
+  UserCheck,
+  RefreshCw,
+  Play,
+  Pause,
+  Volume2,
+  VolumeX,
+  Video
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import { cleanParentStudentName, formatParentGreetingTitle } from '../utils/studentUtils';
@@ -69,10 +79,12 @@ import { ComingSoonPlaceholder } from './ComingSoonPlaceholder';
 import { useSecuritySettings, securityService } from '../services/securityService';
 import { BerqCharacter } from './BerqCharacterManager';
 import { ParentPortalSkeleton } from './shared/ShimmerSkeleton';
+import { StudentLounge } from './StudentLounge';
 import { getSubjectsForGrade, calculateStudentFinancials, computeAcademicIdentity, computeExcellencePoints, normalizeGradeCanonical } from '../utils/studentUtils';
 import { toPng, toBlob } from 'html-to-image';
 import { IRAQ_UNIVERSITIES } from '../constants/iraqColleges';
 import { flattenedColleges } from '../constants/flattenedColleges';
+import { ClassroomVideoPlayer } from './ClassroomVideoPlayer';
 
 interface ParentPortalProps {
   studentName: string;
@@ -130,6 +142,124 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   const [hwSubject, setHwSubject] = useState('الكل');
   const [viewingHwModal, setViewingHwModal] = useState<any | null>(null);
   
+  // Classroom Lens ("عين على الصف") Activities State & Tab
+  const [lensActivities, setLensActivities] = useState<any[]>([]);
+  const [selectedLensMedia, setSelectedLensMedia] = useState<any | null>(null);
+  const [parentAttendanceTab, setParentAttendanceTab] = useState<'attendance' | 'lens'>('attendance');
+  const [unreadLensCount, setUnreadLensCount] = useState<number>(0);
+  const [parentLensDateFilter, setParentLensDateFilter] = useState<string>(() => new Date().toISOString().split('T')[0]);
+  const [showAllLensDates, setShowAllLensDates] = useState<boolean>(true);
+  const [isLoadingLensActivities, setIsLoadingLensActivities] = useState<boolean>(false);
+  const [lensSubTab, setLensSubTab] = useState<'individual' | 'broadcast'>('individual');
+
+  const fetchParentLensActivities = () => {
+    const stId = studentData?.id || studentData?.studentCode || studentCode;
+    if (!stId) return;
+    setIsLoadingLensActivities(true);
+    fetch(`/api/bairaq-activities?studentId=${stId}&schoolId=${schoolId || studentData?.schoolId || 'school1'}`)
+      .then(res => res.json())
+      .then(data => {
+        if (data?.success && Array.isArray(data.activities)) {
+          setLensActivities(data.activities);
+        } else {
+          setLensActivities([]);
+        }
+      })
+      .catch(err => console.warn("Failed to load classroom lens activities:", err))
+      .finally(() => setIsLoadingLensActivities(false));
+  };
+
+  useEffect(() => {
+    fetchParentLensActivities();
+  }, [studentData?.id, studentData?.studentCode, studentCode, parentAttendanceTab]);
+
+  // Real-time synchronization when teacher adds or deletes snapshots
+  useEffect(() => {
+    const handleLensUpdate = (payload?: any) => {
+      if (payload?.deletedId) {
+        setLensActivities(prev => prev.filter(act => act.id !== payload.deletedId));
+        return;
+      }
+
+      const st = studentData || {};
+      const stId = (st.id || '').toLowerCase();
+      const stCode = (st.code || st.student || studentCode || '').toLowerCase();
+      const stName = (st.name || studentName || '').toLowerCase();
+      const pCode = (st.parentCode || st.parent || '').toLowerCase();
+
+      const actStId = (payload?.studentId || '').toLowerCase();
+      const actStCode = (payload?.studentCode || '').toLowerCase();
+      const actPCode = (payload?.parentCode || '').toLowerCase();
+      const actStName = (payload?.studentName || '').toLowerCase();
+      const actAliases = Array.isArray(payload?.aliases) ? payload.aliases.map((a: any) => String(a).toLowerCase()) : [];
+      const actDesc = (payload?.description || '').toLowerCase();
+
+      const isAll = actStId === 'all' || !actStId || actStId === 'ALL';
+
+      // Match by ID, code, name, parentCode, or aliases
+      const matchesId = stId && (actStId === stId || actStId.includes(stId) || stId.includes(actStId) || actAliases.includes(stId));
+      const matchesCode = stCode && (
+        actStId === stCode || actStCode === stCode || 
+        actStId.includes(stCode) || stCode.includes(actStId) || 
+        actAliases.includes(stCode) || actAliases.some(a => a.includes(stCode) || stCode.includes(a))
+      );
+      const matchesParentCode = pCode && (actPCode === pCode || actAliases.includes(pCode));
+      const matchesName = stName && (
+        actStName === stName || actDesc.includes(stName) || 
+        actAliases.includes(stName) || actAliases.some(a => a.includes(stName) || stName.includes(a))
+      );
+
+      const isForThisStudent = isAll || matchesId || matchesCode || matchesParentCode || matchesName;
+
+      if (isForThisStudent) {
+        setUnreadLensCount(prev => prev + 1);
+
+        const teacherName = payload?.authorName || 'الأستاذ';
+        const notifTitle = isAll ? '📢 مشاركة صفية جماعية جديدة' : `📸 لقطة جديدة لطفلك (${studentName || st.name || 'الطالب'})`;
+        const notifBody = payload?.description || `نشر الأستاذ ${teacherName} لقطة جديدة في عين على الصف.`;
+        showToast(`${notifTitle}: ${notifBody}`, 'success');
+
+        try {
+          pushNotificationManager.showLocalNotification(notifTitle, {
+            body: notifBody,
+            icon: '/logo.png',
+            tag: `lens_activity_${payload?.id || Date.now()}`,
+            renotify: true
+          });
+        } catch (e) {}
+
+        fetchParentLensActivities();
+      }
+    };
+
+    const unsub1 = realtimeManager.on('lens_activities', handleLensUpdate);
+    const unsub2 = realtimeManager.on('bairaq_activities', handleLensUpdate);
+
+    return () => {
+      unsub1();
+      unsub2();
+    };
+  }, [parentAttendanceTab, studentData?.id, studentData?.studentCode, studentData?.parentCode, studentData?.name, studentCode, studentName]);
+
+  // Filtered lens activities based on parent date selection
+  const displayedLensActivities = useMemo(() => {
+    if (!Array.isArray(lensActivities)) return [];
+    
+    // First filter by sub-tab (Individual vs Broadcast)
+    let filtered = lensActivities.filter((act: any) => {
+      const isBroadcast = act.studentId === 'ALL' || !act.studentId;
+      return lensSubTab === 'broadcast' ? isBroadcast : !isBroadcast;
+    });
+
+    if (showAllLensDates) return filtered;
+    
+    return filtered.filter((act: any) => {
+      if (!act.createdAt) return false;
+      const actDate = new Date(act.createdAt).toISOString().split('T')[0];
+      return actDate === parentLensDateFilter;
+    });
+  }, [lensActivities, showAllLensDates, parentLensDateFilter, lensSubTab]);
+  
   // Solution submission state
   const [solutionText, setSolutionText] = useState('');
   const [solutionImages, setSolutionImages] = useState<File[]>([]);
@@ -144,6 +274,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
 
   // Contact & Teacher Messaging State
   const [contactTab, setContactTab] = useState<'admin' | 'teachers'>('admin');
+  const [isLoungeOpen, setIsLoungeOpen] = useState<boolean>(false);
   const [allTeachers, setAllTeachers] = useState<any[]>([]);
   const [isLoadingTeachers, setIsLoadingTeachers] = useState<boolean>(false);
   const [selectedTeacherForChat, setSelectedTeacherForChat] = useState<any | null>(null);
@@ -1106,13 +1237,37 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
     
     fetchNotifsAndTickets();
     
+    let cleanupLounge: (() => void) | null = null;
+    
     import('../lib/realtimeManager').then(({ realtimeManager }) => {
       realtimeManager.on('notifications_updated', fetchNotifsAndTickets);
       realtimeManager.on('support_tickets_updated', fetchNotifsAndTickets);
+      
+      cleanupLounge = realtimeManager.subscribe('lounge_messages', (event) => {
+        fetchNotifsAndTickets();
+        if (event && event.action === 'INSERT' && event.data) {
+          const msgData = event.data;
+          const currentUid = auth.currentUser?.uid || studentCode;
+          if (msgData && msgData.recipientId === currentUid && msgData.userId !== currentUid) {
+            const senderName = msgData.userName || 'الكادر التدريسي';
+            const text = msgData.text === 'بصمة صوتية' ? 'أرسل لك بصمة صوتية 🎙️' : msgData.text;
+            showToast(`💬 رسالة جديدة من ${senderName}: ${text}`, 'success');
+            
+            // Trigger background system push notification (Messenger / Facebook style)
+            pushNotificationManager.showLocalNotification(`رسالة جديدة من أ. ${senderName} 💬`, {
+              body: text,
+              icon: msgData.userPhoto || '/logo.png',
+              tag: `lounge_msg_${msgData.userId}`,
+              renotify: true
+            });
+          }
+        }
+      });
     }).catch(console.warn);
 
     return () => {
       isMounted = false;
+      if (cleanupLounge) cleanupLounge();
       import('../lib/realtimeManager').then(({ realtimeManager }) => {
         realtimeManager.off('notifications_updated', fetchNotifsAndTickets);
         realtimeManager.off('support_tickets_updated', fetchNotifsAndTickets);
@@ -1426,7 +1581,15 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
     return () => unsub();
   }, [studentCode]);
 
-  const totalUnreadSupport = unreadSupportCount + parentNotifications.filter(n => !n.read).length;
+  const unreadLoungeMessagesCount = useMemo(() => {
+    return parentNotifications.filter(n => !n.read && (n.type === 'lounge_message' || n.type === 'parent_message')).length;
+  }, [parentNotifications]);
+
+  const generalNotifications = useMemo(() => {
+    return parentNotifications.filter(n => n.type !== 'lounge_message' && n.type !== 'parent_message');
+  }, [parentNotifications]);
+
+  const totalUnreadSupport = unreadSupportCount + generalNotifications.filter(n => !n.read).length;
 
   const academicProfile = useMemo(() => {
      if (!studentData || !subjectMapping) return null;
@@ -1514,6 +1677,32 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
     return parentHomeworks.filter(hw => hw?.id && !viewedHwIds.has(hw.id)).length;
   }, [parentHomeworks, viewedHwIds]);
 
+  // Synchronize unread lens count with database notifications, actual activities, and real-time counter
+  const unreadLensFromNotifs = useMemo(() => {
+    return (parentNotifications || []).filter((n: any) => n.type === 'classroom_lens' && !n.read).length;
+  }, [parentNotifications]);
+
+  const unreadLensActivitiesCount = useMemo(() => {
+    if (!Array.isArray(lensActivities) || lensActivities.length === 0) return 0;
+    try {
+      const storageKey = `bairaq_last_lens_seen_${studentData?.id || studentData?.studentCode || studentCode || ''}`;
+      const lastSeen = safeStorage.getItem(storageKey);
+      if (!lastSeen) {
+        // If not seen yet, return count of existing activities (max 9)
+        return Math.min(lensActivities.length, 9);
+      }
+      const lastTime = new Date(lastSeen).getTime();
+      return lensActivities.filter((act: any) => {
+        if (!act.createdAt) return false;
+        return new Date(act.createdAt).getTime() > lastTime;
+      }).length;
+    } catch {
+      return 0;
+    }
+  }, [lensActivities, studentData?.id, studentData?.studentCode, studentCode]);
+
+  const effectiveLensBadge = Math.max(unreadLensCount, unreadLensFromNotifs, unreadLensActivitiesCount);
+
   const { settings: secSettings } = useSecuritySettings();
 
   const rawSections = [
@@ -1522,7 +1711,15 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
       items: [
         { id: "announcements", icon: Megaphone, name: "مركز التبليغات والإعلانات 📢", color: "text-cyan-400", bg: "bg-cyan-400/10", border: "border-cyan-400/20" },
         { id: "grades", icon: BarChart3, name: "سجل الدرجات", color: "text-emerald-400", bg: "bg-emerald-400/10", border: "border-emerald-400/20", cap: 'view_grades' },
-        { id: "attendance", icon: Timer, name: "سجل الحضور والنشاط الصفي", color: "text-orange-400", bg: "bg-orange-400/10", border: "border-orange-400/20" },
+        { 
+          id: "attendance", 
+          icon: Timer, 
+          name: "سجل الحضور والمواظبة", 
+          color: "text-orange-400", 
+          bg: "bg-orange-400/10", 
+          border: "border-orange-400/20",
+          badge: effectiveLensBadge > 0 ? effectiveLensBadge : null
+        },
         { 
           id: "homework", 
           icon: Edit2, 
@@ -1541,12 +1738,12 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
       items: [
         { 
           id: "meeting", 
-          icon: CalendarClock, 
-          name: "تواصل مع الادارة", 
+          icon: Users, 
+          name: "كادر المواد وتواصل الإدارة", 
           color: "text-blue-400", 
           bg: "bg-blue-400/10", 
           border: "border-blue-400/20",
-          badge: totalUnreadSupport > 0 ? totalUnreadSupport : null
+          badge: unreadLoungeMessagesCount > 0 ? unreadLoungeMessagesCount : null
         },
         { id: "finance", icon: Wallet, name: "المحفظة المالية والأقساط", color: "text-amber-400", bg: "bg-amber-400/10", border: "border-amber-400/20", cap: 'financial_view' },
         { id: "conduct", icon: AlertTriangle, name: "تقارير الانضباط والسلوك", color: "text-rose-400", bg: "bg-rose-400/10", border: "border-rose-400/20" },
@@ -1579,7 +1776,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
       
       // 3. Handle aliases - ONLY check parent-prefixed versions for portal isolation
       if (id === "grades") return disabledModules.includes("parent:grades") || disabledModules.includes("parent:attendance") || disabledModules.includes("parent:discipline");
-      if (id === "attendance") return disabledModules.includes("parent:grades") || disabledModules.includes("parent:attendance") || disabledModules.includes("parent:discipline");
+      if (id === "attendance" || id === "lens") return disabledModules.includes("parent:grades") || disabledModules.includes("parent:attendance") || disabledModules.includes("parent:discipline");
       if (id === "homework") return disabledModules.includes("parent:assignments");
       if (id === "conduct") return disabledModules.includes("parent:discipline_reports");
       if (id === "excellence") return disabledModules.includes("parent:excellence") || disabledModules.includes("parent:competitions");
@@ -1603,7 +1800,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
         return !checkIsDisabled(item.id);
       })
     })).filter(sec => sec.items.length > 0);
-  }, [rawSections, schoolConfigs?.disabledModules]);
+  }, [rawSections, schoolConfigs?.disabledModules, unreadHomeworksCount, effectiveLensBadge, securityService]);
 
   const getFormattedWhatsapp = (phone?: string) => {
     if (!phone) return '9647700000000';
@@ -1668,11 +1865,12 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
           school: activeSchool,
           glowColor: 'cyan' as const
         };
+      case 'lens':
       case 'attendance':
         return {
           pose: 'pose_schedule_planner' as const,
-          title: 'غرفة المتابعة - سجل الحضور والنشاط الصفي ⏱️🌟',
-          subtitle: `تتبع الحضور والغياب وتقييم النشاط الصفي المباشر • الطالب ${cleanStudentName}`,
+          title: parentAttendanceTab === 'lens' ? 'غرفة المتابعة - عين على الصف (اللقطات والبث الصفي) 📸✨' : 'غرفة المتابعة - سجل الحضور والمواظبة ⏱️🌟',
+          subtitle: parentAttendanceTab === 'lens' ? `توثيق اللحظات والمشاركات الصفية الحية • الطالب ${cleanStudentName}` : `تتبع الحضور والغياب وتقييم النشاط الصفي المباشر • الطالب ${cleanStudentName}`,
           school: activeSchool,
           glowColor: 'cyan' as const
         };
@@ -1822,7 +2020,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                 grade={studentData?.grade || grade || 'عام'}
                 section={studentData?.section || ''}
                 isTeacher={false}
-                notifications={parentNotifications}
+                notifications={generalNotifications}
                 hideHeader={true}
                 fullWidth={true}
               />
@@ -2810,7 +3008,352 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
 
           ) : activeSubPage === "attendance" ? (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-              {/* Attendance Stats Cards */}
+              
+              {/* 🌟 Top-Level Tab Switcher: [سجل الحضور والمواظبة ⚡] vs [عين على الصف 📸✨] */}
+              <div className="flex items-center gap-2 p-1.5 bg-[#0a1124] border border-cyan-500/25 rounded-2xl shadow-xl">
+                <button
+                  type="button"
+                  onClick={() => setParentAttendanceTab('attendance')}
+                  className={`flex-1 py-3 px-4 rounded-xl font-black text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    parentAttendanceTab === 'attendance'
+                      ? 'bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 text-white shadow-[0_0_20px_rgba(16,185,129,0.35)] scale-[1.01]'
+                      : 'text-white/60 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <UserCheck size={18} className={parentAttendanceTab === 'attendance' ? 'animate-pulse' : ''} />
+                  <span>سجل الحضور والمواظبة ⏱️</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setParentAttendanceTab('lens');
+                    setUnreadLensCount(0);
+                    try {
+                      const storageKey = `bairaq_last_lens_seen_${studentData?.id || studentData?.studentCode || studentCode || ''}`;
+                      safeStorage.setItem(storageKey, new Date().toISOString());
+                    } catch {}
+                    // Mark classroom_lens notifications as read in state & backend
+                    const unreadLensNotifs = (parentNotifications || []).filter((n: any) => n.type === 'classroom_lens' && !n.read);
+                    unreadLensNotifs.forEach((n: any) => {
+                      fetch(`/api/notifications/${n.id}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ read: true })
+                      }).catch(() => {});
+                    });
+                    setParentNotifications(prev => prev.map(n => n.type === 'classroom_lens' ? { ...n, read: true } : n));
+                  }}
+                  className={`relative flex-1 py-3 px-4 rounded-xl font-black text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                    parentAttendanceTab === 'lens'
+                      ? 'bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white shadow-[0_0_20px_rgba(59,130,246,0.35)] scale-[1.01]'
+                      : 'text-white/60 hover:text-white hover:bg-white/5'
+                  }`}
+                >
+                  <Camera size={18} className={parentAttendanceTab === 'lens' ? 'animate-pulse text-cyan-300' : ''} />
+                  <span>عين على الصف (اللقطات والبث الصفي) 📸✨</span>
+                  {effectiveLensBadge > 0 && (
+                    <span className="absolute -top-1.5 -right-1.5 px-2 py-0.5 rounded-full bg-rose-500 text-white font-black text-[10px] animate-bounce shadow-lg">
+                      {effectiveLensBadge} جديد
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              {parentAttendanceTab === 'lens' ? (
+                <div className="space-y-4 text-right" style={{ direction: 'rtl' }}>
+                  {/* Internal Tab Switcher: [لقطات طفلي] vs [لقطات الصف] */}
+                  <div className="flex items-center gap-1.5 p-1 bg-[#0a1124] border border-blue-500/20 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => setLensSubTab('individual')}
+                      className={`flex-1 py-2 px-3 rounded-lg font-black text-[11px] transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                        lensSubTab === 'individual'
+                          ? 'bg-blue-600 text-white shadow-lg'
+                          : 'text-white/40 hover:text-white/60'
+                      }`}
+                    >
+                      <User size={13} />
+                      <span>لقطات طفلي 👨‍🎓</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLensSubTab('broadcast')}
+                      className={`flex-1 py-2 px-3 rounded-lg font-black text-[11px] transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
+                        lensSubTab === 'broadcast'
+                          ? 'bg-purple-600 text-white shadow-lg'
+                          : 'text-white/40 hover:text-white/60'
+                      }`}
+                    >
+                      <Users size={13} />
+                      <span>المشاركات الجماعية 📢</span>
+                    </button>
+                  </div>
+
+                  {/* Controls Bar: Date Selector & History Navigation */}
+                  <div className="bg-gradient-to-r from-[#0d162d] via-[#101c3d] to-[#0d162d] p-3.5 sm:p-4 rounded-2xl border border-blue-500/25 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-2.5">
+                      <div className="w-9 h-9 rounded-xl bg-blue-500/20 text-blue-400 border border-blue-500/30 flex items-center justify-center shrink-0">
+                        <Camera size={18} className="animate-pulse" />
+                      </div>
+                      <div>
+                        <h4 className="text-xs sm:text-sm font-black text-white">
+                          {showAllLensDates ? 'أرشيف كافة اللقطات والمشاركات الصفية' : `لقطات تاريخ: ${parentLensDateFilter}`}
+                        </h4>
+                        <p className="text-[10.5px] text-white/50">
+                          {showAllLensDates ? `إجمالي اللقطات الموثقة: ${displayedLensActivities.length} لقطة` : `عدد اللقطات في هذا اليوم: ${displayedLensActivities.length} لقطة`}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Date Navigator Controls */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      {/* Date Stepper */}
+                      <div className="flex items-center bg-[#070d1e] p-1 rounded-xl border border-white/10 shadow-inner">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowAllLensDates(false);
+                            const prev = new Date(parentLensDateFilter);
+                            prev.setDate(prev.getDate() - 1);
+                            setParentLensDateFilter(prev.toISOString().split('T')[0]);
+                          }}
+                          title="اليوم السابق"
+                          className="w-7 h-7 rounded-lg bg-white/5 hover:bg-white/10 text-white/70 hover:text-white flex items-center justify-center transition-all cursor-pointer"
+                        >
+                          <ChevronRight size={15} />
+                        </button>
+
+                        <div className="px-2 flex items-center gap-1.5">
+                          <Calendar size={13} className="text-blue-400 shrink-0" />
+                          <input
+                            type="date"
+                            value={parentLensDateFilter}
+                            onChange={(e) => {
+                              setParentLensDateFilter(e.target.value);
+                              setShowAllLensDates(false);
+                            }}
+                            className="bg-transparent text-xs font-bold text-blue-200 outline-none cursor-pointer [color-scheme:dark]"
+                          />
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowAllLensDates(false);
+                            const next = new Date(parentLensDateFilter);
+                            next.setDate(next.getDate() + 1);
+                            setParentLensDateFilter(next.toISOString().split('T')[0]);
+                          }}
+                          title="اليوم التالي"
+                          className="w-7 h-7 rounded-lg bg-white/5 hover:bg-white/10 text-white/70 hover:text-white flex items-center justify-center transition-all cursor-pointer"
+                        >
+                          <ChevronLeft size={15} />
+                        </button>
+                      </div>
+
+                      {/* Today button */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setParentLensDateFilter(new Date().toISOString().split('T')[0]);
+                          setShowAllLensDates(false);
+                        }}
+                        className="px-2.5 py-1.5 rounded-xl bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 text-xs font-bold border border-blue-500/30 transition-all cursor-pointer"
+                      >
+                        اليوم 📍
+                      </button>
+
+                      {/* Show All Toggle */}
+                      <button
+                        type="button"
+                        onClick={() => setShowAllLensDates(!showAllLensDates)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer border ${
+                          showAllLensDates
+                            ? 'bg-blue-600 text-white border-blue-400 shadow-sm'
+                            : 'bg-white/5 hover:bg-white/10 text-white/70 border-white/10'
+                        }`}
+                      >
+                        <span>{showAllLensDates ? 'عرض الكل ✅' : 'عرض كل التواريخ'}</span>
+                      </button>
+
+                      {/* Refresh */}
+                      <button
+                        type="button"
+                        onClick={fetchParentLensActivities}
+                        disabled={isLoadingLensActivities}
+                        className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/70 hover:text-white border border-white/10 transition-all cursor-pointer"
+                        title="تحديث اللقطات"
+                      >
+                        <RefreshCw size={14} className={isLoadingLensActivities ? 'animate-spin text-blue-400' : ''} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Feed */}
+                  {isLoadingLensActivities ? (
+                    <div className="py-16 text-center space-y-3 bg-[#0a1124] rounded-2xl border border-white/5">
+                      <Loader2 size={32} className="text-blue-400 animate-spin mx-auto" />
+                      <span className="text-xs text-white/60 font-bold block">جاري جلب اللقطات والمشاركات الصفية...</span>
+                    </div>
+                  ) : displayedLensActivities.length === 0 ? (
+                    <div className="py-12 px-4 text-center bg-[#0a1124]/60 rounded-3xl border border-dashed border-white/10 space-y-3">
+                      <div className="w-14 h-14 rounded-2xl bg-white/5 mx-auto flex items-center justify-center text-3xl">
+                        📸
+                      </div>
+                      <h5 className="text-sm font-black text-white">
+                        {showAllLensDates ? 'لا توجد لقطات مسجلة لطالبتكم/طالبكم حتى الآن' : `لا توجد لقطات موثقة لتاريخ ${parentLensDateFilter}`}
+                      </h5>
+                      <p className="text-xs text-white/50 max-w-md mx-auto">
+                        {showAllLensDates
+                          ? 'يقوم كادر التدريس بتوثيق اللقطات والفيديوهات التفاعلية وبثها مباشرة فور قيام الطالب بمشاركة متميزة.'
+                          : 'يمكنك التبديل إلى تواريخ أخرى أو النقر على "عرض الكل" لمشاهدة جميع اللقطات السابقة.'}
+                      </p>
+                      {!showAllLensDates && (
+                        <button
+                          type="button"
+                          onClick={() => setShowAllLensDates(true)}
+                          className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-black transition-all cursor-pointer"
+                        >
+                          عرض كل التواريخ 📂
+                        </button>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {displayedLensActivities.map((act) => {
+                        const tgEmbed = act.mediaUrl ? act.mediaUrl.replace('https://t.me/', 'https://t.me/') : '';
+                        const isPrivate = tgEmbed.includes('/c/');
+                        const embedUrl = isPrivate ? '' : `${tgEmbed}?embed=1&dark=1`;
+
+                        const mediaSrc = act.mediaUrl && act.mediaUrl.startsWith('/api/media/local/')
+                          ? act.mediaUrl
+                          : act.telegramFileId?.startsWith('local:')
+                            ? `/api/media/local/${act.telegramFileId.replace('local:', '')}`
+                            : act.telegramFileId
+                              ? `/api/media/telegram/${act.schoolId || studentData?.schoolId || 'school1'}/${act.telegramFileId}`
+                              : act.mediaUrl || '';
+
+                        const isVideo = act.mediaType === 'video' || 
+                          Boolean(act.telegramFileId?.startsWith('BAAC')) ||
+                          Boolean(mediaSrc && (/\.(mp4|mov|webm|m4v|3gp|avi|mkv)$/i.test(mediaSrc) || mediaSrc.includes('video') || mediaSrc.includes('mp4') || mediaSrc.includes('tg_BAAC'))) ||
+                          Boolean(act.mediaUrl && (/\.(mp4|mov|webm|m4v|3gp|avi|mkv)$/i.test(act.mediaUrl) || act.mediaUrl.includes('video') || act.mediaUrl.includes('mp4')));
+
+                        // Parse Teacher Name and Subject Name
+                        const authorRaw = (act.authorName || 'الأستاذ').trim();
+                        let teacherName = authorRaw;
+                        let subjectName = '';
+
+                        const parenMatch = authorRaw.match(/^(.*?)\s*\((.*?)\)$/);
+                        if (parenMatch) {
+                          teacherName = parenMatch[1].trim() || 'الأستاذ';
+                          subjectName = parenMatch[2].trim();
+                        } else if (authorRaw.includes('•')) {
+                          const parts = authorRaw.split('•');
+                          teacherName = parts[0].trim() || 'الأستاذ';
+                          subjectName = parts[1].trim();
+                        } else if (authorRaw.includes(' - ')) {
+                          const parts = authorRaw.split(' - ');
+                          teacherName = parts[0].trim() || 'الأستاذ';
+                          subjectName = parts[1].trim();
+                        }
+
+                        return (
+                          <div key={act.id} className="bg-black/40 p-4 rounded-2xl border border-white/10 space-y-3 relative overflow-hidden flex flex-col justify-between shadow-lg hover:border-blue-500/30 transition-all">
+                            <div>
+                              {/* 👨‍🏫 اسم الأستاذ والمادة الدراسية */}
+                              <div className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-gradient-to-r from-blue-950/70 via-indigo-950/60 to-purple-950/70 border border-blue-500/25 mb-2.5 shadow-sm">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <div className="w-8 h-8 rounded-lg bg-blue-500/20 text-blue-300 flex items-center justify-center shrink-0 border border-blue-400/30 text-sm font-bold shadow-sm">
+                                    👨‍🏫
+                                  </div>
+                                  <div className="min-w-0">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="text-xs font-black text-white truncate">
+                                        الأستاذ: {teacherName}
+                                      </span>
+                                      {subjectName && (
+                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-cyan-500/25 text-cyan-300 border border-cyan-400/35">
+                                          مادة: {subjectName}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <span className="text-[9.5px] text-blue-200/70 font-semibold block">
+                                      {act.telegramMessageId ? 'بث وتوثيق صفي حي 📡' : 'مشاركة صفية متميزة 🌟'}
+                                    </span>
+                                  </div>
+                                </div>
+                                <span className="text-[10px] text-white/50 font-mono shrink-0">
+                                  {act.createdAt ? new Date(act.createdAt).toLocaleDateString('ar-EG', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''}
+                                </span>
+                              </div>
+
+                              {mediaSrc ? (
+                                <div className="w-full aspect-video rounded-xl overflow-hidden border border-white/10 bg-black flex items-center justify-center relative shadow-inner">
+                                  {isVideo ? (
+                                    <ClassroomVideoPlayer
+                                      src={mediaSrc}
+                                      onExpand={() => setSelectedLensMedia({ ...act, mediaSrc, isVideo: true, teacherName, subjectName })}
+                                    />
+                                  ) : (
+                                    <div 
+                                      className="w-full h-full relative cursor-pointer group flex items-center justify-center"
+                                      onClick={() => setSelectedLensMedia({ ...act, mediaSrc, isVideo: false, teacherName, subjectName })}
+                                    >
+                                      <img
+                                        src={mediaSrc}
+                                        alt="نشاط صفي"
+                                        className="w-full h-full object-contain group-hover:scale-105 transition-transform duration-300"
+                                        loading="lazy"
+                                      />
+                                      <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                        <div className="px-3 py-1.5 rounded-xl bg-blue-600/90 text-white font-black text-xs flex items-center gap-1.5 shadow-lg backdrop-blur-sm">
+                                          <ZoomIn size={14} />
+                                          <span>عرض بحجم كامل 🔍</span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              ) : embedUrl ? (
+                                <div className="w-full aspect-video rounded-xl overflow-hidden border border-white/5 bg-black/40">
+                                  <iframe
+                                    src={embedUrl}
+                                    className="w-full h-full border-none"
+                                    title="Classroom Lens Video"
+                                    allowFullScreen
+                                  />
+                                </div>
+                              ) : (
+                                <div className="w-full aspect-video rounded-xl border border-dashed border-white/10 flex flex-col items-center justify-center p-4 text-center bg-black/40 space-y-2">
+                                  <span className="text-2xl">🔒</span>
+                                  <span className="text-[10px] font-bold text-white/60">لقطة صفيّة آمنة (قناة خاصة)</span>
+                                  <a
+                                    href={act.mediaUrl}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="px-3 py-1 rounded-lg bg-blue-600 text-white font-black text-[9px] hover:bg-blue-500 transition-all flex items-center gap-1 shadow-md shadow-blue-500/20"
+                                  >
+                                    <span>فتح وبث المشاهدة ↗️</span>
+                                  </a>
+                                </div>
+                              )}
+                            </div>
+
+                            {act.description && (
+                              <p className="text-white text-xs font-black leading-relaxed border-t border-white/5 pt-2.5 mt-2">
+                                💬 {act.description}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <>
+                  {/* Attendance Stats Cards */}
               <div className="grid grid-cols-3 gap-3">
                 <div 
                   onClick={() => setAttendanceFilter('present')}
@@ -3334,6 +3877,83 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                   );
                 })()}
               </div>
+                </>
+              )}
+
+              {/* Full-Screen Media Modal (Lightbox) for Videos and Photos */}
+              <AnimatePresence>
+                {selectedLensMedia && (
+                  <div 
+                    className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-md flex items-center justify-center p-3 sm:p-6"
+                    onClick={() => setSelectedLensMedia(null)}
+                  >
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.95 }}
+                      className="bg-[#0b1328] border border-white/15 rounded-3xl p-4 sm:p-5 max-w-3xl w-full max-h-[92vh] flex flex-col space-y-3 relative shadow-2xl text-right overflow-hidden"
+                      onClick={(e) => e.stopPropagation()}
+                      style={{ direction: 'rtl' }}
+                    >
+                      {/* Modal Header */}
+                      <div className="flex items-center justify-between border-b border-white/10 pb-3">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-10 h-10 rounded-xl bg-blue-500/20 text-blue-300 flex items-center justify-center text-lg border border-blue-400/30 shrink-0 shadow-sm">
+                            👨‍🏫
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <h4 className="text-sm font-black text-white">
+                                الأستاذ: {selectedLensMedia.teacherName || selectedLensMedia.authorName || 'الأستاذ'}
+                              </h4>
+                              {selectedLensMedia.subjectName && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-cyan-500/25 text-cyan-300 border border-cyan-400/35">
+                                  مادة: {selectedLensMedia.subjectName}
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[10px] text-white/50">{selectedLensMedia.createdAt ? new Date(selectedLensMedia.createdAt).toLocaleString('ar-EG') : ''}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setSelectedLensMedia(null)}
+                            className="w-9 h-9 rounded-xl bg-white/10 hover:bg-rose-500/20 text-white/70 hover:text-rose-400 transition-all cursor-pointer flex items-center justify-center border border-white/10"
+                            title="إغلاق النافذة"
+                          >
+                            <X size={18} />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Media Display */}
+                      <div className="flex-1 w-full min-h-[260px] max-h-[62vh] rounded-2xl overflow-hidden bg-black flex items-center justify-center relative">
+                        {selectedLensMedia.isVideo ? (
+                          <ClassroomVideoPlayer
+                            src={selectedLensMedia.mediaSrc}
+                            autoPlay={true}
+                            className="max-h-[62vh]"
+                          />
+                        ) : (
+                          <img
+                            src={selectedLensMedia.mediaSrc}
+                            alt="نشاط صفي"
+                            className="w-full h-full max-h-[62vh] object-contain"
+                          />
+                        )}
+                      </div>
+
+                      {/* Modal Description */}
+                      {selectedLensMedia.description && (
+                        <div className="p-3 rounded-xl bg-white/5 border border-white/10 text-white text-xs font-black leading-relaxed">
+                          💬 {selectedLensMedia.description}
+                        </div>
+                      )}
+                    </motion.div>
+                  </div>
+                )}
+              </AnimatePresence>
             </div>
           ) : activeSubPage === "excellence" ? (
             <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
@@ -3560,18 +4180,14 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => setContactTab('teachers')}
-                  className={`flex-1 py-3 px-3 sm:px-4 rounded-xl text-xs sm:text-sm font-black transition-all cursor-pointer flex items-center justify-center gap-2 relative ${
-                    contactTab === 'teachers'
-                      ? 'bg-gradient-to-r from-cyan-500 to-blue-600 text-white shadow-lg shadow-cyan-500/30'
-                      : 'text-cyan-300/70 hover:text-cyan-300 hover:bg-cyan-500/10'
-                  }`}
+                  onClick={() => setIsLoungeOpen(true)}
+                  className={`flex-1 py-3 px-3 sm:px-4 rounded-xl text-xs sm:text-sm font-black transition-all cursor-pointer flex items-center justify-center gap-2 relative text-cyan-300/70 hover:text-cyan-300 hover:bg-cyan-500/10 border border-white/5 bg-[#101935] hover:border-cyan-400/30`}
                 >
                   <Users size={16} />
                   <span>الأساتذة (كادر المواد)</span>
-                  {studentTeachers.length > 0 && (
-                    <span className="bg-cyan-400 text-black text-[10px] font-black px-2 py-0.5 rounded-full shrink-0">
-                      {studentTeachers.length}
+                  {unreadLoungeMessagesCount > 0 && (
+                    <span className="absolute -top-1.5 -left-1.5 bg-red-600 text-white text-[9px] font-black w-5 h-5 rounded-full flex items-center justify-center animate-bounce shadow-md font-sans">
+                      {unreadLoungeMessagesCount}
                     </span>
                   )}
                 </button>
@@ -4899,7 +5515,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
           userId={studentData?.parentCode || auth.currentUser?.uid || ''}
           role="parent"
           isTeacher={false}
-          notifications={parentNotifications}
+          notifications={generalNotifications}
           onDeleteNotification={(id) => setParentNotifications(prev => prev.filter(n => n.id !== id))}
           onClearAllNotifications={() => setParentNotifications([])}
           studentCode={studentData?.studentCode || studentCode}
@@ -5034,7 +5650,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
           `}</style>
           <div className="flex-1 overflow-hidden h-full flex items-center relative" dir="ltr">
              {(() => {
-               const broadcastNotifs = [...parentBroadcasts, ...parentNotifications.filter(n => n.type === 'broadcast' || n.title?.includes('تبليغ'))];
+               const broadcastNotifs = [...parentBroadcasts, ...generalNotifications.filter(n => n.type === 'broadcast' || n.title?.includes('تبليغ'))];
                return broadcastNotifs.length === 0 ? (
                  <div className="parent-marquee-scroller font-black text-[11px] md:text-xs tracking-wide opacity-75">
                    {/* First copy */}
@@ -5103,7 +5719,22 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                     key={`${item.id}_${sIdx}_${iIdx}_item`}
                     whileTap={{ scale: 0.98 }}
                     onClick={() => {
-                      item.id === "transport" ? setShowTransportView(true) : setActiveSubPage(item.id)
+                      if (item.id === "meeting") {
+                        setIsLoungeOpen(true);
+                        setActiveSubPage('meeting');
+                      } else if (item.id === "transport") {
+                        setShowTransportView(true);
+                      } else if (item.id === "lens") {
+                        setParentAttendanceTab('lens');
+                        setUnreadLensCount(0);
+                        setActiveSubPage('attendance');
+                      } else {
+                        if (item.id === "attendance") {
+                          setParentAttendanceTab('attendance');
+                          setUnreadLensCount(0);
+                        }
+                        setActiveSubPage(item.id);
+                      }
                     }}
                     className={`bg-[#101935] p-[18px] mb-3 rounded-[20px] flex items-center gap-4 border ${item.border} cursor-pointer hover:bg-[#152042] transition-colors group relative overflow-hidden`}
                   >
@@ -5139,152 +5770,43 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
         <div className="h-20" /> {/* Spacer */}
       </div>
 
-      {/* Teacher Direct Chat Modal */}
+      {/* Teacher Direct Chat (Replaced with Lounge) */}
       <AnimatePresence>
         {selectedTeacherForChat && (
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md" dir="rtl">
-            <motion.div
-              initial={{ opacity: 0, scale: 0.95, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-[#0b1224] border border-cyan-500/30 rounded-3xl max-w-lg w-full overflow-hidden shadow-2xl flex flex-col max-h-[90vh]"
-            >
-              {/* Modal Header */}
-              <div className="p-4 sm:p-5 bg-gradient-to-r from-[#0a1536] to-[#0d2a6b] border-b border-white/10 flex items-center justify-between gap-3 shrink-0">
-                <div className="flex items-center gap-3 min-w-0">
-                  <div className="w-12 h-12 rounded-2xl bg-cyan-500/20 border border-cyan-400/40 text-cyan-300 flex items-center justify-center shrink-0 overflow-hidden shadow-md">
-                    {selectedTeacherForChat.photo ? (
-                      <img src={selectedTeacherForChat.photo} alt={selectedTeacherForChat.name} className="w-full h-full object-cover" />
-                    ) : (
-                      <Users size={22} />
-                    )}
-                  </div>
-                  <div className="min-w-0">
-                    <h4 className="text-white font-black text-base truncate flex items-center gap-2">
-                      <span>أ. {selectedTeacherForChat.name}</span>
-                      <span className="text-[10px] bg-cyan-500/20 text-cyan-300 border border-cyan-400/30 px-2 py-0.5 rounded-full font-bold">
-                        {selectedTeacherForChat.subject ? `مادة ${selectedTeacherForChat.subject}` : 'أستاذ المادة'}
-                      </span>
-                    </h4>
-                    <p className="text-xs text-white/50 font-bold truncate mt-0.5">
-                      استفسار ولي أمر الطالب: <span className="text-cyan-300 font-black">{cleanParentStudentName(studentName)}</span>
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setSelectedTeacherForChat(null)}
-                  className="w-9 h-9 rounded-full bg-white/5 hover:bg-white/10 text-white/50 hover:text-white flex items-center justify-center transition-all cursor-pointer shrink-0"
-                >
-                  <X size={18} />
-                </button>
-              </div>
-
-              {/* Chat Body & History */}
-              <div className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1 no-scrollbar">
-                {/* Intro Banner */}
-                <div className="p-3.5 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-200 text-xs font-bold flex items-center gap-2.5">
-                  <Sparkles size={16} className="text-cyan-400 shrink-0" />
-                  <span>تواصل حي مع أستاذ المادة. تصل رسالتك مباشرة للأستاذ مع إشعار فوري 📱</span>
-                </div>
-
-                {/* Quick Chips Prompts */}
-                <div className="space-y-1.5">
-                  <span className="text-[10px] font-black text-white/40 block">نماذج استفسارات سريعة (انقر للتعبئة):</span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {[
-                      "🌟 السلام عليكم أستاذ، أود الاستفسار عن المستوى الدراسي والدرجات للطالب.",
-                      "⏱️ كيف ترون تحضير والتزام الطالب خلال الحصص والنشاط الصفي؟",
-                      "📝 هل توجد أي واجبات أو توصيات خاصة ينبغي المتابعة مع الطالب فيها؟",
-                      "🤝 جزيل الشكر والتقدير لجهودكم القيمة ومتابعتكم المستمرة."
-                    ].map((promptText, pIdx) => (
-                      <button
-                        key={`chip_${pIdx}`}
-                        type="button"
-                        onClick={() => setTeacherMessageText(promptText)}
-                        className="text-[11px] font-bold bg-white/5 hover:bg-cyan-500/20 border border-white/10 hover:border-cyan-400/40 text-white/80 hover:text-cyan-200 px-3 py-1.5 rounded-xl transition-all cursor-pointer text-right leading-tight"
-                      >
-                        {promptText}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Sent Messages Stream */}
-                {(() => {
-                  const tId = selectedTeacherForChat.id || selectedTeacherForChat.code;
-                  const historyMsgs = teacherChatHistory[tId] || [];
-
-                  if (historyMsgs.length === 0) {
-                    return (
-                      <div className="py-6 text-center text-white/30 text-xs font-bold border border-dashed border-white/10 rounded-2xl">
-                        لم تقم بإرسال أي رسائل سابقة لهذا الأستاذ بعد. اكتب رسالتك أدناه للبدء.
-                      </div>
-                    );
-                  }
-
-                  return (
-                    <div className="space-y-2.5 pt-2 border-t border-white/10">
-                      <span className="text-[10px] font-black text-white/40 block">سجل الرسائل المرسلة للأستاذ:</span>
-                      {historyMsgs.map((m: any, idx: number) => (
-                        <div key={m.id || `msg_${idx}`} className="bg-[#121d38] border border-cyan-500/20 p-3.5 rounded-2xl space-y-1">
-                          <div className="flex items-center justify-between text-[10px]">
-                            <span className="font-black text-cyan-300 flex items-center gap-1">
-                              <CheckCircle2 size={12} className="text-emerald-400" />
-                              <span>{m.senderName}</span>
-                            </span>
-                            <span className="text-white/40 font-mono">{m.time} • {m.date}</span>
-                          </div>
-                          <p className="text-xs text-white font-medium leading-relaxed">{m.text}</p>
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })()}
-              </div>
-
-              {/* Message Input Footer */}
-              <div className="p-4 bg-[#080d1a] border-t border-white/10 space-y-3 shrink-0">
-                <textarea
-                  value={teacherMessageText}
-                  onChange={(e) => setTeacherMessageText(e.target.value)}
-                  placeholder={`اكتب استفسارك أو رسالتك للأستاذ (${selectedTeacherForChat.name}) هنا...`}
-                  className="w-full bg-[#101935] border border-cyan-500/30 rounded-2xl p-3 text-xs font-bold text-white placeholder-white/30 focus:border-cyan-400 outline-none transition-all resize-none h-20 leading-relaxed"
-                />
-
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-[10px] text-white/40 font-bold">
-                    سيصل التنبيه فوراً لجلسة الأستاذ ⚡
-                  </span>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedTeacherForChat(null)}
-                      className="px-4 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/60 hover:text-white text-xs font-bold transition-all cursor-pointer"
-                    >
-                      إلغاء
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={isSendingTeacherMessage || !teacherMessageText.trim()}
-                      onClick={handleSendTeacherMessage}
-                      className="px-5 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-black text-xs transition-all cursor-pointer flex items-center gap-1.5 shadow-lg shadow-cyan-500/25 disabled:opacity-40 active:scale-95"
-                    >
-                      {isSendingTeacherMessage ? (
-                        <Loader2 size={14} className="animate-spin text-black" />
-                      ) : (
-                        <Send size={14} />
-                      )}
-                      <span>إرسال الرسالة للأستاذ</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          </div>
+          <StudentLounge 
+            onClose={() => setSelectedTeacherForChat(null)}
+            schoolId={schoolId || studentData?.schoolId || 'school1'}
+            grade={studentData?.grade || grade || 'all'}
+            isTeacher={false}
+            isParent={true}
+            userProfile={{
+              id: auth.currentUser?.uid || studentCode || 'parent',
+              name: `ولي أمر ${cleanParentStudentName(studentName)}`,
+              role: 'parent',
+              photoURL: null,
+              grade: studentData?.grade || grade
+            }}
+            initialSelectedUser={{
+              ...selectedTeacherForChat,
+              role: 'teacher'
+            }}
+          />
+        )}
+        {isLoungeOpen && (
+          <StudentLounge 
+            onClose={() => setIsLoungeOpen(false)}
+            schoolId={schoolId || studentData?.schoolId || 'school1'}
+            grade={studentData?.grade || grade || 'all'}
+            isTeacher={false}
+            isParent={true}
+            userProfile={{
+              id: auth.currentUser?.uid || studentCode || 'parent',
+              name: `ولي أمر ${cleanParentStudentName(studentName)}`,
+              role: 'parent',
+              photoURL: null,
+              grade: studentData?.grade || grade
+            }}
+          />
         )}
       </AnimatePresence>
 

@@ -464,6 +464,9 @@ export class RealtimeServer {
     const isPublicBroadcast = 
       collection === 'broadcasts' || 
       collection === 'school_announcements' ||
+      collection === 'lens_activities' ||
+      collection === 'bairaq_activities' ||
+      collection === 'notifications_updated' ||
       collection.startsWith('live_sessions');
 
     this.clients.forEach((ws) => {

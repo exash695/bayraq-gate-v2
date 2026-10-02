@@ -104,10 +104,7 @@ export const BroadcastTicker: React.FC<BroadcastTickerProps> = ({ schoolId, grad
           white-space: nowrap;
           animation: ticker-scroll-seamless var(--ticker-speed, 20s) linear infinite;
           width: max-content;
-        }
-        .ticker-scroller-active:hover {
-          animation-play-state: paused;
-          cursor: pointer;
+          pointer-events: none;
         }
       `}</style>
 

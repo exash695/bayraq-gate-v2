@@ -1,4 +1,5 @@
 import { realtimeManager } from '../lib/realtimeManager';
+import { pushNotificationManager } from '../services/pushNotificationManager';
 import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
 const debugLog = (...args: any[]) => { if (process.env.NODE_ENV === 'development') console.log(...args); };
@@ -435,7 +436,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     return "english";
   };
 
-  const getLatestGrade = (student: any, teacherSubject: string): { grade: number; periodName: string } => {
+  const getLatestGrade = (student: any, teacherSubject: string): { grade: number | null; periodName: string; hasGrade: boolean } => {
     const subjId = getTeacherSubjectId(teacherSubject, student.grade || "");
     const allPossiblePeriodsWithLabels = [
       { id: 'month1', label: 'الشهر الأول' },
@@ -455,13 +456,11 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
       if (scoreVal !== undefined && scoreVal !== null && scoreVal !== "") {
         const num = Number(scoreVal);
         if (!isNaN(num)) {
-          return { grade: num, periodName: p.label };
+          return { grade: num, periodName: p.label, hasGrade: true };
         }
       }
     }
-    const nameHash = (student.name || "").split("").reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0);
-    const fallbackGrade = Math.round(85 + (nameHash % 16));
-    return { grade: fallbackGrade, periodName: "التقييم المستمر" };
+    return { grade: null, periodName: "لم تُرصد بعد", hasGrade: false };
   };
 
   const getDynamicOutstandingBadges = () => {
@@ -492,26 +491,19 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
       }
     });
 
-    let subjAvg = 90; // Default baseline avg
+    let basePoints = 0;
+    let progressBonus = 0;
+    let subjAvg = 0;
+
     if (scores.length > 0) {
       subjAvg = scores.reduce((a, b) => a + b, 0) / scores.length;
-    } else {
-      const nameHash = (student.name || "").split("").reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0);
-      subjAvg = 80 + (nameHash % 21); // 80 - 100
-    }
-
-    let basePoints = Math.round(subjAvg * 10);
-
-    // 2. Progress/Improvement Bonus
-    let progressBonus = 0;
-    if (scores.length >= 2) {
-      const diff = scores[scores.length - 1] - scores[0];
-      if (diff > 0) {
-        progressBonus = diff * 15; // e.g., improved by 10 points -> +150 XP
+      basePoints = Math.round(subjAvg * 10);
+      if (scores.length >= 2) {
+        const diff = scores[scores.length - 1] - scores[0];
+        if (diff > 0) {
+          progressBonus = diff * 15; // e.g., improved by 10 points -> +150 XP
+        }
       }
-    } else {
-      const nameHash = (student.name || "").split("").reduce((acc: number, char: string) => acc + char.charCodeAt(0), 0);
-      progressBonus = (nameHash % 5) * 30; // Stable dynamic progress bonus
     }
 
     // 3. Badges and Awards Bonus specifically for this subject
@@ -533,10 +525,10 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     }
 
     // High performance exemption bonus
-    if (subjAvg >= 90) {
+    if (scores.length > 0 && subjAvg >= 90) {
       badgesBonus += 150;
     }
-    if (subjAvg >= 95) {
+    if (scores.length > 0 && subjAvg >= 95) {
       badgesBonus += 100; // Extra elite bonus
     }
 
@@ -3725,8 +3717,25 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     };
 
     fetchCount();
-    const unsub = realtimeManager.subscribe('lounge_messages', () => {
+    const unsub = realtimeManager.subscribe('lounge_messages', (event) => {
       fetchCount();
+      if (event && event.action === 'INSERT' && event.data) {
+        const msgData = event.data;
+        const currentUid = auth.currentUser?.uid;
+        if (msgData && msgData.recipientId === currentUid && msgData.userId !== currentUid) {
+          const senderName = msgData.userName || 'أحد المستخدمين';
+          const text = msgData.text === 'بصمة صوتية' ? 'أرسل لك بصمة صوتية 🎙️' : msgData.text;
+          showToast(`💬 رسالة جديدة من ${senderName}: ${text}`, 'info');
+          
+          // Trigger background system push notification (Messenger / Facebook style)
+          pushNotificationManager.showLocalNotification(`رسالة جديدة من ${senderName} 💬`, {
+            body: text,
+            icon: msgData.userPhoto || '/logo.png',
+            tag: `lounge_msg_${msgData.userId}`,
+            renotify: true
+          });
+        }
+      }
     });
     return () => unsub();
   }, [resolvedSchoolId]);
@@ -8373,8 +8382,16 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
         )}
       </AnimatePresence>
 
-      {/* 3. Professional Bottom Navigation Bar (Matched to User Flutter Specs) */}
-      <nav className="h-16 flex-shrink-0 bg-[#050A18]/95 backdrop-blur-sm border-t border-white/10 flex items-center gap-1 overflow-x-auto no-scrollbar px-2 pb-1 z-50 relative justify-start md:justify-center" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
+      {/* 3. Professional Bottom Navigation Bar (Safe Area & Device Navigation Friendly) */}
+      <nav 
+        className="flex-shrink-0 bg-[#050A18]/95 backdrop-blur-md border-t border-white/10 flex items-center gap-1 overflow-x-auto no-scrollbar px-2 pt-1.5 z-50 relative justify-start md:justify-center transition-all" 
+        style={{ 
+          scrollbarWidth: 'none', 
+          msOverflowStyle: 'none',
+          paddingBottom: 'max(14px, env(safe-area-inset-bottom, 14px))',
+          minHeight: 'calc(68px + env(safe-area-inset-bottom, 0px))'
+        }}
+      >
         {tabs.map((tab) => {
           const isSelected = activeTab === tab.id;
           const Icon = tab.icon;
@@ -8382,23 +8399,23 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as PlatformTab, "Bottom Navigation Bar onClick")}
-              className="relative flex flex-col items-center justify-center gap-1 min-w-[75px] h-full transition-all outline-none group flex-shrink-0"
+              className="relative flex flex-col items-center justify-center gap-0.5 min-w-[72px] h-full py-1 transition-all outline-none group flex-shrink-0 cursor-pointer"
             >
               <motion.div
                 animate={
                   isSelected ? { scale: 1.1, y: -2 } : { scale: 1, y: 0 }
                 }
-                className={`transition-all duration-300 ${isSelected ? "text-[#FFD600]" : (tab as any).isDisabled ? "text-rose-400/60" : "text-white/30 group-hover:text-white/70"}`}
+                className={`transition-all duration-300 ${isSelected ? "text-[#FFD600]" : (tab as any).isDisabled ? "text-rose-400/60" : "text-white/40 group-hover:text-white/80"}`}
               >
                 <div
-                  className={`p-1.5 rounded-xl transition-all duration-300 ${isSelected ? "bg-[#FFD600]/10 shadow-[0_0_15px_rgba(255,214,0,0.1)]" : "bg-transparent"}`}
+                  className={`p-1.5 rounded-xl transition-all duration-300 ${isSelected ? "bg-[#FFD600]/10 shadow-[0_0_15px_rgba(255,214,0,0.15)]" : "bg-transparent"}`}
                 >
-                  <Icon size={22} strokeWidth={isSelected ? 2.5 : 2} />
+                  <Icon size={21} strokeWidth={isSelected ? 2.5 : 2} />
                 </div>
               </motion.div>
               <span
-                className={`text-[10px] font-bold transition-all duration-300 tracking-wide
-                ${isSelected ? "text-[#FFD600] scale-105" : (tab as any).isDisabled ? "text-rose-400/70" : "text-white/30"}`}
+                className={`text-[10px] font-bold transition-all duration-300 tracking-wide select-none
+                ${isSelected ? "text-[#FFD600] font-black scale-105" : (tab as any).isDisabled ? "text-rose-400/70" : "text-white/40"}`}
               >
                 {tab.name}
               </span>
@@ -8416,7 +8433,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
               {isSelected && (
                 <motion.div
                   layoutId="activeTabIndicator"
-                  className="absolute -top-[1px] w-12 h-1 bg-[#FFD600] rounded-b-full shadow-[0_2px_10px_rgba(255,214,0,0.5)]"
+                  className="absolute top-0 w-10 h-1 bg-[#FFD600] rounded-b-full shadow-[0_2px_10px_rgba(255,214,0,0.6)]"
                 />
               )}
             </button>
