@@ -308,24 +308,14 @@ export default function App() {
     }
   });
 
-  const [splashFinished, setSplashFinished] = useState(() => {
-    try {
-      // Returning users skip splash screen completely for instant startup
-      return (
-        safeStorage.getItem("app_has_seen_onboarding") === "true" ||
-        !!safeStorage.getItem("bayraq_cached_user_profile")
-      );
-    } catch {
-      return true;
-    }
-  });
+  const [splashFinished, setSplashFinished] = useState(false);
 
-  // Rapid failsafe: ensure readiness within 500ms max for any first-time visitor
+  // Failsafe: ensure splash and auth readiness complete within 1500ms max
   useEffect(() => {
     const timer = setTimeout(() => {
       setAuthReady(true);
       setSplashFinished(true);
-    }, 500);
+    }, 1500);
     return () => clearTimeout(timer);
   }, []);
   const [hasSeenOnboarding, setHasSeenOnboarding] = useState(() => {
