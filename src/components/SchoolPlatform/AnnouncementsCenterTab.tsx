@@ -26,6 +26,7 @@ interface AnnouncementsCenterTabProps {
   grade: string;
   section?: string;
   isTeacher?: boolean;
+  isParent?: boolean;
   notifications: any[];
   hideHeader?: boolean;
   fullWidth?: boolean;
@@ -36,6 +37,7 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
   grade,
   section,
   isTeacher,
+  isParent = false,
   notifications = [],
   hideHeader = false,
   fullWidth = false
@@ -104,14 +106,6 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
     }
   }, [activeSubTab, adminItems, staffItems, isItemRead]);
 
-  const unreadAdminCount = useMemo(() => {
-    return adminItems.filter(item => !isItemRead(item)).length;
-  }, [adminItems, isItemRead]);
-
-  const unreadStaffCount = useMemo(() => {
-    return staffItems.filter(item => !isItemRead(item)).length;
-  }, [staffItems, isItemRead]);
-
   // 1. Subscribe to administrative & school radio announcements
   useEffect(() => {
     setIsLoading(true);
@@ -148,7 +142,8 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
               grade,
               section,
               className: section && grade ? `${grade} ${section}` : (section || grade),
-              isTeacher
+              isTeacher,
+              isParent
             });
           })
           .sort((a: any, b: any) => {
@@ -324,6 +319,14 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
 
     return { adminItems: adminList, staffItems: staffList };
   }, [broadcasts, mappedNotifications]);
+
+  const unreadAdminCount = useMemo(() => {
+    return adminItems.filter(item => !isItemRead(item)).length;
+  }, [adminItems, isItemRead]);
+
+  const unreadStaffCount = useMemo(() => {
+    return staffItems.filter(item => !isItemRead(item)).length;
+  }, [staffItems, isItemRead]);
 
   // 3. Combined & Searched items list
   const displayItems = useMemo(() => {

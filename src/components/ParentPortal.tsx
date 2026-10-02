@@ -145,12 +145,6 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
     }
   });
 
-  const unreadAnnouncementsCount = useMemo(() => {
-    const unreadBroadcasts = parentBroadcasts.filter(b => b.id && !readBroadcastIds.includes(b.id)).length;
-    const unreadNotifs = generalNotifications.filter(n => !n.read).length;
-    return unreadBroadcasts + unreadNotifs;
-  }, [parentBroadcasts, readBroadcastIds, generalNotifications]);
-
   // Sync readBroadcastIds when opening/closing announcements sub-page or listening to window event
   useEffect(() => {
     const handleReadAnnouncements = () => {
@@ -1642,6 +1636,12 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
     return parentNotifications.filter(n => n.type !== 'lounge_message' && n.type !== 'parent_message');
   }, [parentNotifications]);
 
+  const unreadAnnouncementsCount = useMemo(() => {
+    const unreadBroadcasts = parentBroadcasts.filter(b => b.id && !readBroadcastIds.includes(b.id)).length;
+    const unreadNotifs = generalNotifications.filter(n => !n.read).length;
+    return unreadBroadcasts + unreadNotifs;
+  }, [parentBroadcasts, readBroadcastIds, generalNotifications]);
+
   const totalUnreadSupport = unreadSupportCount + generalNotifications.filter(n => !n.read).length;
 
   const academicProfile = useMemo(() => {
@@ -2081,6 +2081,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                 grade={studentData?.grade || grade || 'عام'}
                 section={studentData?.section || studentData?.studentSection || studentData?.class || studentData?.className || (studentData?.grade && extractSectionLetter(studentData.grade) ? studentData.grade : "") || ""}
                 isTeacher={false}
+                isParent={true}
                 notifications={generalNotifications}
                 hideHeader={true}
                 fullWidth={true}
@@ -5694,8 +5695,8 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
         <div className="w-full bg-[#fbbf24] font-sans text-black flex items-center h-10 border-b border-black/10 relative overflow-hidden" dir="rtl">
           <style>{`
             @keyframes parent-marquee-scroll-seamless {
-              0% { transform: translate3d(0, 0, 0); }
-              100% { transform: translate3d(-50%, 0, 0); }
+              0% { transform: translate3d(-50%, 0, 0); }
+              100% { transform: translate3d(0, 0, 0); }
             }
             .parent-marquee-scroller {
               display: flex;
@@ -5715,25 +5716,25 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                return broadcastNotifs.length === 0 ? (
                  <div className="parent-marquee-scroller font-black text-[11px] md:text-xs tracking-wide opacity-75">
                    {/* First copy */}
-                   <div className="flex items-center justify-around px-6 shrink-0 min-w-full gap-12" dir="rtl">
-                     <span className="shrink-0">منصة الإدارة: لا توجد تبليغات جماعية عاجلة لأولياء الأمور حالياً...</span>
+                   <div className="flex items-center justify-around px-6 shrink-0 min-w-full gap-12">
+                     <span className="shrink-0" dir="rtl">منصة الإدارة: لا توجد تبليغات جماعية عاجلة لأولياء الأمور حالياً...</span>
                      <span className="text-red-700/0 font-extrabold text-sm mx-4 shrink-0">✦</span>
                    </div>
                    {/* Second copy */}
-                   <div className="flex items-center justify-around px-6 shrink-0 min-w-full gap-12" dir="rtl">
-                     <span className="shrink-0">منصة الإدارة: لا توجد تبليغات جماعية عاجلة لأولياء الأمور حالياً...</span>
+                   <div className="flex items-center justify-around px-6 shrink-0 min-w-full gap-12">
+                     <span className="shrink-0" dir="rtl">منصة الإدارة: لا توجد تبليغات جماعية عاجلة لأولياء الأمور حالياً...</span>
                      <span className="text-red-700/0 font-extrabold text-sm mx-4 shrink-0">✦</span>
                    </div>
                  </div>
                ) : (
                  <div className="parent-marquee-scroller font-black text-[11px] md:text-xs tracking-wide">
                    {/* First copy */}
-                   <div className="flex items-center justify-around px-6 shrink-0 min-w-full gap-12" dir="rtl">
-                     <div className="flex items-center gap-12 shrink-0">
+                   <div className="flex items-center justify-around px-6 shrink-0 min-w-full gap-12">
+                     <div className="flex items-center gap-12 shrink-0" dir="rtl">
                        {broadcastNotifs.map((n, i) => (
                          <span key={`p_notif_1_${n.id || i}_${i}`} className="flex items-center gap-2 shrink-0">
                            <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse shrink-0" />
-                           <span className="text-black font-extrabold">{n.message}</span>
+                           <span className="text-black font-extrabold">{n.message || n.body || n.text || ''}</span>
                          </span>
                        ))}
                      </div>
@@ -5741,12 +5742,12 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                    </div>
                    
                    {/* Second copy */}
-                   <div className="flex items-center justify-around px-6 shrink-0 min-w-full gap-12" dir="rtl">
-                     <div className="flex items-center gap-12 shrink-0">
+                   <div className="flex items-center justify-around px-6 shrink-0 min-w-full gap-12">
+                     <div className="flex items-center gap-12 shrink-0" dir="rtl">
                        {broadcastNotifs.map((n, i) => (
                          <span key={`p_notif_2_${n.id || i}_${i}`} className="flex items-center gap-2 shrink-0">
                            <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse shrink-0" />
-                           <span className="text-black font-extrabold">{n.message}</span>
+                           <span className="text-black font-extrabold">{n.message || n.body || n.text || ''}</span>
                          </span>
                        ))}
                      </div>
@@ -5789,6 +5790,18 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                         setParentAttendanceTab('lens');
                         setUnreadLensCount(0);
                         setActiveSubPage('attendance');
+                      } else if (item.id === "announcements") {
+                        // Mark all unread announcements notifications as read
+                        const unreadAnnouncements = (parentNotifications || []).filter(n => !n.read && (n.type === 'broadcast' || n.title?.includes('تبليغ')));
+                        unreadAnnouncements.forEach((n: any) => {
+                          fetch(`/api/notifications/${n.id}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ read: true })
+                          }).catch(() => {});
+                        });
+                        setParentNotifications(prev => prev.map(n => (n.type === 'broadcast' || n.title?.includes('تبليغ')) ? { ...n, read: true } : n));
+                        setActiveSubPage('announcements');
                       } else {
                         if (item.id === "attendance") {
                           setParentAttendanceTab('attendance');

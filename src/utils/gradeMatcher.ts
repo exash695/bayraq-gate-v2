@@ -272,6 +272,7 @@ export function matchesBroadcastAudience(
     section?: string | null;
     className?: string | null;
     isTeacher?: boolean;
+    isParent?: boolean;
   }
 ): boolean {
   // If teacher is viewing all sections or has no specific section selected, allow all broadcasts
@@ -285,8 +286,8 @@ export function matchesBroadcastAudience(
   if (Array.isArray(rawGrades)) gradesList = rawGrades;
   else if (typeof rawGrades === "string") gradesList = [rawGrades];
 
-  if (gradesList.includes("parent_only")) return false;
-  if (gradesList.includes("teacher_only")) return false;
+  if (gradesList.includes("parent_only") && !student.isParent) return false;
+  if (gradesList.includes("teacher_only") && !student.isTeacher) return false;
 
   // 1. Identify if the broadcast targets a specific section or multiple sections
   const targetSection = broadcast.targetSection || broadcast.target_section;

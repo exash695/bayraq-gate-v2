@@ -387,13 +387,8 @@ async function startServer() {
 
       // 1. Get school config
       const config = await db.select().from(school_configs).where(eq(school_configs.id, schoolId)).limit(1);
-      if (!config.length || !config[0].telegramBotToken) {
-        await fsPromises.unlink(file.path).catch(() => {});
-        return res.status(400).json({ success: false, message: "إعدادات البث غير مكتملة للمدرسة" });
-      }
-
-      const botToken = String(config[0].telegramBotToken).trim().replace(/^bot/i, '');
-      const mapping = config[0].telegramChannelsMapping as any || {};
+      const botToken = config.length && config[0].telegramBotToken ? String(config[0].telegramBotToken).trim().replace(/^bot/i, '') : null;
+      const mapping = config.length ? (config[0].telegramChannelsMapping as any || {}) : {};
 
       // 2. Resolve students
       let targetStudents: any[] = [];
@@ -510,12 +505,7 @@ async function startServer() {
       }
 
       const primaryStudent = targetStudents[0];
-      const targetChannel = mapping[grade] || mapping['default'] || mapping['الكل'] || Object.values(mapping)[0];
-
-      if (!targetChannel) {
-        await fsPromises.unlink(file.path).catch(() => {});
-        return res.status(400).json({ success: false, message: `الصف (${grade}) غير مرتبط بقناة تليجرام` });
-      }
+      const targetChannel = botToken ? (mapping[grade] || mapping['default'] || mapping['الكل'] || Object.values(mapping)[0] || null) : null;
 
       // 3. Detect File Type Accurately (Handling Android Filenames like mp4.1000113444 and magic bytes)
       const origName = (file.originalname || '').toLowerCase();
@@ -569,59 +559,61 @@ async function startServer() {
       const TELEGRAM_MAX_FILE_SIZE = 48 * 1024 * 1024; // 48 MB safe limit
       const isLargeFile = file.size > TELEGRAM_MAX_FILE_SIZE;
 
-      if (!isLargeFile) {
-        // Normal Telegram upload (< 48MB)
-        const telegramMethod = isVideo ? 'sendVideo' : isImage ? 'sendPhoto' : 'sendDocument';
-        const telegramUrl = `https://api.telegram.org/bot${botToken}/${telegramMethod}`;
-        const fileBuffer = await fsPromises.readFile(file.path);
-        const blob = new Blob([fileBuffer], { type: file.mimetype || (isVideo ? 'video/mp4' : 'image/jpeg') });
-        const formData = new FormData();
-        formData.append('chat_id', String(targetChannel));
-        formData.append(isVideo ? 'video' : isImage ? 'photo' : 'document', blob, file.originalname);
-        formData.append('caption', captionText);
+      if (botToken && targetChannel) {
+        if (!isLargeFile) {
+          // Normal Telegram upload (< 48MB)
+          const telegramMethod = isVideo ? 'sendVideo' : isImage ? 'sendPhoto' : 'sendDocument';
+          const telegramUrl = `https://api.telegram.org/bot${botToken}/${telegramMethod}`;
+          const fileBuffer = await fsPromises.readFile(file.path);
+          const blob = new Blob([fileBuffer], { type: file.mimetype || (isVideo ? 'video/mp4' : 'image/jpeg') });
+          const formData = new FormData();
+          formData.append('chat_id', String(targetChannel));
+          formData.append(isVideo ? 'video' : isImage ? 'photo' : 'document', blob, file.originalname);
+          formData.append('caption', captionText);
 
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minutes
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minutes
 
-        try {
-          const tgRes = await fetch(telegramUrl, { method: 'POST', body: formData, signal: controller.signal });
-          clearTimeout(timeoutId);
-          const tgData: any = await tgRes.json();
-          if (tgData.ok) {
-            msgId = tgData.result.message_id;
-            if (tgData.result.video) telegramFileId = tgData.result.video.file_id;
-            else if (tgData.result.photo) telegramFileId = tgData.result.photo[tgData.result.photo.length - 1].file_id;
-            else if (tgData.result.document) telegramFileId = tgData.result.document.file_id;
-          } else {
-            console.warn("[Activity Upload] Telegram direct upload failed, falling back to message:", tgData.description);
+          try {
+            const tgRes = await fetch(telegramUrl, { method: 'POST', body: formData, signal: controller.signal });
+            clearTimeout(timeoutId);
+            const tgData: any = await tgRes.json();
+            if (tgData.ok) {
+              msgId = tgData.result.message_id;
+              if (tgData.result.video) telegramFileId = tgData.result.video.file_id;
+              else if (tgData.result.photo) telegramFileId = tgData.result.photo[tgData.result.photo.length - 1].file_id;
+              else if (tgData.result.document) telegramFileId = tgData.result.document.file_id;
+            } else {
+              console.warn("[Activity Upload] Telegram direct upload failed, falling back to message:", tgData.description);
+            }
+          } catch (tgErr: any) {
+            clearTimeout(timeoutId);
+            console.warn("[Activity Upload] Telegram upload network error:", tgErr.message);
           }
-        } catch (tgErr: any) {
-          clearTimeout(timeoutId);
-          console.warn("[Activity Upload] Telegram upload network error:", tgErr.message);
         }
-      }
 
-      // If large file or direct file upload skipped/failed: send a formatted Telegram message
-      if (!msgId) {
-        try {
-          const msgUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
-          const largeFileNote = isLargeFile 
-            ? `\n\n🎬 تم رفع وتوثيق فيديو فائق الدقة (بحجم ${(file.size / (1024 * 1024)).toFixed(1)} ميغابايت).\n✨ الفيديو متاح الآن للمشاهدة المباشرة بجودة فائقة داخل تطبيق المنصة!`
-            : '';
-          const msgRes = await fetch(msgUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              chat_id: String(targetChannel),
-              text: `${captionText}${largeFileNote}`
-            })
-          });
-          const msgData: any = await msgRes.json();
-          if (msgData.ok) {
-            msgId = msgData.result.message_id;
+        // If large file or direct file upload skipped/failed: send a formatted Telegram message
+        if (!msgId) {
+          try {
+            const msgUrl = `https://api.telegram.org/bot${botToken}/sendMessage`;
+            const largeFileNote = isLargeFile 
+              ? `\n\n🎬 تم رفع وتوثيق فيديو فائق الدقة (بحجم ${(file.size / (1024 * 1024)).toFixed(1)} ميغابايت).\n✨ الفيديو متاح الآن للمشاهدة المباشرة بجودة فائقة داخل تطبيق المنصة!`
+              : '';
+            const msgRes = await fetch(msgUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chat_id: String(targetChannel),
+                text: `${captionText}${largeFileNote}`
+              })
+            });
+            const msgData: any = await msgRes.json();
+            if (msgData.ok) {
+              msgId = msgData.result.message_id;
+            }
+          } catch (e) {
+            console.error("[Activity Upload] Failed to send Telegram announcement:", e);
           }
-        } catch (e) {
-          console.error("[Activity Upload] Failed to send Telegram announcement:", e);
         }
       }
 
@@ -629,7 +621,7 @@ async function startServer() {
       await fsPromises.unlink(file.path).catch(() => {});
 
       // 4. Save Activity Records in SQL for each target student
-      const channelUsername = String(targetChannel).replace('@', '');
+      const channelUsername = String(targetChannel || '').replace('@', '');
       const embedUrl = msgId ? `https://t.me/${channelUsername}/${msgId}` : localMediaUrl;
       const mediaType = isVideo ? 'video' : isImage ? 'photo' : 'document';
       const createdActivityIds: string[] = [];
@@ -14650,14 +14642,30 @@ app.post('/api/admin/maintenance/purge-cache', async (req, res) => {
     await sqlRaw`
       CREATE TABLE IF NOT EXISTS "bairaq_activities" (
         "id" varchar(128) PRIMARY KEY NOT NULL,
-        "student_id" varchar(128) NOT NULL,
-        "school_id" varchar(128) NOT NULL,
+        "student_id" varchar(128),
+        "school_id" varchar(128),
         "media_url" text NOT NULL,
         "description" text,
         "author_name" varchar(255),
         "created_at" timestamp DEFAULT now()
       );
     `;
+
+    // Ensure all required columns and constraints are correctly updated
+    try {
+      await sqlRaw`ALTER TABLE bairaq_activities ALTER COLUMN student_id DROP NOT NULL;`;
+      await sqlRaw`ALTER TABLE bairaq_activities ALTER COLUMN school_id DROP NOT NULL;`;
+      await sqlRaw`ALTER TABLE bairaq_activities ADD COLUMN IF NOT EXISTS "telegram_file_id" text;`;
+      await sqlRaw`ALTER TABLE bairaq_activities ADD COLUMN IF NOT EXISTS "telegram_message_id" integer;`;
+      await sqlRaw`ALTER TABLE bairaq_activities ADD COLUMN IF NOT EXISTS "telegram_chat_id" text;`;
+      await sqlRaw`ALTER TABLE bairaq_activities ADD COLUMN IF NOT EXISTS "media_type" varchar(50);`;
+      await sqlRaw`ALTER TABLE bairaq_activities DROP CONSTRAINT IF EXISTS bairaq_activities_student_id_students_id_fk;`;
+      await sqlRaw`ALTER TABLE bairaq_activities DROP CONSTRAINT IF EXISTS bairaq_activities_student_id_fkey;`;
+      await sqlRaw`ALTER TABLE bairaq_activities DROP CONSTRAINT IF EXISTS bairaq_activities_school_id_schools_id_fk;`;
+      await sqlRaw`ALTER TABLE bairaq_activities DROP CONSTRAINT IF EXISTS bairaq_activities_school_id_fkey;`;
+    } catch (columnErr) {
+      console.warn("[bairaq_activities Column check warning]", columnErr);
+    }
 
     // High-concurrency performance indexes
     await sqlRaw`CREATE INDEX IF NOT EXISTS idx_schools_status ON schools(status);`;

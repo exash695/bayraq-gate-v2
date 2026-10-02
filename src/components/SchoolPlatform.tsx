@@ -932,6 +932,19 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
         setStudentLibraryTab("document");
       }
     }
+    if (newTab === "announcements") {
+      const unreadAnnouncements = (notifications || []).filter(n => !n.read && (n.type === 'broadcast' || n.title?.includes('تبليغ')));
+      unreadAnnouncements.forEach((n: any) => {
+        fetch(`/api/notifications/${n.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ read: true })
+        }).catch(() => {});
+      });
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("bairaq_announcements_read"));
+      }, 100);
+    }
   };
   const [selectedControlTab, setSelectedControlTab] = useState<string>(() => {
     const targetSub = safeStorage.getItem("s6_target_control_tab");
@@ -3778,7 +3791,6 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
 
   // Dynamic subscription to calculate unread announcements/broadcasts count for bottom tab badge
   useEffect(() => {
-    if (isTeacher) return;
     const currentSchoolId = resolvedSchoolId || "school1";
 
     let unsubBroadcasts: (() => void) | null = null;
@@ -3822,7 +3834,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
                 grade: studentGrade,
                 section: studentSection,
                 className: studentSection && studentGrade ? `${studentGrade} ${studentSection}` : (studentSection || studentGrade),
-                isTeacher: false
+                isTeacher: isTeacher || false
               });
             });
 
