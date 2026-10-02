@@ -2772,7 +2772,7 @@ export default function App() {
               grade={verifiedStudentInfo?.grade || selectedStudentGrade || ""}
               parentNotifications={notifications}
               onBack={() => {
-                handleHomeNavigation();
+                setActiveSection("mayadeen");
               }}
             />
           );
@@ -2991,29 +2991,6 @@ export default function App() {
           (userProfile?.schoolName && userProfile?.schoolName !== "أكاديمية بيرق الرقمية" ? userProfile.schoolName : null) ||
           (targetAdminSchoolId && targetAdminSchoolId !== "general" ? getOfficialSchoolName(targetAdminSchoolId) : null) ||
           "ثانوية اوائل غماس الاهلية";
-
-        if (isParentUser) {
-          return (
-            <ParentPortal
-              key={`parent-portal-${hubResetKey}`}
-              studentName={
-                verifiedStudentInfo?.studentName ||
-                verifiedStudentInfo?.fullName ||
-                verifiedStudentInfo?.name ||
-                verifiedStudentInfo?.userName ||
-                "طالب مجهول"
-              }
-              studentCode={
-                verifiedStudentInfo?.studentCode || verifiedStudentInfo?.code || verifiedStudentInfo?.parentCode
-              }
-              schoolId={verifiedStudentInfo?.schoolId || selectedSchoolId || "school1-boys"}
-              onBack={() => {
-                setActiveSection("mayadeen");
-              }}
-              onOpenNotifications={() => setIsNotificationDrawerOpen(true)}
-            />
-          );
-        }
 
         if (isTeacherUser && isChoosingSchool) {
           return (

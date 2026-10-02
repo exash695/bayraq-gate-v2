@@ -119,34 +119,56 @@ export const ArchiveDetailView: React.FC<ArchiveDetailViewProps> = ({
   };
 
   const handlePrint = () => {
-    const rowsHtml = selectedArchiveList.students.map((code: any) => `
-      <div style="border: 2px solid #333; padding: 15px; margin: 10px; border-radius: 10px; display: inline-block; width: 250px; direction: rtl; font-family: sans-serif; vertical-align: top; background: white;">
-        <div style="font-weight: bold; border-bottom: 2px solid #FFD600; margin-bottom: 10px; padding-bottom: 5px; color: #101935; display: flex; justify-content: space-between; align-items: center;">
-          <span>بطاقة الطالب الذكية</span>
-          <span style="font-size: 10px; color: #666;">بوابة بيرق</span>
+    const resolvedSchool = schoolName || 'المدرسة';
+    const rowsHtml = selectedArchiveList.students.map((code: any) => {
+      const sName = code.school || code.schoolName || resolvedSchool || 'المدرسة';
+      const gName = code.grade || code.stage || 'غير محدد';
+      const stName = code.name || code.studentName || code.fullName || 'طالب';
+      const stCode = code.student || code.code || code.studentCode || '';
+      const pCode = code.parent || code.parentCode || '';
+
+      return `
+      <div style="border: 2px solid #0f172a; padding: 14px; margin: 8px; border-radius: 12px; display: inline-block; width: 250px; direction: rtl; font-family: system-ui, -apple-system, sans-serif; vertical-align: top; background-color: #ffffff; color: #0f172a; box-sizing: border-box; page-break-inside: avoid; text-align: right;">
+        <div style="font-weight: 900; border-bottom: 2px solid #eab308; margin-bottom: 10px; padding-bottom: 6px; color: #0f172a; display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 13px; color: #0f172a;">بطاقة الطالب الذكية 🛡️</span>
+          <span style="font-size: 10px; font-weight: bold; color: #64748b;">بوابة بيرق</span>
         </div>
-        <div style="margin-bottom: 5px; font-size: 12px;"><strong>المدرسة:</strong> ${schoolName}</div>
-        <div style="margin-bottom: 5px; font-size: 12px;"><strong>الصف:</strong> ${code.grade || 'غير محدد'}</div>
-        <div style="margin-bottom: 5px; font-size: 12px;"><strong>الاسم:</strong> ${code.name}</div>
-        <div style="margin-bottom: 5px; font-size: 12px;"><strong>كود الطالب:</strong> <span style="color: #d32f2f; font-weight: bold; font-family: monospace;">${code.student}</span></div>
-        <div style="margin-bottom: 5px; font-size: 12px;"><strong>كود ولي الأمر:</strong> <span style="color: #1976d2; font-weight: bold; font-family: monospace;">${code.parent}</span></div>
-        <div style="font-size: 10px; color: #666; margin-top: 10px; border-top: 1px dashed #ddd; padding-top: 5px;">يرجى الاحتفاظ بهذه الأكواد للدخول للمنصة</div>
+        <div style="margin-bottom: 6px; font-size: 12px; color: #0f172a;"><strong style="color: #0f172a;">المدرسة:</strong> <span style="color: #1e293b; font-weight: 700;">${sName}</span></div>
+        <div style="margin-bottom: 6px; font-size: 12px; color: #0f172a;"><strong style="color: #0f172a;">الصف:</strong> <span style="color: #1e293b; font-weight: 700;">${gName}</span></div>
+        <div style="margin-bottom: 6px; font-size: 12px; color: #0f172a;"><strong style="color: #0f172a;">الاسم:</strong> <span style="color: #1e293b; font-weight: 800;">${stName}</span></div>
+        <div style="margin-bottom: 6px; font-size: 12px; color: #0f172a;"><strong style="color: #0f172a;">كود الطالب:</strong> <span style="color: #dc2626; font-weight: 900; font-family: monospace; font-size: 13px;">${stCode}</span></div>
+        <div style="margin-bottom: 6px; font-size: 12px; color: #0f172a;"><strong style="color: #0f172a;">كود ولي الأمر:</strong> <span style="color: #2563eb; font-weight: 900; font-family: monospace; font-size: 13px;">${pCode}</span></div>
+        <div style="font-size: 9.5px; color: #64748b; margin-top: 10px; border-top: 1px dashed #cbd5e1; padding-top: 6px; text-align: center;">يرجى الاحتفاظ بهذه الأكواد للدخول للمنصة</div>
       </div>
-    `).join('');
+    `;
+    }).join('');
     
     const html = `
-      <html dir="rtl">
+      <!DOCTYPE html>
+      <html dir="rtl" lang="ar">
         <head>
+          <meta charset="utf-8" />
           <title>طباعة القائمة - ${selectedArchiveList.name}</title>
           <style>
-            body { background: white; margin: 0; padding: 20px; }
+            * { box-sizing: border-box; }
+            body { 
+              background: #ffffff !important; 
+              color: #0f172a !important; 
+              margin: 0; 
+              padding: 16px; 
+              font-family: system-ui, -apple-system, sans-serif;
+              direction: rtl;
+            }
             @media print {
-              body { padding: 0; }
+              body { padding: 0; background: #ffffff !important; color: #0f172a !important; }
+              div { page-break-inside: avoid; }
             }
           </style>
         </head>
-        <body>
-          ${rowsHtml}
+        <body style="background-color: #ffffff; color: #0f172a;">
+          <div style="display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 8px; background: #ffffff;">
+            ${rowsHtml}
+          </div>
           <script>
             window.onload = function() {
               setTimeout(function() { window.print(); }, 500);

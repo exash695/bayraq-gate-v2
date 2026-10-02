@@ -152,6 +152,8 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   const [isLoadingLensActivities, setIsLoadingLensActivities] = useState<boolean>(false);
   const [lensSubTab, setLensSubTab] = useState<'individual' | 'broadcast'>('individual');
 
+  const mountTimeRef = useRef<number>(Date.now());
+
   const fetchParentLensActivities = () => {
     const stId = studentData?.id || studentData?.studentCode || studentCode;
     if (!stId) return;
@@ -176,8 +178,28 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   // Real-time synchronization when teacher adds or deletes snapshots
   useEffect(() => {
     const handleLensUpdate = (payload?: any) => {
+      if (!payload || typeof payload !== 'object') return;
+
       if (payload?.deletedId) {
         setLensActivities(prev => prev.filter(act => act.id !== payload.deletedId));
+        return;
+      }
+
+      // Ignore toast notifications during the first 5 seconds of mounting or for historical/sync events
+      if (Date.now() - mountTimeRef.current < 5000) {
+        fetchParentLensActivities();
+        return;
+      }
+
+      // Ensure payload is a valid new activity object with ID and createdAt timestamp
+      if (!payload?.id || !payload?.createdAt || !payload?.description) {
+        fetchParentLensActivities();
+        return;
+      }
+
+      const activityTime = new Date(payload.createdAt).getTime();
+      if (isNaN(activityTime) || Date.now() - activityTime > 30000) {
+        fetchParentLensActivities();
         return;
       }
 
@@ -212,22 +234,18 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
       const isForThisStudent = isAll || matchesId || matchesCode || matchesParentCode || matchesName;
 
       if (isForThisStudent) {
-        // Prevent showing notifications for old activities on component load
-        const activityTime = new Date(payload?.createdAt || Date.now()).getTime();
-        if (Date.now() - activityTime > 60000) return; 
-
         setUnreadLensCount(prev => prev + 1);
 
         const teacherName = payload?.authorName || 'الأستاذ';
         const notifTitle = isAll ? '📢 مشاركة صفية جماعية جديدة' : `📸 لقطة جديدة لطفلك (${studentName || st.name || 'الطالب'})`;
-        const notifBody = payload?.description || `نشر الأستاذ ${teacherName} لقطة جديدة في عين على الصف.`;
+        const notifBody = payload.description;
         showToast(`${notifTitle}: ${notifBody}`, 'success');
 
         try {
           pushNotificationManager.showLocalNotification(notifTitle, {
             body: notifBody,
             icon: '/logo.png',
-            tag: `lens_activity_${payload?.id || Date.now()}`,
+            tag: `lens_activity_${payload.id}`,
             renotify: true
           });
         } catch (e) {}
