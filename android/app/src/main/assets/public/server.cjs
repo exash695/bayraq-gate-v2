@@ -10877,7 +10877,8 @@ ${extractedText}
       const msgs = await db.select().from(lounge_messages).where((0, import_drizzle_orm.or)(
         (0, import_drizzle_orm.eq)(lounge_messages.userId, uid),
         (0, import_drizzle_orm.eq)(lounge_messages.recipientId, uid)
-      ));
+      )).orderBy((0, import_drizzle_orm.desc)(lounge_messages.timestamp));
+      const latestChatsMap = /* @__PURE__ */ new Map();
       const latestTimestamps = {};
       msgs.forEach((msg) => {
         const otherId = msg.userId === uid ? msg.recipientId : msg.userId;
@@ -10886,9 +10887,19 @@ ${extractedText}
           if (!latestTimestamps[otherId] || ts > latestTimestamps[otherId]) {
             latestTimestamps[otherId] = ts;
           }
+          if (!latestChatsMap.has(otherId)) {
+            latestChatsMap.set(otherId, {
+              otherId,
+              lastMessage: msg.text || (msg.imageUrl ? "\u{1F4F7} \u0645\u0631\u0641\u0642 / \u0635\u0648\u0631\u0629" : "\u0631\u0633\u0627\u0644\u0629 \u062C\u062F\u064A\u062F\u0629"),
+              timestamp: msg.timestamp,
+              senderId: msg.userId,
+              senderName: msg.userName,
+              read: msg.read
+            });
+          }
         }
       });
-      res.json({ success: true, latestTimestamps });
+      res.json({ success: true, latestTimestamps, recentChats: Array.from(latestChatsMap.values()) });
     } catch (error) {
       res.status(500).json({ success: false, message: error.message });
     }
@@ -11526,9 +11537,10 @@ ${extractedText}
       const { schoolId } = req.query;
       let userList = [];
       let studentList = [];
+      let schoolLists = [];
       let validCodesFilter = null;
-      if (schoolId) {
-        const schoolLists = await db.select().from(academic_lists).where((0, import_drizzle_orm.eq)(academic_lists.schoolId, schoolId));
+      if (schoolId && schoolId !== "all" && schoolId !== "undefined" && schoolId !== "null") {
+        schoolLists = await db.select().from(academic_lists).where((0, import_drizzle_orm.eq)(academic_lists.schoolId, schoolId));
         if (schoolLists.length > 0) {
           validCodesFilter = /* @__PURE__ */ new Set();
           for (const al of schoolLists) {
@@ -11543,6 +11555,7 @@ ${extractedText}
         userList = await db.select().from(users).where((0, import_drizzle_orm.eq)(users.schoolId, schoolId)).orderBy((0, import_drizzle_orm.desc)(users.lastLogin));
         studentList = await db.select().from(students).where((0, import_drizzle_orm.eq)(students.schoolId, schoolId));
       } else {
+        schoolLists = await db.select().from(academic_lists);
         userList = await db.select().from(users).orderBy((0, import_drizzle_orm.desc)(users.lastLogin));
         studentList = await db.select().from(students);
       }
@@ -11553,23 +11566,87 @@ ${extractedText}
           return c && validCodesFilter.has(c) || sid && validCodesFilter.has(sid) || Array.from(validCodesFilter).some((vc) => sid.includes(vc));
         });
       }
-      const mappedStudents = studentList.map((s) => ({
-        id: s.id,
-        name: s.name,
-        photo: s.avatar,
-        role: "student",
-        grade: s.grade,
-        schoolId: s.schoolId,
-        code: s.code,
-        studentCode: s.code,
-        parentCode: s.parentCode,
-        phone: s.parentPhone,
-        status: s.status,
-        createdAt: s.createdAt,
-        lastActive: s.lastLogin
-      }));
-      const systemUsers = userList.filter((u) => u.role !== "student" && u.role !== "driver");
-      const combined = [...systemUsers, ...mappedStudents];
+      const studentToSectionMap = /* @__PURE__ */ new Map();
+      if (schoolLists && schoolLists.length > 0) {
+        for (const al of schoolLists) {
+          if (Array.isArray(al.students)) {
+            for (const st of al.students) {
+              const c = String(st.student || st.code || "").trim();
+              const sName = String(st.name || "").trim();
+              const sId = String(st.id || "").trim();
+              if (c) studentToSectionMap.set(c, al.name);
+              if (sName) studentToSectionMap.set(sName, al.name);
+              if (sId) studentToSectionMap.set(sId, al.name);
+            }
+          }
+        }
+      }
+      const mappedStudents = studentList.map((s) => {
+        const matchedListSection = studentToSectionMap.get(String(s.code || "").trim()) || studentToSectionMap.get(String(s.name || "").trim()) || studentToSectionMap.get(String(s.id || "").trim());
+        return {
+          id: s.id,
+          name: s.name,
+          photo: s.avatar,
+          role: "student",
+          grade: matchedListSection || s.grade,
+          schoolId: s.schoolId,
+          code: s.code,
+          studentCode: s.code,
+          parentCode: s.parentCode,
+          phone: s.parentPhone,
+          status: s.status,
+          createdAt: s.createdAt,
+          lastActive: s.lastLogin
+        };
+      });
+      const mappedParents = [];
+      const seenParentCodes = /* @__PURE__ */ new Set();
+      for (const u of userList.filter((u2) => u2.role === "parent")) {
+        const pCode = String(u.parentCode || u.childCode || u.studentCode || u.code || u.id || "").trim();
+        const matchedStudent = mappedStudents.find(
+          (s) => pCode && (s.parentCode === pCode || s.code === pCode || s.id === pCode || s.studentCode === pCode) || u.id && s.code && u.id.includes(s.code)
+        );
+        mappedParents.push({
+          ...u,
+          role: "parent",
+          grade: matchedStudent?.grade || u.grade || "\u063A\u064A\u0631 \u0645\u062D\u062F\u062F",
+          studentGrade: matchedStudent?.grade || u.grade || "\u063A\u064A\u0631 \u0645\u062D\u062F\u062F",
+          studentName: matchedStudent?.name || u.studentName || u.name,
+          studentCode: matchedStudent?.code || u.studentCode || u.childCode,
+          childCode: matchedStudent?.code || u.studentCode || u.childCode,
+          parentCode: u.parentCode || matchedStudent?.parentCode || pCode,
+          schoolId: u.schoolId || matchedStudent?.schoolId || schoolId || "general"
+        });
+        if (pCode) seenParentCodes.add(pCode);
+        if (matchedStudent?.code) seenParentCodes.add(matchedStudent.code);
+        if (matchedStudent?.parentCode) seenParentCodes.add(matchedStudent.parentCode);
+      }
+      for (const s of mappedStudents) {
+        const pCode = s.parentCode || `PAR-${s.code}`;
+        if (!seenParentCodes.has(pCode) && !seenParentCodes.has(s.code)) {
+          seenParentCodes.add(pCode);
+          seenParentCodes.add(s.code);
+          mappedParents.push({
+            id: `parent_${s.schoolId}_${s.code || s.id}`,
+            name: `\u0648\u0644\u064A \u0623\u0645\u0631 ${s.name}`,
+            photo: null,
+            role: "parent",
+            grade: s.grade,
+            studentGrade: s.grade,
+            schoolId: s.schoolId,
+            studentName: s.name,
+            studentCode: s.code,
+            parentCode: pCode,
+            childCode: s.code,
+            phone: s.phone || "",
+            status: "active",
+            createdAt: s.createdAt || (/* @__PURE__ */ new Date()).toISOString(),
+            lastActive: s.lastActive || s.createdAt
+          });
+        }
+      }
+      const systemUsers = userList.filter((u) => u.role !== "student" && u.role !== "driver" && u.role !== "parent");
+      const combined = [...systemUsers, ...mappedParents, ...mappedStudents];
       for (const st of combined) {
         if (st.role === "student") {
           const userMatch = userList.find((u) => u.id === st.id);

@@ -2265,6 +2265,11 @@ export default function App() {
     setActiveSection("unit-detail");
   };
 
+  const handleHomeNavigation = useCallback(() => {
+    setIsChoosingSchool(false);
+    setActiveSection("hub");
+  }, []);
+
   const [isChoosingSchool, setIsChoosingSchool] = useState(false);
 
 
@@ -2369,10 +2374,7 @@ export default function App() {
             safeStorage.removeItem("bayraq_user_role");
             setPortalType("student");
           }}
-          onNavigateHome={() => {
-            setIsChoosingSchool(false);
-            setActiveSection("hub");
-          }}
+          onNavigateHome={handleHomeNavigation}
           onNavigateHallOfFame={() => {
             setIsChoosingSchool(false);
             setActiveSection("hall-of-fame");
@@ -3005,7 +3007,7 @@ export default function App() {
           );
         }
 
-        if (isTeacherUser) {
+        if (isTeacherUser && isChoosingSchool) {
           return (
             <SchoolSelection
               language={settings.language}
@@ -3017,6 +3019,7 @@ export default function App() {
                 setShowRoleSelectionModal(true);
                 safeStorage.removeItem("bayraq_user_role");
               }}
+              onNavigateHome={handleHomeNavigation}
               onSelectSchool={(id) => {
                 safeStorage.setItem("s6_selectedSchoolId", id);
                 setSelectedSchoolId(id);
@@ -4381,10 +4384,7 @@ export default function App() {
               safeStorage.removeItem("bayraq_user_role");
               setPortalType("student");
             }}
-            onNavigateHome={() => {
-              setIsChoosingSchool(false);
-              setActiveSection("hub");
-            }}
+            onNavigateHome={handleHomeNavigation}
             onNavigateHallOfFame={() => {
               setIsChoosingSchool(false);
               setActiveSection("hall-of-fame");
@@ -4641,6 +4641,7 @@ export default function App() {
                       setIsNotificationDrawerOpen(true)
                     }
                     userProfile={userProfile}
+                    onNavigateHome={handleHomeNavigation}
                   />
                 )}
 
@@ -5126,9 +5127,7 @@ export default function App() {
                 <div className="w-full max-w-[320px] pointer-events-auto bg-[#0A0F1D]/80 backdrop-blur-xl border border-white/5 rounded-[2rem] px-2 py-1.5 flex items-center justify-between shadow-[0_8px_32px_rgba(0,0,0,0.3)] min-h-[64px]">
                   {/* Nav: Home (Right) */}
                   <button
-                    onClick={() => {
-                      setActiveSection("hub");
-                    }}
+                    onClick={handleHomeNavigation}
                     className={`flex-1 flex flex-col justify-center items-center h-full transition-all duration-300 ${activeSection === "hub" && !isChoosingSchool ? "text-indigo-400" : "text-white/30 hover:text-white/60"}`}
                   >
                     <Home

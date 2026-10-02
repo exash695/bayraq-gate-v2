@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Send, Image as ImageIcon, Smile, MoreVertical, Coffee, Search, Check, CheckCheck, User, MessageCircle, ArrowRight, Lock, Paperclip, FileText, Video, Headphones, Loader2, Mic, AlertTriangle, Maximize2, ExternalLink, Download, Film } from 'lucide-react';
+import { X, Send, Image as ImageIcon, Smile, MoreVertical, Coffee, Search, Check, CheckCheck, User, MessageCircle, ArrowRight, Lock, Paperclip, FileText, Video, Headphones, Loader2, Mic, AlertTriangle, Maximize2, ExternalLink, Download, Film, Layers, ChevronDown, Filter } from 'lucide-react';
 import { db, auth } from '../lib/firebase';
 import { collection, query, where, orderBy, getDocs, addDoc, updateDoc, doc, serverTimestamp, onSnapshot, limit } from '../lib/firebase';
 import { realtimeManager } from '../lib/realtimeManager';
@@ -14,6 +14,7 @@ interface StudentLoungeProps {
   isTeacher: boolean;
   isParent?: boolean;
   teacherData?: any;
+  teacherAssignedSections?: { name: string; grade: string; studentCount: number; listId?: string }[];
   initialSelectedUser?: any;
   isLocked?: boolean;
 }
@@ -41,6 +42,7 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
   isTeacher,
   isParent,
   teacherData,
+  teacherAssignedSections,
   initialSelectedUser,
   isLocked
 }, ref) => {
@@ -55,7 +57,10 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
   const [parents, setParents] = useState<any[]>([]);
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
   const [teachersList, setTeachersList] = useState<any[]>([]);
+  const [academicLists, setAcademicLists] = useState<any[]>([]);
   const [recentChatsTimestamps, setRecentChatsTimestamps] = useState<Record<string, string>>({});
+  const [recentChatsList, setRecentChatsList] = useState<any[]>([]);
+  const [chatSearchQuery, setChatSearchQuery] = useState('');
   const [isGeneralChat, setIsGeneralChat] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [pendingFile, setPendingFile] = useState<{ file: File; previewUrl: string; type: 'image' | 'video' | 'audio' | 'file' } | null>(null);
@@ -63,8 +68,12 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
   const [activeTab, setActiveTab] = useState<'chat' | 'knights' | 'teachers' | 'parents'>(initialSelectedUser ? 'chat' : (isTeacher ? 'knights' : 'teachers'));
   const [selectedChatUser, setSelectedChatUser] = useState<any>(initialSelectedUser || null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedSection, setSelectedSection] = useState<string>('all');
+  const [isSectionMenuOpen, setIsSectionMenuOpen] = useState(false);
+  const sectionDropdownRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const currentUserUid = auth.currentUser?.uid;
+
   // Grade Normalizer: Matches grades across all sections (e.g., "أول ابتدائي", "اول ابتدائي ب", "اول ابتدائي - أ")
   const getGradeCore = (g?: string | null): string => {
     if (!g) return "";
@@ -79,13 +88,190 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
     return norm.replace(/\s+/g, " ").trim();
   };
 
+  const normalizeArabic = (s?: string | null): string => {
+    if (!s) return "";
+    return s
+      .replace(/[أإآ]/g, "ا")
+      .replace(/ة/g, "ه")
+      .replace(/ى/g, "ي")
+      .replace(/[-/–]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  };
+
   const isGradeMatch = (userGrade?: string | null, targetGrade?: string | null): boolean => {
-    if (isTeacher || !targetGrade) return true;
+    if (!targetGrade || targetGrade === 'all' || targetGrade === 'الكل') return true;
+    if (!userGrade) return false;
     const coreTarget = getGradeCore(targetGrade);
     const coreUser = getGradeCore(userGrade);
-    if (!coreTarget || !coreUser) return true;
+    if (!coreTarget || !coreUser) return false;
     return coreTarget === coreUser || coreUser.includes(coreTarget) || coreTarget.includes(coreUser);
   };
+
+  // Find the current teacher in the Staff & Teachers department (الكادر والموظفين)
+  const currentStaffTeacher = useMemo(() => {
+    if (!isTeacher) return null;
+    const uid = userProfile?.id || userProfile?.uid || auth.currentUser?.uid;
+    const email = userProfile?.email?.toLowerCase().trim();
+    const name = (userProfile?.name || teacherData?.name || '').trim();
+    
+    return teachersList.find((t: any) => 
+      (t.id && (t.id === uid || t.userId === uid)) ||
+      (email && t.email && t.email.toLowerCase().trim() === email) ||
+      (name && t.name && (t.name.trim() === name || t.name.includes(name) || name.includes(t.name)))
+    ) || teacherData || null;
+  }, [isTeacher, userProfile, teacherData, teachersList]);
+
+  // Compute available sections list strictly for the teacher (from Staff section + Control section)
+  const availableSections = useMemo(() => {
+    const list: string[] = [];
+
+    // Helper to safely add section string
+    const addSection = (secName?: string | null) => {
+      if (!secName || typeof secName !== 'string') return;
+      const clean = secName.trim();
+      if (clean && !list.some(item => normalizeArabic(item) === normalizeArabic(clean))) {
+        list.push(clean);
+      }
+    };
+
+    if (isTeacher) {
+      // 1. From passed teacherAssignedSections props (لوحة التحكم)
+      if (Array.isArray(teacherAssignedSections) && teacherAssignedSections.length > 0) {
+        teacherAssignedSections.forEach(s => addSection(s?.name));
+      }
+
+      // 2. From currentStaffTeacher (قسم الكادر والموظفين)
+      if (Array.isArray(currentStaffTeacher?.classes)) {
+        currentStaffTeacher.classes.forEach((c: any) => {
+          const name = typeof c === 'string' ? c : (c.name || c.grade || c.title);
+          addSection(name);
+        });
+      }
+
+      // 3. From currentStaffTeacher.assignedGrades or assignedSections
+      if (Array.isArray(currentStaffTeacher?.assignedGrades)) {
+        currentStaffTeacher.assignedGrades.forEach((g: any) => {
+          const name = typeof g === 'string' ? g : (g.name || g.grade);
+          addSection(name);
+        });
+      }
+
+      // 4. From teacherData.classes (قسم التحكم)
+      if (Array.isArray(teacherData?.classes)) {
+        teacherData.classes.forEach((c: any) => {
+          const name = typeof c === 'string' ? c : (c.name || c.grade || c.title);
+          addSection(name);
+        });
+      }
+
+      // 5. From userProfile.classes
+      if (Array.isArray(userProfile?.classes)) {
+        userProfile.classes.forEach((c: any) => {
+          const name = typeof c === 'string' ? c : (c.name || c.grade);
+          addSection(name);
+        });
+      }
+
+      // 6. Single fallback grade if no classes list
+      if (list.length === 0) {
+        if (currentStaffTeacher?.grade) addSection(currentStaffTeacher.grade);
+        else if (teacherData?.grade) addSection(teacherData.grade);
+        else if (userProfile?.grade) addSection(userProfile.grade);
+        else if (grade) addSection(grade);
+      }
+
+      return list;
+    }
+
+    // Admin view: all active academic lists
+    if (userProfile?.role === 'admin') {
+      academicLists.forEach((al: any) => {
+        if (al.name) addSection(al.name);
+      });
+      if (list.length === 0) {
+        knights.forEach(k => {
+          if (k.grade && k.grade !== 'غير محدد') addSection(k.grade);
+        });
+      }
+      return list;
+    }
+
+    return [];
+  }, [isTeacher, userProfile, teacherAssignedSections, currentStaffTeacher, teacherData, grade, academicLists, knights]);
+
+  // Precise section matching taking into account specific section letter (أ، ب، ج، د) and academic list membership
+  const isSectionMatch = (userGrade?: string | null, targetSection?: string | null, studentObj?: any): boolean => {
+    if (!targetSection || targetSection === 'all' || targetSection === 'الكل') return true;
+    
+    // 1. Direct match in academicLists if studentObj exists
+    if (studentObj && academicLists && academicLists.length > 0) {
+      const targetNorm = normalizeArabic(targetSection);
+      const matchedList = academicLists.find((al: any) => normalizeArabic(al.name) === targetNorm);
+      if (matchedList && Array.isArray(matchedList.students)) {
+        const isInList = matchedList.students.some((s: any) => 
+          (s.id && s.id === studentObj.id) ||
+          (s.code && (s.code === studentObj.code || s.code === studentObj.studentCode || s.code === studentObj.id)) ||
+          (s.student && (s.student === studentObj.code || s.student === studentObj.id)) ||
+          (s.name && studentObj.name && s.name.trim() === studentObj.name.trim())
+        );
+        if (isInList) return true;
+      }
+    }
+
+    if (!userGrade) return false;
+    const cleanUser = userGrade.trim();
+    const cleanTarget = targetSection.trim();
+    if (cleanUser === cleanTarget) return true;
+
+    const normUser = normalizeArabic(cleanUser);
+    const normTarget = normalizeArabic(cleanTarget);
+    if (normUser === normTarget) return true;
+
+    // Extract section letter (أ, ب, ج, د)
+    const getSectionLetter = (str: string) => {
+      const m = str.match(/(?:شعبة|قسم)?\s*([أإآابجدeEaAbBcC])$/i) || str.match(/\s+([أإآابجدeEaAbBcC])\b/i);
+      return m ? m[1].replace(/[أإآ]/g, 'ا').toLowerCase() : null;
+    };
+
+    const targetLetter = getSectionLetter(cleanTarget);
+    const userLetter = getSectionLetter(cleanUser);
+
+    if (targetLetter && userLetter) {
+      return targetLetter === userLetter && getGradeCore(cleanUser) === getGradeCore(cleanTarget);
+    }
+
+    if (targetLetter && !userLetter) {
+      return false;
+    }
+
+    return getGradeCore(cleanUser) === getGradeCore(cleanTarget);
+  };
+
+  // Accurate student count per section
+  const getSectionStudentCount = (secName: string): number => {
+    const targetNorm = normalizeArabic(secName);
+    const matchedList = academicLists.find((al: any) => normalizeArabic(al.name) === targetNorm);
+    if (matchedList && Array.isArray(matchedList.students) && matchedList.students.length > 0) {
+      return matchedList.students.length;
+    }
+    return knights.filter(k => isSectionMatch(k.grade, secName, k)).length;
+  };
+
+  // Handle outside click for section dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (sectionDropdownRef.current && !sectionDropdownRef.current.contains(event.target as Node)) {
+        setIsSectionMenuOpen(false);
+      }
+    };
+    if (isSectionMenuOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isSectionMenuOpen]);
 
   
   const formatMessageTime = (msg: any): string => {
@@ -121,6 +307,29 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
     }
   }, [messages]);
 
+  // Load academic lists for accurate class student mappings and counts
+  useEffect(() => {
+    if (!schoolId) return;
+    const fetchLists = async () => {
+      try {
+        const res = await fetch(`/api/academic-lists?schoolId=${schoolId}`);
+        if (res.ok) {
+          const data = await res.json();
+          if (data && (Array.isArray(data.lists) || Array.isArray(data))) {
+            setAcademicLists(data.lists || data || []);
+          }
+        }
+      } catch (err) {
+        console.warn("Notice: error fetching academic lists in Lounge:", err);
+      }
+    };
+    fetchLists();
+    const unsub = realtimeManager.subscribe('academic_lists', () => {
+      fetchLists();
+    });
+    return () => unsub();
+  }, [schoolId]);
+
   // Load teachers
   useEffect(() => {
     if (!schoolId) return;
@@ -144,9 +353,15 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
             name: u.name || u.fullName || 'مستخدم',
             photo: u.photo || u.photoURL || u.avatar || null,
             role: u.role || 'student',
-            grade: u.grade || 'غير محدد',
+            grade: u.grade || u.studentGrade || u.linkedGrade || 'غير محدد',
             schoolId: u.schoolId || 'unassigned',
-            lastActive: u.lastActive || u.lastLogin
+            lastActive: u.lastActive || u.lastLogin,
+            code: u.code || u.studentCode,
+            studentCode: u.studentCode || u.code,
+            studentId: u.studentId || u.linkedStudentId || null,
+            parentCode: u.parentCode,
+            childCode: u.childCode || u.parentCode,
+            classes: u.classes || u.assignedGrades || []
           }));
           
           // Filter students
@@ -173,6 +388,47 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
     });
     return () => unsub();
   }, [schoolId, currentUserUid, grade, isTeacher, isParent]);
+
+  // Memoized filtered knights based on selected section and search
+  const filteredKnights = useMemo(() => {
+    return knights.filter(k => {
+      const matchesSearch = searchQuery.trim() ? (k.name || '').toLowerCase().includes(searchQuery.toLowerCase()) : true;
+      if (!matchesSearch) return false;
+
+      if (selectedSection !== 'all') {
+        return isSectionMatch(k.grade, selectedSection, k);
+      }
+
+      const matchesGrade = isTeacher || !grade || isGradeMatch(k.grade, grade);
+      return matchesGrade;
+    });
+  }, [knights, searchQuery, selectedSection, isTeacher, grade, academicLists]);
+
+  // Memoized filtered parents based on selected section and search
+  const filteredParents = useMemo(() => {
+    return parents.filter(p => {
+      const matchesSearch = searchQuery.trim() ? (p.name || '').toLowerCase().includes(searchQuery.toLowerCase()) : true;
+      if (!matchesSearch) return false;
+
+      if (selectedSection !== 'all') {
+        const parentGradeMatch = p.grade && isSectionMatch(p.grade, selectedSection);
+        if (parentGradeMatch) return true;
+
+        if (p.studentId || p.studentCode || p.childCode) {
+          const matchedStudent = knights.find(k => 
+            (p.studentId && k.id === p.studentId) ||
+            (p.studentCode && (k.code === p.studentCode || k.studentCode === p.studentCode)) ||
+            (p.childCode && (k.code === p.childCode || k.parentCode === p.childCode))
+          );
+          if (matchedStudent && isSectionMatch(matchedStudent.grade, selectedSection, matchedStudent)) return true;
+        }
+
+        return false;
+      }
+
+      return true;
+    });
+  }, [parents, searchQuery, selectedSection, knights, academicLists]);
 
 
   // Track unread messages per user (PostgreSQL)
@@ -206,8 +462,13 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
         const res = await fetch(`/api/lounge-messages/recent-chats/${currentUserUid}`);
         if (res.ok) {
           const data = await res.json();
-          if (data && data.success && data.latestTimestamps) {
-            setRecentChatsTimestamps(data.latestTimestamps);
+          if (data && data.success) {
+            if (data.latestTimestamps) {
+              setRecentChatsTimestamps(data.latestTimestamps);
+            }
+            if (Array.isArray(data.recentChats)) {
+              setRecentChatsList(data.recentChats);
+            }
           }
         }
       } catch (e) {
@@ -220,6 +481,78 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
     });
     return () => unsubRecent();
   }, [currentUserUid]);
+
+  const allLoungeUsers = useMemo(() => {
+    const map = new Map<string, any>();
+    knights.forEach(k => map.set(k.id, { ...k, role: k.role || 'student' }));
+    parents.forEach(p => map.set(p.id, { ...p, role: 'parent' }));
+    teachersList.forEach(t => map.set(t.id, { ...t, role: 'teacher' }));
+    return map;
+  }, [knights, parents, teachersList]);
+
+  // Formatted recent conversations log list
+  const displayRecentConversations = useMemo(() => {
+    const chatUsersMap = new Map<string, any>();
+
+    // 1. From recentChatsList (with last messages)
+    recentChatsList.forEach(rc => {
+      if (!rc?.otherId || rc.otherId === currentUserUid) return;
+      const matchedUser = allLoungeUsers.get(rc.otherId) || {
+        id: rc.otherId,
+        name: rc.senderName || 'مستخدم',
+        role: 'student',
+        grade: 'غير محدد'
+      };
+      chatUsersMap.set(rc.otherId, {
+        ...matchedUser,
+        lastMessage: rc.lastMessage || 'رسالة جديدة',
+        timestamp: rc.timestamp,
+        read: rc.read
+      });
+    });
+
+    // 2. From unreadCounts or recentChatsTimestamps
+    Object.keys(recentChatsTimestamps).forEach(uid => {
+      if (!chatUsersMap.has(uid) && uid !== currentUserUid) {
+        const matchedUser = allLoungeUsers.get(uid);
+        if (matchedUser) {
+          chatUsersMap.set(uid, {
+            ...matchedUser,
+            lastMessage: unreadCounts[uid] > 0 ? `${unreadCounts[uid]} رسائل غير مقروءة` : 'محادثة سابقة',
+            timestamp: recentChatsTimestamps[uid]
+          });
+        }
+      }
+    });
+
+    // 3. Include any user with unread messages
+    Object.keys(unreadCounts).forEach(uid => {
+      if (unreadCounts[uid] > 0 && !chatUsersMap.has(uid) && uid !== currentUserUid) {
+        const matchedUser = allLoungeUsers.get(uid);
+        if (matchedUser) {
+          chatUsersMap.set(uid, {
+            ...matchedUser,
+            lastMessage: `${unreadCounts[uid]} رسالة جديدة`,
+            timestamp: new Date().toISOString()
+          });
+        }
+      }
+    });
+
+    const list = Array.from(chatUsersMap.values());
+    list.sort((a, b) => {
+      const tsA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+      const tsB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+      return tsB - tsA;
+    });
+
+    if (chatSearchQuery.trim()) {
+      const q = chatSearchQuery.toLowerCase().trim();
+      return list.filter(c => (c.name || '').toLowerCase().includes(q) || (c.lastMessage || '').toLowerCase().includes(q));
+    }
+
+    return list;
+  }, [recentChatsList, recentChatsTimestamps, unreadCounts, allLoungeUsers, chatSearchQuery, currentUserUid]);
 
   const sortByRecentChat = (a: any, b: any) => {
     const tsA = recentChatsTimestamps[a.id] || '';
@@ -527,50 +860,190 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
       {/* Header */}
       <div className="h-16 px-4 flex justify-between items-center bg-[#0D142A]/80 backdrop-blur-xl shrink-0 z-20">
         <div className="flex items-center gap-3">
-          {activeTab === 'chat' ? (
+          {activeTab === 'chat' && (selectedChatUser || isGeneralChat) ? (
             <button 
               onClick={() => {
-                setActiveTab('knights');
                 setSelectedChatUser(null);
                 setIsGeneralChat(false);
               }}
-              className="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center transition-colors text-white/70"
+              title="العودة لسجل المحادثات"
+              className="w-8 h-8 rounded-full hover:bg-white/10 flex items-center justify-center transition-colors text-white/70 cursor-pointer"
             >
                <ArrowRight size={20} />
             </button>
           ) : (
             <div className="w-10 h-10 rounded-full bg-amber-500/10 flex items-center justify-center border border-amber-500/20 relative">
               <Coffee size={20} className="text-amber-400" />
-              <div className="absolute 0 top-0 left-0 w-3 h-3 bg-green-500 border-2 border-[#0D142A] rounded-full"></div>
+              <div className="absolute top-0 left-0 w-3 h-3 bg-green-500 border-2 border-[#0D142A] rounded-full"></div>
             </div>
           )}
           
           <div>
              {activeTab === 'chat' ? (
+                 selectedChatUser || isGeneralChat ? (
+                   <>
+                     <h2 className="text-sm font-black text-white leading-tight">
+                       {isGeneralChat ? 'دردشة المجلس العامة' : selectedChatUser?.name}
+                     </h2>
+                     <div className="flex items-center gap-1.5 mt-0.5">
+                       <span className="text-[#00E5FF] text-[10px] font-bold">
+                         {isGeneralChat ? 'غرفة تجمع كل الفرسان' : (selectedChatUser?.role === 'parent' ? 'ولي أمر' : (selectedChatUser?.role === 'teacher' ? 'أستاذ' : 'طالب'))}
+                       </span>
+                       {selectedChatUser?.grade && selectedChatUser.grade !== 'غير محدد' && (
+                         <span className="text-[9px] text-amber-300/80 bg-white/5 px-1.5 py-0.2 rounded font-mono">
+                           {selectedChatUser.grade}
+                         </span>
+                       )}
+                     </div>
+                   </>
+                 ) : (
+                   <>
+                     <h2 className="text-lg font-black text-white leading-tight">سجل المحادثات</h2>
+                     <p className="text-[#00E5FF] text-[10px] font-bold">
+                       {displayRecentConversations.length > 0 ? `${displayRecentConversations.length} محادثة نشطة` : 'لا توجد محادثات سابقة'}
+                     </p>
+                   </>
+                 )
+             ) : activeTab === 'parents' ? (
                  <>
-                   <h2 className="text-sm font-black text-white leading-tight">
-                     {isGeneralChat ? 'دردشة المجلس العامة' : selectedChatUser?.name}
-                   </h2>
-                   <p className="text-[#00E5FF] text-[10px] font-bold">
-                     {isGeneralChat ? 'غرفة تجمع كل الفرسان' : 'متصل الآن'}
+                   <h2 className="text-lg font-black text-white leading-tight">أولياء الأمور</h2>
+                   <p className="text-white/40 text-[10px] font-bold">
+                       {selectedSection !== 'all' ? `${filteredParents.length} ولي أمر في (${selectedSection})` : `${parents.length} من أولياء الأمور`}
+                   </p>
+                 </>
+             ) : activeTab === 'teachers' ? (
+                 <>
+                   <h2 className="text-lg font-black text-white leading-tight">{isParent ? 'الكادر التدريسي' : 'الأساتذة'}</h2>
+                   <p className="text-white/40 text-[10px] font-bold">
+                       {teachersList.length} أستاذ متاح
                    </p>
                  </>
              ) : (
                  <>
                    <h2 className="text-lg font-black text-white leading-tight">المجلس</h2>
                    <p className="text-white/40 text-[10px] font-bold">
-                       {knights.length} من الأبطال النشطين
+                       {selectedSection !== 'all' ? `${filteredKnights.length} بطل في (${selectedSection})` : `${knights.length} من الأبطال النشطين`}
                    </p>
                  </>
              )}
           </div>
         </div>
-        <button 
-          onClick={onClose}
-          className="w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 text-white/50 hover:text-white flex items-center justify-center transition-all cursor-pointer border border-white/10 shadow-lg"
-        >
-          <X size={20} />
-        </button>
+
+        {/* Action Buttons: Section Switcher + Close Button */}
+        <div className="flex items-center gap-2">
+          {/* زر التبديل بين الشعب للأستاذ والإدارة بجانب علامة X */}
+          {(isTeacher || userProfile?.role === 'admin') && activeTab !== 'chat' && (
+            <div className="relative" ref={sectionDropdownRef}>
+              <button
+                type="button"
+                onClick={() => setIsSectionMenuOpen(!isSectionMenuOpen)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold border transition-all cursor-pointer shadow-sm active:scale-95 ${
+                  selectedSection !== 'all'
+                    ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 shadow-[0_0_10px_rgba(245,158,11,0.25)] ring-1 ring-amber-400/40'
+                    : 'bg-white/5 hover:bg-white/10 text-white/80 border-white/10'
+                }`}
+                title="التبديل بين الشعب المكلفة"
+              >
+                <Layers size={14} className={selectedSection !== 'all' ? 'text-amber-400' : 'text-white/50'} />
+                <span className="max-w-[100px] truncate text-[11px] font-black">
+                  {selectedSection === 'all' ? 'الشعب' : selectedSection}
+                </span>
+                <ChevronDown size={13} className={`text-white/40 transition-transform duration-200 ${isSectionMenuOpen ? 'rotate-180 text-amber-400' : ''}`} />
+              </button>
+
+              {/* Dropdown Menu */}
+              <AnimatePresence>
+                {isSectionMenuOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -6, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -6, scale: 0.95 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute left-0 top-full mt-2 w-56 bg-[#090F1E] border border-white/15 rounded-2xl shadow-2xl p-2 z-50 backdrop-blur-xl divide-y divide-white/5"
+                    dir="rtl"
+                  >
+                    <div className="px-2.5 py-1.5 mb-1 text-[10px] font-black text-amber-400 flex items-center justify-between">
+                      <span className="flex items-center gap-1">
+                        <Filter size={11} />
+                        <span>تصفية حسب الشعبة</span>
+                      </span>
+                      <span className="text-white/40 font-mono text-[9px] bg-white/5 px-1.5 py-0.5 rounded">
+                        {availableSections.length} شعبة
+                      </span>
+                    </div>
+
+                    <div className="max-h-60 overflow-y-auto no-scrollbar py-1 space-y-1">
+                      {/* خيار جميع الشعب */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedSection('all');
+                          setIsSectionMenuOpen(false);
+                        }}
+                        className={`w-full text-right px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-between transition-colors cursor-pointer ${
+                          selectedSection === 'all'
+                            ? 'bg-amber-500/20 text-amber-300 font-black border border-amber-500/30'
+                            : 'text-white/70 hover:bg-white/5 hover:text-white'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className={`w-2 h-2 rounded-full ${selectedSection === 'all' ? 'bg-amber-400 shadow-[0_0_8px_rgba(245,158,11,0.8)]' : 'bg-white/20'}`}></span>
+                          <span>جميع الشعب</span>
+                        </div>
+                        <span className="text-[10px] text-white/40 font-mono bg-white/5 px-1.5 py-0.5 rounded-md">
+                          {knights.length}
+                        </span>
+                      </button>
+
+                      {/* قائمة الشعب المكلفة والمتاحة */}
+                      {availableSections.length > 0 ? (
+                        availableSections.map((secName) => {
+                          const count = getSectionStudentCount(secName);
+                          const isCurrent = selectedSection === secName;
+                          return (
+                            <button
+                              key={secName}
+                              type="button"
+                              onClick={() => {
+                                setSelectedSection(secName);
+                                setIsSectionMenuOpen(false);
+                              }}
+                              className={`w-full text-right px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-between transition-colors cursor-pointer ${
+                                isCurrent
+                                  ? 'bg-amber-500/20 text-amber-300 font-black border border-amber-500/30'
+                                  : 'text-white/70 hover:bg-white/5 hover:text-white'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 truncate">
+                                <span className={`w-2 h-2 rounded-full ${isCurrent ? 'bg-amber-400 shadow-[0_0_8px_rgba(245,158,11,0.8)]' : 'bg-white/20'}`}></span>
+                                <span className="truncate">{secName}</span>
+                              </div>
+                              <span className="text-[10px] text-white/40 font-mono bg-white/5 px-1.5 py-0.5 rounded-md shrink-0 mr-1">
+                                {count}
+                              </span>
+                            </button>
+                          );
+                        })
+                      ) : (
+                        <div className="px-3 py-2 text-[11px] text-white/40 text-center">
+                          لا توجد شعب محددة
+                        </div>
+                      )}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          )}
+
+          {/* زر الإغلاق X */}
+          <button 
+            onClick={onClose}
+            className="w-10 h-10 rounded-full bg-white/5 hover:bg-white/10 text-white/50 hover:text-white flex items-center justify-center transition-all cursor-pointer border border-white/10 shadow-lg"
+          >
+            <X size={20} />
+          </button>
+        </div>
       </div>
 
       {/* Tabs */}
@@ -610,7 +1083,7 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
       {/* Content Area */}
       {activeTab === 'knights' && (
           <div className="flex-1 overflow-y-auto px-4 py-6 bg-[#050A18] flex flex-col gap-2">
-              <div className="mb-4 relative">
+              <div className="mb-2 relative">
                  <input 
                     type="text" 
                     value={searchQuery}
@@ -620,6 +1093,22 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                  />
                  <Search size={18} className="absolute right-3 top-3.5 text-white/40" />
               </div>
+
+              {/* Active Section Filter Notice */}
+              {selectedSection !== 'all' && (
+                <div className="flex items-center justify-between px-3 py-2 bg-amber-500/10 border border-amber-500/20 rounded-xl mb-1 text-xs animate-in fade-in duration-200">
+                  <div className="flex items-center gap-2 text-amber-300 font-bold">
+                    <Filter size={13} className="text-amber-400" />
+                    <span>عرض فرسان شعبة: <strong className="text-amber-200 font-black">{selectedSection}</strong> ({filteredKnights.length})</span>
+                  </div>
+                  <button
+                    onClick={() => setSelectedSection('all')}
+                    className="text-[10px] text-white/60 hover:text-white bg-white/5 hover:bg-white/15 px-2 py-0.5 rounded-md transition-colors cursor-pointer"
+                  >
+                    عرض كل الشعب
+                  </button>
+                </div>
+              )}
 
               {/* General Chat Room Item */}
               <div 
@@ -644,71 +1133,69 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                 </div>
               </div>
               
-              {(() => {
-                // Merge knights with users who have unread messages but might be offline
-                const allInterestedUsers = [...knights];
-                
-                const filteredKnights = allInterestedUsers.filter(k => {
-                  const matchesSearch = k.name.includes(searchQuery);
-                  const matchesGrade = isTeacher || !grade || isGradeMatch(k.grade, grade);
-                  return matchesSearch && matchesGrade;
-                });
-
-                return filteredKnights.length === 0 ? (
-                    <div className="flex-1 flex flex-col items-center justify-center opacity-50 grayscale mt-10">
-                        <User size={48} className="text-white/20 mb-4" />
-                        <p className="text-white/40 text-sm font-bold">لا يوجد فرسان نشطين في صفك حالياً</p>
-                    </div>
-                ) : (
-                    [...filteredKnights].sort(sortByRecentChat).map((user) => (
-                        <div 
-                          key={user.id} 
-                        onClick={() => {
-                          setSelectedChatUser(user);
-                          setActiveTab('chat');
-                        }}
-                        className="flex items-center justify-between p-3 bg-white/[0.02] hover:bg-white/5 border border-white/5 rounded-2xl cursor-pointer transition-colors group"
-                      >
-                          <div className="flex items-center gap-3">
-                              <div className="relative">
-                                  <div className={`w-11 h-11 rounded-full border border-white/10 overflow-hidden ${user.role === 'teacher' ? 'ring-1 ring-amber-400/50' : ''}`}>
-                                      {user.photo ? (
-                                         <img src={user.photo} alt={user.name} className="w-full h-full object-cover" />
-                                      ) : (
-                                         <div className="w-full h-full bg-white/5 flex items-center justify-center">
-                                             <User size={18} className="text-white/30" />
-                                         </div>
-                                      )}
-                                  </div>
-                                  <div className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-[#050A18] rounded-full"></div>
-                                  {unreadCounts[user.id] > 0 && (
-                                     <div className="absolute -top-1 -left-1 bg-red-600 rounded-full min-w-[16px] h-[16px] px-1 flex items-center justify-center shadow-lg border-2 border-[#050A18]">
-                                        <span className="text-[9px] font-black text-white">{unreadCounts[user.id]}</span>
-                                     </div>
-                                  )}
-                              </div>
-                              <div className="flex flex-col text-right">
-                                  <span className="text-[13px] text-white/90 font-bold">{user.name}</span>
+              {filteredKnights.length === 0 ? (
+                  <div className="flex-1 flex flex-col items-center justify-center opacity-50 grayscale mt-10">
+                      <User size={48} className="text-white/20 mb-4" />
+                      <p className="text-white/40 text-sm font-bold">
+                        {selectedSection !== 'all' ? `لا يوجد فرسان مسجلين في شعبة ${selectedSection}` : 'لا يوجد فرسان نشطين حالياً'}
+                      </p>
+                  </div>
+              ) : (
+                  [...filteredKnights].sort(sortByRecentChat).map((user) => (
+                      <div 
+                        key={user.id} 
+                      onClick={() => {
+                        setSelectedChatUser(user);
+                        setActiveTab('chat');
+                      }}
+                      className="flex items-center justify-between p-3 bg-white/[0.02] hover:bg-white/5 border border-white/5 rounded-2xl cursor-pointer transition-colors group"
+                    >
+                        <div className="flex items-center gap-3">
+                            <div className="relative">
+                                <div className={`w-11 h-11 rounded-full border border-white/10 overflow-hidden ${user.role === 'teacher' ? 'ring-1 ring-amber-400/50' : ''}`}>
+                                    {user.photo ? (
+                                       <img src={user.photo} alt={user.name} className="w-full h-full object-cover" />
+                                    ) : (
+                                       <div className="w-full h-full bg-white/5 flex items-center justify-center">
+                                           <User size={18} className="text-white/30" />
+                                       </div>
+                                    )}
+                                </div>
+                                <div className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-[#050A18] rounded-full"></div>
+                                {unreadCounts[user.id] > 0 && (
+                                   <div className="absolute -top-1 -left-1 bg-red-600 rounded-full min-w-[16px] h-[16px] px-1 flex items-center justify-center shadow-lg border-2 border-[#050A18]">
+                                      <span className="text-[9px] font-black text-white">{unreadCounts[user.id]}</span>
+                                   </div>
+                                )}
+                            </div>
+                            <div className="flex flex-col text-right">
+                                <span className="text-[13px] text-white/90 font-bold">{user.name}</span>
+                                <div className="flex items-center gap-1.5">
                                   <span className={`text-[9px] font-bold ${user.role === 'teacher' ? 'text-amber-400' : (user.role === 'admin' ? 'text-blue-400' : 'text-white/40')}`}>
                                       {user.role === 'teacher' ? 'إشراف' : (user.role === 'admin' ? 'إدارة' : 'طالب')}
                                   </span>
-                              </div>
-                          </div>
-                          <button 
-                            className="w-10 h-10 rounded-full bg-[#00E5FF]/10 text-[#00E5FF] flex items-center justify-center opacity-50 group-hover:opacity-100 transition-all shrink-0 ml-1"
-                          >
-                            <MessageCircle size={18} />
-                          </button>
-                      </div>
-                  ))
-              );
-              })()}
+                                  {user.grade && user.grade !== 'غير محدد' && (
+                                    <span className="text-[8px] bg-white/5 text-amber-300/80 px-1.5 py-0.2 rounded font-mono">
+                                      {user.grade}
+                                    </span>
+                                  )}
+                                </div>
+                            </div>
+                        </div>
+                        <button 
+                          className="w-10 h-10 rounded-full bg-[#00E5FF]/10 text-[#00E5FF] flex items-center justify-center opacity-50 group-hover:opacity-100 transition-all shrink-0 ml-1 cursor-pointer"
+                        >
+                          <MessageCircle size={18} />
+                        </button>
+                    </div>
+                ))
+            )}
           </div>
       )}
 
       {activeTab === 'parents' && (isTeacher || userProfile?.role === 'admin') && (
           <div className="flex-1 overflow-y-auto px-4 py-6 bg-[#050A18] flex flex-col gap-2">
-              <div className="mb-4 relative">
+              <div className="mb-2 relative">
                  <input 
                     type="text" 
                     value={searchQuery}
@@ -718,14 +1205,32 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                  />
                  <Search size={18} className="absolute right-3 top-3.5 text-white/40" />
               </div>
+
+              {/* Active Section Filter Notice */}
+              {selectedSection !== 'all' && (
+                <div className="flex items-center justify-between px-3 py-2 bg-blue-500/10 border border-blue-500/20 rounded-xl mb-1 text-xs animate-in fade-in duration-200">
+                  <div className="flex items-center gap-2 text-blue-300 font-bold">
+                    <Filter size={13} className="text-blue-400" />
+                    <span>عرض أولياء أمور شعبة: <strong className="text-blue-200 font-black">{selectedSection}</strong> ({filteredParents.length})</span>
+                  </div>
+                  <button
+                    onClick={() => setSelectedSection('all')}
+                    className="text-[10px] text-white/60 hover:text-white bg-white/5 hover:bg-white/15 px-2 py-0.5 rounded-md transition-colors cursor-pointer"
+                  >
+                    عرض كل الشعب
+                  </button>
+                </div>
+              )}
               
-              {parents.filter(p => p.name?.includes(searchQuery)).length === 0 ? (
+              {filteredParents.length === 0 ? (
                   <div className="flex-1 flex flex-col items-center justify-center opacity-50 grayscale mt-10">
                       <User size={48} className="text-white/20 mb-4" />
-                      <p className="text-white/40 text-sm font-bold">لا يوجد أولياء أمور مسجلين</p>
+                      <p className="text-white/40 text-sm font-bold">
+                        {selectedSection !== 'all' ? `لا يوجد أولياء أمور مرتبطين بشعبة ${selectedSection}` : 'لا يوجد أولياء أمور مسجلين'}
+                      </p>
                   </div>
               ) : (
-                  [...parents.filter(p => p.name?.includes(searchQuery))].sort(sortByRecentChat).map((parent) => (
+                  [...filteredParents].sort(sortByRecentChat).map((parent) => (
                       <div 
                         key={parent.id} 
                         onClick={() => {
@@ -753,11 +1258,18 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                               </div>
                               <div className="flex flex-col text-right">
                                   <span className="text-[13px] text-white/90 font-bold">{parent.name}</span>
-                                  <span className="text-[9px] font-bold text-blue-400">ولي أمر</span>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[9px] font-bold text-blue-400">ولي أمر</span>
+                                    {parent.grade && parent.grade !== 'غير محدد' && (
+                                      <span className="text-[8px] bg-white/5 text-blue-300/80 px-1.5 py-0.2 rounded font-mono">
+                                        {parent.grade}
+                                      </span>
+                                    )}
+                                  </div>
                               </div>
                           </div>
                           <button 
-                            className="w-10 h-10 rounded-full bg-[#00E5FF]/10 text-[#00E5FF] flex items-center justify-center opacity-50 group-hover:opacity-100 transition-all shrink-0 ml-1"
+                            className="w-10 h-10 rounded-full bg-[#00E5FF]/10 text-[#00E5FF] flex items-center justify-center opacity-50 group-hover:opacity-100 transition-all shrink-0 ml-1 cursor-pointer"
                           >
                             <MessageCircle size={18} />
                           </button>
@@ -1139,56 +1651,159 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                 </div>
              </>
           ) : (
-             <div className="flex-1 flex flex-col items-center justify-start px-4 pt-10 bg-[#050A18] overflow-y-auto">
-                <div className="w-20 h-20 bg-blue-500/10 rounded-full flex items-center justify-center mb-4 shrink-0">
-                  <MessageCircle size={32} className="text-blue-400" />
+             <div className="flex-1 overflow-y-auto px-4 py-6 bg-[#050A18] flex flex-col gap-2">
+                {/* Search Bar for Recent Chats */}
+                <div className="mb-2 relative">
+                   <input 
+                      type="text" 
+                      value={chatSearchQuery}
+                      onChange={(e) => setChatSearchQuery(e.target.value)}
+                      placeholder="ابحث في سجل المحادثات..." 
+                      className="w-full bg-[#1A233A] text-white text-sm rounded-xl px-4 py-3 pr-10 border border-white/10 outline-none focus:border-[#00E5FF] focus:bg-[#0D142A] transition-all"
+                   />
+                   <Search size={18} className="absolute right-3 top-3.5 text-white/40" />
                 </div>
-                <h3 className="text-white font-bold text-lg mb-2 shrink-0">محادثة خاصة</h3>
-                <p className="text-white/50 text-sm text-center mb-6 max-w-xs shrink-0">يرجى اختيار فارس من قائمة الفرسان النشطين لبدء محادثة خاصة ومعزولة.</p>
-                
-                {Object.keys(unreadCounts).filter(id => unreadCounts[id] > 0).length > 0 && (
-                   <div className="w-full max-w-md mt-4 flex flex-col gap-2">
-                       <h4 className="text-white/70 font-bold text-sm mb-2 text-right">رسائل غير مقروءة:</h4>
-                       {knights.filter(k => unreadCounts[k.id] > 0).map(user => (
-                          <div 
-                              key={user.id} 
-                              onClick={() => {
-                                setSelectedChatUser(user);
-                                setActiveTab('chat');
-                              }}
-                              className="flex items-center justify-between p-3 bg-white/[0.02] hover:bg-white/5 border border-white/5 rounded-2xl cursor-pointer transition-colors group"
-                          >
-                              <div className="flex items-center gap-3">
-                                  <div className="relative">
-                                      <div className={`w-11 h-11 rounded-full border border-white/10 overflow-hidden ${user.role === 'teacher' ? 'ring-1 ring-amber-400/50' : ''}`}>
-                                          {user.photo ? (
-                                             <img src={user.photo} alt={user.name} className="w-full h-full object-cover" />
-                                          ) : (
-                                             <div className="w-full h-full bg-white/5 flex items-center justify-center">
-                                                 <User size={18} className="text-white/30" />
-                                             </div>
-                                          )}
-                                      </div>
-                                      <div className="absolute -top-1 -left-1 bg-red-600 rounded-full min-w-[16px] h-[16px] px-1 flex items-center justify-center shadow-lg border-2 border-[#050A18]">
-                                          <span className="text-[9px] font-black text-white">{unreadCounts[user.id]}</span>
-                                      </div>
-                                  </div>
-                                  <div className="flex flex-col text-right">
-                                      <span className="text-[13px] text-white/90 font-bold">{user.name}</span>
-                                      <span className="text-[9px] font-bold text-white/40">اضغط للرد</span>
-                                  </div>
-                              </div>
-                          </div>
-                       ))}
-                   </div>
-                )}
-                
-                <button 
-                  onClick={() => setActiveTab('knights')}
-                  className="mt-6 px-6 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-full font-bold text-sm transition-colors shrink-0"
+
+                {/* General Chat Room Shortcut Item */}
+                <div 
+                  onClick={() => {
+                    setIsGeneralChat(true);
+                    setSelectedChatUser(null);
+                  }}
+                  className="flex items-center justify-between p-3.5 bg-gradient-to-r from-amber-500/15 via-amber-500/10 to-transparent hover:from-amber-500/25 hover:via-amber-500/15 border border-amber-500/30 rounded-2xl cursor-pointer transition-all group mb-1 shadow-sm"
                 >
-                  العودة لقائمة الفرسان
-                </button>
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-full bg-amber-500 flex items-center justify-center shadow-[0_0_15px_rgba(245,158,11,0.4)] ring-2 ring-amber-400/50">
+                      <Coffee size={22} className="text-white" />
+                    </div>
+                    <div className="flex flex-col text-right">
+                      <span className="text-sm text-white font-black">غرفة المجلس العامة</span>
+                      <span className="text-[11px] text-amber-300 font-bold">دردشة جماعية مفتوحة للجميع</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-amber-400/80 bg-amber-500/10 px-2 py-0.5 rounded-full font-bold border border-amber-500/20">
+                      عامة
+                    </span>
+                    <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-400 group-hover:scale-110 transition-transform">
+                      <MessageCircle size={16} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Section Header */}
+                <div className="px-1 py-1 flex items-center justify-between text-xs font-black text-white/60">
+                  <span>المحادثات المباشرة ({displayRecentConversations.length})</span>
+                  {displayRecentConversations.length > 0 && (
+                    <span className="text-[10px] text-[#00E5FF]">اضغط لفتح المحادثة فوراً</span>
+                  )}
+                </div>
+
+                {/* Recent Chats List */}
+                {displayRecentConversations.length === 0 ? (
+                    <div className="flex-1 flex flex-col items-center justify-center text-center p-6 my-auto">
+                        <div className="w-16 h-16 rounded-full bg-[#00E5FF]/10 flex items-center justify-center mb-3 border border-[#00E5FF]/20 shadow-[0_0_20px_rgba(0,229,255,0.15)]">
+                            <MessageCircle size={28} className="text-[#00E5FF]" />
+                        </div>
+                        <h3 className="text-white font-black text-base mb-1">لا توجد محادثات سابقة بعد</h3>
+                        <p className="text-white/40 text-xs max-w-xs mb-5">
+                          اختر طالباً أو ولي أمر من القوائم لبدء محادثة مباشرة وسريعة، وسيظهر هنا تلقائياً.
+                        </p>
+                        <div className="flex flex-wrap items-center justify-center gap-2">
+                           <button 
+                             onClick={() => setActiveTab('knights')}
+                             className="px-4 py-2 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm"
+                           >
+                             تصفح الفرسان
+                           </button>
+                           {(isTeacher || userProfile?.role === 'admin') && (
+                             <button 
+                               onClick={() => setActiveTab('parents')}
+                               className="px-4 py-2 bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/40 rounded-xl text-xs font-bold transition-all cursor-pointer shadow-sm"
+                             >
+                               تصفح أولياء الأمور
+                             </button>
+                           )}
+                        </div>
+                    </div>
+                ) : (
+                    displayRecentConversations.map((user) => {
+                      const hasUnread = unreadCounts[user.id] > 0;
+                      const roleName = user.role === 'teacher' ? 'أستاذ' : (user.role === 'parent' ? 'ولي أمر' : 'طالب');
+                      const roleColor = user.role === 'teacher' ? 'text-amber-400 bg-amber-500/10 border-amber-500/30 ring-amber-400/40' : (user.role === 'parent' ? 'text-blue-400 bg-blue-500/10 border-blue-500/30 ring-blue-400/40' : 'text-cyan-400 bg-cyan-500/10 border-cyan-500/30 ring-cyan-400/40');
+                      
+                      return (
+                        <div 
+                          key={user.id} 
+                          onClick={() => {
+                            setSelectedChatUser(user);
+                            setIsGeneralChat(false);
+                          }}
+                          className={`flex items-center justify-between p-3.5 rounded-2xl cursor-pointer transition-all border group ${
+                            hasUnread 
+                              ? 'bg-blue-600/10 hover:bg-blue-600/20 border-blue-500/40 shadow-[0_0_15px_rgba(37,99,235,0.15)]' 
+                              : 'bg-white/[0.03] hover:bg-white/[0.07] border-white/5 hover:border-white/15'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="relative shrink-0">
+                              <div className={`w-12 h-12 rounded-full border border-white/10 overflow-hidden ring-1 ${roleColor}`}>
+                                {user.photo ? (
+                                  <img src={user.photo} alt={user.name} className="w-full h-full object-cover" />
+                                ) : (
+                                  <div className="w-full h-full bg-white/5 flex items-center justify-center">
+                                    <User size={20} className="text-white/40" />
+                                  </div>
+                                )}
+                              </div>
+                              <div className="absolute bottom-0 right-0 w-3 h-3 bg-emerald-500 border-2 border-[#050A18] rounded-full"></div>
+                              {hasUnread && (
+                                <div className="absolute -top-1 -left-1 bg-red-600 rounded-full min-w-[18px] h-[18px] px-1.5 flex items-center justify-center shadow-lg border-2 border-[#050A18] animate-pulse">
+                                  <span className="text-[10px] font-black text-white">{unreadCounts[user.id]}</span>
+                                </div>
+                              )}
+                            </div>
+
+                            <div className="flex flex-col text-right min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className={`text-sm font-black truncate max-w-[140px] sm:max-w-[200px] ${hasUnread ? 'text-white' : 'text-white/90'}`}>
+                                  {user.name}
+                                </span>
+                                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-md border ${roleColor}`}>
+                                  {roleName}
+                                </span>
+                                {user.grade && user.grade !== 'غير محدد' && (
+                                  <span className="text-[8px] bg-white/5 text-amber-300/80 px-1.5 py-0.5 rounded font-mono hidden sm:inline-block">
+                                    {user.grade}
+                                  </span>
+                                )}
+                              </div>
+                              
+                              <div className="flex items-center gap-1.5 mt-0.5">
+                                <span className={`text-xs truncate max-w-[180px] sm:max-w-[260px] ${hasUnread ? 'text-blue-300 font-bold' : 'text-white/50'}`}>
+                                  {user.lastMessage || 'فتح المحادثة'}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="flex flex-col items-end gap-1 shrink-0 mr-2">
+                            {user.timestamp && (
+                              <span className="text-[10px] text-white/40 font-mono">
+                                {formatMessageTime(user)}
+                              </span>
+                            )}
+                            <button 
+                              className="w-8 h-8 rounded-full bg-[#00E5FF]/10 text-[#00E5FF] flex items-center justify-center opacity-70 group-hover:opacity-100 group-hover:scale-105 transition-all cursor-pointer"
+                              title="فتح المحادثة"
+                            >
+                              <MessageCircle size={15} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                )}
              </div>
           )}
         </>

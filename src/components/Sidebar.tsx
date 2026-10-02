@@ -41,6 +41,7 @@ interface SidebarProps {
   notifications: any[];
   onOpenNotifications: () => void;
   userProfile?: any;
+  onNavigateHome?: () => void;
 }
 
 type MenuItemProps = {
@@ -416,7 +417,14 @@ export const Sidebar: React.FC<SidebarProps> = ({
               icon={Home}
               colorClass="cyan"
               isActive={activeSection === 'hub'}
-              onClick={() => { onSelectSection('hub'); setIsOpen(false); }}
+              onClick={() => {
+                if (onNavigateHome) {
+                  onNavigateHome();
+                } else {
+                  onSelectSection('hub');
+                }
+                setIsOpen(false);
+              }}
             />
 
             {(userProfile?.role === 'student' || !userProfile?.role) && (

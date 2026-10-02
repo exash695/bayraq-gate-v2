@@ -10382,9 +10382,11 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
       const msgs = await db.select().from(lounge_messages).where(or(
         eq(lounge_messages.userId, uid),
         eq(lounge_messages.recipientId, uid)
-      ));
+      )).orderBy(desc(lounge_messages.timestamp));
       
+      const latestChatsMap = new Map<string, any>();
       const latestTimestamps: Record<string, string> = {};
+      
       msgs.forEach(msg => {
         const otherId = msg.userId === uid ? msg.recipientId : msg.userId;
         if (otherId && otherId !== 'all') {
@@ -10392,9 +10394,19 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
           if (!latestTimestamps[otherId] || ts > latestTimestamps[otherId]) {
             latestTimestamps[otherId] = ts;
           }
+          if (!latestChatsMap.has(otherId)) {
+            latestChatsMap.set(otherId, {
+              otherId,
+              lastMessage: msg.text || (msg.imageUrl ? '📷 مرفق / صورة' : 'رسالة جديدة'),
+              timestamp: msg.timestamp,
+              senderId: msg.userId,
+              senderName: msg.userName,
+              read: msg.read
+            });
+          }
         }
       });
-      res.json({ success: true, latestTimestamps });
+      res.json({ success: true, latestTimestamps, recentChats: Array.from(latestChatsMap.values()) });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }
@@ -11119,11 +11131,12 @@ app.delete('/api/system_errors/:id', async (req, res) => {
       
       let userList: any[] = [];
       let studentList: any[] = [];
-      
+      let schoolLists: any[] = [];
       let validCodesFilter: Set<string> | null = null;
-      if (schoolId) {
+
+      if (schoolId && schoolId !== 'all' && schoolId !== 'undefined' && schoolId !== 'null') {
         // Enforce Codes Center (academic_lists): Only include authentic students from the school's code lists
-        const schoolLists = await db.select().from(academic_lists).where(eq(academic_lists.schoolId, schoolId as string));
+        schoolLists = await db.select().from(academic_lists).where(eq(academic_lists.schoolId, schoolId as string));
         if (schoolLists.length > 0) {
           validCodesFilter = new Set<string>();
           for (const al of schoolLists) {
@@ -11139,6 +11152,7 @@ app.delete('/api/system_errors/:id', async (req, res) => {
         userList = await db.select().from(users).where(eq(users.schoolId, schoolId as string)).orderBy(desc(users.lastLogin));
         studentList = await db.select().from(students).where(eq(students.schoolId, schoolId as string));
       } else {
+        schoolLists = await db.select().from(academic_lists);
         userList = await db.select().from(users).orderBy(desc(users.lastLogin));
         studentList = await db.select().from(students);
       }
@@ -11152,24 +11166,98 @@ app.delete('/api/system_errors/:id', async (req, res) => {
         });
       }
       
-      const mappedStudents = studentList.map(s => ({
-        id: s.id,
-        name: s.name,
-        photo: s.avatar,
-        role: 'student',
-        grade: s.grade,
-        schoolId: s.schoolId,
-        code: s.code,
-        studentCode: s.code,
-        parentCode: s.parentCode,
-        phone: s.parentPhone,
-        status: s.status,
-        createdAt: s.createdAt,
-        lastActive: s.lastLogin
-      }));
+      const studentToSectionMap = new Map<string, string>();
+      if (schoolLists && schoolLists.length > 0) {
+        for (const al of schoolLists) {
+          if (Array.isArray(al.students)) {
+            for (const st of al.students) {
+              const c = String(st.student || st.code || '').trim();
+              const sName = String(st.name || '').trim();
+              const sId = String(st.id || '').trim();
+              if (c) studentToSectionMap.set(c, al.name);
+              if (sName) studentToSectionMap.set(sName, al.name);
+              if (sId) studentToSectionMap.set(sId, al.name);
+            }
+          }
+        }
+      }
+
+      const mappedStudents = studentList.map(s => {
+        const matchedListSection = studentToSectionMap.get(String(s.code || '').trim()) || 
+                                   studentToSectionMap.get(String(s.name || '').trim()) || 
+                                   studentToSectionMap.get(String(s.id || '').trim());
+        return {
+          id: s.id,
+          name: s.name,
+          photo: s.avatar,
+          role: 'student',
+          grade: matchedListSection || s.grade,
+          schoolId: s.schoolId,
+          code: s.code,
+          studentCode: s.code,
+          parentCode: s.parentCode,
+          phone: s.parentPhone,
+          status: s.status,
+          createdAt: s.createdAt,
+          lastActive: s.lastLogin
+        };
+      });
       
-      const systemUsers = userList.filter(u => u.role !== 'student' && u.role !== 'driver');
-      const combined = [...systemUsers, ...mappedStudents];
+      const mappedParents: any[] = [];
+      const seenParentCodes = new Set<string>();
+
+      // 1. Process explicit parents in userList
+      for (const u of userList.filter(u => u.role === 'parent')) {
+        const pCode = String(u.parentCode || u.childCode || u.studentCode || u.code || u.id || '').trim();
+        const matchedStudent = mappedStudents.find(s => 
+          (pCode && (s.parentCode === pCode || s.code === pCode || s.id === pCode || s.studentCode === pCode)) ||
+          (u.id && s.code && u.id.includes(s.code))
+        );
+
+        mappedParents.push({
+          ...u,
+          role: 'parent',
+          grade: matchedStudent?.grade || u.grade || 'غير محدد',
+          studentGrade: matchedStudent?.grade || u.grade || 'غير محدد',
+          studentName: matchedStudent?.name || u.studentName || u.name,
+          studentCode: matchedStudent?.code || u.studentCode || u.childCode,
+          childCode: matchedStudent?.code || u.studentCode || u.childCode,
+          parentCode: u.parentCode || matchedStudent?.parentCode || pCode,
+          schoolId: u.schoolId || matchedStudent?.schoolId || (schoolId as string) || 'general'
+        });
+        if (pCode) seenParentCodes.add(pCode);
+        if (matchedStudent?.code) seenParentCodes.add(matchedStudent.code);
+        if (matchedStudent?.parentCode) seenParentCodes.add(matchedStudent.parentCode);
+      }
+
+      // 2. Generate parent record for each student who doesn't have an explicit parent user record
+      for (const s of mappedStudents) {
+        const pCode = s.parentCode || `PAR-${s.code}`;
+        if (!seenParentCodes.has(pCode) && !seenParentCodes.has(s.code)) {
+          seenParentCodes.add(pCode);
+          seenParentCodes.add(s.code);
+          mappedParents.push({
+            id: `parent_${s.schoolId}_${s.code || s.id}`,
+            name: `ولي أمر ${s.name}`,
+            photo: null,
+            role: 'parent',
+            grade: s.grade,
+            studentGrade: s.grade,
+            schoolId: s.schoolId,
+            studentName: s.name,
+            studentCode: s.code,
+            parentCode: pCode,
+            childCode: s.code,
+            phone: s.phone || '',
+            status: 'active',
+            createdAt: s.createdAt || new Date().toISOString(),
+            lastActive: s.lastActive || s.createdAt
+          });
+        }
+      }
+
+      const systemUsers = userList.filter(u => u.role !== 'student' && u.role !== 'driver' && u.role !== 'parent');
+      const combined = [...systemUsers, ...mappedParents, ...mappedStudents];
       
       for (const st of combined) {
         if (st.role === 'student') {
