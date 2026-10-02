@@ -3008,7 +3008,7 @@ export default function App() {
               }
               schoolId={verifiedStudentInfo?.schoolId || selectedSchoolId || "school1-boys"}
               onBack={() => {
-                handleHomeNavigation();
+                setActiveSection("mayadeen");
               }}
               onOpenNotifications={() => setIsNotificationDrawerOpen(true)}
             />

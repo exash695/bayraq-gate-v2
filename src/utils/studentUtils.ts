@@ -555,9 +555,9 @@ export const printStudentCards = (generatedCodes: any[], schoolName: string) => 
         <span>بطاقة الطالب الذكية</span>
         <span style="font-size: 10px; color: #666;">بوابة بيرق</span>
       </div>
-      <div style="margin-bottom: 5px; font-size: 12px;"><strong>المدرسة:</strong> ${schoolName}</div>
-      <div style="margin-bottom: 5px; font-size: 12px;"><strong>الصف:</strong> ${code.grade}</div>
-      <div style="margin-bottom: 5px; font-size: 12px;"><strong>الاسم:</strong> ${code.name}</div>
+      <div style="margin-bottom: 5px; font-size: 12px; color: #101935;"><strong>المدرسة:</strong> ${schoolName}</div>
+      <div style="margin-bottom: 5px; font-size: 12px; color: #101935;"><strong>الصف:</strong> ${code.grade}</div>
+      <div style="margin-bottom: 5px; font-size: 12px; color: #101935;"><strong>الاسم:</strong> ${code.name}</div>
       <div style="margin-bottom: 5px; font-size: 12px;"><strong>كود الطالب:</strong> <span style="color: #d32f2f; font-weight: bold;">${code.student}</span></div>
       <div style="margin-bottom: 5px; font-size: 12px;"><strong>كود ولي الأمر:</strong> <span style="color: #1976d2; font-weight: bold;">${code.parent}</span></div>
       <div style="font-size: 10px; color: #666; margin-top: 10px; border-top: 1px dashed #ddd; padding-top: 5px;">يرجى الاحتفاظ بهذه الأكواد للدخول للمنصة</div>
