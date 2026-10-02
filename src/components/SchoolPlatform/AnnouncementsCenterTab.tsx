@@ -151,15 +151,29 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
     const type = (item.type || item.metadata?.type || "").toLowerCase();
     const msg = (item.message || item.body || item.title || "").toLowerCase();
 
-    // Explicit Administration & Finance keywords -> ALWAYS Admin
+    // Explicit Administration & Finance keywords & types -> ALWAYS Admin
     if (
       author.includes("إدارة") || 
       author.includes("ادارة") || 
       author.includes("الإذاعة") || 
+      author.includes("اذاعة") || 
       author.includes("المالية") || 
       author.includes("الحسابات") ||
       author.includes("الأكاديمية") ||
-      author.includes("الأقساط")
+      author.includes("الأقساط") ||
+      author.includes("مدير") ||
+      author.includes("مستخدم") ||
+      author === "user" ||
+      author === "admin" ||
+      type.includes("admin") ||
+      type.includes("broadcast") ||
+      type.includes("ticker") ||
+      type.includes("school") ||
+      type.includes("finance") ||
+      type.includes("payment") ||
+      type.includes("installment") ||
+      item.isSchoolBroadcast === true ||
+      item.is_school_broadcast === true
     ) {
       return false;
     }
