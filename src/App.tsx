@@ -4626,6 +4626,7 @@ export default function App() {
                       setIsNotificationDrawerOpen(true)
                     }
                     userProfile={userProfile}
+                    portalType={portalType}
                     onNavigateHome={handleHomeNavigation}
                   />
                 )}
