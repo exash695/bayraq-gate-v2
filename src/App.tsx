@@ -3766,10 +3766,10 @@ export default function App() {
                 <style>{`
                   @keyframes ticker-scroll-home {
                     0% {
-                      transform: translate3d(-50%, 0, 0);
+                      transform: translate3d(0, 0, 0);
                     }
                     100% {
-                      transform: translate3d(0, 0, 0);
+                      transform: translate3d(-50%, 0, 0);
                     }
                   }
                   .home-ticker-scroller {

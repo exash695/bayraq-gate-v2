@@ -158,7 +158,8 @@ import {
 } from "lucide-react";
 import { SchoolContent } from "./SchoolContent";
 import { BroadcastTicker } from "./BroadcastTicker";
-import { extractGradeBase, extractSectionLetter } from "../utils/gradeMatcher";
+import { extractGradeBase, extractSectionLetter, matchesBroadcastAudience, isSchoolMatch } from "../utils/gradeMatcher";
+import { broadcastService } from "../services/broadcastService";
 import { StudentLounge } from "./StudentLounge";
 import { StudentSupportForm } from "./StudentSupportForm";
 import { StudentSchedule } from "./StudentSchedule";
@@ -3704,6 +3705,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
   const [unreadLoungeCount, setUnreadLoungeCount] = useState(0);
   const [socialUnreadCount, setSocialUnreadCount] = useState(0);
   const [resolvedTicketCount, setResolvedTicketCount] = useState(0);
+  const [unreadAnnouncementsCount, setUnreadAnnouncementsCount] = useState(0);
   const [schoolConfigs, setSchoolConfigs] = useState<any>(null);
   const [deletingPostId, setDeletingPostId] = useState<string | null>(null);
   const [deletingAcademyPageId, setDeletingAcademyPageId] = useState<string | null>(null);
@@ -3773,6 +3775,83 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     );
     return () => unsub();
   }, [schoolId]);
+
+  // Dynamic subscription to calculate unread announcements/broadcasts count for bottom tab badge
+  useEffect(() => {
+    if (isTeacher) return;
+    const currentSchoolId = resolvedSchoolId || "school1";
+
+    let unsubBroadcasts: (() => void) | null = null;
+
+    const fetchUnreadBroadcasts = () => {
+      // Re-fetch read broadcast IDs from localStorage
+      let readIds: string[] = [];
+      try {
+        const saved = localStorage.getItem("bairaq_read_broadcast_ids");
+        readIds = saved ? JSON.parse(saved) : [];
+      } catch {}
+
+      const unsub = broadcastService.subscribeToBroadcasts(currentSchoolId, (allData) => {
+        try {
+          const filtered = (allData || [])
+            .filter((b: any) => {
+              if (b.type === "global_celebration" && b.targetLocation === "popup") return false;
+              return true;
+            })
+            .filter((b: any) => {
+              const bSchool = b.schoolId || b.school_id;
+              if (!isSchoolMatch(currentSchoolId, bSchool)) return false;
+
+              const now = Date.now();
+              let expMs = 0;
+              const expField = b.expiryDate || b.expiry_date;
+              if (typeof expField === "number") expMs = expField;
+              else if (expField?.toMillis) expMs = expField.toMillis();
+              else if (expField instanceof Date) expMs = expField.getTime();
+              else if (typeof expField === "string") {
+                const parsed = new Date(expField).getTime();
+                expMs = isNaN(parsed) ? (Number(expField) || 0) : parsed;
+              }
+              if (expMs > 0 && expMs < now) return false;
+
+              // Resolve grade and section for matches
+              const studentGrade = gradeName || grade || "";
+              const studentSection = resolvedStudentSection || userProfile?.section || (userProfile as any)?.studentSection || userProfile?.class || "";
+              
+              return matchesBroadcastAudience(b, {
+                grade: studentGrade,
+                section: studentSection,
+                className: studentSection && studentGrade ? `${studentGrade} ${studentSection}` : (studentSection || studentGrade),
+                isTeacher: false
+              });
+            });
+
+          const unreadBroadcasts = filtered.filter(b => b.id && !readIds.includes(b.id));
+          const unreadNotifs = (notifications || []).filter(n => !n.read && n.type !== 'lounge_message' && n.type !== 'parent_message');
+
+          setUnreadAnnouncementsCount(unreadBroadcasts.length + unreadNotifs.length);
+        } catch (err) {
+          console.warn("Error calculating unread announcements count:", err);
+        }
+      });
+
+      return unsub;
+    };
+
+    unsubBroadcasts = fetchUnreadBroadcasts();
+
+    const handleReadAnnouncementsEvent = () => {
+      if (unsubBroadcasts) unsubBroadcasts();
+      unsubBroadcasts = fetchUnreadBroadcasts();
+    };
+
+    window.addEventListener("bairaq_announcements_read", handleReadAnnouncementsEvent);
+
+    return () => {
+      if (unsubBroadcasts) unsubBroadcasts();
+      window.removeEventListener("bairaq_announcements_read", handleReadAnnouncementsEvent);
+    };
+  }, [resolvedSchoolId, gradeName, grade, resolvedStudentSection, userProfile, notifications, isTeacher]);
 
   const getStageFromGrade = (studentGrade: string): string => {
     const trimmed = (studentGrade || "").trim();
@@ -8465,6 +8544,12 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
 
               {tab.id === "live_watch" && !(tab as any).isDisabled && (
                 <span className="absolute top-1 right-2 w-2 h-2 bg-red-500 rounded-full animate-pulse shadow-[0_0_8px_rgba(239,68,68,0.8)] border border-black z-20"></span>
+              )}
+
+              {tab.id === "announcements" && !isSelected && unreadAnnouncementsCount > 0 && (
+                <span className="absolute top-1 right-2 px-1.5 min-w-[16px] h-[16px] bg-rose-600 text-[9px] text-white rounded-full flex items-center justify-center font-black animate-bounce shadow-md z-20 border border-black/10">
+                  {unreadAnnouncementsCount}
+                </span>
               )}
 
               {isSelected && (

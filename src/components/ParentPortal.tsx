@@ -136,6 +136,37 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   const [unreadSupportCount, setUnreadSupportCount] = useState(0);
   const [unreadIdeasCount, setUnreadIdeasCount] = useState(0);
   const [parentBroadcasts, setParentBroadcasts] = useState<any[]>([]);
+  const [readBroadcastIds, setReadBroadcastIds] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem("bairaq_read_broadcast_ids");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const unreadAnnouncementsCount = useMemo(() => {
+    const unreadBroadcasts = parentBroadcasts.filter(b => b.id && !readBroadcastIds.includes(b.id)).length;
+    const unreadNotifs = generalNotifications.filter(n => !n.read).length;
+    return unreadBroadcasts + unreadNotifs;
+  }, [parentBroadcasts, readBroadcastIds, generalNotifications]);
+
+  // Sync readBroadcastIds when opening/closing announcements sub-page or listening to window event
+  useEffect(() => {
+    const handleReadAnnouncements = () => {
+      try {
+        const saved = localStorage.getItem("bairaq_read_broadcast_ids");
+        if (saved) {
+          setReadBroadcastIds(JSON.parse(saved));
+        }
+      } catch {}
+    };
+    window.addEventListener("bairaq_announcements_read", handleReadAnnouncements);
+    handleReadAnnouncements();
+    return () => {
+      window.removeEventListener("bairaq_announcements_read", handleReadAnnouncements);
+    };
+  }, [activeSubPage]);
   const [parentHomeworks, setParentHomeworks] = useState<any[]>([]);
   const [parentSubmissions, setParentSubmissions] = useState<any[]>([]);
   const [hwSearch, setHwSearch] = useState('');
@@ -1731,7 +1762,15 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
     {
       title: "المتابعة اللحظية",
       items: [
-        { id: "announcements", icon: Megaphone, name: "مركز التبليغات والإعلانات 📢", color: "text-cyan-400", bg: "bg-cyan-400/10", border: "border-cyan-400/20" },
+        { 
+          id: "announcements", 
+          icon: Megaphone, 
+          name: "مركز التبليغات والإعلانات 📢", 
+          color: "text-cyan-400", 
+          bg: "bg-cyan-400/10", 
+          border: "border-cyan-400/20",
+          badge: unreadAnnouncementsCount > 0 ? unreadAnnouncementsCount : null
+        },
         { id: "grades", icon: BarChart3, name: "سجل الدرجات", color: "text-emerald-400", bg: "bg-emerald-400/10", border: "border-emerald-400/20", cap: 'view_grades' },
         { 
           id: "attendance", 
@@ -2040,7 +2079,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
               <AnnouncementsCenterTab
                 schoolId={schoolId || studentData?.schoolId || 'school_awail_ghamas'}
                 grade={studentData?.grade || grade || 'عام'}
-                section={studentData?.section || ''}
+                section={studentData?.section || studentData?.studentSection || studentData?.class || studentData?.className || (studentData?.grade && extractSectionLetter(studentData.grade) ? studentData.grade : "") || ""}
                 isTeacher={false}
                 notifications={generalNotifications}
                 hideHeader={true}
@@ -5655,8 +5694,8 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
         <div className="w-full bg-[#fbbf24] font-sans text-black flex items-center h-10 border-b border-black/10 relative overflow-hidden" dir="rtl">
           <style>{`
             @keyframes parent-marquee-scroll-seamless {
-              0% { transform: translate3d(-50%, 0, 0); }
-              100% { transform: translate3d(0, 0, 0); }
+              0% { transform: translate3d(0, 0, 0); }
+              100% { transform: translate3d(-50%, 0, 0); }
             }
             .parent-marquee-scroller {
               display: flex;

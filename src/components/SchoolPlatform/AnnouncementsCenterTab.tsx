@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   Megaphone, 
@@ -50,44 +50,67 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
   const [selectedDate, setSelectedDate] = useState<string>(todayStr);
   const [isDateFilterActive, setIsDateFilterActive] = useState<boolean>(false);
 
-  // Read/seen status for badge disappearance upon opening
-  const [hasSeenAdmin, setHasSeenAdmin] = useState<boolean>(() => {
+  // Read/seen status for badge disappearance upon opening using broadcast IDs
+  const [readBroadcastIds, setReadBroadcastIds] = useState<string[]>(() => {
     try {
-      return localStorage.getItem("bairaq_seen_announcements_admin") === "true";
+      const saved = localStorage.getItem("bairaq_read_broadcast_ids");
+      return saved ? JSON.parse(saved) : [];
     } catch {
-      return false;
+      return [];
     }
   });
 
-  const [hasSeenStaff, setHasSeenStaff] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem("bairaq_seen_announcements_staff") === "true";
-    } catch {
-      return false;
-    }
-  });
+  const isItemRead = useCallback((item: any) => {
+    if (item.read === true) return true;
+    if (item.id && readBroadcastIds.includes(item.id)) return true;
+    return false;
+  }, [readBroadcastIds]);
 
-  // Whenever a tab is active, mark it as read immediately so the notification number disappears!
+  // Mark items as read based on current sub-tab
   useEffect(() => {
+    let changed = false;
     if (activeSubTab === "admin") {
-      setHasSeenAdmin(true);
-      try {
-        localStorage.setItem("bairaq_seen_announcements_admin", "true");
-      } catch {}
+      const unreadAdminIds = adminItems
+        .filter(item => !isItemRead(item) && item.id)
+        .map(item => item.id);
+      if (unreadAdminIds.length > 0) {
+        setReadBroadcastIds(prev => {
+          const next = [...new Set([...prev, ...unreadAdminIds])];
+          try {
+            localStorage.setItem("bairaq_read_broadcast_ids", JSON.stringify(next));
+          } catch {}
+          return next;
+        });
+        changed = true;
+      }
     } else if (activeSubTab === "staff") {
-      setHasSeenStaff(true);
-      try {
-        localStorage.setItem("bairaq_seen_announcements_staff", "true");
-      } catch {}
-    } else if (activeSubTab === "all") {
-      setHasSeenAdmin(true);
-      setHasSeenStaff(true);
-      try {
-        localStorage.setItem("bairaq_seen_announcements_admin", "true");
-        localStorage.setItem("bairaq_seen_announcements_staff", "true");
-      } catch {}
+      const unreadStaffIds = staffItems
+        .filter(item => !isItemRead(item) && item.id)
+        .map(item => item.id);
+      if (unreadStaffIds.length > 0) {
+        setReadBroadcastIds(prev => {
+          const next = [...new Set([...prev, ...unreadStaffIds])];
+          try {
+            localStorage.setItem("bairaq_read_broadcast_ids", JSON.stringify(next));
+          } catch {}
+          return next;
+        });
+        changed = true;
+      }
     }
-  }, [activeSubTab]);
+
+    if (changed) {
+      window.dispatchEvent(new CustomEvent("bairaq_announcements_read"));
+    }
+  }, [activeSubTab, adminItems, staffItems, isItemRead]);
+
+  const unreadAdminCount = useMemo(() => {
+    return adminItems.filter(item => !isItemRead(item)).length;
+  }, [adminItems, isItemRead]);
+
+  const unreadStaffCount = useMemo(() => {
+    return staffItems.filter(item => !isItemRead(item)).length;
+  }, [staffItems, isItemRead]);
 
   // 1. Subscribe to administrative & school radio announcements
   useEffect(() => {
@@ -422,10 +445,9 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
             >
               <Building2 size={13} />
               <span>إعلانات الإدارة 🏛️</span>
-              {/* يختفي الرقم عند فتح التبويب أو عند الاطلاع عليه */}
-              {!hasSeenAdmin && activeSubTab !== "admin" && adminItems.length > 0 && (
-                <span className="px-1.5 h-4 text-[9px] font-bold rounded-full flex items-center justify-center bg-cyan-500/20 text-cyan-300">
-                  {adminItems.length}
+              {activeSubTab !== "admin" && unreadAdminCount > 0 && (
+                <span className="px-1.5 h-4 text-[9px] font-bold rounded-full flex items-center justify-center bg-rose-600 text-white animate-pulse">
+                  {unreadAdminCount}
                 </span>
               )}
             </button>
@@ -443,10 +465,9 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
             >
               <UserCheck size={13} />
               <span>تبليغات الأساتذة 🎓</span>
-              {/* يختفي الرقم عند فتح التبويب أو عند الاطلاع عليه */}
-              {!hasSeenStaff && activeSubTab !== "staff" && staffItems.length > 0 && (
-                <span className="px-1.5 h-4 text-[9px] font-bold rounded-full flex items-center justify-center bg-purple-500/20 text-purple-300">
-                  {staffItems.length}
+              {activeSubTab !== "staff" && unreadStaffCount > 0 && (
+                <span className="px-1.5 h-4 text-[9px] font-bold rounded-full flex items-center justify-center bg-rose-600 text-white animate-pulse">
+                  {unreadStaffCount}
                 </span>
               )}
             </button>
