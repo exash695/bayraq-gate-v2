@@ -8551,21 +8551,10 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
       </div>
 
       {/* شريط الفرسان المرابطون أسفل الميادين */}
-      <AnimatePresence>
-        {!isTeacher && activeTab !== "feed" && (
-          <motion.div
-            initial={{ opacity: 0, y: 50 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 50 }}
-            className="fixed bottom-16 left-0 right-0 z-[60]"
-          >
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* 3. Professional Bottom Navigation Bar (Safe Area & Device Navigation Friendly) */}
       <nav 
-        className="flex-shrink-0 bg-[#050A18]/95 backdrop-blur-md border-t border-white/10 flex items-center gap-1 overflow-x-auto no-scrollbar px-2 pt-1.5 z-50 relative justify-start md:justify-center transition-all" 
+        className="flex-shrink-0 bg-[#050A18]/95 backdrop-blur-md border-t border-white/10 flex items-center gap-1 overflow-x-auto no-scrollbar px-2 pt-1.5 z-[100] relative justify-start md:justify-center transition-all pointer-events-auto" 
         style={{ 
           scrollbarWidth: 'none', 
           msOverflowStyle: 'none',

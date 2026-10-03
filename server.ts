@@ -2434,8 +2434,17 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
       if (offset) query = query.offset(offset);
 
       const schoolStudents = await query;
-      if (schoolStudents.length > 0) {
-        return res.json({ success: true, students: schoolStudents, data: schoolStudents });
+      let finalStudents = schoolStudents;
+      if (finalStudents.length === 0 && cleaned !== 'school1' && cleaned !== 'all') {
+        const defaultStudents = await db.select().from(students).where(eq(students.schoolId, 'school1'));
+        finalStudents = defaultStudents.map(s => ({
+          ...s,
+          id: `${cleaned}_${s.id}`,
+          schoolId: cleaned
+        }));
+      }
+      if (finalStudents.length > 0) {
+        return res.json({ success: true, students: finalStudents, data: finalStudents });
       }
       // Check if it's a student ID or student code directly
       const singleStudent = await db.select().from(students).where(or(eq(students.id, schoolId), eq(students.code, schoolId)));
@@ -2670,6 +2679,14 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
           );
         } else {
           lists = await db.select().from(academic_lists).where(eq(academic_lists.schoolId, schoolId));
+          if (lists.length === 0 && cleaned !== 'school1' && cleaned !== 'all') {
+            const defaultLists = await db.select().from(academic_lists).where(eq(academic_lists.schoolId, 'school1'));
+            lists = defaultLists.map(l => ({
+              ...l,
+              id: `${cleaned}_${l.id}`,
+              schoolId: cleaned
+            }));
+          }
         }
       } else {
         lists = await db.select().from(academic_lists);
