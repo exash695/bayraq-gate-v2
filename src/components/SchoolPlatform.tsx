@@ -5179,15 +5179,15 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     if (!schoolId) return;
 
     const postsRef = collection(db, "community_posts");
-    // Simple query by timestamp to avoid missing compound indices
-    const postsQuery = query(postsRef, orderBy("timestamp", "desc"));
-
     const unsubscribe = onSnapshot(
-      postsQuery,
+      postsRef,
       (snapshot) => {
         const likedList = getLikedPosts();
         const fetchedPosts = snapshot.docs.map((docRef) => {
           const data = docRef.data();
+          const timestampVal = data.timestamp 
+            ? (typeof data.timestamp?.toDate === 'function' ? data.timestamp.toDate() : new Date(data.timestamp)) 
+            : new Date();
 
           return {
             id: docRef.id,
@@ -5195,9 +5195,8 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
             userName: data.userName,
             userPhotoURL: data.userPhotoURL || data.userPhoto || null,
             mediaUrl: data.mediaUrl || data.media_url || null,
-            time: data.timestamp
-              ? (typeof data.timestamp?.toDate === 'function' ? data.timestamp.toDate() : new Date(data.timestamp)).toLocaleString("ar-IQ")
-              : "الآن",
+            time: timestampVal.toLocaleString("ar-IQ"),
+            rawTimestamp: timestampVal.getTime(),
             content: data.content,
             likes: data.likesCount ?? data.likes ?? 0,
             comments: data.commentsCount ?? data.comments ?? 0,
@@ -5217,6 +5216,8 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
             targetSections: data.targetSections || data.target_sections || [],
           } as Post;
         });
+
+        fetchedPosts.sort((a: any, b: any) => (b.rawTimestamp || 0) - (a.rawTimestamp || 0));
 
         // Filter with high-fidelity visibility matching
         const filteredPosts = fetchedPosts.filter((post) => {
@@ -7707,7 +7708,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
                     </h2>
                     <div className="flex items-center gap-1 text-[#FFD600] font-bold text-xs sm:text-sm tracking-wide drop-shadow-sm mt-0.5 min-w-0">
                       <span className="shrink-0 text-xs">🏛️</span>
-                      <span className="truncate">{schoolName || "ثانوية أوائل غماس الأهلية"}</span>
+                      <span className="truncate">{schoolName || userProfile?.schoolName || "مدرسة اليمامة الابتدائية"}</span>
                     </div>
                     <div className="flex items-center gap-1 text-white/80 font-semibold text-[11px] sm:text-xs tracking-wide drop-shadow-sm mt-0.5 min-w-0">
                       <span className="shrink-0 text-[10px]">
@@ -8375,7 +8376,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
                       </h2>
                       <div className="flex items-center gap-1 text-[#FFD600] font-bold text-xs sm:text-sm tracking-wide drop-shadow-sm mt-0.5 min-w-0">
                         <span className="shrink-0 text-xs">🏛️</span>
-                        <span className="truncate">{schoolName || "ثانوية أوائل غماس الأهلية"}</span>
+                        <span className="truncate">{schoolName || userProfile?.schoolName || "مدرسة اليمامة الابتدائية"}</span>
                       </div>
                       <div className="flex items-center gap-1.5 text-white/90 font-bold text-[11px] sm:text-xs tracking-wide drop-shadow-sm mt-0.5 min-w-0">
                         <span className="shrink-0 text-[10px]">👨‍🏫</span>
@@ -8391,7 +8392,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
                       </h2>
                       <div className="flex items-center gap-1 text-[#FFD600] font-bold text-xs sm:text-sm tracking-wide drop-shadow-sm mt-0.5 min-w-0">
                         <span className="shrink-0 text-xs">🏛️</span>
-                        <span className="truncate">{schoolName || "ثانوية أوائل غماس الأهلية"}</span>
+                        <span className="truncate">{schoolName || userProfile?.schoolName || "مدرسة اليمامة الابتدائية"}</span>
                       </div>
                       <div className="flex items-center gap-1 text-white/80 font-semibold text-[11px] sm:text-xs tracking-wide drop-shadow-sm mt-0.5 min-w-0">
                         <span className="shrink-0 text-[10px]">🎓</span>

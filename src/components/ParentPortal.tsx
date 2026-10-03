@@ -2050,7 +2050,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
 
   const getSubpageHeaderDetails = (subPageId: string) => {
     const cleanStudentName = cleanParentStudentName(studentName);
-    const activeSchool = schoolName || schoolInfo?.schoolName || schoolInfo?.name || "ثانوية أوائل غماس الأهلية";
+    const activeSchool = schoolName || schoolInfo?.schoolName || schoolInfo?.name || "مدرسة اليمامة الابتدائية";
 
     switch (subPageId) {
       case 'announcements':
@@ -5719,7 +5719,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                 </h2>
                 <div className="flex items-center gap-1 text-[#FFD600] font-bold text-[10px] sm:text-xs md:text-sm tracking-wide drop-shadow-[0_2px_5px_rgba(0,0,0,0.9)] mt-0.5 min-w-0 break-words">
                   <span className="shrink-0 text-xs">🏛️</span>
-                  <span className="break-words">{schoolName || schoolInfo?.schoolName || schoolInfo?.name || "ثانوية أوائل غماس الأهلية"}</span>
+                  <span className="break-words">{schoolName || schoolInfo?.schoolName || schoolInfo?.name || "مدرسة اليمامة الابتدائية"}</span>
                 </div>
                 <div className="flex items-center gap-1 text-white/90 font-semibold text-[9.5px] sm:text-xs tracking-wide drop-shadow-[0_2px_4px_rgba(0,0,0,0.9)] mt-0.5 min-w-0 break-words">
                   <span className="shrink-0 text-[10px]">⚡</span>
@@ -5825,7 +5825,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
               {/* 1. من اليمين: اسم المدرسة بخط مخصص ليظهر كاملاً بدون اقتطاع */}
               <div className="flex items-center gap-1 text-[#FFD600] font-bold text-[9px] sm:text-[10.5px] md:text-xs tracking-tight drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)] shrink-0 max-w-[42%] min-w-0">
                 <span className="shrink-0 text-[10px]">🏛️</span>
-                <span className="whitespace-nowrap overflow-hidden text-ellipsis">{schoolName || schoolInfo?.schoolName || schoolInfo?.name || "ثانوية أوائل غماس الأهلية"}</span>
+                <span className="whitespace-nowrap overflow-hidden text-ellipsis">{schoolName || schoolInfo?.schoolName || schoolInfo?.name || "مدرسة اليمامة الابتدائية"}</span>
               </div>
 
               {/* 2. في المنتصف: اسم المرحلة بخط مباشر وبدون شارة دائرية */}
