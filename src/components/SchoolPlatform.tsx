@@ -5184,59 +5184,39 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
 
     const unsubscribe = onSnapshot(
       postsQuery,
-      async (snapshot) => {
+      (snapshot) => {
         const likedList = getLikedPosts();
-        const fetchedPosts = await Promise.all(
-          snapshot.docs.map(async (docRef) => {
-            const data = docRef.data();
-            
-            let userReaction = null;
-            if (auth.currentUser) {
-              try {
-                const uReactDoc = await getDoc(
-                  doc(
-                    db,
-                    "community_posts",
-                    docRef.id,
-                    "reactions_list",
-                    getCurrentUserId(),
-                  ),
-                );
-                if (uReactDoc.exists()) {
-                  userReaction = uReactDoc.data().sticker;
-                }
-              } catch (e) {}
-            }
+        const fetchedPosts = snapshot.docs.map((docRef) => {
+          const data = docRef.data();
 
-            return {
-              id: docRef.id,
-              userId: data.userId || "",
-              userName: data.userName,
-              userPhotoURL: data.userPhotoURL,
-              mediaUrl: data.mediaUrl,
-              time: data.timestamp
-                ? (typeof data.timestamp?.toDate === 'function' ? data.timestamp.toDate() : new Date(data.timestamp)).toLocaleString("ar-IQ")
-                : "الآن",
-              content: data.content,
-              likes: data.likes || 0,
-              comments: data.comments || 0,
-              shares: data.shares || 0,
-              isLiked: likedList.includes(docRef.id),
-              type: data.type || "student",
-              isPinned: data.isPinned || false,
-              isLocked: data.isLocked || false,
-              adminNotes: data.adminNotes || [],
-              stageIcon: data.stageIcon || "",
-              stageStickers: data.stageStickers || [],
-              reactions: data.reactions || {},
-              userReaction: userReaction,
-              schoolId: data.schoolId || "",
-              grade: data.grade || "",
-              targetSection: data.targetSection || null,
-              targetSections: data.targetSections || [],
-            } as Post;
-          }),
-        );
+          return {
+            id: docRef.id,
+            userId: data.userId || "",
+            userName: data.userName,
+            userPhotoURL: data.userPhotoURL || data.userPhoto || null,
+            mediaUrl: data.mediaUrl || data.media_url || null,
+            time: data.timestamp
+              ? (typeof data.timestamp?.toDate === 'function' ? data.timestamp.toDate() : new Date(data.timestamp)).toLocaleString("ar-IQ")
+              : "الآن",
+            content: data.content,
+            likes: data.likesCount ?? data.likes ?? 0,
+            comments: data.commentsCount ?? data.comments ?? 0,
+            shares: data.shares ?? 0,
+            isLiked: likedList.includes(docRef.id),
+            type: data.type || "student",
+            isPinned: data.isPinned || false,
+            isLocked: data.isLocked || false,
+            adminNotes: data.adminNotes || [],
+            stageIcon: data.stageIcon || "",
+            stageStickers: data.stageStickers || [],
+            reactions: data.reactions || {},
+            userReaction: null,
+            schoolId: data.schoolId || "",
+            grade: data.grade || "",
+            targetSection: data.targetSection || data.target_section || null,
+            targetSections: data.targetSections || data.target_sections || [],
+          } as Post;
+        });
 
         // Filter with high-fidelity visibility matching
         const filteredPosts = fetchedPosts.filter((post) => {
@@ -8214,7 +8194,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
         );
       }
       default:
-        return null;
+        return <StudentFeedTab />;
     }
   };
 
@@ -8510,26 +8490,23 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
           <div className="absolute bottom-1/4 right-1/4 w-96 h-96 bg-[#FFD600]/10 rounded-full blur-[120px]" />
         </div>
 
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={activeTab}
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            transition={{ type: "spring", stiffness: 300, damping: 30 }}
-            className="h-full w-full flex flex-col min-h-0 flex-1"
-          >
-            {isTeacher ? (
-              <TeacherViewWrapper title={activeTab}>
-                {renderTabContent()}
-              </TeacherViewWrapper>
-            ) : (
-              <StudentViewWrapper title={activeTab}>
-                {renderTabContent()}
-              </StudentViewWrapper>
-            )}
-          </motion.div>
-        </AnimatePresence>
+        <motion.div
+          key={activeTab}
+          initial={{ opacity: 0.6, y: 8 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.15, ease: "easeOut" }}
+          className="h-full w-full flex flex-col min-h-0 flex-1 relative"
+        >
+          {isTeacher ? (
+            <TeacherViewWrapper title={activeTab}>
+              {renderTabContent()}
+            </TeacherViewWrapper>
+          ) : (
+            <StudentViewWrapper title={activeTab}>
+              {renderTabContent()}
+            </StudentViewWrapper>
+          )}
+        </motion.div>
 
         <StudentSupportForm
           isOpen={isSupportOpen}

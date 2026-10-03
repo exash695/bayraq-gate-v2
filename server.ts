@@ -12982,7 +12982,32 @@ app.delete('/api/system_errors/:id', async (req, res) => {
         queryBuilder = queryBuilder.where(and(...filters)) as any;
       }
       const results = await queryBuilder.orderBy(desc(community_posts.isPinned), desc(community_posts.timestamp)).limit(Number(limitParam) || 100);
-      res.json({ success: true, posts: results, data: results });
+      const mappedResults = results.map((p: any) => {
+        const extra = (typeof p.data === 'object' && p.data) ? p.data : {};
+        const targetSection = p.targetSection || p.target_section || extra.targetSection || extra.target_section || null;
+        const targetSections = p.targetSections || p.target_sections || extra.targetSections || extra.target_sections || (targetSection ? [targetSection] : []);
+        const reactions = p.reactions || extra.reactions || {};
+        const likes = p.likesCount ?? p.likes_count ?? p.likes ?? extra.likes ?? 0;
+        const comments = p.commentsCount ?? p.comments_count ?? p.comments ?? extra.comments ?? 0;
+        const shares = p.shares ?? extra.shares ?? 0;
+        const userPhotoURL = p.userPhoto || p.user_photo || extra.userPhotoURL || extra.userPhoto || null;
+        
+        return {
+          ...extra,
+          ...p,
+          targetSection,
+          targetSections,
+          reactions,
+          likes,
+          likesCount: likes,
+          comments,
+          commentsCount: comments,
+          shares,
+          userPhoto: userPhotoURL,
+          userPhotoURL,
+        };
+      });
+      res.json({ success: true, posts: mappedResults, data: mappedResults });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }
@@ -13002,10 +13027,16 @@ app.delete('/api/system_errors/:id', async (req, res) => {
       const mediaUrl = body.mediaUrl || body.media_url || null;
       const type = body.type || 'student';
       const grade = body.grade || null;
+      const targetSection = body.targetSection || body.target_section || null;
+      const targetSections = body.targetSections || body.target_sections || (targetSection ? [targetSection] : []);
+      const reactions = body.reactions || {};
+      const shares = Number(body.shares) || 0;
+      const likesCount = Number(body.likesCount ?? body.likes ?? 0);
+      const commentsCount = Number(body.commentsCount ?? body.comments ?? 0);
       const isPinned = Boolean(body.isPinned ?? body.is_pinned ?? false);
       const isLocked = Boolean(body.isLocked ?? body.is_locked ?? false);
 
-      const newPost = {
+      const newPost: any = {
         id,
         schoolId,
         userId,
@@ -13015,21 +13046,44 @@ app.delete('/api/system_errors/:id', async (req, res) => {
         mediaUrl,
         type,
         grade,
+        targetSection,
+        targetSections,
+        reactions,
+        shares,
         isPinned,
         isLocked,
         reportsCount: 0,
-        likesCount: 0,
-        commentsCount: 0,
+        likesCount,
+        commentsCount,
+        data: {
+          ...body,
+          id,
+          targetSection,
+          targetSections,
+          reactions,
+          shares,
+          likes: likesCount,
+          comments: commentsCount,
+          userPhotoURL: userPhoto
+        },
         timestamp: new Date()
       };
 
       await db.insert(community_posts).values(newPost).onConflictDoUpdate({
         target: community_posts.id,
-        set: { content, mediaUrl, isPinned, isLocked }
+        set: { content, mediaUrl, isPinned, isLocked, targetSection, targetSections, reactions, shares, data: newPost.data }
       });
 
-      realtimeServerInstance?.broadcastManual('community_posts', id, 'INSERT', newPost);
-      res.json({ success: true, id, post: newPost, data: newPost });
+      const responsePayload = {
+        ...newPost.data,
+        ...newPost,
+        likes: likesCount,
+        comments: commentsCount,
+        userPhotoURL: userPhoto
+      };
+
+      realtimeServerInstance?.broadcastManual('community_posts', id, 'INSERT', responsePayload);
+      res.json({ success: true, id, post: responsePayload, data: responsePayload });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }
@@ -13053,15 +13107,56 @@ app.delete('/api/system_errors/:id', async (req, res) => {
       if (updates.mediaUrl !== undefined || updates.media_url !== undefined) mapped.mediaUrl = updates.mediaUrl ?? updates.media_url;
       if (updates.isPinned !== undefined || updates.is_pinned !== undefined) mapped.isPinned = updates.isPinned ?? updates.is_pinned;
       if (updates.isLocked !== undefined || updates.is_locked !== undefined) mapped.isLocked = updates.isLocked ?? updates.is_locked;
-      if (updates.likesCount !== undefined || updates.likes_count !== undefined) mapped.likesCount = updates.likesCount ?? updates.likes_count;
+      if (updates.targetSection !== undefined || updates.target_section !== undefined) mapped.targetSection = updates.targetSection ?? updates.target_section;
+      if (updates.targetSections !== undefined || updates.target_sections !== undefined) mapped.targetSections = updates.targetSections ?? updates.target_sections;
+      if (updates.reactions !== undefined) mapped.reactions = updates.reactions;
       if (updates.reportsCount !== undefined || updates.reports_count !== undefined) mapped.reportsCount = updates.reportsCount ?? updates.reports_count;
-      if (updates.commentsCount !== undefined || updates.comments_count !== undefined) mapped.commentsCount = updates.commentsCount ?? updates.comments_count;
+
+      if (updates.shares !== undefined) {
+        if (typeof updates.shares === 'object' && updates.shares?.type === 'increment') {
+          await db.execute(sql`UPDATE community_posts SET shares = COALESCE(shares, 0) + ${updates.shares.value || 1} WHERE id = ${id}`);
+        } else {
+          mapped.shares = Number(updates.shares) || 0;
+        }
+      }
+
+      if (updates.likes !== undefined || updates.likesCount !== undefined || updates.likes_count !== undefined) {
+        const lVal = updates.likes ?? updates.likesCount ?? updates.likes_count;
+        if (typeof lVal === 'object' && lVal?.type === 'increment') {
+          await db.execute(sql`UPDATE community_posts SET likes_count = GREATEST(0, COALESCE(likes_count, 0) + ${lVal.value || 1}) WHERE id = ${id}`);
+        } else {
+          mapped.likesCount = Math.max(0, Number(lVal) || 0);
+        }
+      }
+
+      if (updates.comments !== undefined || updates.commentsCount !== undefined || updates.comments_count !== undefined) {
+        const cVal = updates.comments ?? updates.commentsCount ?? updates.comments_count;
+        if (typeof cVal === 'object' && cVal?.type === 'increment') {
+          await db.execute(sql`UPDATE community_posts SET comments_count = GREATEST(0, COALESCE(comments_count, 0) + ${cVal.value || 1}) WHERE id = ${id}`);
+        } else {
+          mapped.commentsCount = Math.max(0, Number(cVal) || 0);
+        }
+      }
 
       if (Object.keys(mapped).length > 0) {
         await db.update(community_posts).set(mapped).where(eq(community_posts.id, id));
-        realtimeServerInstance?.broadcastManual('community_posts', id, 'UPDATE', { id, ...mapped });
       }
-      res.json({ success: true });
+
+      const updatedDocs = await db.select().from(community_posts).where(eq(community_posts.id, id)).limit(1);
+      const post = updatedDocs[0];
+      const broadcastData = post ? {
+        ...post,
+        likes: post.likesCount || 0,
+        likesCount: post.likesCount || 0,
+        comments: post.commentsCount || 0,
+        commentsCount: post.commentsCount || 0,
+        shares: post.shares || 0,
+        targetSection: post.targetSection || null,
+        targetSections: post.targetSections || [],
+      } : { id, ...mapped };
+
+      realtimeServerInstance?.broadcastManual('community_posts', id, 'UPDATE', broadcastData);
+      res.json({ success: true, post: broadcastData, data: broadcastData });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
     }
@@ -13118,28 +13213,30 @@ app.delete('/api/system_errors/:id', async (req, res) => {
   app.post('/api/community/posts/:id/comments', async (req, res) => {
     try {
       const { id } = req.params;
-      const { userId, userName, content } = req.body;
-      const commentId = `comm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const { userId, userName, userPhoto, userPhotoURL, content } = req.body || {};
+      const commentId = req.body?.id || `comm_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       
       const newComment = {
         id: commentId,
         postId: id,
         userId: userId || 'anonymous',
         userName: userName || 'مستخدم',
+        userPhoto: userPhoto || userPhotoURL || null,
         content: content || '',
         timestamp: new Date()
       };
 
       await db.insert(community_comments).values(newComment);
       
+      await db.execute(sql`UPDATE community_posts SET comments_count = COALESCE(comments_count, 0) + 1 WHERE id = ${id}`);
       const postList = await db.select().from(community_posts).where(eq(community_posts.id, id));
-      if (postList.length > 0) {
-        const nextCount = (postList[0].commentsCount || 0) + 1;
-        await db.update(community_posts).set({ commentsCount: nextCount }).where(eq(community_posts.id, id));
-        realtimeServerInstance?.broadcastManual('community_posts', id, 'UPDATE', { id, commentsCount: nextCount });
-      }
-
+      const nextCount = postList[0]?.commentsCount || 1;
+      
+      realtimeServerInstance?.broadcastManual('community_posts', id, 'UPDATE', { id, comments: nextCount, commentsCount: nextCount });
       realtimeServerInstance?.broadcastManual('community_comments', commentId, 'INSERT', newComment);
+      realtimeServerInstance?.broadcastManual(`community_posts_${id}_comments_list`, commentId, 'INSERT', newComment);
+      realtimeServerInstance?.broadcastManual(`community_posts_${id}_comments`, commentId, 'INSERT', newComment);
+      
       res.json({ success: true, id: commentId, comment: newComment, data: newComment });
     } catch (error: any) {
       res.status(500).json({ success: false, message: error.message });
@@ -14617,6 +14714,18 @@ app.post('/api/admin/maintenance/purge-cache', async (req, res) => {
     `;
   } catch (schemaErr) {
     // Non-blocking fallback
+  }
+
+  // Ensure community_posts has all columns for full feature persistence
+  try {
+    await sqlRaw`ALTER TABLE community_posts ADD COLUMN IF NOT EXISTS "target_section" text;`;
+    await sqlRaw`ALTER TABLE community_posts ADD COLUMN IF NOT EXISTS "target_sections" jsonb DEFAULT '[]'::jsonb;`;
+    await sqlRaw`ALTER TABLE community_posts ADD COLUMN IF NOT EXISTS "reactions" jsonb DEFAULT '{}'::jsonb;`;
+    await sqlRaw`ALTER TABLE community_posts ADD COLUMN IF NOT EXISTS "shares" integer DEFAULT 0;`;
+    await sqlRaw`ALTER TABLE community_posts ADD COLUMN IF NOT EXISTS "data" jsonb DEFAULT '{}'::jsonb;`;
+    await sqlRaw`ALTER TABLE community_comments ADD COLUMN IF NOT EXISTS "user_photo" text;`;
+  } catch (columnErr) {
+    console.warn("[community_posts Column check warning]", columnErr);
   }
 
   // Ensure user_device_tokens table exists for FCM push notifications

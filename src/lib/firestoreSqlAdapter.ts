@@ -160,8 +160,14 @@ export const getEndpoint = (collectionName: string): string => {
   const parts = collectionName.split('/');
   if (parts.length === 3) {
     const [parentCol, parentId, subCol] = parts;
-    if (parentCol === 'community_posts' && subCol === 'comments') {
+    if (parentCol === 'community_posts' && (subCol === 'comments' || subCol === 'comments_list')) {
       return `/api/community/posts/${parentId}/comments`;
+    }
+    if (parentCol === 'community_posts' && (subCol === 'reactions' || subCol === 'reactions_list')) {
+      return `/api/firestore-docs/${parentCol}_${parentId}_reactions_list`;
+    }
+    if (parentCol === 'community_posts' && (subCol === 'admin_notes' || subCol === 'notes')) {
+      return `/api/firestore-docs/${parentCol}_${parentId}_admin_notes`;
     }
     if (parentCol === 'community_stories' && (subCol === 'comments' || subCol === 'replies' || subCol === 'replies_list')) {
       return `/api/community/stories/${parentId}/replies`;

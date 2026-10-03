@@ -436,11 +436,16 @@ export const community_posts = pgTable("community_posts", {
   mediaUrl: text("media_url"),
   type: varchar("type", { length: 50 }).default('student'), // student, teacher, admin
   grade: varchar("grade", { length: 50 }),
+  targetSection: text("target_section"),
+  targetSections: jsonb("target_sections"),
+  reactions: jsonb("reactions"),
+  shares: integer("shares").default(0),
   isPinned: boolean("is_pinned").default(false),
   isLocked: boolean("is_locked").default(false),
   reportsCount: integer("reports_count").default(0),
   likesCount: integer("likes_count").default(0),
   commentsCount: integer("comments_count").default(0),
+  data: jsonb("data"),
   timestamp: timestamp("timestamp").defaultNow(),
 }, (table) => ({
   schoolIdIdx: index("posts_school_id_idx").on(table.schoolId),

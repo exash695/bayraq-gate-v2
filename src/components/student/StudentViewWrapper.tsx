@@ -14,6 +14,7 @@ export const StudentViewWrapper: React.FC<StudentViewWrapperProps> = ({
 }) => {
   return (
     <ModularErrorBoundary
+      key={title}
       fallbackTitle={`تعذر تحميل ${title}`}
       fallbackSubtitle="تمت حماية لوحة الطالب وعزل الخطأ بنجاح، يمكنك النقر لإعادة المحاولة بأمان."
       onReset={onReset}

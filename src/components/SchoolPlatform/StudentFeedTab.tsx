@@ -942,34 +942,55 @@ export const StudentFeedTab: React.FC = () => {
                             </>
                           )}
 
-                          {/* Trigger button */}
+                          {/* Like Button */}
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
-                              setActivePostReactionId(
-                                activePostReactionId === post.id
-                                  ? null
-                                  : post.id,
-                              );
+                              toggleLike(post.id, post.isLiked);
                             }}
-                            className={`flex items-center gap-2 transition-all hover:scale-105 active:scale-95 ${post.isLiked ? "text-[#00E5FF] drop-shadow-cyan" : "text-white/35 hover:text-white/70"}`}
+                            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl transition-all hover:scale-105 active:scale-95 ${
+                              post.isLiked
+                                ? "text-[#00E5FF] bg-[#00E5FF]/10 border border-[#00E5FF]/30 shadow-[0_0_12px_rgba(0,229,255,0.2)]"
+                                : "text-white/40 hover:text-white/80 hover:bg-white/5 border border-transparent"
+                            }`}
+                            title={post.isLiked ? "إلغاء الإعجاب" : "أعجبني"}
                           >
                             <ThumbsUp
-                              size={20}
+                              size={18}
                               strokeWidth={2.5}
-                              className="animate-pulse"
+                              className={post.isLiked ? "fill-[#00E5FF]" : ""}
                             />
                             <span className="text-xs font-black">
                               {post.likes || 0}
                             </span>
                           </button>
+
+                          {/* Sticker Reaction Picker Button */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setActivePostReactionId(
+                                activePostReactionId === post.id ? null : post.id,
+                              );
+                            }}
+                            className="p-1.5 rounded-lg text-white/30 hover:text-amber-400 hover:bg-white/5 transition-all"
+                            title="تفاعل بملصق تعليمي"
+                          >
+                            <Sparkles size={16} />
+                          </button>
                         </div>
 
                         <button
                           onClick={() => handleComment(post.id)}
-                          className={`flex items-center gap-2 transition-colors ${activeCommentPostId === post.id ? "text-blue-500" : "text-white/30 hover:text-white/60"}`}
+                          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl transition-colors ${
+                            activeCommentPostId === post.id
+                              ? "text-blue-400 bg-blue-500/10 border border-blue-500/30"
+                              : "text-white/40 hover:text-white/80 hover:bg-white/5 border border-transparent"
+                          }`}
+                          title="التعليقات"
                         >
-                          <MessageCircle size={20} strokeWidth={2.5} />
+                          <MessageCircle size={18} strokeWidth={2.5} />
                           {userProfile?.canComment === false && (
                             <Lock size={12} className="text-rose-500" />
                           )}
@@ -981,14 +1002,15 @@ export const StudentFeedTab: React.FC = () => {
 
                       <button
                         onClick={() => handleShare(post)}
-                        className="flex items-center gap-2 text-white/30 hover:text-white/60 transition-colors group"
+                        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-white/40 hover:text-white/80 hover:bg-white/5 transition-colors group border border-transparent"
+                        title="مشاركة"
                       >
                         <Share2
-                          size={20}
+                          size={18}
                           strokeWidth={2.5}
                           className="group-hover:rotate-12 transition-transform"
                         />
-                        <span className="text-xs font-black uppercase tracking-widest">
+                        <span className="text-xs font-black uppercase tracking-widest hidden sm:inline">
                           مشاركة
                         </span>
                         <span className="text-xs font-bold">

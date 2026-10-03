@@ -600,6 +600,14 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
       const unsubRealtimeNotifs = realtimeManager.on('notifications_updated', fetchAdminData);
       const unsubRealtimeOutbox = realtimeManager.on('admin_outbox_updated', fetchAdminData);
       const unsubRealtimeTickets = realtimeManager.on('support_tickets_updated', fetchAdminData);
+      const unsubRealtimePosts = realtimeManager.on('community_posts', () => {
+        fetchPostStats();
+        if (showPosts) fetchPosts();
+      });
+      const unsubRealtimeComments = realtimeManager.on('community_comments', () => {
+        fetchPostStats();
+        if (showPosts) fetchPosts();
+      });
 
       if (selectedSchoolId) {
         unsubSettings = academicService.subscribeToSchoolSettings(selectedSchoolId, (data) => {
@@ -616,6 +624,8 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
         unsubRealtimeNotifs();
         unsubRealtimeOutbox();
         unsubRealtimeTickets();
+        unsubRealtimePosts();
+        unsubRealtimeComments();
         unsubSettings();
       };
     }
@@ -2423,18 +2433,18 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
                         {/* Interactive Bar */}
                         <div className="mt-4 flex items-center gap-2 border-t border-white/5 pt-3 pb-2 text-xs font-bold w-full">
                            <div className="flex items-center gap-1.5 text-white/50 bg-white/5 px-3 py-1.5 rounded-lg border border-white/5 whitespace-nowrap">
-                              <ThumbsUp size={14} className={((post as any).likes?.length || 0) > 0 ? "text-cyan-400" : ""} /> 
-                              <span className={((post as any).likes?.length || 0) > 0 ? "text-cyan-400" : ""}>{((post as any).likes?.length || 0)}</span>
+                              <ThumbsUp size={14} className={Number((post as any).likesCount ?? (post as any).likes ?? 0) > 0 ? "text-cyan-400" : ""} /> 
+                              <span className={Number((post as any).likesCount ?? (post as any).likes ?? 0) > 0 ? "text-cyan-400" : ""}>{Number((post as any).likesCount ?? (post as any).likes ?? 0)}</span>
                            </div>
                            <button 
                               onClick={() => handleFetchComments(post.id)}
                               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-colors cursor-pointer border whitespace-nowrap ${expandedCommentsPostId === post.id ? 'bg-blue-500/20 text-blue-400 border-blue-500/30' : 'bg-white/5 text-white/50 border-white/5 hover:bg-white/10 hover:text-white'}`}
                            >
                               <MessageCircle size={14} /> 
-                              <span>{(post as any).comments?.length || 0}</span>
+                              <span>{Number((post as any).commentsCount ?? (post as any).comments ?? 0)}</span>
                            </button>
                            <div className="flex items-center gap-1.5 text-white/30 bg-white/5 px-3 py-1.5 rounded-lg border border-white/5 whitespace-nowrap mr-auto">
-                              <Share2 size={13} /> <span>{(post as any).shares || 0}</span>
+                              <Share2 size={13} /> <span>{Number((post as any).shares || 0)}</span>
                            </div>
                         </div>
 
@@ -2453,7 +2463,7 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
                                  })}
                                </div>
                                <span className="font-extrabold text-cyan-400 px-1 text-xs">
-                                 {Number(Object.values((post as any).reactions || {}).reduce((acc: any, val: any) => acc + val, 0))}
+                                 {Number(Object.values((post as any).reactions || {}).reduce((acc: any, val: any) => acc + (Number(val) || 0), 0))}
                                </span>
                              </div>
                           </div>
@@ -2467,20 +2477,26 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
                                <div className="text-center text-white/40 text-xs font-bold py-4">لا توجد تعليقات بعد</div>
                              ) : (
                                <div className="space-y-4 max-h-64 overflow-y-auto pr-2 custom-scrollbar">
-                                 {postComments.map((comment: any) => (
-                                   <div key={comment.id} className="flex gap-3">
-                                      <div className="shrink-0 w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center overflow-hidden border border-white/10">
-                                        {comment.userPhotoURL ? <img src={comment.userPhotoURL} className="w-full h-full object-cover" /> : <User size={16} className="text-white/60" />}
-                                      </div>
-                                      <div className="flex-1 bg-white/[0.03] border border-white/5 rounded-xl p-3">
-                                         <div className="flex justify-between items-center mb-1">
-                                            <span className="text-xs font-bold text-white">{comment.userName}</span>
-                                            <span className="text-[10px] text-white/30">{comment.timestamp?.toDate ? comment.timestamp.toDate().toLocaleTimeString('ar-IQ') : ''}</span>
-                                         </div>
-                                         <p className="text-white/70 text-xs leading-relaxed">{comment.content}</p>
-                                      </div>
-                                   </div>
-                                 ))}
+                                 {postComments.map((comment: any) => {
+                                   const cPhoto = comment.userPhotoURL || comment.userPhoto || null;
+                                   const cTime = comment.timestamp
+                                     ? (typeof comment.timestamp?.toDate === 'function' ? comment.timestamp.toDate() : new Date(comment.timestamp)).toLocaleTimeString('ar-IQ')
+                                     : 'الآن';
+                                   return (
+                                     <div key={comment.id} className="flex gap-3">
+                                        <div className="shrink-0 w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center overflow-hidden border border-white/10">
+                                          {cPhoto ? <img src={cPhoto} className="w-full h-full object-cover" alt="" /> : <User size={16} className="text-white/60" />}
+                                        </div>
+                                        <div className="flex-1 bg-white/[0.03] border border-white/5 rounded-xl p-3">
+                                           <div className="flex justify-between items-center mb-1">
+                                              <span className="text-xs font-bold text-white">{comment.userName || 'مستخدم'}</span>
+                                              <span className="text-[10px] text-white/30">{cTime}</span>
+                                           </div>
+                                           <p className="text-white/70 text-xs leading-relaxed">{comment.content}</p>
+                                        </div>
+                                     </div>
+                                   );
+                                 })}
                                </div>
                              )}
                           </div>
