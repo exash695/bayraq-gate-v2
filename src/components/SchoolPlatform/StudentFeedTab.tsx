@@ -605,7 +605,7 @@ export const StudentFeedTab: React.FC = () => {
                             <span className="text-white/20 text-[10px] font-bold uppercase tracking-widest leading-none">
                               {post.time}
                             </span>
-                            {post.targetSection && post.targetSection !== "ALL" && post.targetSection !== "الكل" ? (
+                            {post.targetSection ? (
                               <span className="px-1.5 py-0.5 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-400/80 text-[9px] font-black flex items-center gap-1">
                                 <Users size={10} />
                                 {post.targetSection}
@@ -959,7 +959,7 @@ export const StudentFeedTab: React.FC = () => {
                               strokeWidth={2.5}
                               className="animate-pulse"
                             />
-                            <span className="text-[11px] font-black text-white/60">
+                            <span className="text-xs font-black">
                               {post.likes || 0}
                             </span>
                           </button>
@@ -967,34 +967,31 @@ export const StudentFeedTab: React.FC = () => {
 
                         <button
                           onClick={() => handleComment(post.id)}
-                          className={`flex items-center gap-2 transition-colors ${activeCommentPostId === post.id ? "text-blue-400" : "text-white/40 hover:text-white/70"}`}
+                          className={`flex items-center gap-2 transition-colors ${activeCommentPostId === post.id ? "text-blue-500" : "text-white/30 hover:text-white/60"}`}
                         >
                           <MessageCircle size={20} strokeWidth={2.5} />
                           {userProfile?.canComment === false && (
                             <Lock size={12} className="text-rose-500" />
                           )}
-                          <span className="text-[11px] font-black text-white/60">
+                          <span className="text-xs font-black">
                             {post.comments}
                           </span>
                         </button>
                       </div>
 
                       <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleShare(post);
-                        }}
-                        className="flex items-center gap-2 text-white/40 hover:text-white/70 transition-colors group cursor-pointer"
+                        onClick={() => handleShare(post)}
+                        className="flex items-center gap-2 text-white/30 hover:text-white/60 transition-colors group"
                       >
                         <Share2
                           size={20}
                           strokeWidth={2.5}
                           className="group-hover:rotate-12 transition-transform"
                         />
-                        <span className="text-[10px] font-black uppercase tracking-widest hidden sm:inline">
+                        <span className="text-xs font-black uppercase tracking-widest">
                           مشاركة
                         </span>
-                        <span className="text-[11px] font-black text-white/60">
+                        <span className="text-xs font-bold">
                           {post.shares || 0}
                         </span>
                       </button>

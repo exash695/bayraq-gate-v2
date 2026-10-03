@@ -541,7 +541,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     return finalPoints;
   };
 
-  const getCurrentUserId = useCallback(() => {
+  const getCurrentUserId = () => {
     if (isTeacher)
       return (
         teacherData?.id || teacherData?.code || auth.currentUser?.uid || "guest"
@@ -555,9 +555,9 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
       auth.currentUser?.uid ||
       "guest"
     );
-  }, [isTeacher, teacherData, userProfile, auth.currentUser]);
+  };
 
-  const getUserName = useCallback(() => {
+  const getUserName = () => {
     if (isTeacher) return teacherData?.name || "أستاذ";
     if (
       userProfile?.role === "admin" ||
@@ -571,9 +571,9 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
       return profileName.trim();
     }
     return auth.currentUser?.displayName || "طالب متميز";
-  }, [isTeacher, teacherData, userProfile, auth.currentUser]);
+  };
 
-  const getUserPhoto = useCallback(() => {
+  const getUserPhoto = () => {
     if (isTeacher) return currentTeacherData?.photoURL || teacherData?.photoURL || userProfile?.photoURL || null;
     if (
       userProfile?.role === "admin" ||
@@ -582,7 +582,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     )
       return null; // No photo for admin account
     return userProfile?.photoURL || null;
-  }, [isTeacher, currentTeacherData, teacherData, userProfile]);
+  };
 
   const remoteConfig = useRemoteConfig();
   const [schoolConfigData, setSchoolConfigData] = useState<{ disabledModules?: string[]; [key: string]: any } | null>(() => {
@@ -5479,8 +5479,8 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
           schoolId: schoolId,
           schoolName: schoolName,
           grade: isTeacher ? (extractGradeBase(selectedTeacherClass) || grade || "سادس علمي") : grade,
-          targetSection: isTeacher && selectedTeacherClass && selectedTeacherClass !== "ALL" && selectedTeacherClass !== "كافة الشُعب" ? selectedTeacherClass : null,
-          targetSections: isTeacher && selectedTeacherClass && selectedTeacherClass !== "ALL" && selectedTeacherClass !== "كافة الشُعب" ? [selectedTeacherClass] : [],
+          targetSection: isTeacher && selectedTeacherClass && selectedTeacherClass !== "ALL" ? selectedTeacherClass : null,
+          targetSections: isTeacher && selectedTeacherClass && selectedTeacherClass !== "ALL" ? [selectedTeacherClass] : [],
           type: isTeacher
             ? "teacher"
             : userProfile?.role === "admin"
@@ -5597,8 +5597,8 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
         schoolId: schoolId,
         schoolName: schoolName,
         grade: isTeacher ? (extractGradeBase(selectedTeacherClass) || grade || "سادس علمي") : grade,
-        targetSection: isTeacher && selectedTeacherClass && selectedTeacherClass !== "ALL" && selectedTeacherClass !== "كافة الشُعب" ? selectedTeacherClass : null,
-        targetSections: isTeacher && selectedTeacherClass && selectedTeacherClass !== "ALL" && selectedTeacherClass !== "كافة الشُعب" ? [selectedTeacherClass] : [],
+        targetSection: isTeacher && selectedTeacherClass && selectedTeacherClass !== "ALL" ? selectedTeacherClass : null,
+        targetSections: isTeacher && selectedTeacherClass && selectedTeacherClass !== "ALL" ? [selectedTeacherClass] : [],
         type: isTeacher
           ? "teacher"
           : userProfile?.role === "admin"
@@ -5619,8 +5619,8 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
         schoolId: schoolId,
         schoolName: schoolName,
         grade: isTeacher ? (extractGradeBase(selectedTeacherClass) || grade || "سادس علمي") : grade,
-        targetSection: isTeacher && selectedTeacherClass && selectedTeacherClass !== "ALL" && selectedTeacherClass !== "كافة الشُعب" ? selectedTeacherClass : null,
-        targetSections: isTeacher && selectedTeacherClass && selectedTeacherClass !== "ALL" && selectedTeacherClass !== "كافة الشُعب" ? [selectedTeacherClass] : [],
+        targetSection: isTeacher && selectedTeacherClass && selectedTeacherClass !== "ALL" ? selectedTeacherClass : null,
+        targetSections: isTeacher && selectedTeacherClass && selectedTeacherClass !== "ALL" ? [selectedTeacherClass] : [],
         type: isTeacher
           ? "teacher"
           : userProfile?.role === "admin"
