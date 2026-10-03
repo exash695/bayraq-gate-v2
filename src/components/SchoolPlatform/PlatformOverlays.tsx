@@ -68,7 +68,7 @@ import {
   ChevronRight, ChevronDown, ChevronUp, Mic, MicOff, VideoOff, ThumbsUp, Send, Clock,
   HelpCircle, Hand as HandIcon, PenTool, Search, Filter, MailQuestion, ShieldAlert,
   Database, Bot, ClipboardCheck, Play, Target, Terminal, Bug, Info, Unlock, Download,
-  Minimize2, Maximize2, Scan, XCircle, MessageSquare
+  Minimize2, Maximize2, Scan, XCircle, MessageSquare, Loader2
 } from "lucide-react";
 import { SchoolContent } from "../SchoolContent";
 import { BroadcastTicker } from "../BroadcastTicker";
@@ -155,8 +155,47 @@ export const PlatformOverlays: React.FC = () => {
   const { activeCommentPostId, activeFileChallengeQuestions, activeGroupIndex, activeGroupStories, activeStory, aiEvaluationResult, avatarInputRef, classmates, clickingReactionKey, competitionAnswers, competitionScore, competitionTimer, creatorActiveTab, deletingAcademyPageId, deletingPostId, executeDeletePost, getCurrentUserId, getEmbedUrl, getUserName, grade, handleAvatarUpload, handleDeleteStory, handlePointerDown, handlePointerDownSticker, handlePointerMove, handlePointerMoveSticker, handlePointerUp, handlePointerUpSticker, handlePublishStory, handleReactToStory, handleSendStoryReply, handleShareStory, handleStickerTouchEnd, handleStickerTouchMove, handleStickerTouchStart, handleStoryGroupMediaUpload, handleStoryMediaUpload, handleStoryPointerDown, handleStoryPointerLeave, handleStoryPointerMove, handleStoryPointerUp, handleTextTouchEnd, handleTextTouchMove, handleTextTouchStart, handleTextareaChange, hasStartedPlaying, homeworkAnswer, insertTag, isAdminNoteModalOpen, isChallengeActive, isCinemaMode, isCreateStoryMenuOpen, isLoungeOpen, isStoryMenuOpen, isStoryModalOpen, isStoryTypingOpen, isStoryUIHidden, isStoryViewersOpen, isSubmittingTask, isTeacher, isZoomControlsOpen, newAdminNote, newStoryBgGradient, newStoryContent, newStoryFont, newStoryMedia, newStoryMediaFiles, newStoryMediaType, newStorySticker, newStoryStickerScale, newStoryStickerX, newStoryStickerY, newStoryTextBg, newStoryTextColor, newStoryTextScale, newStoryTextX, newStoryTextY, onUpdateProfile, pdfLoadError, platformLocks, posts, previewPdfNumPages, previewingFile, progress, reactionFloatingIcons, resolvedSchoolId, schoolId, selectedAIQuestion, selectedPaperForExtraction, setActiveCommentPostId, setActiveFileChallengeQuestions, setActiveStory, setAiEvaluationResult, setCompetitionAnswers, setCompetitionScore, setCreatorActiveTab, setDeletingAcademyPageId, setDeletingPostId, setHasStartedPlaying, setHomeworkAnswer, setIsAdminNoteModalOpen, setIsChallengeActive, setIsCinemaMode, setIsCreateStoryMenuOpen, setIsLoungeOpen, setIsStoryMenuOpen, setIsStoryModalOpen, setIsStoryPaused, setIsStoryTypingOpen, setIsStoryViewersOpen, setIsSubmittingTask, setNewAdminNote, setNewStoryBgGradient, setNewStoryContent, setNewStoryFont, setNewStoryMedia, setNewStoryMediaFiles, setNewStoryMediaType, setNewStorySticker, setNewStoryTextBg, setNewStoryTextColor, setNewStoryTextScale, setPdfLoadError, setPreviewPdfNumPages, setPreviewingFile, setSelectedAIQuestion, setSelectedPaperForExtraction, setStoryCommentText, setStoryPanX, setStoryPanY, setStoryZoom, setVideoDebugInfo, setViewingCompetition, setViewingHomework, setViewingRecordedLesson, setViewingSubmissionFeedback, showTagMenuTarget, showToast, stories, storyCommentText, storyGroupIndex, storyGroupMediaInputRef, storyMediaInputRef, storyPanX, storyPanY, storyProgress, storyZoom, submitAdminNote, tagSearch, teacherAssignedSections, teacherData, userProfile, videoDebugInfo, videoRef, viewingCompetition, viewingHomework, viewingRecordedLesson, viewingSubmissionFeedback, setRecordedLessons } = useSchoolPlatform();
 
   const [pdfViewerMode, setPdfViewerMode] = useState<'canvas' | 'google'>('canvas');
+  const homeworkFileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadedHomeworkImageUrl, setUploadedHomeworkImageUrl] = useState<string | null>(null);
+  const [homeworkImagePreview, setHomeworkImagePreview] = useState<string | null>(null);
+  const [isUploadingHomeworkImage, setIsUploadingHomeworkImage] = useState(false);
+  const [homeworkImageUploadError, setHomeworkImageUploadError] = useState<string | null>(null);
   const [pdfDownloadProgress, setPdfDownloadProgress] = useState<number | null>(null);
   const [pdfLoadingTimeout, setPdfLoadingTimeout] = useState(false);
+
+  const handleHomeworkImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setHomeworkImageUploadError(null);
+    setIsUploadingHomeworkImage(true);
+
+    const localPreviewUrl = URL.createObjectURL(file);
+    setHomeworkImagePreview(localPreviewUrl);
+
+    try {
+      const { uploadFileToR2 } = await import('../../services/uploadService');
+      const uploadedUrl = await uploadFileToR2(file);
+      setUploadedHomeworkImageUrl(uploadedUrl);
+    } catch (err: any) {
+      console.warn("R2 upload failed, falling back to data URL:", err);
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => {
+        setUploadedHomeworkImageUrl(reader.result as string);
+      };
+    } finally {
+      setIsUploadingHomeworkImage(false);
+    }
+  };
+
+  const handleRemoveHomeworkImage = () => {
+    setHomeworkImagePreview(null);
+    setUploadedHomeworkImageUrl(null);
+    if (homeworkFileInputRef.current) {
+      homeworkFileInputRef.current.value = "";
+    }
+  };
 
   // Memoize PDF options to prevent unnecessary reloads
   const pdfOptions = useMemo(() => ({
@@ -1861,11 +1900,66 @@ export const PlatformOverlays: React.FC = () => {
                     className="w-full min-h-[180px] bg-white/5 border border-white/10 rounded-xl p-4 text-white text-sm outline-none focus:border-amber-500/50 mb-4 resize-none transition-all duration-75 overflow-hidden"
                     dir="auto"
                   />
+                  {/* Image Attachment Section */}
+                  <div className="mb-4">
+                    <input
+                      type="file"
+                      ref={homeworkFileInputRef}
+                      onChange={handleHomeworkImageSelect}
+                      accept="image/*"
+                      className="hidden"
+                    />
+
+                    {homeworkImagePreview ? (
+                      <div className="relative w-28 h-28 rounded-2xl overflow-hidden border-2 border-amber-500/50 group shadow-lg">
+                        <img src={homeworkImagePreview} alt="preview" className="w-full h-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={handleRemoveHomeworkImage}
+                          className="absolute top-1 right-1 w-6 h-6 bg-rose-600 hover:bg-rose-500 text-white rounded-full flex items-center justify-center text-xs shadow-md transition-all cursor-pointer font-bold"
+                          title="حذف الصورة"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => homeworkFileInputRef.current?.click()}
+                        disabled={isUploadingHomeworkImage}
+                        className="px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-amber-300 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shadow-sm disabled:opacity-50"
+                      >
+                        {isUploadingHomeworkImage ? (
+                          <>
+                            <Loader2 size={14} className="animate-spin text-amber-400" />
+                            <span>جاري رفع الصورة...</span>
+                          </>
+                        ) : (
+                          <>
+                            <Camera size={14} className="text-amber-400" />
+                            <span>إرفاق صورة الحل (الدفتر) 📸</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+
+                    {homeworkImageUploadError && (
+                      <p className="mt-1.5 text-xs text-rose-400 font-bold">{homeworkImageUploadError}</p>
+                    )}
+                  </div>
+
                   <button 
-                    disabled={!homeworkAnswer.trim() || isSubmittingTask}
+                    disabled={(!homeworkAnswer.trim() && !uploadedHomeworkImageUrl) || isSubmittingTask || isUploadingHomeworkImage}
                     onClick={async () => {
                       setIsSubmittingTask(true);
                       try {
+                        let finalContent = homeworkAnswer.trim();
+                        if (uploadedHomeworkImageUrl) {
+                          finalContent = finalContent 
+                            ? `${finalContent}\n\n![صورة الحل](${uploadedHomeworkImageUrl})` 
+                            : `![صورة الحل](${uploadedHomeworkImageUrl})`;
+                        }
+
                         const resolvedStudentName = userProfile?.studentName || userProfile?.name || userProfile?.fullName || "طالب";
                         const response = await fetch('/api/gemini/evaluate-homework', {
                           method: 'POST',
@@ -1876,7 +1970,7 @@ export const PlatformOverlays: React.FC = () => {
                             taskTitle: viewingHomework.name,
                             studentId: userProfile?.id || "unknown",
                             studentName: resolvedStudentName,
-                            content: homeworkAnswer
+                            content: finalContent
                           })
                         });
 
@@ -1893,7 +1987,9 @@ export const PlatformOverlays: React.FC = () => {
                             type: "homework",
                             studentId,
                             studentName,
-                            content: homeworkAnswer,
+                            content: finalContent,
+                            solutionImages: uploadedHomeworkImageUrl ? [uploadedHomeworkImageUrl] : [],
+                            imageUrl: uploadedHomeworkImageUrl || null,
                             feedback: data.feedback,
                             score: data.pointsAwarded, // use points as score
                             pointsAwarded: data.pointsAwarded,
@@ -1941,6 +2037,8 @@ export const PlatformOverlays: React.FC = () => {
                           showToast("تم إرسال الواجب وتقييمه تلقائياً بنجاح! 🎉", "success");
                           setViewingHomework(null);
                           setHomeworkAnswer('');
+                          setHomeworkImagePreview(null);
+                          setUploadedHomeworkImageUrl(null);
                         } else {
                           throw new Error(data.error || "خطأ أثناء التقييم التلقائي");
                         }

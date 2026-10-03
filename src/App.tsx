@@ -784,6 +784,7 @@ export default function App() {
   const [showActiveKnights, setShowActiveKnights] = useState(false);
   const [chatSelectedUser, setChatSelectedUser] = useState<any>(null);
   const [isLoungeChatOpen, setIsLoungeChatOpen] = useState(false);
+  const [isLoungeOpen, setIsLoungeOpen] = useState(false);
   const [todayTasksCount, setTodayTasksCount] = useState<number | null>(null);
   const [highlightTasksSection, setHighlightTasksSection] = useState<boolean>(false);
   const [apiSchools, setApiSchools] = useState<SchoolRecord[]>([]);
@@ -3345,7 +3346,7 @@ export default function App() {
 
                   {/* 4. الواجبات المطلوب تصحيحها */}
                   <div
-                    onClick={() => navigateToTeacherPlatform("control", "assessment")}
+                    onClick={() => navigateToTeacherPlatform("ai_assistant", undefined, "activities")}
                     className="bg-[#0A0F1D] border border-emerald-500/20 hover:border-emerald-500/50 rounded-[1.5rem] p-4 flex flex-col justify-between relative overflow-hidden group transition-all cursor-pointer shadow-sm hover:shadow-[0_4px_25px_rgba(16,185,129,0.2)] active:scale-95 min-h-[110px]"
                   >
                     <div className="absolute left-0 top-0 w-24 h-full bg-gradient-to-r from-emerald-500/10 to-transparent pointer-events-none" />
@@ -5188,18 +5189,18 @@ export default function App() {
                   ) : (
                     <button
                       onClick={() => {
-                        setActiveSection("hall-of-fame");
+                        setIsLoungeOpen(true);
                       }}
-                      className={`flex-1 flex flex-col justify-center items-center h-full transition-all duration-300 ${activeSection === "hall-of-fame" && !isChoosingSchool ? "text-amber-400" : "text-white/30 hover:text-white/60"}`}
+                      className={`flex-1 flex flex-col justify-center items-center h-full transition-all duration-300 ${isLoungeOpen ? "text-[#FFD600]" : "text-white/30 hover:text-white/60"}`}
                     >
-                      <Trophy
-                        size={activeSection === "hall-of-fame" && !isChoosingSchool ? 22 : 20}
-                        className={`mb-0.5 transition-all duration-300 ${activeSection === "hall-of-fame" && !isChoosingSchool ? "drop-shadow-[0_0_8px_rgba(251,191,36,0.5)] scale-110" : ""}`}
+                      <MessageCircle
+                        size={isLoungeOpen ? 22 : 20}
+                        className={`mb-0.5 transition-all duration-300 ${isLoungeOpen ? "drop-shadow-[0_0_8px_rgba(255,214,0,0.5)] scale-110" : ""}`}
                       />
                       <span
-                        className={`text-[9px] font-bold transition-all duration-300 ${activeSection === "hall-of-fame" && !isChoosingSchool ? "opacity-100 translate-y-0" : "opacity-0 translate-y-1 h-0 overflow-hidden"}`}
+                        className={`text-[9px] font-bold transition-all duration-300 ${isLoungeOpen ? "opacity-100 translate-y-0" : "opacity-0 translate-y-1 h-0 overflow-hidden"}`}
                       >
-                        الفرسان
+                        المجلس
                       </span>
                     </button>
                   )}
@@ -5229,6 +5230,20 @@ export default function App() {
                   </div>
                 </SwipeDismissContainer>
               </motion.div>
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence>
+            {isLoungeOpen && (
+              <StudentLounge
+                key="global-student-lounge-modal"
+                onClose={() => setIsLoungeOpen(false)}
+                userProfile={userProfile}
+                schoolId={selectedSchoolId || verifiedStudentInfo?.schoolId || userProfile?.schoolId || "school1"}
+                grade={selectedStudentGrade || verifiedStudentInfo?.grade || userProfile?.grade || "عام"}
+                isTeacher={portalType === "teacher" || userProfile?.role === "teacher"}
+                teacherData={loggedInTeacher}
+              />
             )}
           </AnimatePresence>
 

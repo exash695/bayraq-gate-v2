@@ -1666,10 +1666,11 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   }, [parentNotifications]);
 
   const unreadAnnouncementsCount = useMemo(() => {
+    if (activeSubPage === "announcements") return 0;
     const unreadBroadcasts = parentBroadcasts.filter(b => b.id && !readBroadcastIds.includes(b.id)).length;
     const unreadNotifs = generalNotifications.filter(n => !n.read).length;
     return unreadBroadcasts + unreadNotifs;
-  }, [parentBroadcasts, readBroadcastIds, generalNotifications]);
+  }, [parentBroadcasts, readBroadcastIds, generalNotifications, activeSubPage]);
 
   const totalUnreadSupport = unreadSupportCount + generalNotifications.filter(n => !n.read).length;
 
@@ -1794,7 +1795,10 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
     }).length;
   }, [lensActivities, lastSeenBroadcast]);
 
-  const effectiveLensBadge = unreadIndividualCount + unreadBroadcastCount;
+  const effectiveLensBadge = useMemo(() => {
+    if (activeSubPage === 'attendance' && parentAttendanceTab === 'lens') return 0;
+    return unreadIndividualCount + unreadBroadcastCount;
+  }, [unreadIndividualCount, unreadBroadcastCount, activeSubPage, parentAttendanceTab]);
 
   const { settings: secSettings } = useSecuritySettings();
 
@@ -2117,9 +2121,9 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
           {activeSubPage === "announcements" ? (
             <div className="w-full flex flex-col min-h-full animate-in fade-in slide-in-from-bottom-2 pb-16 px-0">
               <AnnouncementsCenterTab
-                schoolId={schoolId || studentData?.schoolId || 'school_awail_ghamas'}
+                schoolId={schoolId || studentData?.schoolId || 'school1'}
                 grade={studentData?.grade || grade || 'عام'}
-                section={studentData?.section || studentData?.studentSection || studentData?.class || studentData?.className || (studentData?.grade && extractSectionLetter(studentData.grade) ? studentData.grade : "") || ""}
+                section={studentData?.section || studentData?.studentSection || extractSectionLetter(studentData?.grade) || extractSectionLetter(studentData?.class) || extractSectionLetter(studentData?.className) || extractSectionLetter(grade) || ""}
                 isTeacher={false}
                 isParent={true}
                 notifications={generalNotifications}
