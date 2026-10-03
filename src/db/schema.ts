@@ -1,4 +1,4 @@
-import { doublePrecision, pgTable, text, varchar, timestamp, integer, boolean, jsonb, bigint } from "drizzle-orm/pg-core";
+import { doublePrecision, pgTable, text, varchar, timestamp, integer, boolean, jsonb, bigint, index } from "drizzle-orm/pg-core";
 
 // جدول المدارس
 export const schools = pgTable("schools", {
@@ -35,7 +35,9 @@ export const users = pgTable("users", {
   whatsappOtpExpires: timestamp("whatsapp_otp_expires"),
   lastLogin: timestamp("last_login"),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  schoolIdIdx: index("users_school_id_idx").on(table.schoolId),
+}));
 
 // جدول المعلمين والموظفين (تفاصيل إضافية)
 export const teachers = pgTable("teachers", {
@@ -65,7 +67,9 @@ export const teachers = pgTable("teachers", {
   email: varchar("email", { length: 255 }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+}, (table) => ({
+  schoolIdIdx: index("teachers_school_id_idx").on(table.schoolId),
+}));
 
 // جدول الطلاب
 export const students = pgTable("students", {
@@ -97,7 +101,10 @@ export const students = pgTable("students", {
   finance: jsonb("finance").default({ installments: [], transactions: [] }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+}, (table) => ({
+  schoolIdIdx: index("students_school_id_idx").on(table.schoolId),
+  codeIdx: index("students_code_idx").on(table.code),
+}));
 
 // جدول القوائم الأكاديمية (الوجبات)
 export const academic_lists = pgTable("academic_lists", {
@@ -111,7 +118,9 @@ export const academic_lists = pgTable("academic_lists", {
   lastSyncedPeriod: varchar("last_synced_period", { length: 50 }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
-});
+}, (table) => ({
+  schoolIdIdx: index("academic_lists_school_id_idx").on(table.schoolId),
+}));
 
 // جدول إعدادات المدرسة
 export const school_configs = pgTable("school_configs", {
@@ -147,7 +156,10 @@ export const student_transactions = pgTable("student_transactions", {
   method: varchar("method", { length: 50 }),
   adminName: varchar("admin_name", { length: 128 }),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  studentIdIdx: index("transactions_student_id_idx").on(table.studentId),
+  schoolIdIdx: index("transactions_school_id_idx").on(table.schoolId),
+}));
 
 // جدول الجداول الدراسية
 export const class_schedules = pgTable("class_schedules", {
@@ -162,7 +174,10 @@ export const class_schedules = pgTable("class_schedules", {
   startTime: varchar("start_time", { length: 50 }),
   endTime: varchar("end_time", { length: 50 }),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  schoolIdIdx: index("schedules_school_id_idx").on(table.schoolId),
+  teacherIdIdx: index("schedules_teacher_id_idx").on(table.teacherId),
+}));
 
 // جدول تذاكر الدعم الفني والشكاوى
 export const support_tickets = pgTable("support_tickets", {
@@ -188,7 +203,10 @@ export const support_tickets = pgTable("support_tickets", {
   readByAdmin: boolean("read_by_admin").default(false),
   readByStudent: boolean("read_by_student").default(false),
   timestamp: timestamp("timestamp").defaultNow(),
-});
+}, (table) => ({
+  schoolIdIdx: index("tickets_school_id_idx").on(table.schoolId),
+  userIdIdx: index("tickets_user_id_idx").on(table.userId),
+}));
 
 // جدول بنك الأفكار والمقترحات
 export const idea_bank = pgTable("idea_bank", {
@@ -206,7 +224,9 @@ export const idea_bank = pgTable("idea_bank", {
   readByParent: boolean("read_by_parent").default(false),
   votes: integer("votes").default(0),
   timestamp: timestamp("timestamp").defaultNow(),
-});
+}, (table) => ({
+  schoolIdIdx: index("idea_bank_school_id_idx").on(table.schoolId),
+}));
 
 // جدول مجلس الآباء (التصويتات العامة)
 export const council_polls = pgTable("council_polls", {
@@ -224,7 +244,9 @@ export const council_polls = pgTable("council_polls", {
   comments: jsonb("comments").default([]), // { id, authorName, text, timestamp }[]
   targetGrade: varchar("target_grade", { length: 50 }),
   timestamp: timestamp("timestamp").defaultNow(),
-});
+}, (table) => ({
+  schoolIdIdx: index("polls_school_id_idx").on(table.schoolId),
+}));
 
 // جدول البث المباشر (الدروس الحية)
 export const broadcasts = pgTable("broadcasts", {
@@ -237,7 +259,9 @@ export const broadcasts = pgTable("broadcasts", {
   status: varchar("status", { length: 50 }).default('scheduled'), // scheduled, live, ended
   startedAt: timestamp("started_at"),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  schoolIdIdx: index("broadcasts_school_id_idx").on(table.schoolId),
+}));
 
 // جدول الإذاعة المدرسية والإعلانات (رادار الذكاء)
 export const school_announcements = pgTable("school_announcements", {
@@ -251,7 +275,9 @@ export const school_announcements = pgTable("school_announcements", {
   expiryDate: timestamp("expiry_date"),
   timestampMs: bigint("timestamp_ms", { mode: 'number' }),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  schoolIdIdx: index("announcements_school_id_idx").on(table.schoolId),
+}));
 
 // جدول الإشعارات
 export const notifications = pgTable("notifications", {
@@ -266,7 +292,10 @@ export const notifications = pgTable("notifications", {
   type: varchar("type", { length: 50 }), // e.g. "alert", "message"
   read: boolean("read").default(false),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  schoolIdIdx: index("notifications_school_id_idx").on(table.schoolId),
+  recipientIdIdx: index("notifications_recipient_id_idx").on(table.recipientId),
+}));
 
 // جدول توكنات أجهزة المستخدمين للإشعارات الخارجية (FCM Push Notification Tokens)
 export const user_device_tokens = pgTable("user_device_tokens", {
@@ -279,7 +308,9 @@ export const user_device_tokens = pgTable("user_device_tokens", {
   role: varchar("role", { length: 50 }).default('student'),
   lastActive: timestamp("last_active").defaultNow(),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  userIdIdx: index("tokens_user_id_idx").on(table.userId),
+}));
 
 // جدول طلبات الدفع والمصروفات
 export const payment_requests = pgTable("payment_requests", {
@@ -291,7 +322,9 @@ export const payment_requests = pgTable("payment_requests", {
   views: integer("views").default(0),
   status: varchar("status", { length: 50 }).default('pending'), // pending, approved, rejected
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  schoolIdIdx: index("payments_school_id_idx").on(table.schoolId),
+}));
 
 // جدول سجلات المطورين
 export const developer_logs = pgTable("developer_logs", {
@@ -311,7 +344,9 @@ export const activation_codes = pgTable("activation_codes", {
   used: boolean("used").default(false),
   usedBy: varchar("used_by", { length: 128 }), // user id
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  schoolIdIdx: index("codes_school_id_idx").on(table.schoolId),
+}));
 
 // الدروس المسجلة
 export const recorded_lessons = pgTable("recorded_lessons", {
@@ -329,7 +364,9 @@ export const recorded_lessons = pgTable("recorded_lessons", {
   commentCount: integer("comment_count").default(0),
   videoUrl: text("video_url").notNull(),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  schoolIdIdx: index("lessons_school_id_idx").on(table.schoolId),
+}));
 
 // ملفات المدرسة
 export const school_files = pgTable("school_files", {
@@ -348,7 +385,9 @@ export const school_files = pgTable("school_files", {
   fileType: varchar("file_type", { length: 50 }),
   allowDownload: boolean("allow_download").default(true),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  schoolIdIdx: index("files_school_id_idx").on(table.schoolId),
+}));
 
 // صفحات الأكاديمية
 export const academy_pages = pgTable("academy_pages", {
@@ -367,7 +406,9 @@ export const academy_pages = pgTable("academy_pages", {
   extractedText: text("extracted_text"),
   data: jsonb("data"),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  schoolIdIdx: index("pages_school_id_idx").on(table.schoolId),
+}));
 
 // رواتب الكادر
 export const salaries = pgTable("salaries", {
@@ -401,7 +442,9 @@ export const community_posts = pgTable("community_posts", {
   likesCount: integer("likes_count").default(0),
   commentsCount: integer("comments_count").default(0),
   timestamp: timestamp("timestamp").defaultNow(),
-});
+}, (table) => ({
+  schoolIdIdx: index("posts_school_id_idx").on(table.schoolId),
+}));
 
 // تعليقات المنشورات
 export const community_comments = pgTable("community_comments", {
@@ -412,7 +455,9 @@ export const community_comments = pgTable("community_comments", {
   userPhoto: text("user_photo"),
   content: text("content").notNull(),
   timestamp: timestamp("timestamp").defaultNow(),
-});
+}, (table) => ({
+  postIdIdx: index("comments_post_id_idx").on(table.postId),
+}));
 
 // سجلات الحضور والغياب (للتخزين التفصيلي والقابل للاستعلام)
 export const attendance_logs = pgTable("attendance_logs", {
@@ -425,7 +470,11 @@ export const attendance_logs = pgTable("attendance_logs", {
   reason: text("reason"),
   recordedBy: text("recorded_by"),
   timestamp: timestamp("timestamp").defaultNow(),
-});
+}, (table) => ({
+  studentIdIdx: index("attendance_student_id_idx").on(table.studentId),
+  schoolIdIdx: index("attendance_school_id_idx").on(table.schoolId),
+  dateIdx: index("attendance_date_idx").on(table.date),
+}));
 
 // سجلات السلوك والانضباط (للتخزين التفصيلي والقابل للاستعلام)
 export const behavior_logs = pgTable("behavior_logs", {
@@ -439,7 +488,10 @@ export const behavior_logs = pgTable("behavior_logs", {
   recordedBy: text("recorded_by"),
   date: varchar("date", { length: 20 }).notNull(), // YYYY-MM-DD
   timestamp: timestamp("timestamp").defaultNow(),
-});
+}, (table) => ({
+  studentIdIdx: index("behavior_student_id_idx").on(table.studentId),
+  schoolIdIdx: index("behavior_school_id_idx").on(table.schoolId),
+}));
 
 // سجل النشاطات والرقابة الإدارية
 export const audit_logs = pgTable("audit_logs", {
@@ -454,7 +506,9 @@ export const audit_logs = pgTable("audit_logs", {
   targetType: varchar("target_type", { length: 50 }),
   schoolId: varchar("school_id", { length: 128 }),
   timestamp: timestamp("timestamp").defaultNow(),
-});
+}, (table) => ({
+  schoolIdIdx: index("audit_school_id_idx").on(table.schoolId),
+}));
 
 
 // --- Transport Module (النقل المدرسي) ---
@@ -469,7 +523,9 @@ export const transport_routes = pgTable('transport_routes', {
   lastUpdate: timestamp('last_update'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
-});
+}, (table) => ({
+  schoolIdIdx: index("routes_school_id_idx").on(table.schoolId),
+}));
 
 export const transport_drivers = pgTable('transport_drivers', {
   id: varchar('id', { length: 50 }).primaryKey(),
@@ -482,7 +538,9 @@ export const transport_drivers = pgTable('transport_drivers', {
   status: varchar('status', { length: 20 }).default('active'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
-});
+}, (table) => ({
+  schoolIdIdx: index("drivers_school_id_idx").on(table.schoolId),
+}));
 
 export const transport_students_status = pgTable('transport_students_status', {
   id: varchar('id', { length: 50 }).primaryKey(), // Usually studentId
@@ -495,7 +553,9 @@ export const transport_students_status = pgTable('transport_students_status', {
   timestamp: timestamp('timestamp'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
-});
+}, (table) => ({
+  routeIdIdx: index("transport_status_route_id_idx").on(table.routeId),
+}));
 
 export const transport_fees = pgTable('transport_fees', {
   id: varchar('id', { length: 50 }).primaryKey(),
@@ -507,7 +567,9 @@ export const transport_fees = pgTable('transport_fees', {
   dueDate: timestamp('due_date'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
-});
+}, (table) => ({
+  studentIdIdx: index("transport_fees_student_id_idx").on(table.studentId),
+}));
 
 // رسائل المحادثات
 export const lounge_messages = pgTable("lounge_messages", {
@@ -522,7 +584,10 @@ export const lounge_messages = pgTable("lounge_messages", {
   imageUrl: text("image_url"),
   read: boolean("read").default(false),
   timestamp: timestamp("timestamp").defaultNow(),
-});
+}, (table) => ({
+  schoolIdIdx: index("lounge_school_id_idx").on(table.schoolId),
+  recipientIdIdx: index("lounge_recipient_id_idx").on(table.recipientId),
+}));
 
 // بنك الأسئلة
 export const question_bank = pgTable("question_bank", {
@@ -544,7 +609,9 @@ export const question_bank = pgTable("question_bank", {
   difficulty: varchar("difficulty", { length: 50 }),
   points: integer("points").default(1),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  schoolIdIdx: index("qbank_school_id_idx").on(table.schoolId),
+}));
 
 // نماذج الامتحانات
 export const exam_papers = pgTable("exam_papers", {
@@ -560,7 +627,9 @@ export const exam_papers = pgTable("exam_papers", {
   targetSections: jsonb("target_sections").default([]),
   imageUrl: text("image_url"),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  schoolIdIdx: index("exams_school_id_idx").on(table.schoolId),
+}));
 
 // قصص المجتمع (Stories)
 export const community_stories = pgTable("community_stories", {
@@ -576,7 +645,9 @@ export const community_stories = pgTable("community_stories", {
   views: jsonb("views").default([]),
   timestamp: timestamp("timestamp").defaultNow(),
   expiresAt: timestamp("expires_at"),
-});
+}, (table) => ({
+  schoolIdIdx: index("stories_school_id_idx").on(table.schoolId),
+}));
 
 // تعليقات الفيديو والدروس
 export const video_comments = pgTable("video_comments", {
@@ -590,7 +661,9 @@ export const video_comments = pgTable("video_comments", {
   isEdited: boolean("is_edited").default(false),
   updatedAt: timestamp("updated_at").defaultNow(),
   timestamp: timestamp("timestamp").defaultNow(),
-});
+}, (table) => ({
+  lessonIdIdx: index("vcomments_lesson_id_idx").on(table.lessonId),
+}));
 
 // ملاحظات البث المباشر للطلاب
 export const student_live_notes = pgTable("student_live_notes", {
@@ -601,7 +674,10 @@ export const student_live_notes = pgTable("student_live_notes", {
   grade: varchar("grade", { length: 50 }),
   content: text("content"),
   timestamp: timestamp("timestamp").defaultNow(),
-});
+}, (table) => ({
+  schoolIdIdx: index("live_notes_school_id_idx").on(table.schoolId),
+  userIdIdx: index("live_notes_user_id_idx").on(table.userId),
+}));
 
 // تخزين الوثائق المتغيرة
 export const firestore_docs = pgTable("firestore_docs", {
@@ -623,7 +699,9 @@ export const admin_outbox = pgTable("admin_outbox", {
   broadcastId: varchar("broadcast_id", { length: 128 }),
   timestamp: timestamp("timestamp").defaultNow(),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  schoolIdIdx: index("outbox_school_id_idx").on(table.schoolId),
+}));
 export const security_bans = pgTable("security_bans", {
   id: varchar("id", { length: 128 }).primaryKey(),
   type: varchar("type", { length: 50 }).notNull(), // 'ip' | 'device' | 'account'
@@ -683,5 +761,9 @@ export const bairaq_activities = pgTable("bairaq_activities", {
   description: text("description"),
   authorName: varchar("author_name", { length: 255 }),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  studentIdIdx: index("activities_student_id_idx").on(table.studentId),
+  schoolIdIdx: index("activities_school_id_idx").on(table.schoolId),
+  createdAtIdx: index("activities_created_at_idx").on(table.createdAt),
+}));
 

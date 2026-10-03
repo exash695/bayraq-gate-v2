@@ -3,6 +3,9 @@ import './index.css';
 import ErrorBoundary from './components/ErrorBoundary';
 import App from './App.tsx';
 import { errorMonitoringService } from './services/errorMonitoringService';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+
+const queryClient = new QueryClient();
 
 import { getApiBaseUrl } from './lib/serverConfig';
 
@@ -187,9 +190,11 @@ try {
   if (rootElement) {
     const root = createRoot(rootElement);
     root.render(
-      <ErrorBoundary>
-        <App />
-      </ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <ErrorBoundary>
+          <App />
+        </ErrorBoundary>
+      </QueryClientProvider>
     );
   }
 } catch (mountErr) {

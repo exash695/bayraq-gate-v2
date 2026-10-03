@@ -1881,7 +1881,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
           color: "text-cyan-400", 
           bg: "bg-cyan-400/10", 
           border: "border-cyan-400/20",
-          badge: unreadAnnouncementsCount > 0 ? unreadAnnouncementsCount : null
+          badge: activeSubPage !== 'announcements' && unreadAnnouncementsCount > 0 ? unreadAnnouncementsCount : null
         },
         { id: "grades", icon: BarChart3, name: "سجل الدرجات", color: "text-emerald-400", bg: "bg-emerald-400/10", border: "border-emerald-400/20", cap: 'view_grades' },
         { 
@@ -1891,7 +1891,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
           color: "text-orange-400", 
           bg: "bg-orange-400/10", 
           border: "border-orange-400/20",
-          badge: effectiveLensBadge > 0 ? effectiveLensBadge : null
+          badge: activeSubPage !== 'attendance' && effectiveLensBadge > 0 ? effectiveLensBadge : null
         },
         { 
           id: "homework", 
@@ -1900,7 +1900,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
           color: "text-amber-400", 
           bg: "bg-amber-400/10", 
           border: "border-amber-400/20",
-          badge: unreadHomeworksCount > 0 ? unreadHomeworksCount : null
+          badge: activeSubPage !== 'homework' && unreadHomeworksCount > 0 ? unreadHomeworksCount : null
         },
         { id: "uniform", icon: Shirt, name: "الزي المدرسي الرسمي", color: "text-indigo-400", bg: "bg-indigo-400/10", border: "border-indigo-400/20" },
         { id: "transport", icon: Bus, name: "تتبع خطوط النقل الذكي", color: "text-blue-400", bg: "bg-blue-400/10", border: "border-blue-400/20", cap: 'track_bus' },
@@ -1916,7 +1916,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
           color: "text-blue-400", 
           bg: "bg-blue-400/10", 
           border: "border-blue-400/20",
-          badge: unreadLoungeMessagesCount > 0 ? unreadLoungeMessagesCount : null
+          badge: activeSubPage !== 'meeting' && unreadLoungeMessagesCount > 0 ? unreadLoungeMessagesCount : null
         },
         { id: "finance", icon: Wallet, name: "المحفظة المالية والأقساط", color: "text-amber-400", bg: "bg-amber-400/10", border: "border-amber-400/20", cap: 'financial_view' },
         { id: "conduct", icon: AlertTriangle, name: "تقارير الانضباط والسلوك", color: "text-rose-400", bg: "bg-rose-400/10", border: "border-rose-400/20" },
@@ -1934,7 +1934,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
           color: "text-purple-400", 
           bg: "bg-purple-400/10", 
           border: "border-purple-400/20",
-          badge: unreadIdeasCount > 0 ? unreadIdeasCount : null
+          badge: activeSubPage !== 'ideas' && unreadIdeasCount > 0 ? unreadIdeasCount : null
         },
       ]
     }

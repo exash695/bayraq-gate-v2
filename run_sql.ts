@@ -4,7 +4,7 @@ import fs from "fs";
 
 async function main() {
   const sql = postgres(process.env.DATABASE_URL as string, { max: 1 });
-  const content = fs.readFileSync("src/db/migrations/0004_shallow_morlun.sql", "utf-8");
+  const content = fs.readFileSync("src/db/migrations/0006_minor_crusher_hogan.sql", "utf-8");
   const statements = content.split("--> statement-breakpoint");
   for (const stmt of statements) {
     if (stmt.trim().length > 0) {

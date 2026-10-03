@@ -43,6 +43,13 @@
       "when": 1789416992849,
       "tag": "0005_early_johnny_blaze",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791029314938,
+      "tag": "0006_minor_crusher_hogan",
+      "breakpoints": true
     }
   ]
 }
