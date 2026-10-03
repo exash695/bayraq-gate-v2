@@ -68,25 +68,16 @@ export const academicService = {
       key = 'school1';
     }
     
-    // 1. Instant Synchronous Cache Emission
-    let cachedEntry = academicCache.lists.get(key) || academicCache.lists.get('school1') || academicCache.lists.get('all');
+    // 1. Instant Synchronous Cache Emission (strict per school key)
+    let cachedEntry = academicCache.lists.get(key);
     if (!cachedEntry) {
       try {
-        const checkKeys = [
-          `s6_cache_lists_${key}`,
-          's6_cache_lists_school1',
-          's6_cache_lists_all',
-          's6_cache_lists_school_awail_ghamas'
-        ];
-        for (const k of checkKeys) {
-          const stored = safeStorage.getItem(k);
-          if (stored) {
-            const parsed = JSON.parse(stored);
-            if (Array.isArray(parsed) && parsed.length > 0) {
-              cachedEntry = { data: parsed, raw: stored };
-              academicCache.lists.set(key, cachedEntry);
-              break;
-            }
+        const stored = safeStorage.getItem(`s6_cache_lists_${key}`);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            cachedEntry = { data: parsed, raw: stored };
+            academicCache.lists.set(key, cachedEntry);
           }
         }
       } catch {}
@@ -147,7 +138,20 @@ export const academicService = {
   saveList: async (schoolId: string, listData: any) => {
     if (!listData) return;
     
-    const targetSchoolId = schoolId || listData.schoolId || 'school1';
+    let targetSchoolId = (schoolId || listData.schoolId || '').trim();
+    if (!targetSchoolId || targetSchoolId === 'undefined' || targetSchoolId === 'null') {
+      const sName = listData.schoolName || listData.school || '';
+      if (sName.includes('اليمامة')) targetSchoolId = 'school6';
+      else if (sName.includes('النخبة')) targetSchoolId = 'school2';
+      else if (sName.includes('نون')) targetSchoolId = 'school3';
+      else if (sName.includes('النبأ')) targetSchoolId = 'school4';
+      else if (sName.includes('عقيل')) targetSchoolId = 'school5';
+      else if (sName.includes('الجواهري')) targetSchoolId = 'school7';
+      else if (sName.includes('ابداعنا')) targetSchoolId = 'school8';
+      else if (sName.includes('أوائل') || sName.includes('اوائل')) targetSchoolId = 'school1';
+      else targetSchoolId = 'general';
+    }
+
     const fullListData = {
       ...listData,
       schoolId: targetSchoolId,
@@ -291,25 +295,16 @@ export const academicService = {
       key = 'school1';
     }
 
-    // 1. Instant Synchronous Cache Emission
-    let cachedEntry = academicCache.students.get(key) || academicCache.students.get('school1') || academicCache.students.get('all');
+    // 1. Instant Synchronous Cache Emission (strict per school key)
+    let cachedEntry = academicCache.students.get(key);
     if (!cachedEntry) {
       try {
-        const checkKeys = [
-          `s6_cache_students_${key}`,
-          's6_cache_students_school1',
-          's6_cache_students_all',
-          's6_cache_students_school_awail_ghamas'
-        ];
-        for (const k of checkKeys) {
-          const stored = safeStorage.getItem(k);
-          if (stored) {
-            const parsed = JSON.parse(stored);
-            if (Array.isArray(parsed) && parsed.length > 0) {
-              cachedEntry = { data: parsed, raw: stored };
-              academicCache.students.set(key, cachedEntry);
-              break;
-            }
+        const stored = safeStorage.getItem(`s6_cache_students_${key}`);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            cachedEntry = { data: parsed, raw: stored };
+            academicCache.students.set(key, cachedEntry);
           }
         }
       } catch {}

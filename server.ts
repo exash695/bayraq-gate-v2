@@ -1611,24 +1611,31 @@ async function startServer() {
   // ==========================================
 
   // Helper to ensure school exists (FK safety)
-const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
+  const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
     if (!schoolId) return;
     try {
       const existing = await db.select().from(schools).where(eq(schools.id, schoolId));
       if (existing.length === 0) {
-        let name = schoolName || 'مدرسة غير معرفة';
-        if (schoolId.endsWith('-boys')) {
-          name = 'ثانوية أوائل غماس الأهلية - للبنين';
-        } else if (schoolId.endsWith('-girls')) {
-          name = 'ثانوية أوائل غماس الأهلية - للبنات';
-        }
+        const knownSchoolNames: Record<string, string> = {
+          'school1': 'ثانوية اوائل غماس الاهلية',
+          'school2': 'ثانوية النخبة العلمية للبنين',
+          'school3': 'ثانوية نون والقلم الاهلية',
+          'school4': 'ثانوية النبأ العظيم الاهلية للبنات',
+          'school5': 'مدارس ابن عقيل الأهلية',
+          'school6': 'مدرسة اليمامة الابتدائية',
+          'school7': 'مدارس الجواهري الاهلية',
+          'school8': 'معهد ابداعنا للتعليم المطور',
+          'general': 'أكاديمية بيرق الرقمية'
+        };
+
+        let name = schoolName || knownSchoolNames[schoolId] || 'ميدان تعليمي';
         await db.insert(schools).values({
           id: schoolId,
           name: name,
           governorate: 'الديوانية - غماس',
           status: 'active'
         }).onConflictDoNothing();
-        console.log(`[DB] Auto-created missing school: ${schoolId}`);
+        console.log(`[DB] Auto-created missing school: ${schoolId} (${name})`);
       }
     } catch (err) {
       console.error(`[DB] Failed to ensure school exists: ${schoolId}`, err);
@@ -2464,8 +2471,8 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
       for (const sid of uniqueSchoolIds) {
         await ensureSchoolExists(sid);
       }
-      if (uniqueSchoolIds.length === 0) {
-        await ensureSchoolExists('school1');
+      if (uniqueSchoolIds.length === 0 && studentsToSync.length > 0) {
+        console.warn('[Sync-All] Received students without explicit schoolId');
       }
 
       // Batch fetch school configs

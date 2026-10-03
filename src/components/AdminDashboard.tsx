@@ -386,6 +386,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Resolve active school ID with alias resilience
   const resolvedSchoolId = React.useMemo(() => {
     if (selectedSchoolId) return selectedSchoolId;
+    if (schoolName?.includes('يمامة')) return 'school6';
+    if (schoolName?.includes('نخبة')) return 'school2';
+    if (schoolName?.includes('نون')) return 'school3';
+    if (schoolName?.includes('نبأ')) return 'school4';
+    if (schoolName?.includes('عقيل')) return 'school5';
+    if (schoolName?.includes('جواهري')) return 'school7';
+    if (schoolName?.includes('ابداعنا')) return 'school8';
+    if (schoolName?.includes('أوائل') || schoolName?.includes('اوائل')) return 'school1';
     try {
       const savedSchool = localStorage.getItem('berq_selected_school');
       if (savedSchool) {
@@ -393,8 +401,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         if (parsed?.id) return parsed.id;
       }
     } catch (e) {}
-    return 'school1';
-  }, [selectedSchoolId]);
+    return 'school6';
+  }, [selectedSchoolId, schoolName]);
 
   // Disabled modules state for the school (controlled centrally by Developer Dashboard)
   const [disabledModules, setDisabledModules] = useState<string[]>(() => {
@@ -1899,7 +1907,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   discountLabels={discountLabels}
                   tuitionFee={tuitionFee}
                   discountRates={discountRates}
-                  onUpdateList={(list) => handleSaveList(selectedSchoolId || '', list)}
+                  onUpdateList={(list) => handleSaveList(resolvedSchoolId, list)}
                   setSavedLists={setSavedLists}
                 />
               ) : (
@@ -1918,7 +1926,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     installmentPlan={installmentPlan}
                     listToEdit={listToEdit}
                     setListToEdit={setListToEdit}
-                    onSaveList={(list) => handleSaveList(selectedSchoolId || '', list)}
+                    onSaveList={(list) => handleSaveList(resolvedSchoolId, list)}
                     isSaving={isSaving}
                     onSubViewChange={setCodesSubView}
                     setSelectedArchiveList={setSelectedArchiveList}
