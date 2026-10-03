@@ -224,9 +224,9 @@ export const PostCommentsSection: React.FC<PostCommentsSectionProps> = ({
         );
 
         const postRef = doc(db, "community_posts", post.id);
-        await updateDoc(postRef, {
+        await setDoc(postRef, {
           comments: increment(1),
-        });
+        }, { merge: true });
 
         if (post.userId !== currentUserId) {
           pushSocialNotification(

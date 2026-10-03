@@ -7252,7 +7252,29 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
       const { userId, recipientId, title, message, body, type, schoolId, metadata, recipientRole, studentName, authorName } = req.body || {};
       const id = req.body.id || `notif_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`;
       let targetRecipient = recipientId || userId || 'all';
+      let targetRole = recipientRole || '';
       const textBody = body || message || '';
+
+      // Try resolving student/user role if not provided
+      if (!targetRole && targetRecipient && targetRecipient !== 'all') {
+        try {
+          const userRec = await db.select().from(users).where(eq(users.id, targetRecipient)).limit(1);
+          if (userRec[0]) {
+            targetRole = userRec[0].role;
+          } else {
+             // Try student table
+             const studentRec = await db.select().from(students).where(or(eq(students.id, targetRecipient), eq(students.code, targetRecipient))).limit(1);
+             if (studentRec[0]) targetRole = 'student';
+             else {
+               // Try teacher table
+               const teacherRec = await db.select().from(teachers).where(or(eq(teachers.id, targetRecipient), eq(teachers.code, targetRecipient))).limit(1);
+               if (teacherRec[0]) targetRole = 'teacher';
+             }
+          }
+        } catch (e) {
+          console.warn("Could not resolve recipient role:", e);
+        }
+      }
       
       // If targetRecipient is anonymous or missing, try resolving student by name
       const nameToResolve = studentName || authorName;
@@ -7261,8 +7283,10 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
           const foundStudents = await db.select().from(students).where(sql`name ILIKE ${'%' + nameToResolve.trim() + '%'}`).limit(1);
           if (foundStudents[0]?.id) {
             targetRecipient = foundStudents[0].id;
+            targetRole = 'student';
           } else if (foundStudents[0]?.code) {
             targetRecipient = foundStudents[0].code;
+            targetRole = 'student';
           }
         } catch (e) {
           console.warn("Could not resolve student by name in notifications:", e);
@@ -7272,7 +7296,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
       const newNotif = {
         id,
         recipientId: targetRecipient,
-        recipientRole: recipientRole || 'student',
+        recipientRole: targetRole || 'student',
         title: title || 'بوابة بيرق - إشعار جديد',
         body: textBody,
         type: type || 'alert',
@@ -7287,7 +7311,16 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
       const finalNotif = { ...newNotif, id: finalId };
 
       realtimeServerInstance?.broadcastManual('notifications', finalId, 'INSERT', finalNotif);
-      realtimeServerInstance?.broadcastManual('notifications_updated', finalId, 'UPDATE', { recipientId: targetRecipient, type: type });
+      realtimeServerInstance?.broadcastManual('notifications_updated', finalId, 'UPDATE', { 
+        recipientId: targetRecipient, 
+        schoolId: schoolId || '',
+        type: type 
+      });
+      
+      // Global broadcast for system-wide sync if needed
+      if (targetRecipient === 'all' || !targetRecipient) {
+        realtimeServerInstance?.broadcastManual('notifications_updated', undefined, 'UPDATE', {});
+      }
 
       // Async external push dispatch (FCM tokens)
       (async () => {

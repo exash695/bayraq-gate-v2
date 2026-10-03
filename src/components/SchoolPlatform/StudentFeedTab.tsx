@@ -605,7 +605,7 @@ export const StudentFeedTab: React.FC = () => {
                             <span className="text-white/20 text-[10px] font-bold uppercase tracking-widest leading-none">
                               {post.time}
                             </span>
-                            {post.targetSection ? (
+                            {post.targetSection && post.targetSection.trim() !== "" ? (
                               <span className="px-1.5 py-0.5 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-400/80 text-[9px] font-black flex items-center gap-1">
                                 <Users size={10} />
                                 {post.targetSection}
@@ -616,7 +616,7 @@ export const StudentFeedTab: React.FC = () => {
                                 كافة الشُعب
                               </span>
                             ) : null}
-                            {post.targetSections && post.targetSections.length > 0 && !post.targetSection && (
+                            {post.targetSections && post.targetSections.length > 0 && (!post.targetSection || post.targetSection.trim() === "") && (
                               <span className="px-1.5 py-0.5 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-400/80 text-[9px] font-black flex items-center gap-1">
                                 <Users size={10} />
                                 {post.targetSections[0]}
@@ -974,7 +974,7 @@ export const StudentFeedTab: React.FC = () => {
                             <Lock size={12} className="text-rose-500" />
                           )}
                           <span className="text-xs font-black">
-                            {post.comments}
+                            {post.comments || 0}
                           </span>
                         </button>
                       </div>
@@ -1022,7 +1022,7 @@ export const StudentFeedTab: React.FC = () => {
                               )}
                             </div>
                             <span className="font-extrabold text-[#00E5FF] px-1 text-xs">
-                              {Object.entries(post.reactions)
+                              {Object.entries(post.reactions || {})
                                 .filter(([key]) =>
                                   ["💡", "✍️", "👏", "🧠", "📚", "👑"].includes(
                                     key,

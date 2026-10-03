@@ -5184,39 +5184,59 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
 
     const unsubscribe = onSnapshot(
       postsQuery,
-      (snapshot) => {
+      async (snapshot) => {
         const likedList = getLikedPosts();
-        const fetchedPosts = snapshot.docs.map((docRef) => {
-          const data = docRef.data();
-          
-          return {
-            id: docRef.id,
-            userId: data.userId || "",
-            userName: data.userName,
-            userPhotoURL: data.userPhotoURL,
-            mediaUrl: data.mediaUrl,
-            time: data.timestamp
-              ? (typeof data.timestamp?.toDate === 'function' ? data.timestamp.toDate() : new Date(data.timestamp)).toLocaleString("ar-IQ")
-              : "الآن",
-            content: data.content,
-            likes: data.likes || 0,
-            comments: data.comments || 0,
-            shares: data.shares || 0,
-            isLiked: likedList.includes(docRef.id),
-            type: data.type || "student",
-            isPinned: data.isPinned || false,
-            isLocked: data.isLocked || false,
-            adminNotes: data.adminNotes || [],
-            stageIcon: data.stageIcon || "",
-            stageStickers: data.stageStickers || [],
-            reactions: data.reactions || {},
-            userReaction: null, // Subcollection handled elsewhere if needed
-            schoolId: data.schoolId || "",
-            grade: data.grade || "",
-            targetSection: data.targetSection || null,
-            targetSections: data.targetSections || [],
-          } as Post;
-        });
+        const fetchedPosts = await Promise.all(
+          snapshot.docs.map(async (docRef) => {
+            const data = docRef.data();
+            
+            let userReaction = null;
+            if (auth.currentUser) {
+              try {
+                const uReactDoc = await getDoc(
+                  doc(
+                    db,
+                    "community_posts",
+                    docRef.id,
+                    "reactions_list",
+                    getCurrentUserId(),
+                  ),
+                );
+                if (uReactDoc.exists()) {
+                  userReaction = uReactDoc.data().sticker;
+                }
+              } catch (e) {}
+            }
+
+            return {
+              id: docRef.id,
+              userId: data.userId || "",
+              userName: data.userName,
+              userPhotoURL: data.userPhotoURL,
+              mediaUrl: data.mediaUrl,
+              time: data.timestamp
+                ? (typeof data.timestamp?.toDate === 'function' ? data.timestamp.toDate() : new Date(data.timestamp)).toLocaleString("ar-IQ")
+                : "الآن",
+              content: data.content,
+              likes: data.likes || 0,
+              comments: data.comments || 0,
+              shares: data.shares || 0,
+              isLiked: likedList.includes(docRef.id),
+              type: data.type || "student",
+              isPinned: data.isPinned || false,
+              isLocked: data.isLocked || false,
+              adminNotes: data.adminNotes || [],
+              stageIcon: data.stageIcon || "",
+              stageStickers: data.stageStickers || [],
+              reactions: data.reactions || {},
+              userReaction: userReaction,
+              schoolId: data.schoolId || "",
+              grade: data.grade || "",
+              targetSection: data.targetSection || null,
+              targetSections: data.targetSections || [],
+            } as Post;
+          }),
+        );
 
         // Filter with high-fidelity visibility matching
         const filteredPosts = fetchedPosts.filter((post) => {
@@ -5418,9 +5438,9 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
 
     try {
       const postRef = doc(db, "community_posts", id);
-      await updateDoc(postRef, {
+      await setDoc(postRef, {
         likes: isLiked ? increment(-1) : increment(1),
-      });
+      }, { merge: true });
 
       if (!isLiked) {
         const targetPost = posts.find((p) => p.id === id);
@@ -5478,7 +5498,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
           timestamp: serverTimestamp(),
           schoolId: schoolId,
           schoolName: schoolName,
-          grade: isTeacher ? (extractGradeBase(selectedTeacherClass) || grade || "سادس علمي") : grade,
+          grade: grade || "سادس علمي",
           targetSection: isTeacher && selectedTeacherClass && selectedTeacherClass !== "ALL" ? selectedTeacherClass : null,
           targetSections: isTeacher && selectedTeacherClass && selectedTeacherClass !== "ALL" ? [selectedTeacherClass] : [],
           type: isTeacher
@@ -5587,6 +5607,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     }
 
     try {
+      const isPostToAll = !selectedTeacherClass || selectedTeacherClass === "ALL";
       const postRef = await addDoc(collection(db, "community_posts"), {
         userId: getCurrentUserId(),
         userName: getUserName(),
@@ -5596,9 +5617,9 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
         timestamp: serverTimestamp(),
         schoolId: schoolId,
         schoolName: schoolName,
-        grade: isTeacher ? (extractGradeBase(selectedTeacherClass) || grade || "سادس علمي") : grade,
-        targetSection: isTeacher && selectedTeacherClass && selectedTeacherClass !== "ALL" ? selectedTeacherClass : null,
-        targetSections: isTeacher && selectedTeacherClass && selectedTeacherClass !== "ALL" ? [selectedTeacherClass] : [],
+        grade: grade || "سادس علمي",
+        targetSection: isTeacher && !isPostToAll ? selectedTeacherClass : null,
+        targetSections: isTeacher && !isPostToAll ? [selectedTeacherClass] : [],
         type: isTeacher
           ? "teacher"
           : userProfile?.role === "admin"
@@ -5618,9 +5639,9 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
         timestamp: new Date(),
         schoolId: schoolId,
         schoolName: schoolName,
-        grade: isTeacher ? (extractGradeBase(selectedTeacherClass) || grade || "سادس علمي") : grade,
-        targetSection: isTeacher && selectedTeacherClass && selectedTeacherClass !== "ALL" ? selectedTeacherClass : null,
-        targetSections: isTeacher && selectedTeacherClass && selectedTeacherClass !== "ALL" ? [selectedTeacherClass] : [],
+        grade: grade || "سادس علمي",
+        targetSection: isTeacher && !isPostToAll ? selectedTeacherClass : null,
+        targetSections: isTeacher && !isPostToAll ? [selectedTeacherClass] : [],
         type: isTeacher
           ? "teacher"
           : userProfile?.role === "admin"

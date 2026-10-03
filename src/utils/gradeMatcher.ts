@@ -239,7 +239,12 @@ export function extractSectionLetter(raw: string | null | undefined): string | n
  */
 export function extractGradeBase(raw: string | null | undefined): string {
   if (!raw || typeof raw !== "string") return "";
-  let s = raw
+  const trimmed = raw.trim();
+  // If it's just a standalone section letter, it's not a grade base
+  if (trimmed.length === 1 && /[أإآبجدوهـوزحطيABCDEFG]/i.test(trimmed)) {
+    return "";
+  }
+  let s = trimmed
     .replace(/[\u064B-\u065F\u0640]/g, "")
     .replace(/\(([\u0621-\u064Aa-zA-Z0-9]+)\)/g, "")
     .replace(/شعبة\s*[\u0621-\u064Aa-zA-Z0-9]+/g, "")
