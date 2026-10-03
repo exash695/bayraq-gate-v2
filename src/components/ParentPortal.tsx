@@ -196,7 +196,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
     const stId = studentData?.id || studentData?.studentCode || studentCode || '';
     if (!stId || parentAttendanceTab !== 'lens') return;
 
-    const now = Date.now();
+    const now = Date.now() + 1000; // Add 1 second buffer
     if (lensSubTab === 'individual') {
       safeStorage.setItem(`bairaq_lens_ind_seen_${stId}`, new Date(now).toISOString());
       setLastSeenIndividual(now);
@@ -1830,10 +1830,17 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
       return Math.min(individualActs.length, 3);
     }
 
-    return individualActs.filter((act: any) => {
+    const unread = individualActs.filter((act: any) => {
       if (!act.createdAt) return false;
-      return new Date(act.createdAt).getTime() > lastSeenIndividual;
-    }).length;
+      const isUnread = new Date(act.createdAt).getTime() > lastSeenIndividual;
+      return isUnread;
+    });
+    
+    if (unread.length > 0) {
+      console.log("Unread individual count > 0", unread.length, "lastSeen:", new Date(lastSeenIndividual).toISOString(), "Activities:", unread.map(u => ({id: u.id, createdAt: u.createdAt})));
+    }
+    
+    return unread.length;
   }, [lensActivities, lastSeenIndividual]);
 
   const unreadBroadcastCount = useMemo(() => {

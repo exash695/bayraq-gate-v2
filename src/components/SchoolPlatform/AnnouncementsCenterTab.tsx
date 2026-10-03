@@ -100,13 +100,17 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
             if (expMs > 0 && expMs < now) return false;
 
             // Audience & Section Matching
-            return matchesBroadcastAudience(b, {
+            const audienceMatches = matchesBroadcastAudience(b, {
               grade,
               section,
               className: section && grade ? `${grade} ${section}` : (section || grade),
               isTeacher,
               isParent
             });
+            if (!audienceMatches) {
+              console.warn("Broadcast filtered: Audience mismatch", b.id, { grade, section, isTeacher, isParent });
+            }
+            return audienceMatches;
           })
           .sort((a: any, b: any) => {
             const timeA = a.timestampMs || a.timestamp_ms || (a.createdAt ? new Date(a.createdAt).getTime() : 0);

@@ -280,6 +280,9 @@ export function matchesBroadcastAudience(
   if (student.isTeacher && isAllStudentSection && (!student.grade || student.grade === "ALL" || student.grade === "all")) {
     return true;
   }
+  
+  // PARENT FIX: Allow parents to see broadcasts that don't explicitly exclude them if they are in the correct grade.
+  // The current section logic is too restrictive for parents.
 
   const rawGrades = broadcast.targetGrades || broadcast.target_grades;
   let gradesList: string[] = [];
@@ -394,6 +397,10 @@ export function matchesBroadcastAudience(
       if (targetLetter && studentLetter) {
         return targetLetter === studentLetter;
       }
+
+      // PARENT FIX: If parent/student doesn't have a section letter, but the broadcast is for the correct grade, 
+      // allow them to see it if it's not explicitly restricted to a different section letter.
+      if (student.isParent) return true;
 
       // If target specifies section letter but student has no section letter known:
       // A section-specific broadcast (e.g. 'أ') MUST NOT match a viewer who doesn't have that section!
