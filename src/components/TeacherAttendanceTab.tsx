@@ -71,7 +71,7 @@ const DEFAULT_GRADES = [
 export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
   schoolId,
   teacherData,
-  schoolName = 'ثانوية أوائل غماس الأهلية',
+  schoolName = 'مدرسة اليمامة الابتدائية',
   selectedClass: initialClass,
   onSelectClass,
   availableClasses: passedAvailableClasses,
@@ -1372,7 +1372,7 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
           </h2>
           <div className="flex items-center gap-1 text-[#FFD600] font-bold text-xs sm:text-sm tracking-wide drop-shadow-sm mt-0.5 min-w-0">
             <span className="shrink-0 text-xs">🏛️</span>
-            <span className="truncate">{schoolName || "ثانوية أوائل غماس الأهلية"}</span>
+            <span className="truncate">{schoolName || "مدرسة اليمامة الابتدائية"}</span>
           </div>
           <div className="flex items-center gap-1 text-white/80 font-semibold text-[11px] sm:text-xs tracking-wide drop-shadow-sm mt-0.5 min-w-0">
             <span className="shrink-0 text-[10px]">⏱️</span>

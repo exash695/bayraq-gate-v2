@@ -226,7 +226,7 @@ export const StudentSchedule: React.FC<Props> = ({ grade, isTeacher, teacherId, 
           </h2>
           <div className="flex items-center gap-1 text-[#FFD600] font-bold text-[10px] sm:text-xs tracking-wide drop-shadow-sm mt-0.5 min-w-0">
             <span className="shrink-0 text-[10px]">🏛️</span>
-            <span className="truncate">{schoolName || "ثانوية أوائل غماس الأهلية"}</span>
+            <span className="truncate">{schoolName || "مدرسة اليمامة الابتدائية"}</span>
           </div>
         </div>
       </div>
