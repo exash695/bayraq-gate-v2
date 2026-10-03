@@ -1544,9 +1544,8 @@ export default function App() {
           }
           
           let finalSchoolId = profileData.schoolId || user.schoolId;
-          if (finalSchoolId && finalBranch) {
-            const baseId = finalSchoolId.replace('-boys', '').replace('-girls', '');
-            finalSchoolId = `${baseId}-${finalBranch}`;
+          if (finalSchoolId) {
+            finalSchoolId = finalSchoolId.replace(/-(boys|girls)$/i, '');
           }
 
           if ((finalBranch && finalBranch !== profileData.adminBranch) || (finalSchoolId && finalSchoolId !== profileData.schoolId)) {
@@ -2433,7 +2432,8 @@ export default function App() {
               safeStorage.setItem("s6_isSchoolVerified", "true");
               safeStorage.setItem("s6_user_logged_out", "false");
 
-              const resolvedSchool = user.schoolId || selectedSchoolId || "school1-boys";
+              const rawSchool = user.schoolId || selectedSchoolId || "school1";
+              const resolvedSchool = rawSchool.replace(/-(boys|girls)$/i, '');
               setSelectedSchoolId(resolvedSchool);
               safeStorage.setItem("s6_selectedSchoolId", resolvedSchool);
 

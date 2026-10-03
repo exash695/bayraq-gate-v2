@@ -63,8 +63,17 @@ export const CodesSection: React.FC<CodesSectionProps> = ({
   onDeleteList
 }) => {
   const savedLists = useMemo(() => {
-    return (propsSavedLists || []).filter(l => !isArchivedList(l));
-  }, [propsSavedLists]);
+    return (propsSavedLists || []).filter(l => {
+      if (isArchivedList(l)) return false;
+      if (l.adminBranch && l.adminBranch !== adminBranch) return false;
+      if (l.students && Array.isArray(l.students) && l.students.length > 0) {
+        const sampleStudent = l.students[0];
+        if (adminBranch === 'boys' && sampleStudent.gender === 'female') return false;
+        if (adminBranch === 'girls' && sampleStudent.gender === 'male') return false;
+      }
+      return true;
+    });
+  }, [propsSavedLists, adminBranch]);
 
   const archivedLists = useMemo(() => {
     return (propsSavedLists || []).filter(l => isArchivedList(l));
@@ -441,6 +450,7 @@ export const CodesSection: React.FC<CodesSectionProps> = ({
       name: trimmedName,
       grade: currentStudentGrade,
       school: currentListSchool || schoolName,
+                            adminBranch: adminBranch,
       date: new Date().toLocaleDateString('ar-IQ'),
       students: [updatedStudent]
     };

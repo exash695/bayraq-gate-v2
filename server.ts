@@ -1642,6 +1642,15 @@ async function startServer() {
     }
   };
 
+  // Cleanup phantom suffix schools on startup
+  (async () => {
+    try {
+      await db.execute(sql`DELETE FROM schools WHERE id LIKE '%-boys' OR id LIKE '%-girls' OR id = 'school_awail_ghamas'`);
+    } catch (e) {
+      console.warn("[DB] Phantom school purge notice:", e);
+    }
+  })();
+
   // ==========================================
   // 🧮 مساعدات الحسابات المالية والقواعد المعيارية
   // ==========================================
@@ -2193,7 +2202,8 @@ async function startServer() {
         return res.json(schoolsMemoryCache.data);
       }
 
-      const dbSchools = await withDbRetry(() => db.select().from(schools));
+      const rawDbSchools = await withDbRetry(() => db.select().from(schools));
+      const dbSchools = rawDbSchools.filter((s: any) => s.id && !s.id.endsWith('-boys') && !s.id.endsWith('-girls') && s.id !== 'school_awail_ghamas');
       const existingIds = new Set(dbSchools.map((s: any) => s.id));
 
       const defaultSchools = [

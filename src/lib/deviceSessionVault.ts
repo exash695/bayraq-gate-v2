@@ -51,7 +51,7 @@ export function getPrimaryUserSession(): PrimaryUserSession | null {
       const info = JSON.parse(verifiedInfoRaw);
       return {
         role,
-        schoolId: schoolId && schoolId !== "general" ? schoolId : info.schoolId || "school1-boys",
+        schoolId: (schoolId && schoolId !== "general" ? schoolId : info.schoolId || "school1").replace(/-(boys|girls)$/i, ''),
         schoolName: info.schoolName,
         code: info.code || info.studentCode || info.parentCode || "",
         studentName: info.studentName || info.name,
@@ -76,7 +76,7 @@ export function savePrimaryUserSession(session: Partial<PrimaryUserSession> & { 
   try {
     const fullSession: PrimaryUserSession = {
       role: session.role,
-      schoolId: session.schoolId && session.schoolId !== "general" ? session.schoolId : "school1-boys",
+      schoolId: (session.schoolId && session.schoolId !== "general" ? session.schoolId : "school1").replace(/-(boys|girls)$/i, ''),
       schoolName: session.schoolName,
       code: session.code.trim().toUpperCase(),
       studentName: session.studentName || session.code,

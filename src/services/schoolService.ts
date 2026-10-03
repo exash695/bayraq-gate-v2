@@ -159,6 +159,8 @@ export const schoolService = {
       const allMerged = Object.values(mergedMap).filter((item: any) => 
         !deletedSchoolIds.includes(item.id) &&
         item.id !== 'school_awail_ghamas' &&
+        !item.id.endsWith('-boys') &&
+        !item.id.endsWith('-girls') &&
         (item.name !== 'مدرسة جديدة' || item.id === 'general')
       );
 
