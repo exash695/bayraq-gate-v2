@@ -87,6 +87,154 @@ interface PortalPulseDashboardProps {
   selectedSchoolId: string | null;
 }
 
+const STAGES_CONFIG = {
+  primary: {
+    label: 'المرحلة الابتدائية',
+    grades: [
+      { id: '1p', label: 'الأول ابتدائي' },
+      { id: '2p', label: 'الثاني ابتدائي' },
+      { id: '3p', label: 'الثالث ابتدائي' },
+      { id: '4p', label: 'الرابع ابتدائي' },
+      { id: '5p', label: 'الخامس ابتدائي' },
+      { id: '6p', label: 'السادس ابتدائي' },
+    ]
+  },
+  intermediate: {
+    label: 'المرحلة المتوسطة',
+    grades: [
+      { id: '1m', label: 'الأول متوسط' },
+      { id: '2m', label: 'الثاني متوسط' },
+      { id: '3m', label: 'الثالث متوسط' },
+    ]
+  },
+  preparatory: {
+    label: 'المرحلة الإعدادية',
+    grades: [
+      { id: '4s', label: 'الرابع علمي' },
+      { id: '4l', label: 'الرابع أدبي' },
+      { id: '5s', label: 'الخامس علمي' },
+      { id: '5l', label: 'الخامس أدبي' },
+      { id: '6s', label: 'السادس علمي' },
+      { id: '6l', label: 'السادس أدبي' },
+    ]
+  }
+};
+
+const normalizeArabic = (str: string) => {
+  if (!str || typeof str !== 'string') return '';
+  return str
+    .replace(/[\u064B-\u065F\u0640]/g, "") // remove tashkeel
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي')
+    .replace(/(^|\s)ال(\s|$)/g, ' ') // remove "al" prefix as standalone word
+    .replace(/\bال/g, '') // remove "al" prefix
+    .replace(/\s+/g, '')
+    .trim()
+    .toLowerCase();
+};
+
+const normalizeRole = (roleRaw: string, code: string) => {
+  const r = (roleRaw || "").toLowerCase().trim();
+  const codeUpper = String(code || "").toUpperCase().trim();
+  
+  // Strict role checks
+  if (["student", "طالب", "طالبة", "students"].includes(r)) return "student";
+  if (["parent", "ولي", "ولي امر", "أب", "أم", "ولي أمر", "parent_role", "parents"].includes(r)) return "parent";
+  if (["teacher", "cadre", "admin", "مدرس", "كادر", "cadre_role", "teachers"].includes(r)) return "cadre";
+  if (["staff", "employee", "موظف", "staff_role", "staffs", "employees"].includes(r)) return "staff";
+  
+  // Prefix checks
+  if (codeUpper.startsWith('TCH-') || codeUpper.startsWith('T-')) return "cadre";
+  if (codeUpper.startsWith('PAR-') || codeUpper.startsWith('P-')) return "parent";
+  if (codeUpper.startsWith('EMP-') || codeUpper.startsWith('E-') || codeUpper.startsWith('STAFF-')) return "staff";
+  if (codeUpper.startsWith('STU-') || codeUpper.startsWith('S-')) return "student";
+  
+  // Return null or unknown if undetermined, don't force 'student'
+  return "unknown";
+};
+
+const getGradeLabel = (gradeId: string) => {
+  if (!gradeId) return 'غير محدد';
+  
+  // Fix: Remove 'ابتدائي' if 'علمي' or 'أدبي' is present
+  let cleanGradeId = gradeId;
+  if (cleanGradeId.includes('علمي') || cleanGradeId.includes('أدبي')) {
+      cleanGradeId = cleanGradeId.replace(/ابتدائي/g, '');
+  }
+
+  // Split by comma or newline or semicolon IF it has Arabic, but if pure English, split with spaces as well to support old list format.
+  const hasArabic = /[\u0600-\u06FF]/.test(cleanGradeId);
+  const ids = hasArabic
+    ? cleanGradeId.split(/[,\n;+|]+/).map(s => s.trim()).filter(Boolean)
+    : cleanGradeId.split(/[,\s\n;+|]+/).map(s => s.trim()).filter(Boolean);
+  
+  const labels = ids.map(id => {
+    const normalized = normalizeArabic(id);
+    
+    // Check for explicit ID matches first
+    for (const stage of Object.values(STAGES_CONFIG)) {
+      const grade = stage.grades.find(g => g.id.toLowerCase() === id.toLowerCase());
+      if (grade) return grade.label;
+    }
+
+    // Fuzzy normalization with normalizeArabic
+    for (const stage of Object.values(STAGES_CONFIG)) {
+      for (const grade of stage.grades) {
+        if (normalizeArabic(grade.label) === normalized || normalizeArabic(grade.id) === normalized) {
+          return grade.label;
+        }
+      }
+    }
+
+    // Fallback fuzzy checks
+    if (normalized.includes('خامس')) {
+        if (normalized.includes('علمي')) return 'الخامس علمي';
+        if (normalized.includes('ادبي')) return 'الخامس أدبي';
+        return 'الخامس ابتدائي';
+    }
+    if (normalized.includes('سادس')) {
+        if (normalized.includes('علمي')) return 'السادس علمي';
+        if (normalized.includes('ادبي')) return 'السادس أدبي';
+        return 'السادس ابتدائي';
+    }
+    if (normalized.includes('رابع')) {
+        if (normalized.includes('علمي')) return 'الرابع علمي';
+        if (normalized.includes('ادبي')) return 'الرابع أدبي';
+        return 'الرابع ابتدائي';
+    }
+
+    return id; // Return as is if no match found
+  });
+
+  return labels.join(' - ');
+};
+
+const getStageAndGradeLabel = (u: UserData) => {
+  const docStage = u.stage || '';
+  let resolvedStage = docStage;
+  const cleanGrade = (u.grade || '').trim().toLowerCase();
+  
+  if (cleanGrade.includes('علمي') || cleanGrade.includes('أدبي') || cleanGrade === '4s' || cleanGrade === '4l' || cleanGrade === '5s' || cleanGrade === '5l' || cleanGrade === '6s' || cleanGrade === '6l') {
+      resolvedStage = 'preparatory';
+  } else if (cleanGrade.includes('متوسط') || cleanGrade === '1m' || cleanGrade === '2m' || cleanGrade === '3m') {
+      resolvedStage = 'intermediate';
+  } else if (cleanGrade.includes('ابتدائي') || cleanGrade === '1p' || cleanGrade === '2p' || cleanGrade === '3p' || cleanGrade === '4p' || cleanGrade === '5p' || cleanGrade === '6p') {
+      resolvedStage = 'primary';
+  }
+  
+  const stageText = resolvedStage === 'primary' ? 'ابتدائي' : resolvedStage === 'intermediate' ? 'متوسط' : resolvedStage === 'preparatory' ? 'إعدادي' : (resolvedStage && resolvedStage !== 'undefined' ? resolvedStage : '');
+  const gradeText = u.grade && u.grade !== 'undefined' ? getGradeLabel(u.grade) : '';
+  
+  if (stageText && gradeText) {
+    if (gradeText.includes('علمي') || gradeText.includes('أدبي') || gradeText.includes('متوسط') || gradeText.includes('ابتدائي')) {
+      return gradeText;
+    }
+    return `${stageText} - ${gradeText}`;
+  }
+  return gradeText || stageText || 'غير محدد';
+};
+
 export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ showToast, schoolName, selectedSchoolId }) => {
   const [users, setUsers] = useState<UserData[]>([]);
   const [posts, setPosts] = useState<PostData[]>([]);
@@ -159,41 +307,6 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
     }
   };
 
-
-
-  const STAGES_CONFIG = {
-    primary: {
-      label: 'المرحلة الابتدائية',
-      grades: [
-        { id: '1p', label: 'الأول ابتدائي' },
-        { id: '2p', label: 'الثاني ابتدائي' },
-        { id: '3p', label: 'الثالث ابتدائي' },
-        { id: '4p', label: 'الرابع ابتدائي' },
-        { id: '5p', label: 'الخامس ابتدائي' },
-        { id: '6p', label: 'السادس ابتدائي' },
-      ]
-    },
-    intermediate: {
-      label: 'المرحلة المتوسطة',
-      grades: [
-        { id: '1m', label: 'الأول متوسط' },
-        { id: '2m', label: 'الثاني متوسط' },
-        { id: '3m', label: 'الثالث متوسط' },
-      ]
-    },
-    preparatory: {
-      label: 'المرحلة الإعدادية',
-      grades: [
-        { id: '4s', label: 'الرابع علمي' },
-        { id: '4l', label: 'الرابع أدبي' },
-        { id: '5s', label: 'الخامس علمي' },
-        { id: '5l', label: 'الخامس أدبي' },
-        { id: '6s', label: 'السادس علمي' },
-        { id: '6l', label: 'السادس أدبي' },
-      ]
-    }
-  };
-  
   const [activeTab, setActiveTab] = useState<'posts' | 'control' | 'notifications'>('posts');
   const [expandedSection, setExpandedSection] = useState<string | null>(null);
   const [postToDelete, setPostToDelete] = useState<PostData | null>(null);
@@ -1640,37 +1753,6 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
     }
   };
 
-  const normalizeArabic = (str: string) => {
-    if (!str) return '';
-    return str
-      .replace(/[أإآ]/g, 'ا')
-      .replace(/ة/g, 'ه')
-      .replace(/ال/g, '')
-      .replace(/\s+/g, '')
-      .trim()
-      .toLowerCase();
-  };
-
-  const normalizeRole = (roleRaw: string, code: string) => {
-      const r = (roleRaw || "").toLowerCase().trim();
-      const codeUpper = String(code || "").toUpperCase().trim();
-      
-      // Strict role checks
-      if (["student", "طالب", "طالبة", "students"].includes(r)) return "student";
-      if (["parent", "ولي", "ولي امر", "أب", "أم", "ولي أمر", "parent_role", "parents"].includes(r)) return "parent";
-      if (["teacher", "cadre", "admin", "مدرس", "كادر", "cadre_role", "teachers"].includes(r)) return "cadre";
-      if (["staff", "employee", "موظف", "staff_role", "staffs", "employees"].includes(r)) return "staff";
-      
-      // Prefix checks
-      if (codeUpper.startsWith('TCH-') || codeUpper.startsWith('T-')) return "cadre";
-      if (codeUpper.startsWith('PAR-') || codeUpper.startsWith('P-')) return "parent";
-      if (codeUpper.startsWith('EMP-') || codeUpper.startsWith('E-') || codeUpper.startsWith('STAFF-')) return "staff";
-      if (codeUpper.startsWith('STU-') || codeUpper.startsWith('S-')) return "student";
-      
-      // Return null or unknown if undetermined, don't force 'student'
-      return "unknown";
-  };
-
   const filteredStudents = React.useMemo(() => {
     let result = users.filter(user => {
       const normalizedRole = normalizeRole(user.role || '', user.studentCode || user.parentCode || user.code || '');
@@ -1837,54 +1919,66 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
   }, [users, searchQuery, activeRole, showOnlyActiveCadre, selectedStage, selectedGrade, selectedStatus]);
 
 
-  // Helper to calculate available sections from Codes Center lists and student data
+  // Helper to calculate available sections strictly from Codes Center lists and student data
   const availableSectionsForSelectedGrade = useMemo(() => {
     if (adminPostTargetStage === 'all') return [];
 
     const sectionsSet = new Set<string>();
+    const targetGradeLabel = adminPostTargetGrade !== 'all_grades' ? getGradeLabel(adminPostTargetGrade) : '';
+    const normTarget = normalizeArabic(targetGradeLabel);
+    const stageObj = STAGES_CONFIG[adminPostTargetStage as keyof typeof STAGES_CONFIG];
+    const stageGradeIds = stageObj?.grades?.map(g => g.id.toLowerCase()) || [];
+    const stageGradeLabels = stageObj?.grades?.map(g => normalizeArabic(g.label)) || [];
 
-    // 1. From academic lists (aData) - Codes Center lists
+    // 1. From academic lists (aData) - Strictly Codes Center lists
     if (Array.isArray(aData)) {
       aData.forEach((list: any) => {
-        const listGrade = String(list.grade || '').trim().toLowerCase();
+        const listGrade = String(list.grade || '').trim();
         const listStage = String(list.stage || '').trim().toLowerCase();
         const listName = String(list.name || list.sectionName || '').trim();
+        
+        const normName = normalizeArabic(listName);
+        const normGrade = normalizeArabic(listGrade);
 
-        const targetGradeLabel = adminPostTargetGrade !== 'all_grades' ? getGradeLabel(adminPostTargetGrade) : '';
+        // Try to match stage
+        const matchesStage = adminPostTargetStage === 'all' ||
+          listStage === adminPostTargetStage.toLowerCase() ||
+          stageGradeIds.some(id => listGrade.toLowerCase().includes(id)) ||
+          stageGradeLabels.some(lbl => normGrade.includes(lbl) || normName.includes(lbl));
+
+        // Try to match grade
         const matchesGrade = adminPostTargetGrade === 'all_grades' ||
-          listGrade === adminPostTargetGrade.toLowerCase() ||
-          (targetGradeLabel && normalizeArabic(getGradeLabel(listGrade)).includes(normalizeArabic(targetGradeLabel))) ||
-          (targetGradeLabel && normalizeArabic(listName).includes(normalizeArabic(targetGradeLabel)));
-
-        const matchesStage = listStage === adminPostTargetStage.toLowerCase() ||
-          (STAGES_CONFIG[adminPostTargetStage as keyof typeof STAGES_CONFIG]?.grades.some(g => g.id.toLowerCase() === listGrade));
+          listGrade.toLowerCase().includes(adminPostTargetGrade.toLowerCase()) ||
+          (normTarget && (normGrade.includes(normTarget) || normTarget.includes(normGrade)));
 
         if (matchesGrade && matchesStage) {
+          if (listName && listName !== listGrade) {
+            sectionsSet.add(listName);
+          }
           if (list.sectionName && typeof list.sectionName === 'string' && list.sectionName.trim()) {
             sectionsSet.add(list.sectionName.trim());
-          } else if (list.section && typeof list.section === 'string' && list.section.trim()) {
+          }
+          if (list.section && typeof list.section === 'string' && list.section.trim()) {
             sectionsSet.add(list.section.trim());
-          } else if (listName) {
-            sectionsSet.add(listName);
           }
 
           if (Array.isArray(list.students)) {
             list.students.forEach((st: any) => {
-              if (st.section) sectionsSet.add(String(st.section).trim());
-              if (st.group) sectionsSet.add(String(st.group).trim());
+              if (st.section && typeof st.section === 'string' && st.section.trim()) sectionsSet.add(st.section.trim());
+              if (st.group && typeof st.group === 'string' && st.group.trim()) sectionsSet.add(st.group.trim());
             });
           }
         }
       });
     }
 
-    // 2. From registered student users
+    // 2. From registered student users matching this grade
     users.forEach((u: any) => {
       const uGrade = String(u.grade || '').trim().toLowerCase();
-      const targetGradeLabel = adminPostTargetGrade !== 'all_grades' ? getGradeLabel(adminPostTargetGrade) : '';
+      const normUGrade = normalizeArabic(uGrade);
       const matchesGrade = adminPostTargetGrade === 'all_grades' ||
         uGrade === adminPostTargetGrade.toLowerCase() ||
-        (targetGradeLabel && normalizeArabic(getGradeLabel(uGrade)).includes(normalizeArabic(targetGradeLabel)));
+        (normTarget && (normUGrade.includes(normTarget) || normTarget.includes(normUGrade)));
 
       if (matchesGrade) {
         if (u.section && typeof u.section === 'string' && u.section.trim()) {
@@ -1896,98 +1990,9 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
       }
     });
 
-    const extracted = Array.from(sectionsSet).filter(Boolean);
-
-    // Fallbacks if no specific lists exist in Codes Center
-    if (extracted.length === 0) {
-      return ['شعبة (أ)', 'شعبة (ب)', 'شعبة (ج)', 'شعبة (د)'];
-    }
-
-    return extracted;
+    // Return exclusively registered sections from Codes Center - NO guessed fallbacks
+    return Array.from(sectionsSet).filter(Boolean);
   }, [aData, users, adminPostTargetStage, adminPostTargetGrade]);
-
-  // Helper to get grade label
-  const getGradeLabel = (gradeId: string) => {
-    if (!gradeId) return 'غير محدد';
-    
-    // Fix: Remove 'ابتدائي' if 'علمي' or 'أدبي' is present
-    let cleanGradeId = gradeId;
-    if (cleanGradeId.includes('علمي') || cleanGradeId.includes('أدبي')) {
-        cleanGradeId = cleanGradeId.replace(/ابتدائي/g, '');
-    }
-
-    // Split by comma or newline or semicolon IF it has Arabic, but if pure English, split with spaces as well to support old list format.
-    const hasArabic = /[\u0600-\u06FF]/.test(cleanGradeId);
-    const ids = hasArabic
-      ? cleanGradeId.split(/[,\n;+|]+/).map(s => s.trim()).filter(Boolean)
-      : cleanGradeId.split(/[,\s\n;+|]+/).map(s => s.trim()).filter(Boolean);
-    
-    const labels = ids.map(id => {
-      const normalized = normalizeArabic(id);
-      
-      // Check for explicit ID matches first
-      for (const stage of Object.values(STAGES_CONFIG)) {
-        const grade = stage.grades.find(g => g.id.toLowerCase() === id.toLowerCase());
-        if (grade) return grade.label;
-      }
-
-      // Fuzzy normalization with normalizeArabic
-      for (const stage of Object.values(STAGES_CONFIG)) {
-        for (const grade of stage.grades) {
-          if (normalizeArabic(grade.label) === normalized || normalizeArabic(grade.id) === normalized) {
-            return grade.label;
-          }
-        }
-      }
-
-      // Fallback fuzzy checks
-      if (normalized.includes('خامس')) {
-          if (normalized.includes('علمي')) return 'الخامس علمي';
-          if (normalized.includes('ادبي')) return 'الخامس أدبي';
-          return 'الخامس ابتدائي';
-      }
-      if (normalized.includes('سادس')) {
-          if (normalized.includes('علمي')) return 'السادس علمي';
-          if (normalized.includes('ادبي')) return 'السادس أدبي';
-          return 'السادس ابتدائي';
-      }
-      if (normalized.includes('رابع')) {
-          if (normalized.includes('علمي')) return 'الرابع علمي';
-          if (normalized.includes('ادبي')) return 'الرابع أدبي';
-          return 'الرابع ابتدائي';
-      }
-
-      return id; // Return as is if no match found
-    });
-
-    return labels.join(' - ');
-  };
-
-  // Helper to get unified and cleaned stage/grade label avoiding duplicates like 'ابتدائي - الخامس علمي'
-  const getStageAndGradeLabel = (u: UserData) => {
-    const docStage = u.stage || '';
-    let resolvedStage = docStage;
-    const cleanGrade = (u.grade || '').trim().toLowerCase();
-    
-    if (cleanGrade.includes('علمي') || cleanGrade.includes('أدبي') || cleanGrade === '4s' || cleanGrade === '4l' || cleanGrade === '5s' || cleanGrade === '5l' || cleanGrade === '6s' || cleanGrade === '6l') {
-        resolvedStage = 'preparatory';
-    } else if (cleanGrade.includes('متوسط') || cleanGrade === '1m' || cleanGrade === '2m' || cleanGrade === '3m') {
-        resolvedStage = 'intermediate';
-    } else if (cleanGrade.includes('ابتدائي') || cleanGrade === '1p' || cleanGrade === '2p' || cleanGrade === '3p' || cleanGrade === '4p' || cleanGrade === '5p' || cleanGrade === '6p') {
-        resolvedStage = 'primary';
-    }
-    
-    const stageText = resolvedStage === 'primary' ? 'ابتدائي' : resolvedStage === 'intermediate' ? 'متوسط' : resolvedStage === 'preparatory' ? 'إعدادي' : (resolvedStage && resolvedStage !== 'undefined' ? resolvedStage : '');
-    const gradeText = u.grade && u.grade !== 'undefined' ? getGradeLabel(u.grade) : '';
-    
-    if (stageText && gradeText) {
-      if (gradeText.includes('علمي') || gradeText.includes('أدبي') || gradeText.includes('متوسط') || gradeText.includes('ابتدائي')) {
-        return gradeText;
-      }
-      return `${stageText} - ${gradeText}`;
-    }
-    return gradeText || stageText || 'غير محدد';
-  };
 
   const getUnreadRepliesCount = (notifications: any[]) => {
     return notifications.reduce((acc, n) => {

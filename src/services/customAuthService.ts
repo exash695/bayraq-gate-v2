@@ -170,22 +170,6 @@ class CustomAuthService {
   public async loginWithCode(code: string, expectedSchoolId?: string): Promise<CustomUser> {
     const deviceId = getOrCreateDeviceId();
     const cleanCode = code.trim().toUpperCase();
-    
-    // Check locally stored / synced codes if available as extra resilience
-    let localCodeDoc: any = null;
-    try {
-      const cached = localStorage.getItem('bairaq_cached_activation_codes');
-      if (cached) {
-        const list = JSON.parse(cached);
-        if (Array.isArray(list)) {
-          localCodeDoc = list.find((c: any) => 
-            String(c.code).trim().toUpperCase() === cleanCode ||
-            String(c.parentCode || '').trim().toUpperCase() === cleanCode ||
-            String(c.studentCode || '').trim().toUpperCase() === cleanCode
-          );
-        }
-      }
-    } catch (e) {}
 
     const res = await fetch(resolveApiUrl('/api/auth/login-code'), {
       method: 'POST',
@@ -196,8 +180,7 @@ class CustomAuthService {
       body: JSON.stringify({ 
         code: cleanCode, 
         schoolId: expectedSchoolId?.trim(), 
-        deviceId,
-        ...(localCodeDoc ? { firestoreCodeDoc: localCodeDoc } : {})
+        deviceId
       })
     });
     const data = await res.json();

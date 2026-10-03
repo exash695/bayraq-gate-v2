@@ -1,4 +1,4 @@
-import { doublePrecision, pgTable, text, varchar, timestamp, integer, boolean, jsonb, bigint, index } from "drizzle-orm/pg-core";
+import { doublePrecision, pgTable, text, varchar, timestamp, integer, boolean, jsonb, bigint, index, numeric } from "drizzle-orm/pg-core";
 
 // جدول المدارس
 export const schools = pgTable("schools", {
@@ -643,6 +643,20 @@ export const community_stories = pgTable("community_stories", {
   mediaType: varchar("media_type", { length: 50 }),
   postMediaGroup: jsonb("post_media_group").default([]),
   views: jsonb("views").default([]),
+  grade: text("grade"),
+  bgGradient: text("bg_gradient"),
+  fontStyle: text("font_style"),
+  sticker: text("sticker"),
+  textColor: text("text_color"),
+  textBg: text("text_bg"),
+  textX: numeric("text_x").default("0"),
+  textY: numeric("text_y").default("0"),
+  textScale: numeric("text_scale").default("1"),
+  stickerX: numeric("sticker_x").default("0"),
+  stickerY: numeric("sticker_y").default("0"),
+  stickerScale: numeric("sticker_scale").default("1.2"),
+  musicTrack: text("music_track"),
+  metadata: jsonb("metadata").default({}),
   timestamp: timestamp("timestamp").defaultNow(),
   expiresAt: timestamp("expires_at"),
 }, (table) => ({

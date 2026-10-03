@@ -286,22 +286,28 @@ export function matchesBroadcastAudience(
 
   const rawGrades = broadcast.targetGrades || broadcast.target_grades;
   let gradesList: string[] = [];
-  if (Array.isArray(rawGrades)) gradesList = rawGrades;
-  else if (typeof rawGrades === "string") gradesList = [rawGrades];
+  if (Array.isArray(rawGrades)) gradesList = gradesList.concat(rawGrades);
+  else if (typeof rawGrades === "string") gradesList.push(rawGrades);
 
   if (gradesList.includes("parent_only") && !student.isParent) return false;
   if (gradesList.includes("teacher_only") && !student.isTeacher) return false;
 
-  // 1. Identify if the broadcast targets a specific section or multiple sections
+  // Identification of target sections
   const targetSection = broadcast.targetSection || broadcast.target_section;
   const rawTargetSections = broadcast.targetSections || broadcast.target_sections;
   let targetSectionsList: string[] = [];
   if (Array.isArray(rawTargetSections)) targetSectionsList = [...rawTargetSections];
   else if (typeof rawTargetSections === "string") targetSectionsList = [rawTargetSections];
 
-  // Also include targetSection if present
   if (targetSection && !targetSectionsList.includes(targetSection)) {
     targetSectionsList.unshift(targetSection);
+  }
+
+  // Inclusion of 'grade' property if present
+  if (broadcast.grade && typeof broadcast.grade === "string") {
+    if (!gradesList.includes(broadcast.grade)) {
+      gradesList.push(broadcast.grade);
+    }
   }
 
   // Also extract sections from gradesList if any entry contains a section letter (e.g. "الأول ابتدائي أ")
@@ -313,7 +319,7 @@ export function matchesBroadcastAudience(
     }
   });
 
-  // Filter out generic keywords from target sections
+  // Relaxed match for community posts: if no specific sections are targeted, match by grade alone
   const specificTargetSections = targetSectionsList.filter((s) => {
     if (!s || typeof s !== "string") return false;
     const norm = s.trim().toLowerCase();

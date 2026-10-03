@@ -7287,6 +7287,7 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
       const finalNotif = { ...newNotif, id: finalId };
 
       realtimeServerInstance?.broadcastManual('notifications', finalId, 'INSERT', finalNotif);
+      realtimeServerInstance?.broadcastManual('notifications_updated', finalId, 'UPDATE', { recipientId: targetRecipient, type: type });
 
       // Async external push dispatch (FCM tokens)
       (async () => {
@@ -8830,13 +8831,33 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
       let parentList: any[] = [];
       let driverList: any[] = [];
 
-      // Fast-path: Execute targeted single query based on code prefix
+      const isArchivedList = (l: any): boolean => {
+        if (!l) return false;
+        if (typeof l === 'string') {
+          const s = l.trim().toLowerCase();
+          return s.includes('أرشيف') || s.includes('ارشيف') || s.includes('archive');
+        }
+        return Boolean(
+          l.isArchive || l.isArchived || l.archived || l.status === 'archived' ||
+          (typeof l.name === 'string' && (l.name.includes('أرشيف') || l.name.includes('ارشيف') || l.name.toLowerCase().includes('archive')))
+        );
+      };
+
+      // 1. Admin codes check
       if (isAdminPrefix) {
-        activationList = await db.select().from(activation_codes).where(or(eq(activation_codes.code, code), eq(activation_codes.code, cleanCode)));
-      } else if (isTeacherPrefix) {
-        teacherDirectList = await db.select().from(teachers).where(or(eq(teachers.code, code), eq(teachers.id, code), eq(teachers.code, cleanCode)));
-        // If not matched by master code or id, search teacher classCodes JSONB
-        if (teacherDirectList.length === 0) {
+        const actList = await db.select().from(activation_codes).where(or(eq(activation_codes.code, code), eq(activation_codes.code, cleanCode)));
+        activationList = actList.filter(a => {
+          if (targetSchoolId && targetSchoolId !== 'all') {
+            return areSchoolsCompatible(a.schoolId, targetSchoolId);
+          }
+          return true;
+        });
+      } 
+      
+      // 2. Teacher codes check
+      if (isTeacherPrefix) {
+        let tchs = await db.select().from(teachers).where(or(eq(teachers.code, code), eq(teachers.id, code), eq(teachers.code, cleanCode)));
+        if (tchs.length === 0) {
           try {
             const allTchs = await db.select().from(teachers);
             const matched = allTchs.find(t => {
@@ -8847,290 +8868,117 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
               }
               return false;
             });
-            if (matched) teacherDirectList = [matched];
+            if (matched) tchs = [matched];
           } catch (err) {
             console.error('Error finding teacher by class code:', err);
           }
         }
 
-        // Fallback: Check activation_codes or decode structured teacher code (e.g. TCH-SCI-P1-2528)
-        if (teacherDirectList.length === 0) {
+        if (tchs.length === 0) {
           const actCodes = await db.select().from(activation_codes).where(or(eq(activation_codes.code, code), eq(activation_codes.code, cleanCode)));
-          if (actCodes.length > 0) {
-            activationList = actCodes;
-          } else {
-            const parts = cleanCode.split('-');
-            let subjectName = 'العلوم';
-            let gradeName = 'أول ابتدائي';
-            let teacherName = 'أستاذ المادة';
-
-            if (parts.length >= 2) {
-              const sub = parts[1].toUpperCase();
-              switch (sub) {
-                case 'SCI': subjectName = 'العلوم'; break;
-                case 'MATH': subjectName = 'الرياضيات'; break;
-                case 'ARB': subjectName = 'اللغة العربية'; break;
-                case 'ENG': subjectName = 'اللغة الإنكليزية'; break;
-                case 'ISL': subjectName = 'التربية الإسلامية'; break;
-                case 'HIS': subjectName = 'التاريخ'; break;
-                case 'GEO': subjectName = 'الجغرافيا'; break;
-                case 'ECO': subjectName = 'الاقتصاد'; break;
-                case 'SOC': subjectName = 'الاجتماعيات'; break;
-                case 'ART': subjectName = 'التربية الفنية'; break;
-                case 'SPO': subjectName = 'التربية الرياضية'; break;
-                case 'COM': subjectName = 'الحاسوب'; break;
-                case 'FRE': subjectName = 'اللغة الفرنسية'; break;
-                case 'CHE': subjectName = 'الكيمياء'; break;
-                case 'PHY': subjectName = 'الفيزياء'; break;
-                case 'BIO': subjectName = 'الأحياء'; break;
-                case 'STAFF': subjectName = 'الكادر الإداري'; break;
-                default: subjectName = 'المنهج العام'; break;
-              }
-              teacherName = `أستاذ ${subjectName}`;
-            }
-
-            if (parts.length >= 3) {
-              const gCode = parts[2].toUpperCase();
-              const parsedGrade = getGradeFromCodePrefix(gCode);
-              if (parsedGrade) {
-                gradeName = parsedGrade;
-              }
-            }
-
-            const synthTeacherId = `tch_${cleanCode.toLowerCase().replace(/[^a-z0-9]/g, '_')}`;
-            const synthClasses = [gradeName, `${gradeName} (أ)`, `${gradeName} (ب)`];
-            const targetSchool = targetSchoolId || 'school1';
-            const synthTeacher: any = {
-              id: synthTeacherId,
-              name: teacherName,
-              subject: subjectName,
-              role: 'TEACHER',
-              classes: synthClasses,
-              grade: gradeName,
-              code: cleanCode,
-              schoolId: targetSchool,
-              isActive: true,
-              canPublish: true,
-              rating: 5,
-              classCodes: {
-                [gradeName]: cleanCode,
-                [`${gradeName} (أ)`]: cleanCode
-              }
-            };
-
-            try {
-              await db.insert(teachers).values({
-                id: synthTeacher.id,
-                name: synthTeacher.name,
-                subject: synthTeacher.subject,
-                role: synthTeacher.role as any,
-                classes: synthTeacher.classes,
-                grade: synthTeacher.grade,
-                code: synthTeacher.code,
-                schoolId: synthTeacher.schoolId,
-                isActive: true,
-                canPublish: true,
-                rating: 5,
-                classCodes: synthTeacher.classCodes,
-                createdAt: new Date(),
-                updatedAt: new Date()
-              }).onConflictDoUpdate({
-                target: teachers.id,
-                set: {
-                  code: cleanCode,
-                  schoolId: targetSchool,
-                  updatedAt: new Date()
-                }
-              });
-            } catch (insertErr) {
-              console.warn('Auto-provisioning synthetic teacher in DB notice:', insertErr);
-            }
-
-            teacherDirectList = [synthTeacher];
-          }
+          activationList = actCodes.filter(a => (a.role || '').toLowerCase().includes('teacher'));
+        } else {
+          teacherDirectList = tchs;
         }
-      } else if (isParentPrefix) {
-        parentList = await db.select().from(students).where(or(eq(students.parentCode, code), eq(students.parentCode, cleanCode), ilike(students.parentCode, code)));
-      } else if (isDriverPrefix) {
-        driverList = await db.select().from(transport_drivers).where(or(eq(transport_drivers.accessCode, code), eq(transport_drivers.accessCode, cleanCode), ilike(transport_drivers.accessCode, code)));
-      } else if (isStudentPrefix) {
-        studentList = await db.select().from(students).where(or(eq(students.code, code), eq(students.code, cleanCode), ilike(students.code, code)));
-      } else {
-        // Fallback: Run all candidate checks in parallel (single DB roundtrip)
-        const results = await Promise.all([
-          db.select().from(teachers).where(or(eq(teachers.code, code), eq(teachers.id, code), eq(teachers.code, cleanCode))),
-          db.select().from(activation_codes).where(or(eq(activation_codes.code, code), eq(activation_codes.code, cleanCode))),
-          db.select().from(students).where(or(eq(students.code, code), eq(students.code, cleanCode), ilike(students.code, code))),
-          db.select().from(students).where(or(eq(students.parentCode, code), eq(students.parentCode, cleanCode), ilike(students.parentCode, code))),
-          db.select().from(transport_drivers).where(or(eq(transport_drivers.accessCode, code), eq(transport_drivers.accessCode, cleanCode)))
-        ]);
-        teacherDirectList = results[0];
-        activationList = results[1];
-        studentList = results[2];
-        parentList = results[3];
-        driverList = results[4];
 
-        // Also check teachers classCodes in fallback
-        if (teacherDirectList.length === 0) {
-          try {
-            const allTchs = await db.select().from(teachers);
-            const matched = allTchs.find(t => {
-              if (!t) return false;
-              if (t.code === code || t.id === code || String(t.code).toUpperCase() === cleanCode) return true;
-              if (t.classCodes && typeof t.classCodes === 'object') {
-                return Object.values(t.classCodes).some((c: any) => String(c).trim().toUpperCase() === cleanCode);
-              }
-              return false;
-            });
-            if (matched) teacherDirectList = [matched];
-          } catch (err) {
-            console.error('Error finding teacher by class code in fallback:', err);
-          }
+        if (targetSchoolId && targetSchoolId !== 'all') {
+          teacherDirectList = teacherDirectList.filter(t => areSchoolsCompatible(t.schoolId, targetSchoolId));
+          activationList = activationList.filter(a => areSchoolsCompatible(a.schoolId, targetSchoolId));
         }
-      }
-
-      // Fallback: If student or parent not found in tables yet, check academic_lists
-      if (studentList.length === 0 && !isAdminPrefix && !isTeacherPrefix && !isDriverPrefix) {
+      } 
+      
+      // 3. Driver codes check
+      if (isDriverPrefix) {
+        const drvs = await db.select().from(transport_drivers).where(or(eq(transport_drivers.accessCode, code), eq(transport_drivers.accessCode, cleanCode), ilike(transport_drivers.accessCode, code)));
+        driverList = drvs.filter(d => {
+          if (d.status !== 'active') return false;
+          if (targetSchoolId && targetSchoolId !== 'all') {
+            return areSchoolsCompatible(d.schoolId, targetSchoolId);
+          }
+          return true;
+        });
+      } 
+      
+      // 4. Student & Parent codes check (STRICTLY FROM DATABASE)
+      if (isStudentPrefix || isParentPrefix || (!isAdminPrefix && !isTeacherPrefix && !isDriverPrefix)) {
         try {
+          // A. Check academic_lists (The "Code Center" source of truth)
           const allLists = await db.select().from(academic_lists);
           for (const aList of allLists) {
+            if (isArchivedList(aList)) continue;
+            if (targetSchoolId && targetSchoolId !== 'all' && !areSchoolsCompatible(aList.schoolId, targetSchoolId)) continue;
+            
             const listStudents = Array.isArray(aList.students) ? aList.students : [];
-            const foundStu = listStudents.find((s: any) => {
+            for (const s of listStudents) {
               const scode = String(s.student || s.code || '').trim().toUpperCase();
-              const sid = String(s.id || '').trim().toUpperCase();
-              return scode === cleanCode || sid === cleanCode;
-            });
-            if (foundStu) {
-              const gradeFromPfx = getGradeFromCodePrefix(cleanCode);
-              const resolvedGrade = gradeFromPfx || foundStu.grade || aList.grade || 'أول ابتدائي';
-              studentList = [{
-                id: String(foundStu.id || `${aList.schoolId || 'school1'}_${cleanCode}`),
-                schoolId: aList.schoolId || targetSchoolId || 'school1',
-                name: foundStu.name || 'طالب الأكاديمية',
-                grade: resolvedGrade,
-                section: aList.name || (foundStu as any).section || '',
-                class: aList.name || (foundStu as any).class || '',
-                className: aList.name || (foundStu as any).className || '',
-                code: foundStu.student || foundStu.code || cleanCode,
-                parentCode: foundStu.parent || foundStu.parentCode || `PAR-${cleanCode}`,
-                status: 'نشط',
-                isBanned: false,
-                gender: foundStu.gender || (cleanCode.includes('-G-') ? 'female' : 'male')
-              }] as any;
-              break;
-            }
-          }
-        } catch (listErr) {
-          console.error('Error searching academic_lists for student:', listErr);
-        }
-      }
-
-      if (parentList.length === 0 && (isParentPrefix || (!isAdminPrefix && !isTeacherPrefix && !isDriverPrefix))) {
-        try {
-          const allLists = await db.select().from(academic_lists);
-          for (const aList of allLists) {
-            const listStudents = Array.isArray(aList.students) ? aList.students : [];
-            const foundStu = listStudents.find((s: any) => {
               const pcode = String(s.parent || s.parentCode || '').trim().toUpperCase();
-              return pcode === cleanCode || pcode === code.trim().toUpperCase();
-            });
-            if (foundStu) {
-              const gradeFromPfx = getGradeFromCodePrefix(cleanCode);
-              const resolvedGrade = gradeFromPfx || foundStu.grade || aList.grade || 'أول ابتدائي';
-              parentList = [{
-                id: String(foundStu.id || `${aList.schoolId || 'school1'}_${cleanCode}`),
-                schoolId: aList.schoolId || targetSchoolId || 'school1',
-                name: foundStu.name || 'طالب الأكاديمية',
-                grade: resolvedGrade,
-                section: aList.name || (foundStu as any).section || '',
-                class: aList.name || (foundStu as any).class || '',
-                className: aList.name || (foundStu as any).className || '',
-                code: foundStu.student || foundStu.code || cleanCode,
-                parentCode: foundStu.parent || foundStu.parentCode || cleanCode,
+              const sid = String(s.id || '').trim().toUpperCase();
+
+              if (scode === cleanCode || sid === cleanCode || pcode === cleanCode) {
+                const isParent = pcode === cleanCode && scode !== cleanCode;
+                const gradeFromPfx = getGradeFromCodePrefix(cleanCode);
+                const resolvedGrade = gradeFromPfx || s.grade || aList.grade || aList.name || 'أول ابتدائي';
+                
+                const stuData = {
+                  id: String(s.id || `${aList.schoolId || 'school1'}_${scode || cleanCode}`),
+                  schoolId: aList.schoolId || targetSchoolId || 'school1',
+                  name: s.name || 'طالب الأكاديمية',
+                  grade: resolvedGrade,
+                  section: s.section || aList.name || '',
+                  class: s.class || aList.name || '',
+                  code: scode || cleanCode,
+                  parentCode: pcode || `PAR-${scode || cleanCode}`,
+                  status: 'نشط',
+                  isBanned: false,
+                  role: isParent ? 'parent' : 'student'
+                };
+
+                if (isParent) parentList = [stuData];
+                else studentList = [stuData];
+                break;
+              }
+            }
+            if (studentList.length > 0 || parentList.length > 0) break;
+          }
+
+          // B. Check students table if not found in lists
+          if (studentList.length === 0 && parentList.length === 0) {
+            const dbStus = await db.select().from(students).where(or(
+              eq(students.code, cleanCode), 
+              eq(students.id, cleanCode),
+              eq(students.parentCode, cleanCode)
+            )).limit(1);
+            
+            if (dbStus.length > 0) {
+               const s = dbStus[0];
+               if (!targetSchoolId || targetSchoolId === 'all' || areSchoolsCompatible(s.schoolId, targetSchoolId)) {
+                  const isParent = s.parentCode === cleanCode && s.code !== cleanCode;
+                  const stuData = { ...s, role: isParent ? 'parent' : 'student' };
+                  if (isParent) parentList = [stuData];
+                  else studentList = [stuData];
+               }
+            }
+          }
+
+          // C. Check activation_codes
+          if (studentList.length === 0 && parentList.length === 0) {
+            const actCodes = await db.select().from(activation_codes).where(eq(activation_codes.code, cleanCode));
+            for (const act of actCodes) {
+              if (targetSchoolId && targetSchoolId !== 'all' && !areSchoolsCompatible(act.schoolId, targetSchoolId)) continue;
+              studentList = [{
+                id: act.id,
+                schoolId: act.schoolId || targetSchoolId || 'school1',
+                name: 'طالب الأكاديمية',
+                grade: act.grade || 'أول ابتدائي',
+                code: cleanCode,
                 status: 'نشط',
                 isBanned: false,
-                gender: foundStu.gender || (cleanCode.includes('-G-') ? 'female' : 'male')
-              }] as any;
+              }];
               break;
             }
           }
         } catch (listErr) {
-          console.error('Error searching academic_lists for parent:', listErr);
-        }
-      }
-
-      // Universal Cross-Platform Fallback: If code not found in local SQL tables, check if verified Firestore doc is provided
-      const fsDoc = req.body?.firestoreCodeDoc;
-      if (teacherDirectList.length === 0 && activationList.length === 0 && studentList.length === 0 && parentList.length === 0 && driverList.length === 0) {
-        if (fsDoc && typeof fsDoc === 'object') {
-          const fsRole = (fsDoc.role || '').toLowerCase();
-          const fsSchool = fsDoc.schoolId || targetSchoolId || 'school1';
-          const fsCode = String(fsDoc.code || fsDoc.parentCode || fsDoc.studentCode || cleanCode).trim().toUpperCase();
-
-          // Auto-cache to PostgreSQL activation_codes
-          try {
-            await db.insert(activation_codes).values({
-              id: String(fsDoc.id || `act_${Date.now()}`),
-              code: fsCode,
-              schoolId: fsSchool,
-              role: fsRole || (isTeacherPrefix ? 'teacher' : isAdminPrefix ? 'admin' : 'student'),
-              used: fsDoc.used === true,
-              createdAt: new Date().toISOString()
-            }).onConflictDoNothing();
-          } catch (syncErr) {
-            console.warn('Auto-sync firestoreCodeDoc into PostgreSQL warning:', syncErr);
-          }
-
-          if (fsRole.includes('teacher') || isTeacherPrefix) {
-            try {
-              await db.insert(teachers).values({
-                id: String(fsDoc.id || `tch_${cleanCode}`),
-                code: fsCode,
-                name: fsDoc.name || fsDoc.teacherName || 'أستاذ المادة',
-                schoolId: fsSchool,
-                subject: fsDoc.subject || 'المادة الدراسية',
-                grade: fsDoc.grade || 'جميع المراحل',
-                isActive: true
-              }).onConflictDoNothing();
-            } catch (tchErr) {}
-
-            teacherDirectList = [{
-              id: String(fsDoc.id || `tch_${cleanCode}`),
-              name: fsDoc.name || fsDoc.teacherName || 'أستاذ المادة',
-              code: fsCode,
-              schoolId: fsSchool,
-              subject: fsDoc.subject || 'المادة الدراسية',
-              grade: fsDoc.grade || 'جميع المراحل',
-              isActive: fsDoc.isActive !== false,
-              isBanned: false
-            }];
-          } else if (fsRole.includes('admin') || isAdminPrefix) {
-            activationList = [{
-              id: String(fsDoc.id || `act_${cleanCode}`),
-              code: fsCode,
-              schoolId: fsSchool,
-              role: 'admin',
-              used: false
-            }];
-          } else if (fsRole.includes('parent') || isParentPrefix) {
-            parentList = [{
-              id: String(fsDoc.id || `par_${cleanCode}`),
-              name: fsDoc.name || 'ولي أمر الطالب',
-              code: fsDoc.studentCode || cleanCode,
-              parentCode: fsCode,
-              schoolId: fsSchool,
-              grade: fsDoc.grade || 'أول ابتدائي',
-              gender: 'male'
-            }];
-          } else {
-            activationList = [{
-              id: String(fsDoc.id || `act_${cleanCode}`),
-              code: fsCode,
-              schoolId: fsSchool,
-              role: fsDoc.role || 'student',
-              used: false
-            }];
-          }
+          console.error('Error during student/parent code verification:', listErr);
         }
       }
 
@@ -9550,7 +9398,10 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
       console.log('Login failed for code:', code);
       await recordFailedAuthAttempt(req, code);
 
-      return res.status(401).json({ success: false, message: 'كود الدخول غير صحيح' });
+      return res.status(401).json({ 
+        success: false, 
+        message: 'كود الدخول غير موجود في مركز أكواد المدرسة. يجب أن يكون الكود مسجلاً ومولداً داخل مركز أكواد المدرسة حصراً.' 
+      });
     } catch (error: any) {
       console.error('Login code error:', error);
       res.status(500).json({ success: false, message: error.message });
@@ -12908,7 +12759,19 @@ app.delete('/api/system_errors/:id', async (req, res) => {
       const { schoolId } = req.query;
       let queryBuilder = db.select().from(community_stories);
       if (schoolId && schoolId !== 'all') {
-        queryBuilder = queryBuilder.where(eq(community_stories.schoolId, schoolId as string)) as any;
+        const sId = String(schoolId).trim();
+        const awailGroup = ['school1', 'school1-boys', 'school1-girls', 'school_awail_ghamas', 'ghamas_awail'];
+        if (awailGroup.includes(sId)) {
+          queryBuilder = queryBuilder.where(or(
+            eq(community_stories.schoolId, 'school1'),
+            eq(community_stories.schoolId, 'school1-boys'),
+            eq(community_stories.schoolId, 'school1-girls'),
+            eq(community_stories.schoolId, 'school_awail_ghamas'),
+            eq(community_stories.schoolId, 'ghamas_awail')
+          )) as any;
+        } else {
+          queryBuilder = queryBuilder.where(eq(community_stories.schoolId, sId)) as any;
+        }
       }
       const results = await queryBuilder.orderBy(desc(community_stories.timestamp));
       res.json({ success: true, stories: results, data: results });
@@ -12935,7 +12798,7 @@ app.delete('/api/system_errors/:id', async (req, res) => {
       const views = body.views || [];
       const expiresAt = body.expiresAt ? new Date(body.expiresAt) : new Date(Date.now() + 24 * 60 * 60 * 1000);
 
-      const newStory = {
+      const newStory: any = {
         id,
         schoolId,
         userId,
@@ -12946,6 +12809,20 @@ app.delete('/api/system_errors/:id', async (req, res) => {
         mediaType,
         postMediaGroup,
         views,
+        grade: body.grade || null,
+        bgGradient: body.bgGradient || body.bg_gradient || 'indigo',
+        fontStyle: body.fontStyle || body.font_style || 'classic',
+        sticker: body.sticker || null,
+        textColor: body.textColor || body.text_color || '#ffffff',
+        textBg: body.textBg || body.text_bg || 'transparent',
+        textX: String(body.textX ?? 0),
+        textY: String(body.textY ?? 0),
+        textScale: String(body.textScale ?? 1.0),
+        stickerX: String(body.stickerX ?? 0),
+        stickerY: String(body.stickerY ?? 0),
+        stickerScale: String(body.stickerScale ?? 1.2),
+        musicTrack: body.musicTrack || body.music_track || null,
+        metadata: body.metadata || {},
         timestamp: new Date(),
         expiresAt
       };

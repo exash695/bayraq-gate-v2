@@ -1858,13 +1858,15 @@ export default function App() {
           .filter((d: any) => !(portalType === "teacher" && d.type === "alarm"))
           .filter((d: any) => d.type !== "reminder")
           .filter((d: any) => {
+            // If it's a direct notification to a specific ID, and that ID is one of ours, show it regardless of role
+            if (d.recipientId && d.recipientId !== 'all' && possibleIds.includes(d.recipientId)) return true;
+
             if (d.recipientRole) {
               const r = d.recipientRole.toLowerCase();
               if (portalType === "teacher") return r === "teacher" || r === "cadre" || r === "staff" || r === "general";
               if (portalType === "parent") return r === "parent" || r === "general";
               return r === "student" || r === "general";
             }
-            if (d.recipientId && d.recipientId !== 'all') return true;
             return true;
           });
           

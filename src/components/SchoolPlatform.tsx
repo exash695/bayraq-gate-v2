@@ -541,7 +541,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     return finalPoints;
   };
 
-  const getCurrentUserId = () => {
+  const getCurrentUserId = useCallback(() => {
     if (isTeacher)
       return (
         teacherData?.id || teacherData?.code || auth.currentUser?.uid || "guest"
@@ -555,9 +555,9 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
       auth.currentUser?.uid ||
       "guest"
     );
-  };
+  }, [isTeacher, teacherData, userProfile, auth.currentUser]);
 
-  const getUserName = () => {
+  const getUserName = useCallback(() => {
     if (isTeacher) return teacherData?.name || "أستاذ";
     if (
       userProfile?.role === "admin" ||
@@ -571,9 +571,9 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
       return profileName.trim();
     }
     return auth.currentUser?.displayName || "طالب متميز";
-  };
+  }, [isTeacher, teacherData, userProfile, auth.currentUser]);
 
-  const getUserPhoto = () => {
+  const getUserPhoto = useCallback(() => {
     if (isTeacher) return currentTeacherData?.photoURL || teacherData?.photoURL || userProfile?.photoURL || null;
     if (
       userProfile?.role === "admin" ||
@@ -582,7 +582,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     )
       return null; // No photo for admin account
     return userProfile?.photoURL || null;
-  };
+  }, [isTeacher, currentTeacherData, teacherData, userProfile]);
 
   const remoteConfig = useRemoteConfig();
   const [schoolConfigData, setSchoolConfigData] = useState<{ disabledModules?: string[]; [key: string]: any } | null>(() => {
@@ -5152,7 +5152,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
       (err) => console.warn("Stories sub error:", err),
     );
     return () => unsubscribe();
-  }, [schoolId, grade]);
+  }, [schoolId, grade, userProfile, isTeacher, getCurrentUserId]);
 
   const getLikedPosts = (): string[] => {
     const key = `liked_posts_${auth.currentUser?.uid || "guest"}`;
@@ -5184,62 +5184,45 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
 
     const unsubscribe = onSnapshot(
       postsQuery,
-      async (snapshot) => {
+      (snapshot) => {
         const likedList = getLikedPosts();
-        const fetchedPosts = await Promise.all(
-          snapshot.docs.map(async (docRef) => {
-            const data = docRef.data();
-            const notesSnap = await getDocs(
-              collection(db, "community_posts", docRef.id, "admin_notes"),
-            );
-            const adminNotes = notesSnap.docs.map((n) => n.data());
-
-            let userReaction = null;
-            if (auth.currentUser) {
-              const uReactDoc = await getDoc(
-                doc(
-                  db,
-                  "community_posts",
-                  docRef.id,
-                  "reactions_list",
-                  getCurrentUserId(),
-                ),
-              );
-              if (uReactDoc.exists()) {
-                userReaction = uReactDoc.data().sticker;
-              }
-            }
-
-            return {
-              id: docRef.id,
-              userId: data.userId || "",
-              userName: data.userName,
-              userPhotoURL: data.userPhotoURL,
-              mediaUrl: data.mediaUrl,
-              time: data.timestamp
-                ? (typeof data.timestamp?.toDate === 'function' ? data.timestamp.toDate() : new Date(data.timestamp)).toLocaleString("ar-IQ")
-                : "الآن",
-              content: data.content,
-              likes: data.likes || 0,
-              comments: data.comments || 0,
-              shares: data.shares || 0,
-              isLiked: likedList.includes(docRef.id),
-              type: data.type || "student",
-              isPinned: data.isPinned || false,
-              isLocked: data.isLocked || false,
-              adminNotes: adminNotes,
-              stageIcon: data.stageIcon || "",
-              stageStickers: data.stageStickers || [],
-              reactions: data.reactions || {},
-              userReaction: userReaction,
-              schoolId: data.schoolId || "",
-              grade: data.grade || "",
-            } as Post;
-          }),
-        );
+        const fetchedPosts = snapshot.docs.map((docRef) => {
+          const data = docRef.data();
+          
+          return {
+            id: docRef.id,
+            userId: data.userId || "",
+            userName: data.userName,
+            userPhotoURL: data.userPhotoURL,
+            mediaUrl: data.mediaUrl,
+            time: data.timestamp
+              ? (typeof data.timestamp?.toDate === 'function' ? data.timestamp.toDate() : new Date(data.timestamp)).toLocaleString("ar-IQ")
+              : "الآن",
+            content: data.content,
+            likes: data.likes || 0,
+            comments: data.comments || 0,
+            shares: data.shares || 0,
+            isLiked: likedList.includes(docRef.id),
+            type: data.type || "student",
+            isPinned: data.isPinned || false,
+            isLocked: data.isLocked || false,
+            adminNotes: data.adminNotes || [],
+            stageIcon: data.stageIcon || "",
+            stageStickers: data.stageStickers || [],
+            reactions: data.reactions || {},
+            userReaction: null, // Subcollection handled elsewhere if needed
+            schoolId: data.schoolId || "",
+            grade: data.grade || "",
+            targetSection: data.targetSection || null,
+            targetSections: data.targetSections || [],
+          } as Post;
+        });
 
         // Filter with high-fidelity visibility matching
         const filteredPosts = fetchedPosts.filter((post) => {
+          // Always show user's own posts to them
+          if (post.userId === getCurrentUserId()) return true;
+
           // Must match school context
           const isSchoolMatch =
             !post.schoolId ||
@@ -5247,9 +5230,14 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
             post.schoolId === schoolId;
           if (!isSchoolMatch) return false;
 
-          // If it's a student/teacher post, only show to the same grade
+          // If it's a student/teacher post, use robust matching
           if (post.type !== "admin") {
-            return post.grade === grade;
+            return matchesBroadcastAudience(post, {
+              grade: grade,
+              section: (userProfile as any)?.section || (userProfile as any)?.group || "",
+              className: (userProfile as any)?.className || (userProfile as any)?.class || "",
+              isTeacher: isTeacher
+            });
           }
 
           // For admin posts, determine visibility based on configured targets
@@ -5309,7 +5297,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     );
 
     return () => unsubscribe();
-  }, [schoolId, grade]);
+  }, [schoolId, grade, userProfile, isTeacher, getCurrentUserId]);
 
   const handleReactToPost = async (postId: string, sticker: string) => {
     try {
@@ -5387,6 +5375,19 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
           { merge: true },
         );
         showToast(`تم التفاعل بـ ${sticker}! ✨`, "success");
+
+        // Notify the post author
+        const targetPost = posts.find((p) => p.id === postId);
+        if (targetPost && targetPost.userId && targetPost.userId !== getCurrentUserId()) {
+          pushSocialNotification(
+            targetPost.userId,
+            null,
+            getUserName(),
+            getUserPhoto(),
+            "reaction",
+            `تفاعل بـ ${sticker} على منشورك`,
+          );
+        }
       }
     } catch (err) {
       console.error("Error reacting to post with sticker:", err);
@@ -5477,17 +5478,34 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
           timestamp: serverTimestamp(),
           schoolId: schoolId,
           schoolName: schoolName,
-          grade: grade,
+          grade: isTeacher ? (extractGradeBase(selectedTeacherClass) || grade || "سادس علمي") : grade,
+          targetSection: isTeacher && selectedTeacherClass && selectedTeacherClass !== "ALL" && selectedTeacherClass !== "كافة الشُعب" ? selectedTeacherClass : null,
+          targetSections: isTeacher && selectedTeacherClass && selectedTeacherClass !== "ALL" && selectedTeacherClass !== "كافة الشُعب" ? [selectedTeacherClass] : [],
           type: isTeacher
             ? "teacher"
             : userProfile?.role === "admin"
               ? "admin"
               : "student",
+          likes: 0,
+          comments: 0,
+          shares: 0,
         });
         await updateDoc(doc(db, "community_posts", sharingPost.id), {
           shares: increment(1),
         });
         showToast("تمت إعادة مشاركة المنشور في الساحة بنجاح! 🚀", "success");
+
+        // Notify the original post author
+        if (sharingPost.userId && sharingPost.userId !== getCurrentUserId()) {
+          pushSocialNotification(
+            sharingPost.userId,
+            null,
+            getUserName(),
+            getUserPhoto(),
+            "share",
+            `قام بإعادة مشاركة منشورك في الساحة`,
+          );
+        }
       } catch (err) {
         console.error("Error sharing to feed:", err);
         showToast("فشل مشاركة المنشور", "error");
@@ -5512,6 +5530,18 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
           "تمت الإضافة إلى حالات التميز الخاصة بك بنجاح! 🌟",
           "success",
         );
+
+        // Notify the original post author
+        if (sharingPost.userId && sharingPost.userId !== getCurrentUserId()) {
+          pushSocialNotification(
+            sharingPost.userId,
+            null,
+            getUserName(),
+            getUserPhoto(),
+            "share_story",
+            `قام بإضافة منشورك إلى حالات التميز الخاصة به`,
+          );
+        }
       } catch (err) {
         console.error("Error sharing to story:", err);
         showToast("فشل النشر في حالات التميز", "error");
@@ -5566,27 +5596,52 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
         timestamp: serverTimestamp(),
         schoolId: schoolId,
         schoolName: schoolName,
-        grade: isTeacher ? (targetBroadcastGrade || "سادس علمي") : grade,
+        grade: isTeacher ? (extractGradeBase(selectedTeacherClass) || grade || "سادس علمي") : grade,
+        targetSection: isTeacher && selectedTeacherClass && selectedTeacherClass !== "ALL" && selectedTeacherClass !== "كافة الشُعب" ? selectedTeacherClass : null,
+        targetSections: isTeacher && selectedTeacherClass && selectedTeacherClass !== "ALL" && selectedTeacherClass !== "كافة الشُعب" ? [selectedTeacherClass] : [],
         type: isTeacher
           ? "teacher"
           : userProfile?.role === "admin"
             ? "admin"
             : "student",
-      });
-
-      const newPost: Post = {
-        id: postRef.id,
-        userName: getUserName(),
-        userPhotoURL: getUserPhoto(),
-        mediaUrl: newPostMedia || undefined,
-        time: "الآن",
-        content: newPostContent,
         likes: 0,
         comments: 0,
-        isLiked: false,
-        type: isTeacher ? "teacher" : "student",
+        shares: 0,
+      });
+
+      const postData = {
+        userId: getCurrentUserId(),
+        userName: getUserName(),
+        userPhotoURL: getUserPhoto(),
+        mediaUrl: newPostMedia || null,
+        content: newPostContent,
         timestamp: new Date(),
+        schoolId: schoolId,
+        schoolName: schoolName,
+        grade: isTeacher ? (extractGradeBase(selectedTeacherClass) || grade || "سادس علمي") : grade,
+        targetSection: isTeacher && selectedTeacherClass && selectedTeacherClass !== "ALL" && selectedTeacherClass !== "كافة الشُعب" ? selectedTeacherClass : null,
+        targetSections: isTeacher && selectedTeacherClass && selectedTeacherClass !== "ALL" && selectedTeacherClass !== "كافة الشُعب" ? [selectedTeacherClass] : [],
+        type: isTeacher
+          ? "teacher"
+          : userProfile?.role === "admin"
+            ? "admin"
+            : "student",
+        likes: 0,
+        comments: 0,
+        shares: 0,
       };
+
+      const newPost: Post = {
+        ...postData,
+        id: postRef.id,
+        time: "الآن",
+        isLiked: false,
+        isPinned: false,
+        isLocked: false,
+        adminNotes: [],
+        reactions: {},
+        userReaction: null,
+      } as Post;
 
       // The onSnapshot will automatically update the UI
       const matches = newPostContent.match(/@(\S+)/g);

@@ -97,7 +97,64 @@ import type { Teacher, MaterialField, Post, SchoolPlatformProps, PlatformTab, Ha
 import { useSchoolPlatform } from "./SchoolPlatformContext";
 
 export const StudentFeedTab: React.FC = () => {
-  const { activeCommentPostId, activeLiveTeacherName, activePostReactionId, classmates, editingPostContent, editingPostId, getCurrentUserId, getUserName, getUserPhoto, grade, handleAddAdminNoteClick, handleAddStoryClick, handleComment, handleDeletePost, handleEditPost, handleMediaUpload, handlePost, handleReactToPost, handleSaveEditPost, handleShare, handleTextareaChange, handleToggleLockPost, handleTogglePinPost, handleViewUserStories, insertTag, isLiveActive, isPosting, isTeacher, liveTitle, mediaInputRef, newPostContent, newPostMedia, openMenuPostId, platformLocks, posts, schoolName, setActivePostReactionId, setActiveTab, setEditingPostContent, setEditingPostId, setIsPosting, setNewPostContent, setNewPostMedia, setOpenMenuPostId, showTagMenuTarget, showToast, stories, tagSearch, teacherData, toggleLike, uniqueStoryUsers, userProfile } = useSchoolPlatform();
+  const contextValue = useSchoolPlatform();
+  const {
+    activeCommentPostId,
+    activeLiveTeacherName,
+    activePostReactionId,
+    classmates,
+    editingPostContent,
+    editingPostId,
+    getCurrentUserId,
+    getUserName,
+    getUserPhoto,
+    grade,
+    handleAddAdminNoteClick,
+    handleAddStoryClick,
+    handleComment,
+    handleDeletePost,
+    handleEditPost,
+    handleMediaUpload,
+    handlePost,
+    handleReactToPost,
+    handleSaveEditPost,
+    handleShare,
+    handleTextareaChange,
+    handleToggleLockPost,
+    handleTogglePinPost,
+    handleViewUserStories,
+    insertTag,
+    isLiveActive,
+    isPosting,
+    isTeacher,
+    liveTitle,
+    mediaInputRef,
+    newPostContent,
+    newPostMedia,
+    openMenuPostId,
+    platformLocks,
+    posts,
+    schoolName,
+    setActivePostReactionId,
+    setActiveTab,
+    setEditingPostContent,
+    setEditingPostId,
+    setIsPosting,
+    setNewPostContent,
+    setNewPostMedia,
+    setOpenMenuPostId,
+    showTagMenuTarget,
+    showToast,
+    stories,
+    tagSearch,
+    teacherData,
+    toggleLike,
+    uniqueStoryUsers,
+    userProfile,
+    teacherAssignedSections,
+    selectedTeacherClass,
+    setSelectedTeacherClass,
+  } = contextValue;
 
         return (
           <div className="flex-1 overflow-y-auto no-scrollbar pb-24">
@@ -348,6 +405,36 @@ export const StudentFeedTab: React.FC = () => {
                     className="space-y-4"
                   >
                     <div className="relative">
+                      {isTeacher && teacherAssignedSections && teacherAssignedSections.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-2 mb-4 bg-white/5 p-2 rounded-xl border border-white/5">
+                          <span className="text-[10px] font-black text-white/30 ml-1 uppercase tracking-widest">توجيه إلى:</span>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedTeacherClass("ALL")}
+                            className={`px-3 py-1 rounded-lg text-[10px] font-black transition-all border ${
+                              !selectedTeacherClass || selectedTeacherClass === "ALL"
+                                ? "bg-amber-500 text-white border-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.3)]"
+                                : "bg-black/20 text-white/40 border-white/5 hover:bg-white/5"
+                            }`}
+                          >
+                            كافة الشعب
+                          </button>
+                          {teacherAssignedSections.map((sec: any) => (
+                            <button
+                              key={sec.name}
+                              type="button"
+                              onClick={() => setSelectedTeacherClass(sec.name)}
+                              className={`px-3 py-1 rounded-lg text-[10px] font-black transition-all border ${
+                                selectedTeacherClass === sec.name
+                                  ? "bg-amber-500 text-white border-amber-400 shadow-[0_0_10px_rgba(245,158,11,0.3)]"
+                                  : "bg-black/20 text-white/40 border-white/5 hover:bg-white/5"
+                              }`}
+                            >
+                              {sec.name}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       <textarea
                         autoFocus
                         value={newPostContent}
@@ -514,9 +601,29 @@ export const StudentFeedTab: React.FC = () => {
                               <Lock size={14} className="text-rose-400" />
                             )}
                           </h4>
-                          <span className="text-white/20 text-[10px] font-bold uppercase tracking-widest leading-none">
-                            {post.time}
-                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-white/20 text-[10px] font-bold uppercase tracking-widest leading-none">
+                              {post.time}
+                            </span>
+                            {post.targetSection && post.targetSection !== "ALL" && post.targetSection !== "الكل" ? (
+                              <span className="px-1.5 py-0.5 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-400/80 text-[9px] font-black flex items-center gap-1">
+                                <Users size={10} />
+                                {post.targetSection}
+                              </span>
+                            ) : (post.type === "teacher" || post.type === "admin") ? (
+                              <span className="px-1.5 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-500/60 text-[9px] font-black flex items-center gap-1">
+                                <Users size={10} />
+                                كافة الشُعب
+                              </span>
+                            ) : null}
+                            {post.targetSections && post.targetSections.length > 0 && !post.targetSection && (
+                              <span className="px-1.5 py-0.5 rounded-md bg-blue-500/10 border border-blue-500/20 text-blue-400/80 text-[9px] font-black flex items-center gap-1">
+                                <Users size={10} />
+                                {post.targetSections[0]}
+                                {post.targetSections.length > 1 && ` (+${post.targetSections.length - 1})`}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                       {/* Three Dots Menu Placement */}
@@ -852,39 +959,42 @@ export const StudentFeedTab: React.FC = () => {
                               strokeWidth={2.5}
                               className="animate-pulse"
                             />
-                            <span className="text-xs font-black">
-                              تفاعل / أعجبني
+                            <span className="text-[11px] font-black text-white/60">
+                              {post.likes || 0}
                             </span>
                           </button>
                         </div>
 
                         <button
                           onClick={() => handleComment(post.id)}
-                          className={`flex items-center gap-2 transition-colors ${activeCommentPostId === post.id ? "text-blue-500" : "text-white/30 hover:text-white/60"}`}
+                          className={`flex items-center gap-2 transition-colors ${activeCommentPostId === post.id ? "text-blue-400" : "text-white/40 hover:text-white/70"}`}
                         >
                           <MessageCircle size={20} strokeWidth={2.5} />
                           {userProfile?.canComment === false && (
                             <Lock size={12} className="text-rose-500" />
                           )}
-                          <span className="text-xs font-black">
+                          <span className="text-[11px] font-black text-white/60">
                             {post.comments}
                           </span>
                         </button>
                       </div>
 
                       <button
-                        onClick={() => handleShare(post)}
-                        className="flex items-center gap-2 text-white/30 hover:text-white/60 transition-colors group"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleShare(post);
+                        }}
+                        className="flex items-center gap-2 text-white/40 hover:text-white/70 transition-colors group cursor-pointer"
                       >
                         <Share2
                           size={20}
                           strokeWidth={2.5}
                           className="group-hover:rotate-12 transition-transform"
                         />
-                        <span className="text-xs font-black uppercase tracking-widest">
+                        <span className="text-[10px] font-black uppercase tracking-widest hidden sm:inline">
                           مشاركة
                         </span>
-                        <span className="text-xs font-bold">
+                        <span className="text-[11px] font-black text-white/60">
                           {post.shares || 0}
                         </span>
                       </button>

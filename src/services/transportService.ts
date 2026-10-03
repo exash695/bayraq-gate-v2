@@ -49,29 +49,11 @@ export const getDrivers = async (schoolId: string): Promise<BusDriver[]> => {
 
 export const getDriverByAccessCode = async (accessCode: string): Promise<BusDriver | null> => {
   try {
-    const res = await fetch(`/api/transport/drivers?accessCode=${accessCode}`);
+    const res = await fetch(`/api/transport/drivers?accessCode=${encodeURIComponent(accessCode)}`);
     const data = await res.json();
-    if (data.success && data.drivers.length > 0) return data.drivers[0];
+    if (data.success && data.drivers && data.drivers.length > 0) return data.drivers[0];
   } catch (e) {
     console.error("Error fetching driver:", e);
-  }
-  // Demo fallback for testing
-  if (
-    accessCode.startsWith('DRI-') || 
-    accessCode.startsWith('DRV-') || 
-    accessCode === '100200' || 
-    accessCode === '112233'
-  ) {
-    return {
-      id: 'demo-driver-1',
-      name: 'الكابتن أبو فهد (سائق تجريبي)',
-      phone: '07700000000',
-      accessCode: accessCode,
-      busNumber: 'حافلة رقم 12 (الفرسان)',
-      routeId: 'route-demo-1',
-      schoolId: 'school1',
-      status: 'active'
-    };
   }
   return null;
 };

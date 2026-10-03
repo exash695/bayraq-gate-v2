@@ -37,6 +37,8 @@ export interface Post {
   shares?: number;
   schoolId?: string;
   grade?: string;
+  targetSection?: string | null;
+  targetSections?: string[];
 }
 
 export type HandRaiseStatus = "pending" | "approved" | "rejected";
