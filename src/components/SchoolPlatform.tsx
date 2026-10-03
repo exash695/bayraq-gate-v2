@@ -541,7 +541,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     return finalPoints;
   };
 
-  const getCurrentUserId = () => {
+  const getCurrentUserId = useCallback(() => {
     if (isTeacher)
       return (
         teacherData?.id || teacherData?.code || auth.currentUser?.uid || "guest"
@@ -555,7 +555,15 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
       auth.currentUser?.uid ||
       "guest"
     );
-  };
+  }, [
+    isTeacher,
+    teacherData?.id,
+    teacherData?.code,
+    userProfile?.role,
+    userProfile?.id,
+    userProfile?.studentCode,
+    userProfile?.code,
+  ]);
 
   const getUserName = () => {
     if (isTeacher) return teacherData?.name || "أستاذ";
@@ -5152,7 +5160,7 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
       (err) => console.warn("Stories sub error:", err),
     );
     return () => unsubscribe();
-  }, [schoolId, grade, userProfile, isTeacher, getCurrentUserId]);
+  }, [schoolId, grade, isTeacher, getCurrentUserId]);
 
   const getLikedPosts = (): string[] => {
     const key = `liked_posts_${auth.currentUser?.uid || "guest"}`;
@@ -5298,7 +5306,16 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     );
 
     return () => unsubscribe();
-  }, [schoolId, grade, userProfile, isTeacher, getCurrentUserId]);
+  }, [
+    schoolId,
+    grade,
+    (userProfile as any)?.section,
+    (userProfile as any)?.group,
+    (userProfile as any)?.className,
+    (userProfile as any)?.class,
+    isTeacher,
+    getCurrentUserId,
+  ]);
 
   const handleReactToPost = async (postId: string, sticker: string) => {
     try {

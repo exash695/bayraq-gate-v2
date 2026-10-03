@@ -2423,28 +2423,22 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
     try {
       const { schoolId } = req.params;
       const cleaned = (schoolId || '').trim().toLowerCase();
+      const baseId = cleaned.replace(/-(boys|girls)$/i, '');
       const limit = req.query.limit ? Math.min(Math.max(parseInt(req.query.limit as string, 10) || 50, 1), 2000) : undefined;
       const offset = req.query.offset ? Math.max(parseInt(req.query.offset as string, 10) || 0, 0) : undefined;
 
       let query = (cleaned === 'school_awail_ghamas' || cleaned === 'ghamas_awail')
         ? db.select().from(students).where(or(eq(students.schoolId, 'school1'), eq(students.schoolId, schoolId)))
-        : db.select().from(students).where(eq(students.schoolId, schoolId));
+        : (baseId !== cleaned)
+          ? db.select().from(students).where(or(eq(students.schoolId, schoolId), eq(students.schoolId, baseId)))
+          : db.select().from(students).where(eq(students.schoolId, schoolId));
 
       if (limit) query = query.limit(limit);
       if (offset) query = query.offset(offset);
 
       const schoolStudents = await query;
-      let finalStudents = schoolStudents;
-      if (finalStudents.length === 0 && cleaned !== 'school1' && cleaned !== 'all') {
-        const defaultStudents = await db.select().from(students).where(eq(students.schoolId, 'school1'));
-        finalStudents = defaultStudents.map(s => ({
-          ...s,
-          id: `${cleaned}_${s.id}`,
-          schoolId: cleaned
-        }));
-      }
-      if (finalStudents.length > 0) {
-        return res.json({ success: true, students: finalStudents, data: finalStudents });
+      if (schoolStudents.length > 0) {
+        return res.json({ success: true, students: schoolStudents, data: schoolStudents });
       }
       // Check if it's a student ID or student code directly
       const singleStudent = await db.select().from(students).where(or(eq(students.id, schoolId), eq(students.code, schoolId)));
@@ -2673,20 +2667,17 @@ const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
       let lists;
       if (schoolId && schoolId !== 'all' && schoolId !== 'undefined' && schoolId !== 'null') {
         const cleaned = (schoolId || '').trim().toLowerCase();
+        const baseId = cleaned.replace(/-(boys|girls)$/i, '');
         if (cleaned === 'school_awail_ghamas' || cleaned === 'ghamas_awail') {
           lists = await db.select().from(academic_lists).where(
             or(eq(academic_lists.schoolId, 'school1'), eq(academic_lists.schoolId, schoolId))
           );
+        } else if (baseId !== cleaned) {
+          lists = await db.select().from(academic_lists).where(
+            or(eq(academic_lists.schoolId, schoolId), eq(academic_lists.schoolId, baseId))
+          );
         } else {
           lists = await db.select().from(academic_lists).where(eq(academic_lists.schoolId, schoolId));
-          if (lists.length === 0 && cleaned !== 'school1' && cleaned !== 'all') {
-            const defaultLists = await db.select().from(academic_lists).where(eq(academic_lists.schoolId, 'school1'));
-            lists = defaultLists.map(l => ({
-              ...l,
-              id: `${cleaned}_${l.id}`,
-              schoolId: cleaned
-            }));
-          }
         }
       } else {
         lists = await db.select().from(academic_lists);

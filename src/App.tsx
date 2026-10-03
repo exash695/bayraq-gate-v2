@@ -2399,12 +2399,22 @@ export default function App() {
     switch (effectiveSection as string) {
       case "school-content": {
         console.log("[DEBUG] portalType inside school-content:", portalType);
+        const activeTargetSchoolId =
+          selectedSchoolId ||
+          verifiedStudentInfo?.schoolId ||
+          loggedInTeacher?.schoolId ||
+          userProfile?.schoolId ||
+          "";
+        const cleanActiveSchoolId = (activeTargetSchoolId || "").replace(/-(boys|girls)$/i, "");
         const currentSchool = allSchoolsList.find(
-          (s) => s.id === selectedSchoolId,
+          (s) => s.id === activeTargetSchoolId || s.id === cleanActiveSchoolId,
         );
-        const institutionName = currentSchool
-          ? currentSchool.name
-          : selectedSchoolId ? getOfficialSchoolName(selectedSchoolId) : "";
+        const institutionName =
+          currentSchool?.name ||
+          verifiedStudentInfo?.schoolName ||
+          loggedInTeacher?.schoolName ||
+          (userProfile?.schoolName && userProfile?.schoolName !== "أكاديمية بيرق الرقمية" ? userProfile.schoolName : "") ||
+          (activeTargetSchoolId ? getOfficialSchoolName(activeTargetSchoolId) : "");
 
         if (!isSchoolVerified) {
           const isAcademy =
@@ -2419,6 +2429,7 @@ export default function App() {
                 selectedSchoolId || undefined,
               );
               setIsSchoolVerified(true);
+              initializedProfile.current = true;
               safeStorage.setItem("s6_isSchoolVerified", "true");
               safeStorage.setItem("s6_user_logged_out", "false");
 
@@ -3060,12 +3071,22 @@ export default function App() {
           return <DriverDashboard driverId={loggedInDriver?.id || "unknown"} routeId={loggedInDriver?.routeId || "unknown"} onBack={() => setActiveSection("hub")} />;
         }
 
+        const activeHubSchoolId =
+          selectedSchoolId ||
+          verifiedStudentInfo?.schoolId ||
+          loggedInTeacher?.schoolId ||
+          userProfile?.schoolId ||
+          "";
+        const cleanHubSchoolId = (activeHubSchoolId || "").replace(/-(boys|girls)$/i, "");
         const currentSchool = allSchoolsList.find(
-          (s) => s.id === selectedSchoolId,
+          (s) => s.id === activeHubSchoolId || s.id === cleanHubSchoolId,
         );
-        const institutionName = currentSchool
-          ? currentSchool.name
-          : selectedSchoolId ? getOfficialSchoolName(selectedSchoolId) : "مدرسة غير محددة";
+        const institutionName =
+          currentSchool?.name ||
+          verifiedStudentInfo?.schoolName ||
+          loggedInTeacher?.schoolName ||
+          (userProfile?.schoolName && userProfile?.schoolName !== "أكاديمية بيرق الرقمية" ? userProfile.schoolName : "") ||
+          (activeHubSchoolId ? getOfficialSchoolName(activeHubSchoolId) : "مدرسة غير محددة");
         return (
           <motion.div
             key={`student-hub-${hubResetKey}`}
