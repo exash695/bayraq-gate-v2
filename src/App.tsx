@@ -2425,6 +2425,12 @@ export default function App() {
               const resolvedSchool = user.schoolId || selectedSchoolId || "school1-boys";
               setSelectedSchoolId(resolvedSchool);
               safeStorage.setItem("s6_selectedSchoolId", resolvedSchool);
+
+              const cleanSchoolId = resolvedSchool.replace(/-(boys|girls)$/i, '');
+              const matchedSchool = allSchoolsList.find(
+                s => s.id === resolvedSchool || s.id === cleanSchoolId || s.name === resolvedSchool || s.name === cleanSchoolId
+              );
+              const resolvedInstitutionName = matchedSchool?.name || (user as any).schoolName || getOfficialSchoolName(resolvedSchool);
               
               // Save to device Keychain/Local Storage for instant auto-fill
               try {
@@ -2432,7 +2438,7 @@ export default function App() {
                   code: code.trim().toUpperCase(),
                   role: user.role,
                   schoolId: resolvedSchool,
-                  schoolName: institutionName,
+                  schoolName: resolvedInstitutionName,
                   studentName: user.displayName || (user as any).name || (user as any).studentName
                 });
               } catch (saveErr) {}
@@ -2454,6 +2460,7 @@ export default function App() {
                     (user as any).name ||
                     "الأستاذ المحاضر",
                   schoolId: resolvedSchool,
+                  schoolName: resolvedInstitutionName,
                   subject: (user as any).subject || "المنهج الوزاري",
                   grade: (user as any).grade || "السادس العلمي",
                   classes: (user as any).classes || [],
@@ -2465,12 +2472,14 @@ export default function App() {
                   ...user,
                   role: "teacher",
                   name: teacherObj.name,
+                  schoolId: resolvedSchool,
+                  schoolName: resolvedInstitutionName,
                 }));
 
                 savePrimaryUserSession({
                   role: "teacher",
                   schoolId: resolvedSchool,
-                  schoolName: institutionName,
+                  schoolName: resolvedInstitutionName,
                   code: code.trim().toUpperCase(),
                   studentName: teacherObj.name
                 });
@@ -2503,7 +2512,8 @@ export default function App() {
                     role: "admin", 
                     studentCode: code.trim().toUpperCase(), 
                     adminBranch: branch === "admin-boys" ? "boys" : "girls",
-                    schoolId: resolvedSchool
+                    schoolId: resolvedSchool,
+                    schoolName: resolvedInstitutionName
                   }, { merge: true });
                 } catch(e) {}
 
@@ -2513,18 +2523,21 @@ export default function App() {
                   name: user.displayName || "",
                   role: "admin",
                   schoolId: resolvedSchool,
+                  schoolName: resolvedInstitutionName,
                 });
                 setUserProfile((prev: any) => ({
                   ...prev,
                   ...user,
                   role: "admin",
+                  schoolId: resolvedSchool,
+                  schoolName: resolvedInstitutionName,
                   adminBranch: branch === "admin-boys" ? "boys" : "girls",
                 }));
 
                 savePrimaryUserSession({
                   role: branch,
                   schoolId: resolvedSchool,
-                  schoolName: institutionName,
+                  schoolName: resolvedInstitutionName,
                   code: code.trim().toUpperCase(),
                   studentName: user.displayName || "مدير المدرسة"
                 });
@@ -2558,6 +2571,7 @@ export default function App() {
                   grade: studentGrade,
                   section: (user as any).section || (user as any).studentSection || (user as any).class || "",
                   schoolId: resolvedSchool,
+                  schoolName: resolvedInstitutionName,
                   gender: (user as any).gender,
                 };
                 setVerifiedStudentInfo(parentInfo);
@@ -2566,12 +2580,14 @@ export default function App() {
                   ...user,
                   ...parentInfo,
                   role: "parent",
+                  schoolId: resolvedSchool,
+                  schoolName: resolvedInstitutionName,
                 }));
 
                 savePrimaryUserSession({
                   role: "parent",
                   schoolId: resolvedSchool,
-                  schoolName: institutionName,
+                  schoolName: resolvedInstitutionName,
                   code: code.trim().toUpperCase(),
                   studentName: parentInfo.studentName,
                   parentCode: code.trim().toUpperCase(),
@@ -2592,17 +2608,20 @@ export default function App() {
                   name: user.displayName || "",
                   role: "driver",
                   schoolId: resolvedSchool,
+                  schoolName: resolvedInstitutionName,
                 });
                 setUserProfile((prev: any) => ({
                   ...prev,
                   ...user,
                   role: "driver",
+                  schoolId: resolvedSchool,
+                  schoolName: resolvedInstitutionName,
                 }));
 
                 savePrimaryUserSession({
                   role: "driver",
                   schoolId: resolvedSchool,
-                  schoolName: institutionName,
+                  schoolName: resolvedInstitutionName,
                   code: code.trim().toUpperCase(),
                   studentName: user.displayName || "كابتن الباص"
                 });
@@ -2633,6 +2652,7 @@ export default function App() {
                   section: (user as any).section || (user as any).studentSection || (user as any).class || "",
                   class: (user as any).class || (user as any).className || (user as any).section || "",
                   schoolId: resolvedSchool,
+                  schoolName: resolvedInstitutionName,
                   gender: (user as any).gender,
                 };
                 setVerifiedStudentInfo(stuInfo);
@@ -2641,12 +2661,14 @@ export default function App() {
                   ...user,
                   ...stuInfo,
                   role: "student",
+                  schoolId: resolvedSchool,
+                  schoolName: resolvedInstitutionName,
                 }));
 
                 savePrimaryUserSession({
                   role: "student",
                   schoolId: resolvedSchool,
-                  schoolName: institutionName,
+                  schoolName: resolvedInstitutionName,
                   code: code.trim().toUpperCase(),
                   studentName: stuInfo.name,
                   studentCode: stuInfo.studentCode,
@@ -2774,10 +2796,17 @@ export default function App() {
         if (
           (portalType === "admin-boys" || portalType === "admin-girls")
         ) {
+          const targetSchoolId = selectedSchoolId || userProfile?.schoolId || verifiedStudentInfo?.schoolId;
+          const cleanTargetId = (targetSchoolId || "").replace(/-(boys|girls)$/i, '');
+          const currentSchool = allSchoolsList.find(
+            (s) => s.id === targetSchoolId || s.id === cleanTargetId,
+          );
+          const currentSchoolName = currentSchool?.name || (userProfile?.schoolName && userProfile?.schoolName !== "أكاديمية بيرق الرقمية" ? userProfile.schoolName : null) || (targetSchoolId ? getOfficialSchoolName(targetSchoolId) : "مدرسة اليمامة الابتدائية");
+
           return (
             <AdminDashboard
-              schoolName={institutionName}
-              selectedSchoolId={selectedSchoolId}
+              schoolName={currentSchoolName}
+              selectedSchoolId={targetSchoolId}
               adminBranch={portalType === "admin-boys" ? "boys" : "girls"}
               onBack={() => {
                 setActiveSection("hub");
@@ -2975,15 +3004,16 @@ export default function App() {
 
         const targetAdminSchoolId = (selectedSchoolId && selectedSchoolId !== "general") 
           ? selectedSchoolId 
-          : (userProfile?.schoolId && userProfile?.schoolId !== "general" ? userProfile.schoolId : "school1");
+          : (userProfile?.schoolId && userProfile?.schoolId !== "general" ? userProfile.schoolId : "school6");
+        const cleanAdminId = targetAdminSchoolId.replace(/-(boys|girls)$/i, '');
         const resolvedSchoolData = allSchoolsList.find(
-          (s) => s.id === targetAdminSchoolId && s.id !== "general",
+          (s) => (s.id === targetAdminSchoolId || s.id === cleanAdminId) && s.id !== "general",
         );
         const resolvedSchoolName = 
           resolvedSchoolData?.name || 
           (userProfile?.schoolName && userProfile?.schoolName !== "أكاديمية بيرق الرقمية" ? userProfile.schoolName : null) ||
           (targetAdminSchoolId && targetAdminSchoolId !== "general" ? getOfficialSchoolName(targetAdminSchoolId) : null) ||
-          "ثانوية اوائل غماس الاهلية";
+          getOfficialSchoolName(cleanAdminId);
 
         if (isTeacherUser && isChoosingSchool) {
           return (
@@ -4204,14 +4234,15 @@ export default function App() {
         );
       case "admin-hub": {
         const targetAdminHubSchoolId = selectedSchoolId || userProfile?.schoolId || user?.schoolId;
+        const cleanHubId = (targetAdminHubSchoolId || "").replace(/-(boys|girls)$/i, '');
         const resolvedSchoolData = allSchoolsList.find(
-          (s) => s.id === targetAdminHubSchoolId,
+          (s) => (s.id === targetAdminHubSchoolId || s.id === cleanHubId) && s.id !== "general",
         );
         const resolvedSchoolName = 
           resolvedSchoolData?.name || 
           (userProfile?.schoolName && userProfile?.schoolName !== "أكاديمية بيرق الرقمية" ? userProfile.schoolName : null) ||
           (targetAdminHubSchoolId && targetAdminHubSchoolId !== "general" ? getOfficialSchoolName(targetAdminHubSchoolId) : null) ||
-          (userProfile?.schoolId && userProfile?.schoolId !== "general" ? getOfficialSchoolName(userProfile.schoolId) : "ثانوية اوائل غماس الاهلية");
+          getOfficialSchoolName(cleanHubId);
 
         return (
           <div className="max-w-6xl mx-auto p-2 sm:p-6 space-y-8">

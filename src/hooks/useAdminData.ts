@@ -9,8 +9,8 @@ import { realtimeManager } from '../lib/realtimeManager';
 
 export const useAdminData = (selectedSchoolId: string | null, schoolName?: string) => {
   const safeSchoolId = (selectedSchoolId && selectedSchoolId !== 'general' && selectedSchoolId !== 'null') 
-    ? selectedSchoolId 
-    : (schoolName?.includes('غماس') ? 'school1' : 'school1');
+    ? selectedSchoolId.replace(/-(boys|girls)$/i, '') 
+    : (schoolName?.includes('يمامة') ? 'school6' : (schoolName?.includes('نخبة') ? 'school2' : (schoolName?.includes('نون') ? 'school3' : (schoolName?.includes('نبأ') ? 'school4' : (schoolName?.includes('عقيل') ? 'school5' : (schoolName?.includes('جواهري') ? 'school7' : (schoolName?.includes('ابداعنا') ? 'school8' : 'school1')))))));
 
   const [rawStudents, setRawStudents] = useState<SchoolStudent[]>(() => {
     try {

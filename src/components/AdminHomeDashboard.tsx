@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useAdminData } from '../hooks/useAdminData';
 import { normalizeGradeCanonical } from '../utils/studentUtils';
+import { getOfficialSchoolName } from '../lib/constants';
 
 interface AdminHomeDashboardProps {
   schoolName: string;
@@ -21,8 +22,13 @@ export const AdminHomeDashboard: React.FC<AdminHomeDashboardProps> = ({
   setActiveTab,
   onOpenNotifications
 }) => {
-  const effectiveSchoolId = (selectedSchoolId && selectedSchoolId !== 'general') ? selectedSchoolId : (schoolName?.includes('غماس') ? 'school1' : 'school1');
-  const { students, teachers, savedLists, isLoading } = useAdminData(effectiveSchoolId, schoolName);
+  const effectiveSchoolId = (selectedSchoolId && selectedSchoolId !== 'general') 
+    ? selectedSchoolId.replace(/-(boys|girls)$/i, '') 
+    : (schoolName?.includes('يمامة') ? 'school6' : (schoolName?.includes('نخبة') ? 'school2' : 'school1'));
+  const resolvedSchoolName = schoolName && schoolName !== 'المؤسسة التعليمية' && schoolName !== 'general'
+    ? schoolName
+    : getOfficialSchoolName(effectiveSchoolId);
+  const { students, teachers, savedLists, isLoading } = useAdminData(effectiveSchoolId, resolvedSchoolName);
   const [dataError, setDataError] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchFocused, setIsSearchFocused] = useState(false);
@@ -104,23 +110,26 @@ export const AdminHomeDashboard: React.FC<AdminHomeDashboardProps> = ({
   );
 
   const getGreetingName = (name: string) => {
-    if (!name || name === 'أكاديمية بيرق الرقمية' || name === 'أكاديمية بيرق العامة' || name === 'general') {
-      return 'ثانوية أوائل غماس الأهلية';
+    const raw = (name && name !== 'general' && name !== 'المؤسسة التعليمية') ? name : resolvedSchoolName;
+    const finalName = getOfficialSchoolName(selectedSchoolId || undefined, raw);
+    if (!finalName || finalName === 'المؤسسة التعليمية') {
+      return resolvedSchoolName || 'إدارة المدرسة';
     }
     if (
-      name.includes('أكاديمية') || 
-      name.includes('اكاديمية') || 
-      name.includes('مدرسة') || 
-      name.includes('ثانوية') || 
-      name.includes('إعدادية') || 
-      name.includes('ابتدائية') || 
-      name.includes('متوسطة') ||
-      name.includes('معهد') ||
-      name.includes('بوابة')
+      finalName.includes('أكاديمية') || 
+      finalName.includes('اكاديمية') || 
+      finalName.includes('مدرسة') || 
+      finalName.includes('مدارس') || 
+      finalName.includes('ثانوية') || 
+      finalName.includes('إعدادية') || 
+      finalName.includes('ابتدائية') || 
+      finalName.includes('متوسطة') ||
+      finalName.includes('معهد') ||
+      finalName.includes('بوابة')
     ) {
-      return name;
+      return finalName;
     }
-    return `مدرسة ${name}`;
+    return `مدرسة ${finalName}`;
   };
 
   return (
