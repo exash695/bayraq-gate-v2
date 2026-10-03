@@ -59,7 +59,7 @@ import ReactMarkdown from 'react-markdown';
 import { cleanParentStudentName, formatParentGreetingTitle } from '../utils/studentUtils';
 import { matchesTargetGrades, extractSectionLetter } from '../utils/gradeMatcher';
 import { AnnouncementsCenterTab } from './SchoolPlatform/AnnouncementsCenterTab';
-import { doc, onSnapshot, collection, query, where, orderBy, limit, updateDoc, addDoc, serverTimestamp } from '../lib/firebase';
+import { doc, onSnapshot, collection, query, where, orderBy, limit, updateDoc, addDoc, serverTimestamp, increment, arrayUnion } from '../lib/firebase';
 import { academicService } from '../services/academicService';
 import { supportService } from '../services/supportService';
 import { staffService } from '../services/staffService';
@@ -675,6 +675,37 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
       const cleanStudentName = cleanParentStudentName(studentData?.name || studentName);
       const studentClass = studentData?.grade || grade || 'عام';
 
+      // Call AI Evaluation for Parent Submission
+      let aiFeedback = "";
+      let pointsAwarded = 0;
+      let badgeAwarded = null;
+      let aiGraded = false;
+
+      try {
+        const response = await fetch('/api/gemini/evaluate-homework', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            schoolId: effectiveSchoolId,
+            taskId: hw.id,
+            taskTitle: hw.name || hw.title || 'واجب مدرسي',
+            studentId: studentData?.id || studentCode || 'std_unknown',
+            studentName: cleanStudentName,
+            content: fullContent
+          })
+        });
+
+        const data = await response.json();
+        if (response.ok && data.success) {
+          aiFeedback = data.feedback;
+          pointsAwarded = data.pointsAwarded;
+          badgeAwarded = data.badgeAwarded || null;
+          aiGraded = true;
+        }
+      } catch (geminiErr) {
+        console.warn("Failed AI evaluation for parent submission, continuing with local submit", geminiErr);
+      }
+
       const submissionPayload = {
         taskId: hw.id,
         taskTitle: hw.name || hw.title || 'واجب مدرسي',
@@ -690,14 +721,41 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
         content: fullContent,
         solutionImages: uploadedUrls,
         imageUrl: uploadedUrls[0] || null,
-        status: 'pending',
+        status: aiGraded ? 'completed' : 'pending',
         submittedBy: 'parent',
         parentName: studentName || 'ولي الأمر',
         submittedAt: new Date().toISOString(),
-        createdAt: serverTimestamp()
+        createdAt: serverTimestamp(),
+        aiFeedback: aiFeedback || null,
+        feedback: aiFeedback || null,
+        score: pointsAwarded,
+        pointsAwarded: pointsAwarded,
+        badgeAwarded: badgeAwarded,
+        aiGraded: aiGraded
       };
 
       await addDoc(collection(db, "schools", effectiveSchoolId, "activities_submissions"), submissionPayload);
+
+      // If AI graded successfully and awarded points, update the student's user profile in Firestore
+      if (aiGraded && pointsAwarded > 0) {
+        const studentUid = studentData?.uid || studentData?.id;
+        if (studentUid) {
+          const userRef = doc(db, "users", studentUid);
+          const updateFields: any = {
+            totalScore: increment(pointsAwarded),
+            xp: increment(pointsAwarded)
+          };
+          if (badgeAwarded) {
+            updateFields.outstandingBadges = arrayUnion(badgeAwarded);
+          }
+          try {
+            await updateDoc(userRef, updateFields);
+          } catch (err) {
+            console.warn("Failed to update user document for parent-submitted homework points:", err);
+          }
+        }
+      }
+
       setSolutionSubmitSuccess(true);
       setSolutionText('');
       setSolutionImages([]);
