@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { pushNotificationManager } from '../services/pushNotificationManager';
 import { 
@@ -179,6 +179,50 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
 
   const [lastSeenIndividual, setLastSeenIndividual] = useState<number>(0);
   const [lastSeenBroadcast, setLastSeenBroadcast] = useState<number>(0);
+  const [readLensIds, setReadLensIds] = useState<string[]>(() => {
+    try {
+      const saved = safeStorage.getItem('bairaq_lens_read_ids');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const markLensActivitiesRead = useCallback((activitiesToMark: any[]) => {
+    if (!Array.isArray(activitiesToMark) || activitiesToMark.length === 0) return;
+    const newIds = activitiesToMark.map(a => a?.id).filter(Boolean);
+    if (newIds.length === 0) return;
+
+    setReadLensIds(prev => {
+      const prevSet = new Set(prev);
+      let changed = false;
+      newIds.forEach(id => {
+        if (!prevSet.has(id)) {
+          prevSet.add(id);
+          changed = true;
+        }
+      });
+      if (!changed) return prev;
+      const updated = Array.from(prevSet);
+      try {
+        safeStorage.setItem('bairaq_lens_read_ids', JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
+    const maxTs = Math.max(
+      Date.now(),
+      ...activitiesToMark.map(a => (a?.createdAt ? new Date(a.createdAt).getTime() : 0))
+    ) + 60000;
+
+    const stId = studentData?.id || studentData?.studentCode || studentCode || '';
+    if (stId) {
+      safeStorage.setItem(`bairaq_lens_ind_seen_${stId}`, new Date(maxTs).toISOString());
+      safeStorage.setItem(`bairaq_lens_bc_seen_${stId}`, new Date(maxTs).toISOString());
+    }
+    setLastSeenIndividual(maxTs);
+    setLastSeenBroadcast(maxTs);
+  }, [studentData?.id, studentData?.studentCode, studentCode]);
 
   // Sync seen timestamps when studentData changes
   useEffect(() => {
@@ -193,18 +237,16 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
 
   // Automatically mark activities as read when the active tab is opened
   useEffect(() => {
-    const stId = studentData?.id || studentData?.studentCode || studentCode || '';
-    if (!stId || parentAttendanceTab !== 'lens') return;
+    if (parentAttendanceTab !== 'lens' || !Array.isArray(lensActivities) || lensActivities.length === 0) return;
 
-    const now = Date.now() + 1000; // Add 1 second buffer
     if (lensSubTab === 'individual') {
-      safeStorage.setItem(`bairaq_lens_ind_seen_${stId}`, new Date(now).toISOString());
-      setLastSeenIndividual(now);
+      const individualActs = lensActivities.filter((act: any) => act.studentId !== 'ALL' && act.studentId);
+      markLensActivitiesRead(individualActs);
     } else if (lensSubTab === 'broadcast') {
-      safeStorage.setItem(`bairaq_lens_bc_seen_${stId}`, new Date(now).toISOString());
-      setLastSeenBroadcast(now);
+      const broadcastActs = lensActivities.filter((act: any) => act.studentId === 'ALL' || !act.studentId);
+      markLensActivitiesRead(broadcastActs);
     }
-  }, [parentAttendanceTab, lensSubTab, lensActivities, studentData?.id, studentData?.studentCode, studentCode]);
+  }, [parentAttendanceTab, lensSubTab, lensActivities, markLensActivitiesRead]);
 
   const mountTimeRef = useRef<number>(Date.now());
 
@@ -1821,44 +1863,41 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   // Compute unread counts for individual and broadcast lens activities separately
   const unreadIndividualCount = useMemo(() => {
     if (!Array.isArray(lensActivities) || lensActivities.length === 0) return 0;
+    if (parentAttendanceTab === 'lens' && lensSubTab === 'individual') return 0;
+
     const individualActs = lensActivities.filter((act: any) => {
       const isBroadcast = act.studentId === 'ALL' || !act.studentId;
       return !isBroadcast;
     });
 
-    if (!lastSeenIndividual) {
-      return Math.min(individualActs.length, 3);
-    }
-
-    const unread = individualActs.filter((act: any) => {
-      if (!act.createdAt) return false;
-      const isUnread = new Date(act.createdAt).getTime() > lastSeenIndividual;
-      return isUnread;
-    });
-    
-    if (unread.length > 0) {
-      console.log("Unread individual count > 0", unread.length, "lastSeen:", new Date(lastSeenIndividual).toISOString(), "Activities:", unread.map(u => ({id: u.id, createdAt: u.createdAt})));
-    }
-    
-    return unread.length;
-  }, [lensActivities, lastSeenIndividual]);
+    return individualActs.filter((act: any) => {
+      if (!act?.id) return false;
+      if (readLensIds.includes(act.id)) return false;
+      if (lastSeenIndividual && act.createdAt) {
+        return new Date(act.createdAt).getTime() > lastSeenIndividual;
+      }
+      return true;
+    }).length;
+  }, [lensActivities, readLensIds, lastSeenIndividual, parentAttendanceTab, lensSubTab]);
 
   const unreadBroadcastCount = useMemo(() => {
     if (!Array.isArray(lensActivities) || lensActivities.length === 0) return 0;
+    if (parentAttendanceTab === 'lens' && lensSubTab === 'broadcast') return 0;
+
     const broadcastActs = lensActivities.filter((act: any) => {
       const isBroadcast = act.studentId === 'ALL' || !act.studentId;
       return isBroadcast;
     });
 
-    if (!lastSeenBroadcast) {
-      return Math.min(broadcastActs.length, 3);
-    }
-
     return broadcastActs.filter((act: any) => {
-      if (!act.createdAt) return false;
-      return new Date(act.createdAt).getTime() > lastSeenBroadcast;
+      if (!act?.id) return false;
+      if (readLensIds.includes(act.id)) return false;
+      if (lastSeenBroadcast && act.createdAt) {
+        return new Date(act.createdAt).getTime() > lastSeenBroadcast;
+      }
+      return true;
     }).length;
-  }, [lensActivities, lastSeenBroadcast]);
+  }, [lensActivities, readLensIds, lastSeenBroadcast, parentAttendanceTab, lensSubTab]);
 
   const effectiveLensBadge = useMemo(() => {
     // If the parent is currently inside the Lens section (individual or broadcast),
@@ -3203,6 +3242,13 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                   onClick={() => {
                     setParentAttendanceTab('lens');
                     setUnreadLensCount(0);
+                    if (lensSubTab === 'broadcast') {
+                      const broadcastActs = (lensActivities || []).filter((act: any) => act.studentId === 'ALL' || !act.studentId);
+                      markLensActivitiesRead(broadcastActs);
+                    } else {
+                      const individualActs = (lensActivities || []).filter((act: any) => act.studentId !== 'ALL' && act.studentId);
+                      markLensActivitiesRead(individualActs);
+                    }
                     try {
                       const storageKey = `bairaq_last_lens_seen_${studentData?.id || studentData?.studentCode || studentCode || ''}`;
                       safeStorage.setItem(storageKey, new Date().toISOString());
@@ -3226,7 +3272,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                 >
                   <Camera size={18} className={parentAttendanceTab === 'lens' ? 'animate-pulse text-cyan-300' : ''} />
                   <span>عين على الصف (اللقطات والبث الصفي) 📸✨</span>
-                  {effectiveLensBadge > 0 && (
+                  {parentAttendanceTab !== 'lens' && effectiveLensBadge > 0 && (
                     <span className="absolute -top-1.5 -right-1.5 px-2 py-0.5 rounded-full bg-rose-500 text-white font-black text-[10px] animate-bounce shadow-lg">
                       {effectiveLensBadge} جديد
                     </span>
@@ -3242,12 +3288,8 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                       type="button"
                       onClick={() => {
                         setLensSubTab('individual');
-                        const stId = studentData?.id || studentData?.studentCode || studentCode || '';
-                        if (stId) {
-                          const now = Date.now();
-                          safeStorage.setItem(`bairaq_lens_ind_seen_${stId}`, new Date(now).toISOString());
-                          setLastSeenIndividual(now);
-                        }
+                        const individualActs = (lensActivities || []).filter((act: any) => act.studentId !== 'ALL' && act.studentId);
+                        markLensActivitiesRead(individualActs);
                       }}
                       className={`flex-1 py-2 px-3 rounded-lg font-black text-[11px] transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                         lensSubTab === 'individual'
@@ -3257,7 +3299,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                     >
                       <User size={13} />
                       <span>لقطات الطالب 👨‍🎓</span>
-                      {unreadIndividualCount > 0 && (
+                      {lensSubTab !== 'individual' && unreadIndividualCount > 0 && (
                         <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[9px] font-black animate-pulse">
                           {unreadIndividualCount} جديد
                         </span>
@@ -3267,12 +3309,8 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                       type="button"
                       onClick={() => {
                         setLensSubTab('broadcast');
-                        const stId = studentData?.id || studentData?.studentCode || studentCode || '';
-                        if (stId) {
-                          const now = Date.now();
-                          safeStorage.setItem(`bairaq_lens_bc_seen_${stId}`, new Date(now).toISOString());
-                          setLastSeenBroadcast(now);
-                        }
+                        const broadcastActs = (lensActivities || []).filter((act: any) => act.studentId === 'ALL' || !act.studentId);
+                        markLensActivitiesRead(broadcastActs);
                       }}
                       className={`flex-1 py-2 px-3 rounded-lg font-black text-[11px] transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                         lensSubTab === 'broadcast'
@@ -3282,7 +3320,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                     >
                       <Users size={13} />
                       <span>المشاركات الجماعية 📢</span>
-                      {unreadBroadcastCount > 0 && (
+                      {lensSubTab !== 'broadcast' && unreadBroadcastCount > 0 && (
                         <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[9px] font-black animate-pulse">
                           {unreadBroadcastCount} جديد
                         </span>
