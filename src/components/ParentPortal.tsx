@@ -1861,9 +1861,12 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   }, [lensActivities, lastSeenBroadcast]);
 
   const effectiveLensBadge = useMemo(() => {
-    if (activeSubPage === 'attendance' && parentAttendanceTab === 'lens') return 0;
+    // If the parent is currently inside the Lens section (individual or broadcast),
+    // treat everything as read.
+    if (parentAttendanceTab === 'lens') return 0;
+    
     return unreadIndividualCount + unreadBroadcastCount;
-  }, [unreadIndividualCount, unreadBroadcastCount, activeSubPage, parentAttendanceTab]);
+  }, [unreadIndividualCount, unreadBroadcastCount, parentAttendanceTab]);
 
   const { settings: secSettings } = useSecuritySettings();
 
