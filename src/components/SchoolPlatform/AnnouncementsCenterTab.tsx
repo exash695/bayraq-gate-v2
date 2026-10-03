@@ -122,7 +122,7 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
     });
 
     return () => unsub();
-  }, [schoolId, grade, section, isTeacher]);
+  }, [schoolId, grade, section, isTeacher, isParent]);
 
   // 2. Classify announcements into Admin (Radio/Administration/Finance) vs Teachers (Control panel)
   const isTeacherItem = (item: any) => {
@@ -232,11 +232,11 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
         subject: isTeacher ? (n.metadata?.subject || "تبليغ صفي") : (isFinance ? "متابعة الأقساط والرسوم" : "تبليغ إداري رسمي"),
         createdAt: n.createdAt,
         timestampMs: n.createdAt ? new Date(n.createdAt).getTime() : Date.now(),
-        read: n.read || false,
+        read: n.read || (n.id ? readBroadcastIds.includes(n.id) : false),
         type: isTeacher ? "staff" : "admin"
       };
     });
-  }, [notifications]);
+  }, [notifications, readBroadcastIds]);
 
   // Combined broadcasts + notifications categorized accurately
   const { adminItems, staffItems } = useMemo(() => {

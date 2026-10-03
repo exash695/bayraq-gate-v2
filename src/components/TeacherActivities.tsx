@@ -566,6 +566,38 @@ export default function TeacherActivities({
                           await updateDoc(doc(db, "schools", schoolId, "activities_submissions", selectedSubmission.id), {
                             feedback: feedback
                           });
+
+                          // 1. Send notification to student
+                          await fetch('/api/notifications', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                              recipientId: selectedSubmission.studentId,
+                              recipientRole: 'student',
+                              title: `📝 تم تصحيح واجبك: ${selectedSubmission.taskTitle}`,
+                              body: `كتب لك الأستاذ ملاحظات وتغذية راجعة جديدة: "${feedback.slice(0, 150)}${feedback.length > 150 ? '...' : ''}"`,
+                              type: 'announcement',
+                              schoolId: schoolId
+                            })
+                          }).catch(err => console.warn("Failed sending student feedback notification:", err));
+
+                          // 2. Send notification to parent
+                          const parentRecipientId = selectedSubmission.studentCode || selectedSubmission.studentId;
+                          if (parentRecipientId) {
+                            await fetch('/api/notifications', {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({
+                                recipientId: parentRecipientId,
+                                recipientRole: 'parent',
+                                title: `📝 تقرير تصحيح واجب ${selectedSubmission.studentName}`,
+                                body: `قام الأستاذ بتصحيح الواجب "${selectedSubmission.taskTitle}" وكتابة الملاحظات: "${feedback.slice(0, 150)}${feedback.length > 150 ? '...' : ''}"`,
+                                type: 'announcement',
+                                schoolId: schoolId
+                              })
+                            }).catch(err => console.warn("Failed sending parent feedback notification:", err));
+                          }
+
                           setSelectedSubmission(null);
                         } catch(e) {
                           console.error(e);

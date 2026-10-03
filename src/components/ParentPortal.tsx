@@ -1338,7 +1338,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
             return false;
           })
           .sort((a: any, b: any) => (b.timestampMs || 0) - (a.timestampMs || 0))
-          .slice(0, 5);
+          .slice(0, 200);
         setParentBroadcasts(pBroadcasts);
       });
     }).catch(console.warn);
@@ -1407,7 +1407,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
         realtimeManager.off('support_tickets_updated', fetchNotifsAndTickets);
       }).catch(console.warn);
     };
-  }, [studentData?.parentCode, studentCode]);
+  }, [studentData?.parentCode, studentCode, studentData?.id, studentData?.grade, studentData?.section]);
 
   const gradePeriods = [
     { id: 'month1', name: 'الشهر الاول' },
@@ -3226,11 +3226,19 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
 
               {parentAttendanceTab === 'lens' ? (
                 <div className="space-y-4 text-right" style={{ direction: 'rtl' }}>
-                  {/* Internal Tab Switcher: [لقطات طفلي] vs [لقطات الصف] */}
+                  {/* Internal Tab Switcher: [لقطات الطالب] vs [لقطات الصف] */}
                   <div className="flex items-center gap-1.5 p-1 bg-[#0a1124] border border-blue-500/20 rounded-xl">
                     <button
                       type="button"
-                      onClick={() => setLensSubTab('individual')}
+                      onClick={() => {
+                        setLensSubTab('individual');
+                        const stId = studentData?.id || studentData?.studentCode || studentCode || '';
+                        if (stId) {
+                          const now = Date.now();
+                          safeStorage.setItem(`bairaq_lens_ind_seen_${stId}`, new Date(now).toISOString());
+                          setLastSeenIndividual(now);
+                        }
+                      }}
                       className={`flex-1 py-2 px-3 rounded-lg font-black text-[11px] transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                         lensSubTab === 'individual'
                           ? 'bg-blue-600 text-white shadow-lg'
@@ -3238,7 +3246,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                       }`}
                     >
                       <User size={13} />
-                      <span>لقطات طفلي 👨‍🎓</span>
+                      <span>لقطات الطالب 👨‍🎓</span>
                       {unreadIndividualCount > 0 && (
                         <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[9px] font-black animate-pulse">
                           {unreadIndividualCount} جديد
@@ -3247,7 +3255,15 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                     </button>
                     <button
                       type="button"
-                      onClick={() => setLensSubTab('broadcast')}
+                      onClick={() => {
+                        setLensSubTab('broadcast');
+                        const stId = studentData?.id || studentData?.studentCode || studentCode || '';
+                        if (stId) {
+                          const now = Date.now();
+                          safeStorage.setItem(`bairaq_lens_bc_seen_${stId}`, new Date(now).toISOString());
+                          setLastSeenBroadcast(now);
+                        }
+                      }}
                       className={`flex-1 py-2 px-3 rounded-lg font-black text-[11px] transition-all cursor-pointer flex items-center justify-center gap-1.5 ${
                         lensSubTab === 'broadcast'
                           ? 'bg-purple-600 text-white shadow-lg'
