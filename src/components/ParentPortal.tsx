@@ -177,6 +177,35 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
   const [isLoadingLensActivities, setIsLoadingLensActivities] = useState<boolean>(false);
   const [lensSubTab, setLensSubTab] = useState<'individual' | 'broadcast'>('individual');
 
+  const [lastSeenIndividual, setLastSeenIndividual] = useState<number>(0);
+  const [lastSeenBroadcast, setLastSeenBroadcast] = useState<number>(0);
+
+  // Sync seen timestamps when studentData changes
+  useEffect(() => {
+    const stId = studentData?.id || studentData?.studentCode || studentCode || '';
+    if (stId) {
+      const valInd = safeStorage.getItem(`bairaq_lens_ind_seen_${stId}`);
+      setLastSeenIndividual(valInd ? new Date(valInd).getTime() : 0);
+      const valBc = safeStorage.getItem(`bairaq_lens_bc_seen_${stId}`);
+      setLastSeenBroadcast(valBc ? new Date(valBc).getTime() : 0);
+    }
+  }, [studentData?.id, studentData?.studentCode, studentCode]);
+
+  // Automatically mark activities as read when the active tab is opened
+  useEffect(() => {
+    const stId = studentData?.id || studentData?.studentCode || studentCode || '';
+    if (!stId || parentAttendanceTab !== 'lens') return;
+
+    const now = Date.now();
+    if (lensSubTab === 'individual') {
+      safeStorage.setItem(`bairaq_lens_ind_seen_${stId}`, new Date(now).toISOString());
+      setLastSeenIndividual(now);
+    } else if (lensSubTab === 'broadcast') {
+      safeStorage.setItem(`bairaq_lens_bc_seen_${stId}`, new Date(now).toISOString());
+      setLastSeenBroadcast(now);
+    }
+  }, [parentAttendanceTab, lensSubTab, lensActivities, studentData?.id, studentData?.studentCode, studentCode]);
+
   const mountTimeRef = useRef<number>(Date.now());
 
   const fetchParentLensActivities = () => {
@@ -1730,31 +1759,42 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
     return parentHomeworks.filter(hw => hw?.id && !viewedHwIds.has(hw.id)).length;
   }, [parentHomeworks, viewedHwIds]);
 
-  // Synchronize unread lens count with database notifications, actual activities, and real-time counter
-  const unreadLensFromNotifs = useMemo(() => {
-    return (parentNotifications || []).filter((n: any) => n.type === 'classroom_lens' && !n.read).length;
-  }, [parentNotifications]);
-
-  const unreadLensActivitiesCount = useMemo(() => {
+  // Compute unread counts for individual and broadcast lens activities separately
+  const unreadIndividualCount = useMemo(() => {
     if (!Array.isArray(lensActivities) || lensActivities.length === 0) return 0;
-    try {
-      const storageKey = `bairaq_last_lens_seen_${studentData?.id || studentData?.studentCode || studentCode || ''}`;
-      const lastSeen = safeStorage.getItem(storageKey);
-      if (!lastSeen) {
-        // If not seen yet, return count of existing activities (max 9)
-        return Math.min(lensActivities.length, 9);
-      }
-      const lastTime = new Date(lastSeen).getTime();
-      return lensActivities.filter((act: any) => {
-        if (!act.createdAt) return false;
-        return new Date(act.createdAt).getTime() > lastTime;
-      }).length;
-    } catch {
-      return 0;
-    }
-  }, [lensActivities, studentData?.id, studentData?.studentCode, studentCode]);
+    const individualActs = lensActivities.filter((act: any) => {
+      const isBroadcast = act.studentId === 'ALL' || !act.studentId;
+      return !isBroadcast;
+    });
 
-  const effectiveLensBadge = Math.max(unreadLensCount, unreadLensFromNotifs, unreadLensActivitiesCount);
+    if (!lastSeenIndividual) {
+      return Math.min(individualActs.length, 3);
+    }
+
+    return individualActs.filter((act: any) => {
+      if (!act.createdAt) return false;
+      return new Date(act.createdAt).getTime() > lastSeenIndividual;
+    }).length;
+  }, [lensActivities, lastSeenIndividual]);
+
+  const unreadBroadcastCount = useMemo(() => {
+    if (!Array.isArray(lensActivities) || lensActivities.length === 0) return 0;
+    const broadcastActs = lensActivities.filter((act: any) => {
+      const isBroadcast = act.studentId === 'ALL' || !act.studentId;
+      return isBroadcast;
+    });
+
+    if (!lastSeenBroadcast) {
+      return Math.min(broadcastActs.length, 3);
+    }
+
+    return broadcastActs.filter((act: any) => {
+      if (!act.createdAt) return false;
+      return new Date(act.createdAt).getTime() > lastSeenBroadcast;
+    }).length;
+  }, [lensActivities, lastSeenBroadcast]);
+
+  const effectiveLensBadge = unreadIndividualCount + unreadBroadcastCount;
 
   const { settings: secSettings } = useSecuritySettings();
 
@@ -3137,6 +3177,11 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                     >
                       <User size={13} />
                       <span>لقطات طفلي 👨‍🎓</span>
+                      {unreadIndividualCount > 0 && (
+                        <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[9px] font-black animate-pulse">
+                          {unreadIndividualCount} جديد
+                        </span>
+                      )}
                     </button>
                     <button
                       type="button"
@@ -3149,6 +3194,11 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                     >
                       <Users size={13} />
                       <span>المشاركات الجماعية 📢</span>
+                      {unreadBroadcastCount > 0 && (
+                        <span className="px-2 py-0.5 rounded-full bg-rose-500 text-white text-[9px] font-black animate-pulse">
+                          {unreadBroadcastCount} جديد
+                        </span>
+                      )}
                     </button>
                   </div>
 
@@ -3355,7 +3405,8 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                                   {isVideo ? (
                                     <ClassroomVideoPlayer
                                       src={mediaSrc}
-                                      onExpand={() => setSelectedLensMedia({ ...act, mediaSrc, isVideo: true, teacherName, subjectName })}
+                                      paused={Boolean(selectedLensMedia)}
+                                      onExpand={(currentTime) => setSelectedLensMedia({ ...act, mediaSrc, isVideo: true, teacherName, subjectName, initialTime: currentTime })}
                                     />
                                   ) : (
                                     <div 
@@ -3995,6 +4046,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
                           <ClassroomVideoPlayer
                             src={selectedLensMedia.mediaSrc}
                             autoPlay={true}
+                            initialTime={selectedLensMedia.initialTime || 0}
                             className="max-h-[62vh]"
                           />
                         ) : (

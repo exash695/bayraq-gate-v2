@@ -3,28 +3,44 @@ import { Play, Pause, Volume2, VolumeX, Video, ZoomIn, RefreshCw } from 'lucide-
 
 interface ClassroomVideoPlayerProps {
   src: string;
-  onExpand?: () => void;
+  onExpand?: (currentTime?: number) => void;
   className?: string;
   autoPlay?: boolean;
+  initialTime?: number;
+  paused?: boolean;
 }
 
 export const ClassroomVideoPlayer: React.FC<ClassroomVideoPlayerProps> = ({ 
   src, 
   onExpand, 
   className = '', 
-  autoPlay = false 
+  autoPlay = false,
+  initialTime = 0,
+  paused = false
 }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
+  const [currentTime, setCurrentTime] = useState(initialTime || 0);
   const [duration, setDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [isBuffering, setIsBuffering] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const controlsTimeoutRef = useRef<any>(null);
 
+  // Sync paused prop from parent (e.g., when lightbox modal is open)
+  useEffect(() => {
+    if (paused && videoRef.current && !videoRef.current.paused) {
+      videoRef.current.pause();
+      setIsPlaying(false);
+    }
+  }, [paused]);
+
   useEffect(() => {
     if (autoPlay && videoRef.current) {
+      if (initialTime > 0) {
+        videoRef.current.currentTime = initialTime;
+        setCurrentTime(initialTime);
+      }
       videoRef.current.play()
         .then(() => {
           setIsPlaying(true);
@@ -33,7 +49,7 @@ export const ClassroomVideoPlayer: React.FC<ClassroomVideoPlayerProps> = ({
           setIsPlaying(false);
         });
     }
-  }, [autoPlay, src]);
+  }, [autoPlay, src, initialTime]);
 
   const togglePlay = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -206,7 +222,15 @@ export const ClassroomVideoPlayer: React.FC<ClassroomVideoPlayerProps> = ({
                 type="button"
                 onClick={(e) => {
                   e.stopPropagation();
-                  onExpand();
+                  let currentProgress = 0;
+                  if (videoRef.current) {
+                    currentProgress = videoRef.current.currentTime;
+                    videoRef.current.pause();
+                    setIsPlaying(false);
+                  }
+                  if (onExpand) {
+                    onExpand(currentProgress);
+                  }
                 }}
                 className="px-2.5 py-1 rounded-lg bg-white/15 hover:bg-white/25 text-white text-[10.5px] font-bold flex items-center gap-1 transition-all cursor-pointer shadow-sm"
                 title="تكبير وملء الشاشة"

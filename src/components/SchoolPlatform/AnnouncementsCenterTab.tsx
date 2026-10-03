@@ -68,44 +68,6 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
     return false;
   }, [readBroadcastIds]);
 
-  // Mark items as read based on current sub-tab
-  useEffect(() => {
-    let changed = false;
-    if (activeSubTab === "admin") {
-      const unreadAdminIds = adminItems
-        .filter(item => !isItemRead(item) && item.id)
-        .map(item => item.id);
-      if (unreadAdminIds.length > 0) {
-        setReadBroadcastIds(prev => {
-          const next = [...new Set([...prev, ...unreadAdminIds])];
-          try {
-            localStorage.setItem("bairaq_read_broadcast_ids", JSON.stringify(next));
-          } catch {}
-          return next;
-        });
-        changed = true;
-      }
-    } else if (activeSubTab === "staff") {
-      const unreadStaffIds = staffItems
-        .filter(item => !isItemRead(item) && item.id)
-        .map(item => item.id);
-      if (unreadStaffIds.length > 0) {
-        setReadBroadcastIds(prev => {
-          const next = [...new Set([...prev, ...unreadStaffIds])];
-          try {
-            localStorage.setItem("bairaq_read_broadcast_ids", JSON.stringify(next));
-          } catch {}
-          return next;
-        });
-        changed = true;
-      }
-    }
-
-    if (changed) {
-      window.dispatchEvent(new CustomEvent("bairaq_announcements_read"));
-    }
-  }, [activeSubTab, adminItems, staffItems, isItemRead]);
-
   // 1. Subscribe to administrative & school radio announcements
   useEffect(() => {
     setIsLoading(true);
@@ -327,6 +289,44 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
   const unreadStaffCount = useMemo(() => {
     return staffItems.filter(item => !isItemRead(item)).length;
   }, [staffItems, isItemRead]);
+
+  // Mark items as read based on current sub-tab
+  useEffect(() => {
+    let changed = false;
+    if (activeSubTab === "admin") {
+      const unreadAdminIds = adminItems
+        .filter(item => !isItemRead(item) && item.id)
+        .map(item => item.id);
+      if (unreadAdminIds.length > 0) {
+        setReadBroadcastIds(prev => {
+          const next = [...new Set([...prev, ...unreadAdminIds])];
+          try {
+            localStorage.setItem("bairaq_read_broadcast_ids", JSON.stringify(next));
+          } catch {}
+          return next;
+        });
+        changed = true;
+      }
+    } else if (activeSubTab === "staff") {
+      const unreadStaffIds = staffItems
+        .filter(item => !isItemRead(item) && item.id)
+        .map(item => item.id);
+      if (unreadStaffIds.length > 0) {
+        setReadBroadcastIds(prev => {
+          const next = [...new Set([...prev, ...unreadStaffIds])];
+          try {
+            localStorage.setItem("bairaq_read_broadcast_ids", JSON.stringify(next));
+          } catch {}
+          return next;
+        });
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      window.dispatchEvent(new CustomEvent("bairaq_announcements_read"));
+    }
+  }, [activeSubTab, adminItems, staffItems, isItemRead]);
 
   // 3. Combined & Searched items list
   const displayItems = useMemo(() => {
