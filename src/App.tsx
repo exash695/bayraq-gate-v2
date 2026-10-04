@@ -48,6 +48,8 @@ import { ToastContainer } from "./components/ToastNotification";
 import { BerqCharacter } from "./components/BerqCharacterManager";
 import { MascotTestPage } from "./components/MascotTestPage";
 import { PrivacyPolicy } from "./components/PrivacyPolicy";
+import { AccountDeletionPage } from "./components/AccountDeletionPage";
+import { StoreSubmissionKit } from "./components/StoreSubmissionKit";
 import { SwipeDismissContainer } from "./components/SwipeDismissContainer";
 import { ComingSoonPlaceholder } from "./components/ComingSoonPlaceholder";
 import { sounds } from "./lib/sounds";
@@ -270,7 +272,49 @@ export default function App() {
   const [dismissedOptionalUpdate, setDismissedOptionalUpdate] = useState(false);
   const [dismissedNewVersionNotice, setDismissedNewVersionNotice] = useState(false);
   const [verifyReceiptId, setVerifyReceiptId] = useState<string | null>(null);
-  const [showPrivacyPublic, setShowPrivacyPublic] = useState(false);
+  const [showPrivacyPublic, setShowPrivacyPublic] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      return (
+        params.get("privacy") !== null ||
+        params.get("view") === "privacy" ||
+        params.get("policy") !== null ||
+        window.location.pathname.toLowerCase().includes("privacy")
+      );
+    } catch {
+      return false;
+    }
+  });
+  const [showDeleteAccountPublic, setShowDeleteAccountPublic] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const path = window.location.pathname.toLowerCase();
+      return (
+        params.get("delete-account") !== null ||
+        params.get("delete_account") !== null ||
+        params.get("view") === "delete-account" ||
+        path.includes("delete-account") ||
+        path.includes("delete_account")
+      );
+    } catch {
+      return false;
+    }
+  });
+  const [showStoreKitPublic, setShowStoreKitPublic] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const path = window.location.pathname.toLowerCase();
+      return (
+        params.get("store-kit") !== null ||
+        params.get("store_kit") !== null ||
+        params.get("view") === "store-kit" ||
+        path.includes("store-kit") ||
+        path.includes("store_kit")
+      );
+    } catch {
+      return false;
+    }
+  });
   const [showGate6Demo, setShowGate6Demo] = useState(false);
   const [resetPasswordData, setResetPasswordData] = useState<{ token: string; email: string } | null>(null);
 
@@ -289,6 +333,18 @@ export default function App() {
     const isPrivacyPath = window.location.pathname.toLowerCase().includes("privacy");
     if (isPrivacyParam || isPrivacyPath) {
       setShowPrivacyPublic(true);
+    }
+
+    const isDeleteParam = params.get("delete-account") !== null || params.get("delete_account") !== null || params.get("view") === "delete-account";
+    const isDeletePath = window.location.pathname.toLowerCase().includes("delete-account") || window.location.pathname.toLowerCase().includes("delete_account");
+    if (isDeleteParam || isDeletePath) {
+      setShowDeleteAccountPublic(true);
+    }
+
+    const isStoreKitParam = params.get("store-kit") !== null || params.get("store_kit") !== null || params.get("view") === "store-kit";
+    const isStoreKitPath = window.location.pathname.toLowerCase().includes("store-kit") || window.location.pathname.toLowerCase().includes("store_kit");
+    if (isStoreKitParam || isStoreKitPath) {
+      setShowStoreKitPublic(true);
     }
 
     if (window.location.pathname.toLowerCase().includes("gate6") || params.get("gate6") !== null) {
@@ -4486,6 +4542,32 @@ export default function App() {
 
   if (showGate6Demo) {
     return <Gate6Demo />;
+  }
+
+  if (showStoreKitPublic) {
+    return (
+      <ErrorBoundary>
+        <StoreSubmissionKit onBack={() => {
+          setShowStoreKitPublic(false);
+          if (window.history.replaceState) {
+            window.history.replaceState({}, document.title, "/");
+          }
+        }} />
+      </ErrorBoundary>
+    );
+  }
+
+  if (showDeleteAccountPublic) {
+    return (
+      <ErrorBoundary>
+        <AccountDeletionPage onBack={() => {
+          setShowDeleteAccountPublic(false);
+          if (window.history.replaceState) {
+            window.history.replaceState({}, document.title, "/");
+          }
+        }} />
+      </ErrorBoundary>
+    );
   }
 
   if (showPrivacyPublic) {

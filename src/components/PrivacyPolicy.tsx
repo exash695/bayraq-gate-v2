@@ -101,6 +101,15 @@ export const PrivacyPolicy: React.FC<PrivacyPolicyProps> = ({ onBack }) => {
             </button>
           </div>
 
+          <a
+            href="/delete-account"
+            className="p-2 rounded-xl bg-rose-500/15 hover:bg-rose-500/25 text-rose-300 hover:text-white transition-all border border-rose-500/30 flex items-center gap-1.5 text-xs font-bold"
+            title={activeLang === 'ar' ? 'طلب حذف الحساب والبيانات' : 'Request Account Deletion'}
+          >
+            <Trash2 size={15} />
+            <span className="hidden md:inline">{activeLang === 'ar' ? 'طلب حذف الحساب' : 'Delete Account'}</span>
+          </a>
+
           <button
             onClick={handlePrint}
             className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-white/70 hover:text-white transition-all border border-white/5 hidden sm:flex items-center gap-1.5 text-xs font-bold"
