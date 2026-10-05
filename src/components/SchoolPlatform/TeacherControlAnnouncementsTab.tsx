@@ -123,14 +123,16 @@ export const TeacherControlAnnouncementsTab: React.FC = () => {
 
   const displayedBroadcasts = useMemo(() => {
     const seen = new Set<string>();
+    const safeSections = Array.isArray(teacherAssignedSections) ? teacherAssignedSections : [];
     const filtered = (teacherBroadcasts || []).filter((item: any) => {
-      const msgKey = `${item.schoolId || ''}:::${(item.message || '').trim()}`;
+      if (!item) return false;
+      const msgKey = `${item.schoolId || ''}:::${String(item.message || item.body || '').trim()}`;
       if (seen.has(msgKey)) return false;
       seen.add(msgKey);
 
       if (isAllSections) {
         if (!item.targetSection || item.targetSection === 'ALL' || item.targetSection === 'الكل') return true;
-        const assignedNames = (teacherAssignedSections || []).map((s: any) => s.name);
+        const assignedNames = safeSections.map((s: any) => typeof s === 'string' ? s : (s?.name || ''));
         return assignedNames.includes(item.targetSection) || 
                (Array.isArray(item.targetSections) && item.targetSections.some((s: string) => assignedNames.includes(s)));
       }

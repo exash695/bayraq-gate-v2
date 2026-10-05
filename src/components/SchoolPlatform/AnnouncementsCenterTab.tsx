@@ -48,7 +48,13 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
   const [isLoading, setIsLoading] = useState(true);
 
   // Date filter state (مطابق لتبويب سجل الحضور)
-  const todayStr = useMemo(() => new Date().toISOString().split("T")[0], []);
+  const todayStr = useMemo(() => {
+    try {
+      return new Date().toISOString().split("T")[0];
+    } catch {
+      return "2026-10-05";
+    }
+  }, []);
   const [selectedDate, setSelectedDate] = useState<string>(todayStr);
   const [isDateFilterActive, setIsDateFilterActive] = useState<boolean>(false);
 
@@ -56,17 +62,37 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
   const [readBroadcastIds, setReadBroadcastIds] = useState<string[]>(() => {
     try {
       const saved = localStorage.getItem("bairaq_read_broadcast_ids");
-      return saved ? JSON.parse(saved) : [];
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return Array.isArray(parsed) ? parsed.filter(id => typeof id === "string") : [];
+      }
+      return [];
     } catch {
       return [];
     }
   });
 
   const isItemRead = useCallback((item: any) => {
+    if (!item) return true;
     if (item.read === true) return true;
-    if (item.id && readBroadcastIds.includes(item.id)) return true;
+    if (item.id && Array.isArray(readBroadcastIds) && readBroadcastIds.includes(String(item.id))) return true;
     return false;
   }, [readBroadcastIds]);
+
+  // Safe helper to extract milliseconds from various timestamp formats
+  const getSafeTimestamp = (val: any): number => {
+    if (!val) return 0;
+    if (typeof val === "number") return isNaN(val) ? 0 : val;
+    if (typeof val?.toMillis === "function") return val.toMillis();
+    if (typeof val?.seconds === "number") return val.seconds * 1000;
+    if (typeof val?._seconds === "number") return val._seconds * 1000;
+    if (val instanceof Date) return val.getTime();
+    if (typeof val === "string") {
+      const parsed = new Date(val).getTime();
+      return isNaN(parsed) ? 0 : parsed;
+    }
+    return 0;
+  };
 
   // 1. Subscribe to administrative & school radio announcements
   useEffect(() => {
@@ -77,6 +103,7 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
       try {
         const filtered = (allData || [])
           .filter((b: any) => {
+            if (!b) return false;
             // Exclude global celebration items that are solely for the celebrations popup modal
             if (b.type === "global_celebration" && b.targetLocation === "popup") return false;
             return true; // We show both ticker, both, post, etc.
@@ -88,15 +115,7 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
 
             // Expiry check
             const now = Date.now();
-            let expMs = 0;
-            const expField = b.expiryDate || b.expiry_date;
-            if (typeof expField === "number") expMs = expField;
-            else if (expField?.toMillis) expMs = expField.toMillis();
-            else if (expField instanceof Date) expMs = expField.getTime();
-            else if (typeof expField === "string") {
-              const parsed = new Date(expField).getTime();
-              expMs = isNaN(parsed) ? (Number(expField) || 0) : parsed;
-            }
+            const expMs = getSafeTimestamp(b.expiryDate || b.expiry_date);
             if (expMs > 0 && expMs < now) return false;
 
             // Audience & Section Matching
@@ -107,14 +126,11 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
               isTeacher,
               isParent
             });
-            if (!audienceMatches) {
-              console.warn("Broadcast filtered: Audience mismatch", b.id, { grade, section, isTeacher, isParent });
-            }
             return audienceMatches;
           })
           .sort((a: any, b: any) => {
-            const timeA = a.timestampMs || a.timestamp_ms || (a.createdAt ? new Date(a.createdAt).getTime() : 0);
-            const timeB = b.timestampMs || b.timestamp_ms || (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+            const timeA = getSafeTimestamp(a.timestampMs || a.timestamp_ms || a.createdAt);
+            const timeB = getSafeTimestamp(b.timestampMs || b.timestamp_ms || b.createdAt);
             return timeB - timeA;
           });
         setBroadcasts(filtered);
@@ -130,10 +146,18 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
 
   // 2. Classify announcements into Admin (Radio/Administration/Finance) vs Teachers (Control panel)
   const isTeacherItem = (item: any) => {
-    const author = (item.author || item.metadata?.senderName || item.metadata?.teacherName || "").toLowerCase();
-    const subject = (item.subject || item.metadata?.subject || "").toLowerCase();
-    const type = (item.type || item.metadata?.type || "").toLowerCase();
-    const msg = (item.message || item.body || item.title || "").toLowerCase();
+    if (!item) return false;
+    const authorRaw = item.author || item.metadata?.senderName || item.metadata?.teacherName || "";
+    const author = typeof authorRaw === "string" ? authorRaw.toLowerCase() : String(authorRaw || "").toLowerCase();
+    
+    const subjectRaw = item.subject || item.metadata?.subject || "";
+    const subject = typeof subjectRaw === "string" ? subjectRaw.toLowerCase() : String(subjectRaw || "").toLowerCase();
+    
+    const typeRaw = item.type || item.metadata?.type || "";
+    const type = typeof typeRaw === "string" ? typeRaw.toLowerCase() : String(typeRaw || "").toLowerCase();
+    
+    const msgRaw = item.message || item.body || item.title || "";
+    const msg = typeof msgRaw === "string" ? msgRaw.toLowerCase() : String(msgRaw || "").toLowerCase();
 
     // Explicit Administration & Finance keywords & types -> ALWAYS Admin
     if (
@@ -219,27 +243,30 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
   // Map notifications
   const mappedNotifications = useMemo(() => {
     return (notifications || []).map(n => {
+      if (!n) return null;
       const isTeacher = isTeacherItem(n);
-      const isFinance = (n.body || n.title || '').includes('قسط') || (n.body || n.title || '').includes('تسديد');
+      const titleStr = typeof n.title === "string" ? n.title : "";
+      const bodyStr = typeof n.body === "string" ? n.body : "";
+      const isFinance = bodyStr.includes('قسط') || bodyStr.includes('تسديد') || titleStr.includes('قسط');
       const nAuthor = n.metadata?.senderName || n.metadata?.teacherName || n.author || "";
       const isAuthorDefault = !nAuthor || nAuthor === "مستخدم" || nAuthor === "مستخدم 🏛️" || nAuthor === "مستخدم 🎓" || nAuthor === "user" || nAuthor === "admin";
       
       const cleanAuthor = isAuthorDefault
         ? (isTeacher ? "أستاذ المادة 🎓" : isFinance ? "القسم المالي والإداري 🏛️" : "الإدارة المدرسية 🏛️")
-        : nAuthor;
+        : (typeof nAuthor === "string" ? nAuthor : String(nAuthor || ""));
 
       return {
-        id: n.id,
-        message: n.body || n.title,
-        title: n.title,
+        id: String(n.id || Math.random()),
+        message: bodyStr || titleStr || (typeof n.message === "string" ? n.message : ""),
+        title: titleStr,
         author: cleanAuthor,
         subject: isTeacher ? (n.metadata?.subject || "تبليغ صفي") : (isFinance ? "متابعة الأقساط والرسوم" : "تبليغ إداري رسمي"),
         createdAt: n.createdAt,
-        timestampMs: n.createdAt ? new Date(n.createdAt).getTime() : Date.now(),
-        read: n.read || (n.id ? readBroadcastIds.includes(n.id) : false),
+        timestampMs: getSafeTimestamp(n.timestampMs || n.timestamp_ms || n.createdAt) || Date.now(),
+        read: n.read || (n.id && Array.isArray(readBroadcastIds) ? readBroadcastIds.includes(String(n.id)) : false),
         type: isTeacher ? "staff" : "admin"
       };
-    });
+    }).filter(Boolean);
   }, [notifications, readBroadcastIds]);
 
   // Combined broadcasts + notifications categorized accurately
@@ -249,33 +276,41 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
 
     // Process broadcasts
     (broadcasts || []).forEach(b => {
+      if (!b) return;
       const isTeacher = isTeacherItem(b);
       const bAuthor = b.author || b.metadata?.senderName || b.metadata?.teacherName || "";
       const isAuthorDefault = !bAuthor || bAuthor === "مستخدم" || bAuthor === "مستخدم 🏛️" || bAuthor === "مستخدم 🎓" || bAuthor === "user" || bAuthor === "admin";
       
       const cleanAuthor = isAuthorDefault 
         ? (isTeacher ? "أستاذ المادة 🎓" : "الإدارة المدرسية 🏛️")
-        : bAuthor;
+        : (typeof bAuthor === "string" ? bAuthor : String(bAuthor || ""));
+
+      const messageContent = typeof b.message === "string" ? b.message : (typeof b.body === "string" ? b.body : (typeof b.title === "string" ? b.title : ""));
 
       if (isTeacher) {
         staffList.push({
           ...b,
           type: "staff",
           author: cleanAuthor,
-          subject: b.subject || "تبليغ صفي"
+          message: messageContent,
+          subject: b.subject || "تبليغ صفي",
+          timestampMs: getSafeTimestamp(b.timestampMs || b.timestamp_ms || b.createdAt) || Date.now()
         });
       } else {
         adminList.push({
           ...b,
           type: "admin",
           author: cleanAuthor,
-          subject: b.subject || "الإذاعة المدرسية 📻"
+          message: messageContent,
+          subject: b.subject || "الإذاعة المدرسية 📻",
+          timestampMs: getSafeTimestamp(b.timestampMs || b.timestamp_ms || b.createdAt) || Date.now()
         });
       }
     });
 
     // Process notifications
-    mappedNotifications.forEach(n => {
+    mappedNotifications.forEach((n: any) => {
+      if (!n) return;
       if (n.type === "staff") {
         staffList.push(n);
       } else {
@@ -300,10 +335,11 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
     if (activeSubTab === "admin") {
       const unreadAdminIds = adminItems
         .filter(item => !isItemRead(item) && item.id)
-        .map(item => item.id);
+        .map(item => String(item.id));
       if (unreadAdminIds.length > 0) {
         setReadBroadcastIds(prev => {
-          const next = [...new Set([...prev, ...unreadAdminIds])];
+          const currentArr = Array.isArray(prev) ? prev : [];
+          const next = [...new Set([...currentArr, ...unreadAdminIds])];
           try {
             localStorage.setItem("bairaq_read_broadcast_ids", JSON.stringify(next));
           } catch {}
@@ -314,10 +350,11 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
     } else if (activeSubTab === "staff") {
       const unreadStaffIds = staffItems
         .filter(item => !isItemRead(item) && item.id)
-        .map(item => item.id);
+        .map(item => String(item.id));
       if (unreadStaffIds.length > 0) {
         setReadBroadcastIds(prev => {
-          const next = [...new Set([...prev, ...unreadStaffIds])];
+          const currentArr = Array.isArray(prev) ? prev : [];
+          const next = [...new Set([...currentArr, ...unreadStaffIds])];
           try {
             localStorage.setItem("bairaq_read_broadcast_ids", JSON.stringify(next));
           } catch {}
@@ -345,18 +382,20 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
 
     // Sort by timestamp
     combined.sort((a, b) => {
-      const timeA = a.timestampMs || a.timestamp_ms || (a.createdAt ? new Date(a.createdAt).getTime() : 0);
-      const timeB = b.timestampMs || b.timestamp_ms || (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+      const timeA = getSafeTimestamp(a.timestampMs || a.timestamp_ms || a.createdAt);
+      const timeB = getSafeTimestamp(b.timestampMs || b.timestamp_ms || b.createdAt);
       return timeB - timeA;
     });
 
     // Apply date filter if active (مطابق لسجل الحضور)
     if (isDateFilterActive && selectedDate) {
       combined = combined.filter(item => {
-        const ts = item.timestampMs || item.timestamp_ms || (item.createdAt ? new Date(item.createdAt).getTime() : null);
+        const ts = getSafeTimestamp(item.timestampMs || item.timestamp_ms || item.createdAt);
         if (!ts) return false;
         try {
-          const itemDateStr = new Date(ts).toISOString().split("T")[0];
+          const d = new Date(ts);
+          if (isNaN(d.getTime())) return false;
+          const itemDateStr = d.toISOString().split("T")[0];
           return itemDateStr === selectedDate;
         } catch {
           return false;
@@ -367,12 +406,13 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
     // Apply search filter
     if (searchQuery.trim() !== "") {
       const q = searchQuery.toLowerCase();
-      combined = combined.filter(item => 
-        (item.message || "").toLowerCase().includes(q) || 
-        (item.subject || "").toLowerCase().includes(q) || 
-        (item.title || "").toLowerCase().includes(q) || 
-        (item.author || "").toLowerCase().includes(q)
-      );
+      combined = combined.filter(item => {
+        const msg = String(item.message || item.body || "").toLowerCase();
+        const sub = String(item.subject || "").toLowerCase();
+        const tit = String(item.title || "").toLowerCase();
+        const aut = String(item.author || "").toLowerCase();
+        return msg.includes(q) || sub.includes(q) || tit.includes(q) || aut.includes(q);
+      });
     }
 
     return combined;
@@ -380,8 +420,8 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
 
   // Helper to format date
   const formatTimeAgo = (item: any) => {
-    const ts = item.timestampMs || item.timestamp_ms || (item.createdAt ? new Date(item.createdAt).getTime() : Date.now());
-    const seconds = Math.floor((Date.now() - ts) / 1000);
+    const ts = getSafeTimestamp(item.timestampMs || item.timestamp_ms || item.createdAt) || Date.now();
+    const seconds = Math.max(0, Math.floor((Date.now() - ts) / 1000));
     
     if (seconds < 60) return "الآن ⚡";
     const minutes = Math.floor(seconds / 60);
@@ -664,7 +704,7 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
                       {/* Announcement Message Content */}
                       <div className="text-right">
                         <p className="text-[11.5px] font-semibold text-white/90 leading-relaxed font-sans whitespace-pre-line break-words">
-                          {item.message || item.body}
+                          {typeof item.message === 'string' ? item.message : typeof item.body === 'string' ? item.body : String(item.message || item.body || '')}
                         </p>
                       </div>
                     </div>

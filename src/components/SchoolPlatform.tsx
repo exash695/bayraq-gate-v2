@@ -178,6 +178,7 @@ import { TeacherQuestionBank } from "./TeacherQuestionBank";
 import { TeacherAttendanceTab } from "./TeacherAttendanceTab";
 import DevDashboard from "./DevDashboard";
 import { AnnouncementsCenterTab } from "./SchoolPlatform/AnnouncementsCenterTab";
+import { AdminSectionErrorBoundary } from "./AdminSectionErrorBoundary";
 
 import { VerticalScrollPicker } from "./SchoolPlatform/VerticalScrollPicker";
 import { RevealBlock, RenderTextWithTags } from "./SchoolPlatform/RevealBlock";
@@ -7309,13 +7310,15 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
           "";
 
         return (
-          <AnnouncementsCenterTab
-            schoolId={resolvedSchoolId}
-            grade={grade}
-            section={resolvedAnnouncementsSection}
-            isTeacher={isTeacher}
-            notifications={notifications}
-          />
+          <AdminSectionErrorBoundary sectionName="مركز التبليغات والإعلانات">
+            <AnnouncementsCenterTab
+              schoolId={resolvedSchoolId}
+              grade={grade}
+              section={resolvedAnnouncementsSection}
+              isTeacher={isTeacher}
+              notifications={notifications}
+            />
+          </AdminSectionErrorBoundary>
         );
       }
       case "live_watch":
@@ -7324,32 +7327,44 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
         return (
           <div className="flex-1 flex flex-col h-full overflow-y-auto no-scrollbar p-2 sm:p-4">
             <div className="flex-1 min-h-0">
-              <TeacherQuestionBank
-                schoolId={resolvedSchoolId}
-                teacherData={currentTeacherData || teacherData}
-                schoolName={schoolName}
-                selectedClass={selectedTeacherClass}
-                classSwitcherBar={isTeacher ? renderTeacherClassSwitcherBar() : null}
-              />
+              <AdminSectionErrorBoundary sectionName="بنك الأسئلة والملفات">
+                <TeacherQuestionBank
+                  schoolId={resolvedSchoolId}
+                  teacherData={currentTeacherData || teacherData}
+                  schoolName={schoolName}
+                  selectedClass={selectedTeacherClass}
+                  classSwitcherBar={isTeacher ? renderTeacherClassSwitcherBar() : null}
+                />
+              </AdminSectionErrorBoundary>
             </div>
           </div>
         );
 
-      case "ai_assistant":
+      case "ai_assistant": {
+        const rawClasses = currentTeacherData?.classes || teacherData?.classes;
+        const defaultClass = Array.isArray(rawClasses) && rawClasses.length > 0
+          ? rawClasses[0]
+          : typeof rawClasses === 'string' && rawClasses.trim()
+            ? rawClasses.trim()
+            : "سادس علمي";
+
         return (
           <div className="flex-1 flex flex-col h-full overflow-y-auto no-scrollbar p-2 sm:p-4">
             <div className="flex-1 min-h-0">
-              <TeacherAIAssistant
-                schoolId={resolvedSchoolId}
-                teacherData={currentTeacherData || teacherData}
-                selectedClass={selectedTeacherClass || ((currentTeacherData?.classes || teacherData?.classes)?.[0] || "سادس علمي")}
-                disabledModules={disabledModules}
-                rolePrefix={rolePrefix}
-                classSwitcherBar={isTeacher ? renderTeacherClassSwitcherBar() : null}
-              />
+              <AdminSectionErrorBoundary sectionName="مساعد الذكاء الاصطناعي">
+                <TeacherAIAssistant
+                  schoolId={resolvedSchoolId}
+                  teacherData={currentTeacherData || teacherData}
+                  selectedClass={selectedTeacherClass || defaultClass}
+                  disabledModules={disabledModules}
+                  rolePrefix={rolePrefix}
+                  classSwitcherBar={isTeacher ? renderTeacherClassSwitcherBar() : null}
+                />
+              </AdminSectionErrorBoundary>
             </div>
           </div>
         );
+      }
       
       case "dev_dashboard":
         return <DevDashboard schoolId={resolvedSchoolId} userProfile={userProfile} showToast={showToast} />;

@@ -175,13 +175,18 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
     setIsPublishing(true);
     try {
       const isAll = !selectedClass || selectedClass === 'ALL' || selectedClass === 'كافة الشُعب' || selectedClass === 'all';
-      const teacherSecNames = (teacherData?.classes || []).filter(Boolean);
+      const rawClasses = teacherData?.classes;
+      const teacherSecNames = Array.isArray(rawClasses) 
+        ? rawClasses.filter(Boolean) 
+        : typeof rawClasses === 'string' && rawClasses.trim() 
+          ? [rawClasses.trim()] 
+          : [];
       const targetGrade = isAll ? "الكل" : selectedClass;
-      const targetSections = isAll ? teacherSecNames : [selectedClass];
+      const targetSections = isAll ? (teacherSecNames.length > 0 ? teacherSecNames : [selectedClass || "الكل"]) : [selectedClass];
       const targetSectionLabel = isAll ? "كافة الشُعب" : selectedClass;
       const subject = teacherData?.subject || "عام";
       
-      const savedItem = savedResults.find(r => r.content === generatedContent);
+      const savedItem = (savedResults || []).find(r => r.content === generatedContent);
       const defaultTitle = activeToolData?.title ? `${activeToolData.title} - ${new Date().toLocaleDateString('ar-IQ')}` : 'ملف جديد';
       const finalName = savedItem ? savedItem.name : (saveName.trim() || defaultTitle);
       const toolName = savedItem ? savedItem.tool : (activeToolData?.title || 'عام');
@@ -286,9 +291,14 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
       const finalTitle = imageHwTitle.trim() || defaultTitle;
 
       const isAll = !selectedClass || selectedClass === 'ALL' || selectedClass === 'كافة الشُعب' || selectedClass === 'all';
-      const teacherSecNames = (teacherData?.classes || []).filter(Boolean);
+      const rawClasses = teacherData?.classes;
+      const teacherSecNames = Array.isArray(rawClasses) 
+        ? rawClasses.filter(Boolean) 
+        : typeof rawClasses === 'string' && rawClasses.trim() 
+          ? [rawClasses.trim()] 
+          : [];
       const targetGrade = isAll ? "الكل" : selectedClass;
-      const targetSections = isAll ? teacherSecNames : [selectedClass];
+      const targetSections = isAll ? (teacherSecNames.length > 0 ? teacherSecNames : [selectedClass || "الكل"]) : [selectedClass];
       const targetSectionLabel = isAll ? "كافة الشُعب" : selectedClass;
       const subject = teacherData?.subject || "عام";
 
@@ -345,7 +355,11 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
   const [savedResults, setSavedResults] = useState<{id: string, name: string, content: string, tool: string, date: string}[]>(() => {
     try {
       const saved = localStorage.getItem('teacher_ai_saved_results');
-      return saved ? JSON.parse(saved) : [];
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        return Array.isArray(parsed) ? parsed : [];
+      }
+      return [];
     } catch {
       return [];
     }
