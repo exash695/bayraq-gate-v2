@@ -926,6 +926,11 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
   const getFunctionNameFromStack = (s: string) => s;
   const getFileNameFromStack = (s: string) => s;
   
+  const activeTabRef = useRef<PlatformTab>(activeTab);
+  useEffect(() => {
+    activeTabRef.current = activeTab;
+  }, [activeTab]);
+
   const setActiveTab = (newTab: PlatformTab, callerName: string = 'unknown') => {
     if (checkIsModuleDisabled(newTab)) {
       showToast("هذا القسم مقفل حالياً من قبل الإدارة المركزية", "error");
@@ -942,14 +947,32 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
       }
     }
     if (newTab === "announcements") {
+      try {
+        let readIds: string[] = [];
+        try {
+          const saved = localStorage.getItem("bairaq_read_broadcast_ids");
+          readIds = saved ? JSON.parse(saved) : [];
+        } catch {}
+
+        const notifIds = (notifications || []).map(n => String(n.id)).filter(Boolean);
+        const updated = [...new Set([...readIds, ...notifIds])];
+        localStorage.setItem("bairaq_read_broadcast_ids", JSON.stringify(updated));
+      } catch {}
+
+      setUnreadAnnouncementsCount(0);
+
       const unreadAnnouncements = (notifications || []).filter(n => !n.read && (n.type === 'broadcast' || n.title?.includes('تبليغ')));
       unreadAnnouncements.forEach((n: any) => {
+        if (typeof onMarkNotificationAsRead === 'function') {
+          onMarkNotificationAsRead(n.id);
+        }
         fetch(`/api/notifications/${n.id}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ read: true })
         }).catch(() => {});
       });
+
       setTimeout(() => {
         window.dispatchEvent(new CustomEvent("bairaq_announcements_read"));
       }, 100);
@@ -3802,74 +3825,86 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
   useEffect(() => {
     const currentSchoolId = resolvedSchoolId || "school1";
 
-    let unsubBroadcasts: (() => void) | null = null;
+    let latestBroadcastsData: any[] = [];
 
-    const fetchUnreadBroadcasts = () => {
-      // Re-fetch read broadcast IDs from localStorage
+    const recalculateUnread = (data = latestBroadcastsData) => {
+      latestBroadcastsData = data;
       let readIds: string[] = [];
       try {
         const saved = localStorage.getItem("bairaq_read_broadcast_ids");
         readIds = saved ? JSON.parse(saved) : [];
       } catch {}
 
-      const unsub = broadcastService.subscribeToBroadcasts(currentSchoolId, (allData) => {
-        try {
-          const filtered = (allData || [])
-            .filter((b: any) => {
-              if (b.type === "global_celebration" && b.targetLocation === "popup") return false;
-              return true;
-            })
-            .filter((b: any) => {
-              const bSchool = b.schoolId || b.school_id;
-              if (!isSchoolMatch(currentSchoolId, bSchool)) return false;
+      try {
+        const filtered = (data || [])
+          .filter((b: any) => {
+            if (b.type === "global_celebration" && b.targetLocation === "popup") return false;
+            return true;
+          })
+          .filter((b: any) => {
+            const bSchool = b.schoolId || b.school_id;
+            if (!isSchoolMatch(currentSchoolId, bSchool)) return false;
 
-              const now = Date.now();
-              let expMs = 0;
-              const expField = b.expiryDate || b.expiry_date;
-              if (typeof expField === "number") expMs = expField;
-              else if (expField?.toMillis) expMs = expField.toMillis();
-              else if (expField instanceof Date) expMs = expField.getTime();
-              else if (typeof expField === "string") {
-                const parsed = new Date(expField).getTime();
-                expMs = isNaN(parsed) ? (Number(expField) || 0) : parsed;
-              }
-              if (expMs > 0 && expMs < now) return false;
+            const now = Date.now();
+            let expMs = 0;
+            const expField = b.expiryDate || b.expiry_date;
+            if (typeof expField === "number") expMs = expField;
+            else if (expField?.toMillis) expMs = expField.toMillis();
+            else if (expField instanceof Date) expMs = expField.getTime();
+            else if (typeof expField === "string") {
+              const parsed = new Date(expField).getTime();
+              expMs = isNaN(parsed) ? (Number(expField) || 0) : parsed;
+            }
+            if (expMs > 0 && expMs < now) return false;
 
-              // Resolve grade and section for matches
-              const studentGrade = gradeName || grade || "";
-              const studentSection = resolvedStudentSection || userProfile?.section || (userProfile as any)?.studentSection || userProfile?.class || "";
-              
-              return matchesBroadcastAudience(b, {
-                grade: studentGrade,
-                section: studentSection,
-                className: studentSection && studentGrade ? `${studentGrade} ${studentSection}` : (studentSection || studentGrade),
-                isTeacher: isTeacher || false
-              });
+            // Resolve grade and section for matches
+            const studentGrade = gradeName || grade || "";
+            const studentSection = resolvedStudentSection || userProfile?.section || (userProfile as any)?.studentSection || userProfile?.class || "";
+            
+            return matchesBroadcastAudience(b, {
+              grade: studentGrade,
+              section: studentSection,
+              className: studentSection && studentGrade ? `${studentGrade} ${studentSection}` : (studentSection || studentGrade),
+              isTeacher: isTeacher || false
             });
+          });
 
-          const unreadBroadcasts = filtered.filter(b => b.id && !readIds.includes(b.id));
-          const unreadNotifs = (notifications || []).filter(n => !n.read && n.type !== 'lounge_message' && n.type !== 'parent_message');
+        const unreadBroadcasts = filtered.filter(b => b.id && !readIds.includes(String(b.id)));
+        const unreadNotifs = (notifications || []).filter(n => !n.read && !readIds.includes(String(n.id)) && n.type !== 'lounge_message' && n.type !== 'parent_message');
 
-          setUnreadAnnouncementsCount(unreadBroadcasts.length + unreadNotifs.length);
-        } catch (err) {
-          console.warn("Error calculating unread announcements count:", err);
+        if (activeTabRef.current === "announcements") {
+          const allIdsToMark = [
+            ...filtered.map(b => String(b.id)).filter(Boolean),
+            ...(notifications || []).map(n => String(n.id)).filter(Boolean)
+          ];
+          if (allIdsToMark.length > 0) {
+            const updatedReadIds = [...new Set([...readIds, ...allIdsToMark])];
+            try {
+              localStorage.setItem("bairaq_read_broadcast_ids", JSON.stringify(updatedReadIds));
+            } catch {}
+          }
+          setUnreadAnnouncementsCount(0);
+          return;
         }
-      });
 
-      return unsub;
+        setUnreadAnnouncementsCount(unreadBroadcasts.length + unreadNotifs.length);
+      } catch (err) {
+        console.warn("Error calculating unread announcements count:", err);
+      }
     };
 
-    unsubBroadcasts = fetchUnreadBroadcasts();
+    const unsub = broadcastService.subscribeToBroadcasts(currentSchoolId, (allData) => {
+      recalculateUnread(allData);
+    });
 
     const handleReadAnnouncementsEvent = () => {
-      if (unsubBroadcasts) unsubBroadcasts();
-      unsubBroadcasts = fetchUnreadBroadcasts();
+      recalculateUnread();
     };
 
     window.addEventListener("bairaq_announcements_read", handleReadAnnouncementsEvent);
 
     return () => {
-      if (unsubBroadcasts) unsubBroadcasts();
+      unsub();
       window.removeEventListener("bairaq_announcements_read", handleReadAnnouncementsEvent);
     };
   }, [resolvedSchoolId, gradeName, grade, resolvedStudentSection, userProfile, notifications, isTeacher]);
@@ -7296,14 +7331,20 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
       case "excellence":
         return <StudentExcellenceTab />;
       case "announcements": {
+        let storedStudentInfo: any = null;
+        try {
+          const raw = safeStorage.getItem("s6_verified_student_info");
+          if (raw) storedStudentInfo = JSON.parse(raw);
+        } catch {}
+
         const resolvedAnnouncementsSection = 
           resolvedStudentSection || 
           userProfile?.section || 
           (userProfile as any)?.studentSection || 
           userProfile?.class || 
-          verifiedStudentInfo?.section || 
-          verifiedStudentInfo?.studentSection || 
-          verifiedStudentInfo?.class || 
+          storedStudentInfo?.section || 
+          storedStudentInfo?.studentSection || 
+          storedStudentInfo?.class || 
           (userProfile?.grade && extractSectionLetter(userProfile.grade) ? userProfile.grade : "") || 
           gradeName || 
           grade || 
@@ -7349,8 +7390,8 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
             : "سادس علمي";
 
         return (
-          <div className="flex-1 flex flex-col h-full overflow-y-auto no-scrollbar p-2 sm:p-4">
-            <div className="flex-1 min-h-0">
+          <div className="flex-1 flex flex-col h-full overflow-hidden p-0">
+            <div className="flex-1 min-h-0 h-full">
               <AdminSectionErrorBoundary sectionName="مساعد الذكاء الاصطناعي">
                 <TeacherAIAssistant
                   schoolId={resolvedSchoolId}
@@ -8440,17 +8481,18 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
               <div className="w-full bg-[#fbbf24] border-b border-white/5 flex items-center h-11">
                 {/* Notification & Lounge Buttons container */}
                 <div className="flex items-center h-full">
-                  {/* Lounge Button */}
+                  {/* Lounge / المجلس Button (Always visible for all users including teachers) */}
                   <button
                     onClick={() => setIsLoungeOpen(true)}
-                    className="h-full px-3 shrink-0 flex items-center justify-center bg-[#fbbf24] border-l border-black/10 text-black hover:bg-black/5 transition-all relative group"
+                    className="h-full px-3 shrink-0 flex items-center justify-center bg-[#fbbf24] border-l border-black/10 text-black hover:bg-black/5 transition-all relative group cursor-pointer"
                     title="المجلس"
                   >
-                    <div className="relative">
+                    <div className="relative flex items-center gap-1.5">
                       <Coffee
                         size={18}
                         className="text-black group-hover:scale-110 transition-transform"
                       />
+                      <span className="hidden sm:inline font-black text-xs">المجلس</span>
                       {(!isTeacher && userProfile?.role !== 'admin' && userProfile?.role !== 'manager' && userProfile?.role !== 'super_admin' && platformLocks.loungeLock) ? (
                           <div className="absolute -bottom-1.5 -left-2 bg-red-600 rounded-full min-w-[14px] h-[14px] px-1 shadow-sm border border-white flex items-center justify-center">
                               <Lock size={8} className="text-white" />
@@ -8471,6 +8513,8 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
                       )}
                     </div>
                   </button>
+
+
                   {/* Support/Notifications Button */}
                   <button
                     onClick={() => setIsSupportOpen(true)}

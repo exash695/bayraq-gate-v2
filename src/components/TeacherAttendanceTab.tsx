@@ -455,9 +455,15 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
   // Classroom Live Evaluation State
   const [showEvalModal, setShowEvalModal] = useState<boolean>(false);
   const [selectedEvalStudent, setSelectedEvalStudent] = useState<any | null>(null);
-  const [selectedEvalOption, setSelectedEvalTextOption] = useState<string>('');
+  const [selectedEvalOptions, setSelectedEvalOptions] = useState<string[]>([]);
   const [customEvalText, setCustomEvalText] = useState<string>('');
   const [isSavingEval, setIsSavingEval] = useState<boolean>(false);
+
+  const toggleEvalOption = (option: string) => {
+    setSelectedEvalOptions((prev) =>
+      prev.includes(option) ? prev.filter((o) => o !== option) : [...prev, option]
+    );
+  };
 
   // Classroom Lens ("عين على الصف") State
   const [activeMainTab, setActiveMainTab] = useState<'attendance' | 'lens'>('attendance');
@@ -901,15 +907,18 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
   const handleSaveClassroomEvaluation = async () => {
     if (!selectedEvalStudent) return;
 
-    let finalText = selectedEvalOption;
-    if (selectedEvalOption === "✏️ ملاحظة مخصصة (كتابة أخرى)...") {
-      finalText = customEvalText.trim();
+    const combinedBadges = (selectedEvalOptions || []).filter(Boolean).join(" • ");
+    let finalText = "";
+    if (combinedBadges && customEvalText.trim()) {
+      finalText = `${combinedBadges} - ${customEvalText.trim()}`;
+    } else if (combinedBadges) {
+      finalText = combinedBadges;
     } else if (customEvalText.trim()) {
-      finalText = selectedEvalOption ? `${selectedEvalOption} - ${customEvalText.trim()}` : customEvalText.trim();
+      finalText = customEvalText.trim();
     }
 
     if (!finalText) {
-      showToast("يرجى اختيار تقييم أو كتابة ملاحظة مخصصة للطالب", "error");
+      showToast("يرجى تحديد خيار تقييم واحد على الأقل أو كتابة ملاحظة مخصصة للطالب", "error");
       return;
     }
 
@@ -963,10 +972,10 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
         });
       } catch {}
 
-      showToast(`تم إرسال التقييم الصفي للطالب "${selectedEvalStudent.name}" ولولي أمره بنجاح! ⚡`, "success");
+      showToast(`تم إرسال التقييم الصفي (${selectedEvalOptions.length > 1 ? `${selectedEvalOptions.length} تقييمات` : 'تقييم'}) للطالب "${selectedEvalStudent.name}" بنجاح! ⚡`, "success");
       setShowEvalModal(false);
       setSelectedEvalStudent(null);
-      setSelectedEvalTextOption("");
+      setSelectedEvalOptions([]);
       setCustomEvalText("");
     } catch (err) {
       console.error("Failed to save classroom evaluation:", err);
@@ -1144,13 +1153,14 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
   };
 
   // Handler: Detailed Attendance Record (Period & Reason)
-  const handleSaveDetailedAction = async (student: any) => {
+  const handleSaveDetailedAction = async (student: any, overridePeriod?: string, overrideStatus?: 'present' | 'absent' | 'late') => {
     if (!student) return;
     const teacherName = teacherData?.name || 'الأستاذ';
     const currentSubject = teacherData?.subject || internalTeacherData?.subject || '';
     setIsSubmittingAction(true);
 
-    const targetPeriod = (actionStatus === 'present' && actionPeriod === 'يوم كامل') ? '1' : actionPeriod;
+    const effectiveStatus = overrideStatus || actionStatus;
+    const targetPeriod = overridePeriod || actionPeriod || 'يوم كامل';
     const recordedTime = getArabicRecordedTime();
 
     // 1. Instant local state update (0ms feedback)
@@ -1159,10 +1169,10 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
     const otherLogs = existingLogs.filter((l: any) => !(l.date === selectedDate && l.period === targetPeriod));
     const newLog = {
       date: selectedDate,
-      status: actionStatus,
+      status: effectiveStatus,
       period: targetPeriod,
       subject: currentSubject,
-      reason: actionStatus === 'present' ? '' : actionReason,
+      reason: effectiveStatus === 'present' ? '' : actionReason,
       time: recordedTime,
       by: teacherName
     };
@@ -1188,9 +1198,9 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
       await academicService.updateAttendance(
         student.id,
         (student as any).userId || student.code || student.id,
-        actionStatus,
+        effectiveStatus,
         teacherName,
-        actionStatus === 'present' ? '' : actionReason,
+        effectiveStatus === 'present' ? '' : actionReason,
         targetPeriod,
         schoolId,
         selectedDate,
@@ -1198,10 +1208,10 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
         { code: student.code, studentCode: student.code, name: student.name, subject: currentSubject, time: recordedTime }
       );
 
-      showToast(`تم تثبيت ${actionStatus === 'present' ? 'حضور' : actionStatus === 'absent' ? 'غياب' : 'تأخير'} للطالب (${targetPeriod})`, 'success');
+      showToast(`تم تثبيت ${effectiveStatus === 'present' ? (targetPeriod === 'يوم كامل' ? 'حضور يوم كامل' : 'حضور') : effectiveStatus === 'absent' ? 'غياب' : 'تأخير'} للطالب (${targetPeriod}) 🌟`, 'success');
     } catch (err: any) {
       console.warn('Detailed attendance update error/notice:', err);
-      showToast(`تم حفظ ${actionStatus === 'present' ? 'الحضور' : actionStatus === 'absent' ? 'الغياب' : 'التأخير'} وتزامن السجل!`, 'success');
+      showToast(`تم حفظ ${effectiveStatus === 'present' ? 'الحضور' : effectiveStatus === 'absent' ? 'الغياب' : 'التأخير'} وتزامن السجل!`, 'success');
     } finally {
       setIsSubmittingAction(false);
       setEditingStudentId(null);
@@ -1318,14 +1328,14 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
   // Handler: Export / Print Daily Attendance Sheet for Class with full Arabic support
   const handlePrintAttendanceReport = () => {
     try {
+      const resolvedSchool = schoolName || teacherData?.schoolName || internalTeacherData?.schoolName || 'مجموعة مدارس بيرق الأهلية النموذجية';
       printAttendanceReport({
-        schoolName,
+        schoolName: resolvedSchool,
         className: activeClass,
         date: selectedDate,
-        supervisorName: teacherData?.name || 'الكادر التعليمي',
+        supervisorName: teacherData?.name || internalTeacherData?.name || 'الكادر التعليمي',
         students: studentsWithDayStatus.map(s => ({
           name: s.name,
-          code: s.code,
           dayStatus: s.dayStatus,
           dayLog: s.dayLog
         })),
@@ -1836,7 +1846,7 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
                         } else {
                           setEditingStudentId(studentKey);
                           setActionStatus('present');
-                          setActionPeriod('1');
+                          setActionPeriod('يوم كامل');
                           setActionReason('');
                         }
                       }}
@@ -1845,6 +1855,7 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
                           ? 'bg-emerald-500 text-white shadow-lg shadow-emerald-500/25 ring-2 ring-emerald-400/40'
                           : 'bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20'
                       }`}
+                      title="رصد حضور الطالب (يوم كامل أو حصة محددة)"
                     >
                       <Check size={14} />
                       <span>حاضر</span>
@@ -1867,6 +1878,7 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
                           ? 'bg-rose-500 text-white shadow-lg shadow-rose-500/25 ring-2 ring-rose-400/40'
                           : 'bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-rose-500/20'
                       }`}
+                      title="رصد غياب الطالب"
                     >
                       <XCircle size={14} />
                       <span>غائب</span>
@@ -1889,6 +1901,7 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
                           ? 'bg-amber-500 text-white shadow-lg shadow-amber-500/25 ring-2 ring-amber-400/40'
                           : 'bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 border border-amber-500/20'
                       }`}
+                      title="رصد تأخير الطالب"
                     >
                       <Clock size={14} />
                       <span>تأخير</span>
@@ -1899,12 +1912,12 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
                       type="button"
                       onClick={() => {
                         setSelectedEvalStudent(student);
-                        setSelectedEvalTextOption('');
+                        setSelectedEvalOptions([]);
                         setCustomEvalText('');
                         setShowEvalModal(true);
                       }}
                       className="flex-1 sm:flex-initial text-[11px] sm:text-xs px-2.5 sm:px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-500/15 via-blue-500/15 to-indigo-500/15 hover:from-cyan-500/25 hover:to-indigo-500/25 border border-cyan-400/30 text-cyan-300 hover:text-white font-black transition-all cursor-pointer flex items-center justify-center gap-1 shadow-sm active:scale-95 whitespace-nowrap"
-                      title="إضافة تقييم صفي مباشر وتزامن فوري مع ولي الأمر"
+                      title="إضافة تقييم صفي مباشر ونشاط (متعدد الخيارات) وتزامن فوري مع ولي الأمر"
                     >
                       <Sparkles size={14} className="text-cyan-400 animate-pulse shrink-0" />
                       <span>التقييم والنشاط ⚡</span>
@@ -1921,6 +1934,33 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
                       exit={{ opacity: 0, height: 0 }}
                       className="overflow-hidden pt-3 mt-3 border-t border-white/10 space-y-3"
                     >
+                      {/* Special Banner & Instant Full-Day Button when Present */}
+                      {actionStatus === 'present' && (
+                        <div className="bg-gradient-to-r from-emerald-500/15 via-teal-500/10 to-emerald-500/15 border border-emerald-500/30 rounded-2xl p-3.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-inner">
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1.5 text-emerald-300 font-black text-xs">
+                              <CheckCircle2 size={16} className="text-emerald-400 shrink-0" />
+                              <span>رصد حضور يوم كامل (كامل الحصص الدراسية) 🌟</span>
+                            </div>
+                            <p className="text-[11px] text-white/70 font-medium">
+                              عند اختيار <strong>يوم كامل</strong> فإنه يمثل حضور الطالب في كامل حصص اليوم بدون استثناء ويبث لسجل ولي الأمر فوراً.
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={isSubmittingAction}
+                            onClick={() => {
+                              setActionPeriod('يوم كامل');
+                              handleSaveDetailedAction(student, 'يوم كامل', 'present');
+                            }}
+                            className="w-full sm:w-auto px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-black font-black text-xs transition-all flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-500/25 active:scale-95 cursor-pointer shrink-0"
+                          >
+                            <Check size={14} />
+                            <span>تأكيد حضور (يوم كامل) ⚡</span>
+                          </button>
+                        </div>
+                      )}
+
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-[#080d1a] p-3.5 rounded-xl border border-white/5">
                         
                         {/* Period selection */}
@@ -1930,27 +1970,24 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
                               تحديد وقت / الحصة الدراسية:
                             </label>
                             <span className="text-[10px] text-white/50 font-bold">
-                              المحدد: {actionStatus === 'present' ? `الحصة ${actionPeriod === 'يوم كامل' ? '1' : actionPeriod}` : (actionPeriod === 'يوم كامل' ? 'اليوم بالكامل' : `الحصة ${actionPeriod}`)}
+                              المحدد: {actionPeriod === 'يوم كامل' ? 'اليوم بالكامل (كامل الحصص)' : `الحصة ${actionPeriod}`}
                             </span>
                           </div>
                           <div className="flex flex-wrap gap-1.5">
-                            {(actionStatus === 'present'
-                              ? ['1', '2', '3', '4', '5', '6', '7', '8']
-                              : ['يوم كامل', '1', '2', '3', '4', '5', '6', '7', '8']
-                            ).map(p => (
+                            {['يوم كامل', '1', '2', '3', '4', '5', '6', '7', '8'].map(p => (
                               <button
                                 key={p}
                                 type="button"
                                 onClick={() => setActionPeriod(p)}
                                 className={`px-2.5 py-1.5 rounded-lg text-xs font-black transition-all cursor-pointer border ${
-                                  (actionStatus === 'present' && actionPeriod === 'يوم كامل' ? '1' : actionPeriod) === p
+                                  actionPeriod === p
                                     ? (actionStatus === 'present' ? 'bg-emerald-500 text-black border-emerald-400 shadow-md shadow-emerald-500/20' :
                                        actionStatus === 'absent' ? 'bg-rose-500 text-white border-rose-400 shadow-md shadow-rose-500/20' :
                                        'bg-amber-500 text-black border-amber-400 shadow-md shadow-amber-500/20')
                                     : 'bg-white/5 text-white/60 border-white/10 hover:text-white'
                                 }`}
                               >
-                                {p === 'يوم كامل' ? 'اليوم بالكامل' : `الحصة ${p}`}
+                                {p === 'يوم كامل' ? 'يوم كامل (كامل الحصص) 🌟' : `الحصة ${p}`}
                               </button>
                             ))}
                           </div>
@@ -2004,7 +2041,7 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
                               <Check size={13} />
                             )}
                             <span>
-                              تأكيد تسجيل ({actionStatus === 'present' ? 'الحضور' : actionStatus === 'absent' ? 'الغياب' : 'التأخير'}) لـ {actionStatus === 'present' ? `الحصة ${actionPeriod === 'يوم كامل' ? '1' : actionPeriod}` : (actionPeriod === 'يوم كامل' ? 'اليوم بالكامل' : `الحصة ${actionPeriod}`)}
+                              تأكيد تسجيل ({actionStatus === 'present' ? 'الحضور' : actionStatus === 'absent' ? 'الغياب' : 'التأخير'}) لـ {actionPeriod === 'يوم كامل' ? 'اليوم بالكامل' : `الحصة ${actionPeriod}`}
                             </span>
                           </button>
                         </div>
@@ -2345,15 +2382,27 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
               </div>
 
               {/* Subtitle Banner */}
-              <div className="p-3 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-200 text-xs font-bold flex items-center gap-2">
-                <Info size={16} className="text-cyan-400 shrink-0" />
-                <span>سيتم إرسال التقييم المباشر فوراً لقاعدة البيانات وسجل ولي الأمر مع تنبيه لحظي 📱</span>
+              <div className="p-3 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-200 text-xs font-bold flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <Info size={16} className="text-cyan-400 shrink-0" />
+                  <span>يمكنك اختيار <strong>أكثر من نشاط وتقييم معاً</strong> وبثها فوراً لسجل الطالب وولي أمره 📱</span>
+                </div>
+                {selectedEvalOptions.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedEvalOptions([])}
+                    className="text-[11px] text-rose-300 hover:text-rose-200 underline font-black shrink-0 cursor-pointer"
+                  >
+                    مسح التحديد ({selectedEvalOptions.length})
+                  </button>
+                )}
               </div>
 
-              {/* Section 1: Positive Badges */}
+              {/* Section 1: Positive Badges (Multi-Select) */}
               <div className="space-y-2">
-                <label className="text-xs font-black text-emerald-300 block flex items-center gap-1.5">
-                  <span>🌟 المشاركات والأوسمة الإيجابية:</span>
+                <label className="text-xs font-black text-emerald-300 block flex items-center justify-between">
+                  <span>🌟 المشاركات والأوسمة الإيجابية (متعدد الخيارات):</span>
+                  <span className="text-[10px] text-emerald-400/70 font-bold">انقر لتحديد/إلغاء الخيارات</span>
                 </label>
                 <div className="flex flex-wrap gap-2">
                   {[
@@ -2361,32 +2410,39 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
                     "💡 إجابة نموذجية ورائعة",
                     "📝 ملتزم ومستعد للحصة",
                     "👑 نجم/فارس الحصة اليوم",
-                    "🤝 متعاون ومساعد لزملائه"
+                    "🤝 متعاون ومساعد لزملائه",
+                    "🎯 تركيز وفهم عالي",
+                    "🏆 إنجاز الواجب بإتقان"
                   ].map((option) => {
-                    const isSelected = selectedEvalOption === option;
+                    const isSelected = selectedEvalOptions.includes(option);
                     return (
                       <button
                         key={option}
                         type="button"
-                        onClick={() => setSelectedEvalTextOption(option)}
+                        onClick={() => toggleEvalOption(option)}
                         className={`px-3 py-2 rounded-xl text-xs font-black transition-all cursor-pointer border flex items-center gap-1.5 ${
                           isSelected
-                            ? "bg-emerald-500 text-black border-emerald-400 shadow-lg shadow-emerald-500/20 scale-[1.02]"
-                            : "bg-emerald-500/10 text-emerald-300 border-emerald-500/20 hover:bg-emerald-500/20"
+                            ? "bg-emerald-500 text-black border-emerald-400 shadow-lg shadow-emerald-500/20 scale-[1.02] ring-2 ring-emerald-300/40"
+                            : "bg-emerald-500/10 text-emerald-300 border-emerald-500/20 hover:bg-emerald-500/20 hover:text-white"
                         }`}
                       >
                         <span>{option}</span>
-                        {isSelected && <Check size={14} className="text-black" />}
+                        {isSelected ? (
+                          <Check size={14} className="text-black stroke-[3]" />
+                        ) : (
+                          <span className="text-emerald-400/40 text-xs">+</span>
+                        )}
                       </button>
                     );
                   })}
                 </div>
               </div>
 
-              {/* Section 2: Alerts & Behavioral Notes */}
+              {/* Section 2: Alerts & Behavioral Notes (Multi-Select) */}
               <div className="space-y-2">
-                <label className="text-xs font-black text-rose-300 block flex items-center gap-1.5">
+                <label className="text-xs font-black text-rose-300 block flex items-center justify-between">
                   <span>⚠️ التنبيهات والملاحظات السلوكية:</span>
+                  <span className="text-[10px] text-rose-400/70 font-bold">انقر لتحديد/إلغاء الخيارات</span>
                 </label>
                 <div className="flex flex-wrap gap-2">
                   {[
@@ -2394,21 +2450,27 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
                     "🗣️ كثرة الكلام وغير منضبط",
                     "📚 لم يحضر الواجب / الدفتر",
                     "⏳ تأخر عن دخول القاعة",
+                    "📱 الانشغال بغير الدرس",
+                    "⚠️ يحتاج لمتابعة منزلية مكثفة"
                   ].map((option) => {
-                    const isSelected = selectedEvalOption === option;
+                    const isSelected = selectedEvalOptions.includes(option);
                     return (
                       <button
                         key={option}
                         type="button"
-                        onClick={() => setSelectedEvalTextOption(option)}
+                        onClick={() => toggleEvalOption(option)}
                         className={`px-3 py-2 rounded-xl text-xs font-black transition-all cursor-pointer border flex items-center gap-1.5 ${
                           isSelected
-                            ? "bg-amber-500 text-black border-amber-400 shadow-lg shadow-amber-500/20 scale-[1.02]"
-                            : "bg-amber-500/10 text-amber-300 border-amber-500/20 hover:bg-amber-500/20"
+                            ? "bg-amber-500 text-black border-amber-400 shadow-lg shadow-amber-500/20 scale-[1.02] ring-2 ring-amber-300/40"
+                            : "bg-amber-500/10 text-amber-300 border-amber-500/20 hover:bg-amber-500/20 hover:text-white"
                         }`}
                       >
                         <span>{option}</span>
-                        {isSelected && <Check size={14} className="text-black" />}
+                        {isSelected ? (
+                          <Check size={14} className="text-black stroke-[3]" />
+                        ) : (
+                          <span className="text-amber-400/40 text-xs">+</span>
+                        )}
                       </button>
                     );
                   })}
@@ -2428,6 +2490,18 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
                   className="w-full bg-[#080e1c] border border-cyan-500/30 rounded-2xl p-3 text-xs font-bold text-white placeholder-white/30 focus:border-cyan-400 outline-none transition-all resize-none h-20 leading-relaxed"
                 />
               </div>
+
+              {/* Selected Badges Summary */}
+              {selectedEvalOptions.length > 0 && (
+                <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-xs text-cyan-200 flex items-center justify-between">
+                  <span className="font-bold">
+                    تم تحديد <strong>{selectedEvalOptions.length}</strong> تقييم ونشاط:
+                  </span>
+                  <span className="font-black text-white truncate max-w-[240px]">
+                    {selectedEvalOptions.join(' • ')}
+                  </span>
+                </div>
+              )}
 
               {/* Modal Footer Actions */}
               <div className="pt-3 border-t border-white/10 flex items-center justify-end gap-2.5">
@@ -2452,7 +2526,9 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
                   ) : (
                     <Sparkles size={14} />
                   )}
-                  <span>إرسال التقييم المباشر لولي الأمر 🚀</span>
+                  <span>
+                    إرسال التقييم {selectedEvalOptions.length > 1 ? `(${selectedEvalOptions.length} بنود)` : ''} لولي الأمر 🚀
+                  </span>
                 </button>
               </div>
             </motion.div>

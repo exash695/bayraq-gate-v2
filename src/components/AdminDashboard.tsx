@@ -1020,7 +1020,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       supervisorName: 'إدارة المدرسة',
       students: studentsWithDayStatus.map(s => ({
         name: s.name,
-        code: s.code,
         dayStatus: s.dayStatus,
         period: s.latestLog?.period,
         reason: s.latestLog?.reason,

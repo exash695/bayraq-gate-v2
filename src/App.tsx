@@ -1,8 +1,6 @@
-import { Gate6 } from './components/Gate6.tsx';
-import { Gate6Demo } from './components/Gate6/Gate6Demo';
 import { matchesTargetGrades, isSchoolMatch, matchesBroadcastAudience } from './utils/gradeMatcher';
 import { formatParentGreetingTitle, cleanParentStudentName } from './utils/studentUtils';
-import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback, Suspense } from "react";
 import { customAuth } from "./services/customAuthService";
 import { auth, db, purgeFirestore } from "./lib/firebase";
 import { api } from "./lib/api";
@@ -28,28 +26,32 @@ import {
 } from "@/src/lib/firebase";
 import { useRemoteConfig } from "./services/remoteConfig";
 import { useAppLogo } from "./components/BerqCharacterManager";
-import DevDashboard from "./components/DevDashboard";
 import { handleFirestoreError, OperationType } from "./lib/firestoreUtils";
 import { getStudentLevelInfo, getProfessionalAvatar } from "./lib/avatarLevel";
 import { updateDailyLogin, updatePoints } from "./lib/pointsEngine";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { AuthPage } from "./components/AuthPage";
-import { ResetPasswordModal } from "./components/ResetPasswordModal";
-import { ProfileDashboard } from "./components/ProfileDashboard";
-import { UnitDetail } from "./components/UnitDetail";
-import { AIBot } from "./components/AIBot";
-import { IdeaBank } from "./components/IdeaBank";
-import { HallOfFame } from "./components/HallOfFame";
-import { ControlRoom } from "./components/ControlRoom";
-import { Battalion } from "./components/Battalion";
-import { SubscriptionPage } from "./components/SubscriptionPage";
-import { NotificationDrawer } from "./components/NotificationDrawer";
+
+// Instant Launch: Lazy loaded secondary modules (prevents 8.8MB download block)
+const Gate6 = React.lazy(() => import('./components/Gate6.tsx').then(m => ({ default: m.Gate6 })));
+const Gate6Demo = React.lazy(() => import('./components/Gate6/Gate6Demo').then(m => ({ default: m.Gate6Demo })));
+const DevDashboard = React.lazy(() => import("./components/DevDashboard"));
+const ResetPasswordModal = React.lazy(() => import("./components/ResetPasswordModal").then(m => ({ default: m.ResetPasswordModal })));
+const ProfileDashboard = React.lazy(() => import("./components/ProfileDashboard").then(m => ({ default: m.ProfileDashboard })));
+const UnitDetail = React.lazy(() => import("./components/UnitDetail").then(m => ({ default: m.UnitDetail })));
+const AIBot = React.lazy(() => import("./components/AIBot").then(m => ({ default: m.AIBot })));
+const IdeaBank = React.lazy(() => import("./components/IdeaBank").then(m => ({ default: m.IdeaBank })));
+const HallOfFame = React.lazy(() => import("./components/HallOfFame").then(m => ({ default: m.HallOfFame })));
+const ControlRoom = React.lazy(() => import("./components/ControlRoom").then(m => ({ default: m.ControlRoom })));
+const Battalion = React.lazy(() => import("./components/Battalion").then(m => ({ default: m.Battalion })));
+const SubscriptionPage = React.lazy(() => import("./components/SubscriptionPage").then(m => ({ default: m.SubscriptionPage })));
+const MascotTestPage = React.lazy(() => import("./components/MascotTestPage").then(m => ({ default: m.MascotTestPage })));
+const PrivacyPolicy = React.lazy(() => import("./components/PrivacyPolicy").then(m => ({ default: m.PrivacyPolicy })));
+const AccountDeletionPage = React.lazy(() => import("./components/AccountDeletionPage").then(m => ({ default: m.AccountDeletionPage })));
+const StoreSubmissionKit = React.lazy(() => import("./components/StoreSubmissionKit").then(m => ({ default: m.StoreSubmissionKit })));
+const NotificationDrawer = React.lazy(() => import("./components/NotificationDrawer").then(m => ({ default: m.NotificationDrawer })));
 import { ToastContainer } from "./components/ToastNotification";
 import { BerqCharacter } from "./components/BerqCharacterManager";
-import { MascotTestPage } from "./components/MascotTestPage";
-import { PrivacyPolicy } from "./components/PrivacyPolicy";
-import { AccountDeletionPage } from "./components/AccountDeletionPage";
-import { StoreSubmissionKit } from "./components/StoreSubmissionKit";
 import { SwipeDismissContainer } from "./components/SwipeDismissContainer";
 import { ComingSoonPlaceholder } from "./components/ComingSoonPlaceholder";
 import { sounds } from "./lib/sounds";
@@ -100,7 +102,7 @@ import { BadgeNotification } from "./components/BadgeNotification";
 import { broadcastService } from "./services/broadcastService";
 import { Badge } from "./types";
 import { checkNewBadges } from "./lib/badgeUtils";
-import { SovereigntyPlatform } from "./components/Sovereignty/SovereigntyPlatform";
+const SovereigntyPlatform = React.lazy(() => import("./components/Sovereignty/SovereigntyPlatform").then(m => ({ default: m.SovereigntyPlatform })));
 
 import { BroadcastTicker } from "./components/BroadcastTicker";
 import { SeasonalThemeBanner } from "./components/SeasonalThemeBanner";
@@ -152,38 +154,50 @@ import {
   Rocket,
   MessageCircle,
   Award,
-  Megaphone
+  Megaphone,
+  LayoutGrid,
+  GraduationCap
 } from "lucide-react";
 import { LoadingScreen } from "./components/LoadingScreen";
-import { WelcomeIntroScreen } from "./components/WelcomeIntroScreen";
-import { ProfileSetup } from "./components/ProfileSetup";
-import { DualArena } from "./components/DualArena";
-import { BayraqGateway } from "./components/BayraqGateway";
-import { SixthAcademyPro } from "./components/SixthAcademyPro";
-import { SchoolSelection } from "./components/SchoolSelection";
-import { SchoolPlatform } from "./components/SchoolPlatform";
-import { AIEnhancedRadar } from "./components/AIEnhancedRadar";
-import { StudentLounge } from "./components/StudentLounge";
-import { SchoolContent } from "./components/SchoolContent";
-import { SchoolAccessGate } from "./components/SchoolAccessGate";
 import { saveAccessCode } from "./lib/savedAccessCodes";
 import { getPrimaryUserSession, savePrimaryUserSession, clearPrimaryUserSession } from "./lib/deviceSessionVault";
-import { BayraqAcademyHub } from "./components/BayraqAcademyHub";
-import { ParentPortal } from "./components/ParentPortal";
-import { AdminDashboard } from "./components/AdminDashboard";
-import { AdminHomeDashboard } from "./components/AdminHomeDashboard";
-import { DriverDashboard } from "./components/Transport/DriverDashboard";
-import { DriverPortal } from "./components/Transport/DriverPortal";
 import { getDriverByAccessCode } from "./services/transportService";
-import { OnboardingCarousel } from "./components/OnboardingCarousel";
-import { RoleSelectionModal } from "./components/RoleSelectionModal";
 import { SCHOOLS_DATA, getOfficialSchoolName } from "./lib/constants";
 import { schoolService, SchoolRecord } from "./services/schoolService";
 import { STUDENT_REGISTRY } from "./lib/studentRegistry";
-import { ReceiptVerification } from "./components/ReceiptVerification";
-import { GlobalAnnouncementsPopup } from "./components/GlobalAnnouncementsPopup";
-import { SystemDialogsModal } from "./components/SystemDialogsModal";
 import { NetworkStatusListener } from "./components/NetworkStatusListener";
+import { PWAInstallButton } from "./components/PWAInstallButton";
+
+// Fast on-demand chunking for large dashboard modules
+const WelcomeIntroScreen = React.lazy(() => import("./components/WelcomeIntroScreen").then(m => ({ default: m.WelcomeIntroScreen })));
+const ProfileSetup = React.lazy(() => import("./components/ProfileSetup").then(m => ({ default: m.ProfileSetup })));
+const DualArena = React.lazy(() => import("./components/DualArena").then(m => ({ default: m.DualArena })));
+const BayraqGateway = React.lazy(() => import("./components/BayraqGateway").then(m => ({ default: m.BayraqGateway })));
+const SixthAcademyPro = React.lazy(() => import("./components/SixthAcademyPro").then(m => ({ default: m.SixthAcademyPro })));
+const SchoolSelection = React.lazy(() => import("./components/SchoolSelection").then(m => ({ default: m.SchoolSelection })));
+const SchoolPlatform = React.lazy(() => import("./components/SchoolPlatform").then(m => ({ default: m.SchoolPlatform })));
+const AIEnhancedRadar = React.lazy(() => import("./components/AIEnhancedRadar").then(m => ({ default: m.AIEnhancedRadar })));
+const StudentLounge = React.lazy(() => import("./components/StudentLounge").then(m => ({ default: m.StudentLounge })));
+const SchoolContent = React.lazy(() => import("./components/SchoolContent").then(m => ({ default: m.SchoolContent })));
+const SchoolAccessGate = React.lazy(() => import("./components/SchoolAccessGate").then(m => ({ default: m.SchoolAccessGate })));
+const BayraqAcademyHub = React.lazy(() => import("./components/BayraqAcademyHub").then(m => ({ default: m.BayraqAcademyHub })));
+const ParentPortal = React.lazy(() => import("./components/ParentPortal").then(m => ({ default: m.ParentPortal })));
+const AdminDashboard = React.lazy(() => import("./components/AdminDashboard").then(m => ({ default: m.AdminDashboard })));
+const AdminHomeDashboard = React.lazy(() => import("./components/AdminHomeDashboard").then(m => ({ default: m.AdminHomeDashboard })));
+const DriverDashboard = React.lazy(() => import("./components/Transport/DriverDashboard").then(m => ({ default: m.DriverDashboard })));
+const DriverPortal = React.lazy(() => import("./components/Transport/DriverPortal").then(m => ({ default: m.DriverPortal })));
+const OnboardingCarousel = React.lazy(() => import("./components/OnboardingCarousel").then(m => ({ default: m.OnboardingCarousel })));
+const RoleSelectionModal = React.lazy(() => import("./components/RoleSelectionModal").then(m => ({ default: m.RoleSelectionModal })));
+const ReceiptVerification = React.lazy(() => import("./components/ReceiptVerification").then(m => ({ default: m.ReceiptVerification })));
+const GlobalAnnouncementsPopup = React.lazy(() => import("./components/GlobalAnnouncementsPopup").then(m => ({ default: m.GlobalAnnouncementsPopup })));
+const SystemDialogsModal = React.lazy(() => import("./components/SystemDialogsModal").then(m => ({ default: m.SystemDialogsModal })));
+
+const FastRouteFallback: React.FC = () => (
+  <div className="flex-1 flex flex-col items-center justify-center p-12 min-h-[50vh] text-center" dir="rtl">
+    <div className="w-10 h-10 rounded-full border-2 border-amber-500/20 border-t-amber-400 animate-spin mb-3"></div>
+    <span className="text-xs font-bold text-amber-200/90">جاري فتح الصفحة بسرعة فائقة...</span>
+  </div>
+);
 
 export const AVAILABLE_GRADES = [
   "أول ابتدائي",
@@ -352,26 +366,16 @@ export default function App() {
     }
   }, []);
 
-  const [authReady, setAuthReady] = useState(() => {
-    try {
-      return (
-        !!safeStorage.getItem("bayraq_cached_user_profile") ||
-        !!safeStorage.getItem("bairaq_jwt_token") ||
-        safeStorage.getItem("app_has_seen_onboarding") === "true"
-      );
-    } catch {
-      return true;
-    }
-  });
+  const [authReady, setAuthReady] = useState(true);
 
-  const [splashFinished, setSplashFinished] = useState(false);
+  const [splashFinished, setSplashFinished] = useState(true);
 
-  // Failsafe: ensure splash and auth readiness complete within 1500ms max
+  // Failsafe: ensure splash and auth readiness complete within 350ms max
   useEffect(() => {
     const timer = setTimeout(() => {
       setAuthReady(true);
       setSplashFinished(true);
-    }, 1500);
+    }, 350);
     return () => clearTimeout(timer);
   }, []);
   const [hasSeenOnboarding, setHasSeenOnboarding] = useState(() => {
@@ -2750,11 +2754,13 @@ export default function App() {
               } else if (e.message === 'ACCOUNT_BANNED') {
                 setBannedCode(code);
               } else {
+                const errMsg = e.message || "هذا الكود غير موجود في مركز أكواد المدرسة";
                 addNotification(
                   "خطأ في التحقق",
-                  e.message || "كود الدخول غير صحيح",
+                  errMsg,
                   "alarm",
                 );
+                throw new Error(errMsg);
               }
             } finally {
               setIsVerifying(false);
@@ -4639,6 +4645,7 @@ export default function App() {
         onClose={() => setDismissedNewVersionNotice(true)}
       />
 
+      <Suspense fallback={<FastRouteFallback />}>
       {verifyReceiptId ? (
         <ReceiptVerification receiptId={verifyReceiptId} />
       ) : (
@@ -5322,21 +5329,50 @@ export default function App() {
                         لوحة ولي الأمر
                       </span>
                     </button>
+                  ) : (loggedInTeacher || portalType === "teacher" || userProfile?.role === "teacher" || safeStorage.getItem("bayraq_user_role") === "teacher") ? (
+                    <button
+                      onClick={() => {
+                        setPortalType("teacher");
+                        setActiveSection("school-content");
+                        setIsChoosingSchool(false);
+                      }}
+                      className={`flex-1 flex flex-col justify-center items-center h-full transition-all duration-300 ${activeSection === "school-content" && portalType === "teacher" && !isChoosingSchool ? "text-[#fbbf24]" : "text-white/30 hover:text-white/60"}`}
+                      title="لوحة الأستاذ"
+                    >
+                      <LayoutGrid
+                        size={activeSection === "school-content" && portalType === "teacher" && !isChoosingSchool ? 22 : 20}
+                        className={`mb-0.5 transition-all duration-300 ${activeSection === "school-content" && portalType === "teacher" && !isChoosingSchool ? "drop-shadow-[0_0_8px_rgba(251,191,36,0.5)] scale-110 text-[#fbbf24]" : ""}`}
+                      />
+                      <span
+                        className={`text-[9px] font-bold transition-all duration-300 ${activeSection === "school-content" && portalType === "teacher" && !isChoosingSchool ? "opacity-100 translate-y-0 text-amber-300" : "opacity-0 translate-y-1 h-0 overflow-hidden"}`}
+                      >
+                        لوحة الأستاذ
+                      </span>
+                    </button>
                   ) : (
                     <button
                       onClick={() => {
-                        setIsLoungeOpen(true);
+                        let targetSchool = selectedSchoolId || verifiedStudentInfo?.schoolId || userProfile?.schoolId;
+                        if (!targetSchool) {
+                          targetSchool = safeStorage.getItem("s6_selectedSchoolId") || safeStorage.getItem("s6_preferred_school") || "school1";
+                        }
+                        setSelectedSchoolId(targetSchool);
+                        safeStorage.setItem("s6_selectedSchoolId", targetSchool);
+                        setPortalType("student");
+                        setIsChoosingSchool(false);
+                        setActiveSection("school-content");
                       }}
-                      className={`flex-1 flex flex-col justify-center items-center h-full transition-all duration-300 ${isLoungeOpen ? "text-[#FFD600]" : "text-white/30 hover:text-white/60"}`}
+                      className={`flex-1 flex flex-col justify-center items-center h-full transition-all duration-300 ${activeSection === "school-content" && portalType !== "parent" && portalType !== "teacher" ? "text-cyan-400" : "text-white/30 hover:text-white/60"}`}
+                      title="لوحة الطالب"
                     >
-                      <MessageCircle
-                        size={isLoungeOpen ? 22 : 20}
-                        className={`mb-0.5 transition-all duration-300 ${isLoungeOpen ? "drop-shadow-[0_0_8px_rgba(255,214,0,0.5)] scale-110" : ""}`}
+                      <GraduationCap
+                        size={activeSection === "school-content" && portalType !== "parent" && portalType !== "teacher" ? 22 : 20}
+                        className={`mb-0.5 transition-all duration-300 ${activeSection === "school-content" && portalType !== "parent" && portalType !== "teacher" ? "drop-shadow-[0_0_8px_rgba(6,182,212,0.5)] scale-110 text-cyan-400" : ""}`}
                       />
                       <span
-                        className={`text-[9px] font-bold transition-all duration-300 ${isLoungeOpen ? "opacity-100 translate-y-0" : "opacity-0 translate-y-1 h-0 overflow-hidden"}`}
+                        className={`text-[9px] font-bold transition-all duration-300 ${activeSection === "school-content" && portalType !== "parent" && portalType !== "teacher" ? "opacity-100 translate-y-0 text-cyan-300" : "opacity-0 translate-y-1 h-0 overflow-hidden"}`}
                       >
-                        المجلس
+                        لوحة الطالب
                       </span>
                     </button>
                   )}
@@ -5405,6 +5441,7 @@ export default function App() {
 
         </>
       )}
+      </Suspense>
     </ErrorBoundary>
   );
 }

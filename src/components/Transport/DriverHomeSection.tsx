@@ -563,7 +563,7 @@ export const DriverHomeSection: React.FC<DriverHomeSectionProps> = ({
 
         {/* Center Title & Verse */}
         <div className="flex-1 text-center px-2">
-          <span className="text-[#D4AF37] font-black font-amiri text-base sm:text-lg block drop-shadow-sm">
+          <span className="text-[#D4AF37] font-black text-base sm:text-lg block drop-shadow-sm">
             وَقُل رَّبِّ زِدْنِي عِلْمًا
           </span>
           <span className="text-[10px] text-white/50 font-bold">

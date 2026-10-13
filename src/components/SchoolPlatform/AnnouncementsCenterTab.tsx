@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   Megaphone, 
@@ -75,21 +75,26 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
   const isItemRead = useCallback((item: any) => {
     if (!item) return true;
     if (item.read === true) return true;
-    if (item.id && Array.isArray(readBroadcastIds) && readBroadcastIds.includes(String(item.id))) return true;
+    const itemId = item.id ? String(item.id) : null;
+    if (itemId && Array.isArray(readBroadcastIds) && readBroadcastIds.includes(itemId)) return true;
     return false;
   }, [readBroadcastIds]);
 
   // Safe helper to extract milliseconds from various timestamp formats
   const getSafeTimestamp = (val: any): number => {
     if (!val) return 0;
-    if (typeof val === "number") return isNaN(val) ? 0 : val;
-    if (typeof val?.toMillis === "function") return val.toMillis();
-    if (typeof val?.seconds === "number") return val.seconds * 1000;
-    if (typeof val?._seconds === "number") return val._seconds * 1000;
-    if (val instanceof Date) return val.getTime();
-    if (typeof val === "string") {
-      const parsed = new Date(val).getTime();
-      return isNaN(parsed) ? 0 : parsed;
+    try {
+      if (typeof val === "number") return isNaN(val) ? 0 : val;
+      if (typeof val?.toMillis === "function") return val.toMillis();
+      if (typeof val?.seconds === "number") return Number(val.seconds) * 1000;
+      if (typeof val?._seconds === "number") return Number(val._seconds) * 1000;
+      if (val instanceof Date) return isNaN(val.getTime()) ? 0 : val.getTime();
+      if (typeof val === "string") {
+        const parsed = new Date(val).getTime();
+        return isNaN(parsed) ? 0 : parsed;
+      }
+    } catch {
+      return 0;
     }
     return 0;
   };
@@ -242,32 +247,39 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
 
   // Map notifications
   const mappedNotifications = useMemo(() => {
-    return (notifications || []).map(n => {
+    return (notifications || []).map((n, idx) => {
       if (!n) return null;
-      const isTeacher = isTeacherItem(n);
-      const titleStr = typeof n.title === "string" ? n.title : "";
-      const bodyStr = typeof n.body === "string" ? n.body : "";
-      const isFinance = bodyStr.includes('قسط') || bodyStr.includes('تسديد') || titleStr.includes('قسط');
-      const nAuthor = n.metadata?.senderName || n.metadata?.teacherName || n.author || "";
-      const isAuthorDefault = !nAuthor || nAuthor === "مستخدم" || nAuthor === "مستخدم 🏛️" || nAuthor === "مستخدم 🎓" || nAuthor === "user" || nAuthor === "admin";
-      
-      const cleanAuthor = isAuthorDefault
-        ? (isTeacher ? "أستاذ المادة 🎓" : isFinance ? "القسم المالي والإداري 🏛️" : "الإدارة المدرسية 🏛️")
-        : (typeof nAuthor === "string" ? nAuthor : String(nAuthor || ""));
+      try {
+        const isTeacherNotif = isTeacherItem(n);
+        const titleStr = typeof n.title === "string" ? n.title : "";
+        const bodyStr = typeof n.body === "string" ? n.body : "";
+        const isFinance = bodyStr.includes('قسط') || bodyStr.includes('تسديد') || titleStr.includes('قسط');
+        const nAuthor = n.metadata?.senderName || n.metadata?.teacherName || n.author || "";
+        const isAuthorDefault = !nAuthor || nAuthor === "مستخدم" || nAuthor === "مستخدم 🏛️" || nAuthor === "مستخدم 🎓" || nAuthor === "user" || nAuthor === "admin";
+        
+        const cleanAuthor = isAuthorDefault
+          ? (isTeacherNotif ? "أستاذ المادة 🎓" : isFinance ? "القسم المالي والإداري 🏛️" : "الإدارة المدرسية 🏛️")
+          : (typeof nAuthor === "string" ? nAuthor : String(nAuthor || ""));
 
-      return {
-        id: String(n.id || Math.random()),
-        message: bodyStr || titleStr || (typeof n.message === "string" ? n.message : ""),
-        title: titleStr,
-        author: cleanAuthor,
-        subject: isTeacher ? (n.metadata?.subject || "تبليغ صفي") : (isFinance ? "متابعة الأقساط والرسوم" : "تبليغ إداري رسمي"),
-        createdAt: n.createdAt,
-        timestampMs: getSafeTimestamp(n.timestampMs || n.timestamp_ms || n.createdAt) || Date.now(),
-        read: n.read || (n.id && Array.isArray(readBroadcastIds) ? readBroadcastIds.includes(String(n.id)) : false),
-        type: isTeacher ? "staff" : "admin"
-      };
+        // Stable ID without Math.random()!
+        const stableId = n.id ? String(n.id) : `notif_${n.timestampMs || n.createdAt || ''}_${titleStr.slice(0, 15)}_${idx}`;
+
+        return {
+          id: stableId,
+          message: bodyStr || titleStr || (typeof n.message === "string" ? n.message : ""),
+          title: titleStr,
+          author: cleanAuthor,
+          subject: isTeacherNotif ? (n.metadata?.subject || "تبليغ صفي") : (isFinance ? "متابعة الأقساط والرسوم" : "تبليغ إداري رسمي"),
+          createdAt: n.createdAt,
+          timestampMs: getSafeTimestamp(n.timestampMs || n.timestamp_ms || n.createdAt) || Date.now(),
+          read: Boolean(n.read),
+          type: isTeacherNotif ? "staff" : "admin"
+        };
+      } catch {
+        return null;
+      }
     }).filter(Boolean);
-  }, [notifications, readBroadcastIds]);
+  }, [notifications]);
 
   // Combined broadcasts + notifications categorized accurately
   const { adminItems, staffItems } = useMemo(() => {
@@ -275,37 +287,42 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
     const staffList: any[] = [];
 
     // Process broadcasts
-    (broadcasts || []).forEach(b => {
+    (broadcasts || []).forEach((b, idx) => {
       if (!b) return;
-      const isTeacher = isTeacherItem(b);
-      const bAuthor = b.author || b.metadata?.senderName || b.metadata?.teacherName || "";
-      const isAuthorDefault = !bAuthor || bAuthor === "مستخدم" || bAuthor === "مستخدم 🏛️" || bAuthor === "مستخدم 🎓" || bAuthor === "user" || bAuthor === "admin";
-      
-      const cleanAuthor = isAuthorDefault 
-        ? (isTeacher ? "أستاذ المادة 🎓" : "الإدارة المدرسية 🏛️")
-        : (typeof bAuthor === "string" ? bAuthor : String(bAuthor || ""));
+      try {
+        const isTeacher = isTeacherItem(b);
+        const bAuthor = b.author || b.metadata?.senderName || b.metadata?.teacherName || "";
+        const isAuthorDefault = !bAuthor || bAuthor === "مستخدم" || bAuthor === "مستخدم 🏛️" || bAuthor === "مستخدم 🎓" || bAuthor === "user" || bAuthor === "admin";
+        
+        const cleanAuthor = isAuthorDefault 
+          ? (isTeacher ? "أستاذ المادة 🎓" : "الإدارة المدرسية 🏛️")
+          : (typeof bAuthor === "string" ? bAuthor : String(bAuthor || ""));
 
-      const messageContent = typeof b.message === "string" ? b.message : (typeof b.body === "string" ? b.body : (typeof b.title === "string" ? b.title : ""));
+        const messageContent = typeof b.message === "string" ? b.message : (typeof b.body === "string" ? b.body : (typeof b.title === "string" ? b.title : ""));
+        const stableId = b.id ? String(b.id) : `broadcast_${b.timestampMs || b.createdAt || ''}_${idx}`;
 
-      if (isTeacher) {
-        staffList.push({
-          ...b,
-          type: "staff",
-          author: cleanAuthor,
-          message: messageContent,
-          subject: b.subject || "تبليغ صفي",
-          timestampMs: getSafeTimestamp(b.timestampMs || b.timestamp_ms || b.createdAt) || Date.now()
-        });
-      } else {
-        adminList.push({
-          ...b,
-          type: "admin",
-          author: cleanAuthor,
-          message: messageContent,
-          subject: b.subject || "الإذاعة المدرسية 📻",
-          timestampMs: getSafeTimestamp(b.timestampMs || b.timestamp_ms || b.createdAt) || Date.now()
-        });
-      }
+        if (isTeacher) {
+          staffList.push({
+            ...b,
+            id: stableId,
+            type: "staff",
+            author: cleanAuthor,
+            message: messageContent,
+            subject: b.subject || "تبليغ صفي",
+            timestampMs: getSafeTimestamp(b.timestampMs || b.timestamp_ms || b.createdAt) || Date.now()
+          });
+        } else {
+          adminList.push({
+            ...b,
+            id: stableId,
+            type: "admin",
+            author: cleanAuthor,
+            message: messageContent,
+            subject: b.subject || "الإذاعة المدرسية 📻",
+            timestampMs: getSafeTimestamp(b.timestampMs || b.timestamp_ms || b.createdAt) || Date.now()
+          });
+        }
+      } catch (e) {}
     });
 
     // Process notifications
@@ -329,45 +346,35 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
     return staffItems.filter(item => !isItemRead(item)).length;
   }, [staffItems, isItemRead]);
 
-  // Mark items as read based on current sub-tab
-  useEffect(() => {
-    let changed = false;
-    if (activeSubTab === "admin") {
-      const unreadAdminIds = adminItems
-        .filter(item => !isItemRead(item) && item.id)
-        .map(item => String(item.id));
-      if (unreadAdminIds.length > 0) {
-        setReadBroadcastIds(prev => {
-          const currentArr = Array.isArray(prev) ? prev : [];
-          const next = [...new Set([...currentArr, ...unreadAdminIds])];
-          try {
-            localStorage.setItem("bairaq_read_broadcast_ids", JSON.stringify(next));
-          } catch {}
-          return next;
-        });
-        changed = true;
-      }
-    } else if (activeSubTab === "staff") {
-      const unreadStaffIds = staffItems
-        .filter(item => !isItemRead(item) && item.id)
-        .map(item => String(item.id));
-      if (unreadStaffIds.length > 0) {
-        setReadBroadcastIds(prev => {
-          const currentArr = Array.isArray(prev) ? prev : [];
-          const next = [...new Set([...currentArr, ...unreadStaffIds])];
-          try {
-            localStorage.setItem("bairaq_read_broadcast_ids", JSON.stringify(next));
-          } catch {}
-          return next;
-        });
-        changed = true;
-      }
-    }
+  // Mark items as read based on current sub-tab with strict loop protection
+  const alreadyMarkedIdsRef = useRef<Set<string>>(new Set());
 
-    if (changed) {
-      window.dispatchEvent(new CustomEvent("bairaq_announcements_read"));
+  useEffect(() => {
+    // Mark all items (both admin and staff) as read upon opening the Announcements Center tab
+    const targetItems = [...adminItems, ...staffItems];
+    
+    const unreadIds = targetItems
+      .filter(item => item && item.id && !alreadyMarkedIdsRef.current.has(String(item.id)) && !isItemRead(item))
+      .map(item => String(item.id));
+
+    if (unreadIds.length > 0) {
+      unreadIds.forEach(id => alreadyMarkedIdsRef.current.add(id));
+      
+      setReadBroadcastIds(prev => {
+        const currentArr = Array.isArray(prev) ? prev : [];
+        const next = [...new Set([...currentArr, ...unreadIds])];
+        try {
+          localStorage.setItem("bairaq_read_broadcast_ids", JSON.stringify(next));
+        } catch {}
+        return next;
+      });
+
+      const timer = setTimeout(() => {
+        window.dispatchEvent(new CustomEvent("bairaq_announcements_read"));
+      }, 300);
+      return () => clearTimeout(timer);
     }
-  }, [activeSubTab, adminItems, staffItems, isItemRead]);
+  }, [adminItems, staffItems, isItemRead]);
 
   // 3. Combined & Searched items list
   const displayItems = useMemo(() => {
@@ -541,9 +548,13 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
               type="button"
               onClick={() => {
                 setIsDateFilterActive(true);
-                const prev = new Date(selectedDate);
-                prev.setDate(prev.getDate() - 1);
-                setSelectedDate(prev.toISOString().split("T")[0]);
+                try {
+                  const prev = selectedDate ? new Date(selectedDate) : new Date();
+                  if (!isNaN(prev.getTime())) {
+                    prev.setDate(prev.getDate() - 1);
+                    setSelectedDate(prev.toISOString().split("T")[0]);
+                  }
+                } catch {}
               }}
               title="اليوم السابق"
               className="w-7 h-7 rounded-lg bg-white/5 hover:bg-white/10 text-white/70 hover:text-white flex items-center justify-center transition-all cursor-pointer"
@@ -568,9 +579,13 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
               type="button"
               onClick={() => {
                 setIsDateFilterActive(true);
-                const next = new Date(selectedDate);
-                next.setDate(next.getDate() + 1);
-                setSelectedDate(next.toISOString().split("T")[0]);
+                try {
+                  const next = selectedDate ? new Date(selectedDate) : new Date();
+                  if (!isNaN(next.getTime())) {
+                    next.setDate(next.getDate() + 1);
+                    setSelectedDate(next.toISOString().split("T")[0]);
+                  }
+                } catch {}
               }}
               title="اليوم التالي"
               className="w-7 h-7 rounded-lg bg-white/5 hover:bg-white/10 text-white/70 hover:text-white flex items-center justify-center transition-all cursor-pointer"

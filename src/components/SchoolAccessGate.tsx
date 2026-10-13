@@ -70,25 +70,31 @@ export const SchoolAccessGate: React.FC<SchoolAccessGateProps> = ({
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleVerify = (codeToVerify?: string) => {
+  const handleVerify = async (codeToVerify?: string) => {
     const targetCode = (codeToVerify || code).trim().toUpperCase();
     
     if (!targetCode) {
       setError('يرجى إدخال الكود أولاً');
       return;
     }
-    
-    if (rememberCode) {
-      saveAccessCode({
-        code: targetCode,
-        schoolName: schoolName
-      });
-      // Refresh list
-      setSavedCodes(getSavedAccessCodes(schoolName));
-    }
 
     setShowDropdown(false);
-    onVerify(targetCode, activePortal === 'parent');
+    setError('');
+    
+    try {
+      await onVerify(targetCode, activePortal === 'parent');
+      if (rememberCode) {
+        saveAccessCode({
+          code: targetCode,
+          schoolName: schoolName
+        });
+        // Refresh list
+        setSavedCodes(getSavedAccessCodes(schoolName));
+      }
+    } catch (err: any) {
+      const errMsg = err?.message || 'هذا الكود غير موجود في مركز أكواد المدرسة';
+      setError(errMsg);
+    }
   };
 
   const handleSelectSavedCode = (item: SavedAccessCodeItem, e: React.MouseEvent) => {

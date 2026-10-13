@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Bot, FileUp, ClipboardCheck, HelpCircle, ScrollText, Edit2, Sparkles, Trophy, ChevronRight, Loader2, Copy, CheckCircle, Image as ImageIcon, X, Save, History, Trash2, Plus, Minus, Lock, Search, Camera, CheckCircle2, UploadCloud, Eye, ZoomIn } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -72,6 +72,52 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
   const [isUploadingImageHw, setIsUploadingImageHw] = useState(false);
   const [imageHwProgress, setImageHwProgress] = useState(0);
   const imageHwInputRef = useRef<HTMLInputElement>(null);
+
+  // Summaries states (AI generation, Multi-image upload, Manual writing)
+  const [summaryMode, setSummaryMode] = useState<'ai' | 'image' | 'manual'>('ai');
+  
+  // Dedicated strictly separate states for AI generation mode
+  const [aiSummaryTopic, setAiSummaryTopic] = useState('');
+  const [aiSummaryPromptText, setAiSummaryPromptText] = useState('');
+  const [aiSummaryPdfFiles, setAiSummaryPdfFiles] = useState<File[]>([]);
+  const aiSummaryPdfInputRef = useRef<HTMLInputElement>(null);
+
+  // Dedicated strictly separate states for Multi-image mode
+  const [summaryImageFiles, setSummaryImageFiles] = useState<File[]>([]);
+  const [summaryImagePreviews, setSummaryImagePreviews] = useState<string[]>([]);
+  const [summaryImageTitle, setSummaryImageTitle] = useState('');
+  const [summaryImageNotes, setSummaryImageNotes] = useState('');
+  const [isUploadingSummaryImages, setIsUploadingSummaryImages] = useState(false);
+  const [summaryImageProgress, setSummaryImageProgress] = useState(0);
+  const summaryImageInputRef = useRef<HTMLInputElement>(null);
+
+  // Dedicated strictly separate states for Manual writing mode
+  const [summaryManualTitle, setSummaryManualTitle] = useState('');
+  const [summaryManualText, setSummaryManualText] = useState('');
+  const [previewingImageUrl, setPreviewingImageUrl] = useState<string | null>(null);
+
+  // Dedicated strictly separated results for each summary mode
+  const [aiSummaryResult, setAiSummaryResult] = useState('');
+  const [imageSummaryResult, setImageSummaryResult] = useState('');
+  const [manualSummaryResult, setManualSummaryResult] = useState('');
+
+  const activeSummaryTitle = useMemo(() => {
+    if (activeTool !== 'summaries') return saveName;
+    if (summaryMode === 'image') {
+      return summaryImageTitle.trim() || `ملخص ${teacherData?.subject || 'دراسي'} مصور - ${new Date().toLocaleDateString('ar-IQ')}`;
+    }
+    if (summaryMode === 'manual') {
+      return summaryManualTitle.trim() || `ملخص ${teacherData?.subject || 'دراسي'} - ${new Date().toLocaleDateString('ar-IQ')}`;
+    }
+    return aiSummaryTopic.trim() || saveName.trim() || `ملخص ${teacherData?.subject || 'دراسي'} ذكي - ${new Date().toLocaleDateString('ar-IQ')}`;
+  }, [activeTool, summaryMode, summaryImageTitle, summaryManualTitle, aiSummaryTopic, saveName, teacherData?.subject]);
+
+  const activeDisplayContent = activeTool === 'summaries' ? (
+    summaryMode === 'ai' ? aiSummaryResult :
+    summaryMode === 'image' ? imageSummaryResult :
+    manualSummaryResult
+  ) : generatedContent;
+
   const [showCancelConfirm, setShowCancelConfirm] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
   const isMountedRef = useRef(true);
@@ -123,6 +169,25 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
     setImageHwPreviews([]);
     setImageHwTitle('');
     setImageHwInstructions('');
+
+    setSummaryMode('ai');
+    setAiSummaryTopic('');
+    setAiSummaryPromptText('');
+    setAiSummaryPdfFiles([]);
+    setSummaryImageFiles([]);
+    setSummaryImagePreviews(prev => {
+      prev.forEach(url => { try { URL.revokeObjectURL(url); } catch {} });
+      return [];
+    });
+    setSummaryImageTitle('');
+    setSummaryImageNotes('');
+    setSummaryManualTitle('');
+    setSummaryManualText('');
+    setAiSummaryResult('');
+    setImageSummaryResult('');
+    setManualSummaryResult('');
+    setPreviewingImageUrl(null);
+    setTopicFiles([]);
     
     const performScroll = () => {
       // 1. Scroll local container
@@ -170,41 +235,108 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
     };
   }, [activeTool]);
 
+  // Note: We preserve user inputs across summary mode tabs (AI, Image, Manual) so data is not wiped when switching views.
+
   const handlePublish = async () => {
-    if (!generatedContent || !schoolId) return;
+    if (!schoolId) return;
+
+    // In summaries tool: if direct image or manual modes haven't been applied yet, trigger them; if already applied, publish content directly
+    if (activeTool === 'summaries') {
+      if (summaryMode === 'image') {
+        if (!imageSummaryResult && summaryImageFiles.length > 0) {
+          await handleApplySummaryImagesToResult(true);
+          return;
+        }
+      }
+      if (summaryMode === 'manual') {
+        if (!manualSummaryResult && summaryManualText.trim()) {
+          await handleApplyManualSummaryToResult(true);
+          return;
+        }
+      }
+    }
+
+    const contentToPublish = activeTool === 'summaries' ? (summaryMode === 'ai' ? aiSummaryResult : activeDisplayContent) : generatedContent;
+    if (!contentToPublish) return;
     setIsPublishing(true);
     try {
-      const isAll = !selectedClass || selectedClass === 'ALL' || selectedClass === 'كافة الشُعب' || selectedClass === 'all';
+      const isAll = !selectedClass || selectedClass === 'ALL' || selectedClass === 'كافة الشُعب' || selectedClass === 'all' || selectedClass === 'الكل';
       const rawClasses = teacherData?.classes;
       const teacherSecNames = Array.isArray(rawClasses) 
         ? rawClasses.filter(Boolean) 
         : typeof rawClasses === 'string' && rawClasses.trim() 
           ? [rawClasses.trim()] 
           : [];
-      const targetGrade = isAll ? "الكل" : selectedClass;
+      const targetGrade = isAll ? (teacherData?.grade || "الكل") : selectedClass;
       const targetSections = isAll ? (teacherSecNames.length > 0 ? teacherSecNames : [selectedClass || "الكل"]) : [selectedClass];
       const targetSectionLabel = isAll ? "كافة الشُعب" : selectedClass;
       const subject = teacherData?.subject || "عام";
       
-      const savedItem = (savedResults || []).find(r => r.content === generatedContent);
       const defaultTitle = activeToolData?.title ? `${activeToolData.title} - ${new Date().toLocaleDateString('ar-IQ')}` : 'ملف جديد';
-      const finalName = savedItem ? savedItem.name : (saveName.trim() || defaultTitle);
-      const toolName = savedItem ? savedItem.tool : (activeToolData?.title || 'عام');
+      const finalName = activeTool === 'summaries' ? activeSummaryTitle : (saveName.trim() || defaultTitle);
+      const isSummary = activeTool === 'summaries';
 
-      await addDoc(collection(db, "schools", schoolId, "ai_materials"), {
+      const materialData = {
         name: finalName,
-        content: generatedContent,
-        tool: toolName,
+        title: finalName,
+        content: contentToPublish,
+        tool: isSummary ? 'إنشاء ملخصات' : (activeToolData?.title || 'عام'),
         subject: subject,
         targetGrade: targetGrade,
+        grade: targetGrade,
         section: isAll ? null : selectedClass,
         targetSections: targetSections,
         targetSectionLabel: targetSectionLabel,
         teacherId: teacherData?.id || teacherData?.code || "unknown",
         teacherName: teacherData?.name || "الأستاذ",
         timestamp: serverTimestamp(),
-        date: new Date().toISOString()
-      });
+        createdAt: serverTimestamp(),
+        date: new Date().toISOString(),
+        publishDate: new Date().toLocaleDateString('ar-IQ'),
+        tag: isSummary ? 'ملخص ذكي 🤖' : undefined,
+        type: isSummary ? 'summary' : undefined,
+        isSummary: isSummary,
+        category: isSummary ? 'ملخصات' : undefined,
+        allowDownload: true
+      };
+
+      await addDoc(collection(db, "schools", schoolId, "ai_materials"), materialData);
+
+      if (isSummary) {
+        const schoolFilesData = {
+          ...materialData,
+          schoolId: schoolId
+        };
+        await addDoc(collection(db, "school_files"), schoolFilesData);
+
+        // Also sync to REST API /api/school-files for PostgreSQL & Realtime listeners
+        try {
+          await fetch('/api/school-files', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: finalName,
+              fileName: `${finalName}.md`,
+              fileUrl: '',
+              content: contentToPublish,
+              schoolId: schoolId,
+              subject: subject,
+              grade: targetGrade,
+              section: isAll ? null : selectedClass,
+              targetSections: targetSections,
+              targetSectionLabel: targetSectionLabel,
+              tag: summaryMode === 'image' ? 'ملخص مصور' : summaryMode === 'manual' ? 'ملخص مكتوب' : 'ملخص ذكي 🤖',
+              size: summaryMode === 'image' ? `${summaryImageFiles.length} صفحات` : 'ملخص معتمد',
+              downloads: 0,
+              allowDownload: true,
+              createdAt: new Date().toISOString()
+            })
+          });
+        } catch (apiErr) {
+          console.warn("API school-files sync error:", apiErr);
+        }
+      }
+
       setIsPublished(true);
       setTimeout(() => setIsPublished(false), 3000);
       
@@ -371,6 +503,323 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Helpers to build live previews for Image and Manual modes
+  const buildImageSummaryMarkdown = (previews: string[], title?: string, notes?: string) => {
+    if (previews.length === 0) return '';
+    const finalTitle = (title !== undefined ? title : summaryImageTitle).trim() || `ملخص ${teacherData?.subject || 'دراسي'} مصور - ${new Date().toLocaleDateString('ar-IQ')}`;
+    const finalNotes = (notes !== undefined ? notes : summaryImageNotes).trim();
+    let md = `# 📄 ${finalTitle}\n\n`;
+    if (finalNotes) {
+      md += `> 💡 **ملاحظات وتوجيهات الأستاذ:**\n> ${finalNotes}\n\n`;
+    }
+    md += `### 🖼️ صفحات ومحتويات الملخص (${previews.length} ${previews.length === 1 ? 'صفحة' : 'صفحات'}):\n\n`;
+    previews.forEach((url, i) => {
+      md += `![صفحة الملخص ${i + 1}](${url})\n\n`;
+    });
+    return md;
+  };
+
+  // Handlers for multiple summary images upload & management
+  const handleSummaryImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const newFiles = Array.from(e.target.files);
+      const updatedFiles = [...summaryImageFiles, ...newFiles];
+      setSummaryImageFiles(updatedFiles);
+      const newPreviews = newFiles.map(file => URL.createObjectURL(file));
+      const updatedPreviews = [...summaryImagePreviews, ...newPreviews];
+      setSummaryImagePreviews(updatedPreviews);
+      const title = summaryImageTitle.trim() || `ملخص ${teacherData?.subject || 'دراسي'} مصور - ${new Date().toLocaleDateString('ar-IQ')}`;
+      if (!summaryImageTitle) {
+        setSummaryImageTitle(title);
+      }
+      setImageSummaryResult(buildImageSummaryMarkdown(updatedPreviews, title, summaryImageNotes));
+    }
+  };
+
+  const removeSummaryImageFile = (index: number) => {
+    const updatedFiles = summaryImageFiles.filter((_, i) => i !== index);
+    setSummaryImageFiles(updatedFiles);
+    const updatedPreviews = summaryImagePreviews.filter((_, i) => i !== index);
+    setSummaryImagePreviews(prev => {
+      try {
+        if (prev[index]) URL.revokeObjectURL(prev[index]);
+      } catch {}
+      return updatedPreviews;
+    });
+    setImageSummaryResult(buildImageSummaryMarkdown(updatedPreviews, summaryImageTitle, summaryImageNotes));
+  };
+
+  const handleApplySummaryImagesToResult = async (publishDirectly: boolean = false) => {
+    if (summaryImageFiles.length === 0) {
+      alert("يرجى اختيار صورة أو أكثر للملخص أولاً");
+      return;
+    }
+    if (!schoolId) {
+      alert("معرف المدرسة غير متوفر");
+      return;
+    }
+
+    setIsUploadingSummaryImages(true);
+    setSummaryImageProgress(10);
+    try {
+      const uploadedUrls: string[] = [];
+      const totalFiles = summaryImageFiles.length;
+      for (let i = 0; i < totalFiles; i++) {
+        const file = summaryImageFiles[i];
+        const uploaded: any = await uploadFileToR2(
+          file,
+          (progress) => {
+            const currentFileWeight = 80 / totalFiles;
+            const currentProgress = 10 + (i * currentFileWeight) + (progress * currentFileWeight / 100);
+            setSummaryImageProgress(Math.round(currentProgress));
+          },
+          schoolId,
+          'image_summary'
+        );
+        const resolvedUrl = typeof uploaded === 'string' ? uploaded : (uploaded?.publicUrl || uploaded?.url || '');
+        if (resolvedUrl && typeof resolvedUrl === 'string' && resolvedUrl.trim().length > 0) {
+          uploadedUrls.push(resolvedUrl.trim());
+        }
+      }
+
+      if (uploadedUrls.length === 0) {
+        throw new Error("فشل في رفع صور الملخص إلى الخادم السحابي");
+      }
+
+      setSummaryImageProgress(90);
+
+      const defaultTitle = `ملخص ${teacherData?.subject || 'دراسي'} مصور - ${new Date().toLocaleDateString('ar-IQ')}`;
+      const finalTitle = summaryImageTitle.trim() || defaultTitle;
+
+      let mdContent = `# 📄 ${finalTitle}\n\n`;
+      if (summaryImageNotes.trim()) {
+        mdContent += `> 💡 **ملاحظات وتوجيهات الأستاذ:**\n> ${summaryImageNotes.trim()}\n\n`;
+      }
+      mdContent += `### 🖼️ صفحات ومحتويات الملخص (${uploadedUrls.length} ${uploadedUrls.length === 1 ? 'صفحة' : 'صفحات'}):\n\n`;
+      uploadedUrls.forEach((url, i) => {
+        mdContent += `![صفحة الملخص ${i + 1}](${url})\n\n`;
+      });
+
+      setSummaryImageProgress(100);
+      setImageSummaryResult(mdContent);
+      setGeneratedContent(mdContent);
+      setSaveName(finalTitle);
+
+      const isAll = !selectedClass || selectedClass === 'ALL' || selectedClass === 'كافة الشُعب' || selectedClass === 'all';
+      const rawClasses = teacherData?.classes;
+      const teacherSecNames = Array.isArray(rawClasses) 
+        ? rawClasses.filter(Boolean) 
+        : typeof rawClasses === 'string' && rawClasses.trim() 
+          ? [rawClasses.trim()] 
+          : [];
+      const targetGrade = isAll ? "الكل" : selectedClass;
+      const targetSections = isAll ? (teacherSecNames.length > 0 ? teacherSecNames : [selectedClass || "الكل"]) : [selectedClass];
+      const targetSectionLabel = isAll ? "كافة الشُعب" : selectedClass;
+      const subject = teacherData?.subject || "عام";
+
+      const newItem = {
+        id: Date.now().toString(),
+        name: finalTitle,
+        content: mdContent,
+        tool: 'إنشاء ملخصات (مصور)',
+        date: new Date().toISOString()
+      };
+      setSavedResults(prev => [newItem, ...prev]);
+      try {
+        localStorage.setItem('teacher_ai_saved_results', JSON.stringify([newItem, ...savedResults]));
+      } catch {}
+
+      if (publishDirectly) {
+        const materialData = {
+          name: finalTitle,
+          title: finalTitle,
+          content: mdContent,
+          fileUrl: uploadedUrls[0] || null,
+          imageUrl: uploadedUrls[0] || null,
+          imageUrls: uploadedUrls,
+          tool: 'إنشاء ملخصات',
+          subject: subject,
+          targetGrade: targetGrade,
+          grade: targetGrade,
+          section: isAll ? null : selectedClass,
+          targetSections: targetSections,
+          targetSectionLabel: targetSectionLabel,
+          teacherId: teacherData?.id || teacherData?.code || "unknown",
+          teacherName: teacherData?.name || "الأستاذ",
+          timestamp: serverTimestamp(),
+          createdAt: serverTimestamp(),
+          date: new Date().toISOString(),
+          publishDate: new Date().toLocaleDateString('ar-IQ'),
+          type: 'image_summary',
+          tag: 'ملخص مصور',
+          isSummary: true,
+          category: 'ملخصات',
+          size: `${uploadedUrls.length} صفحات`,
+          downloads: 0,
+          allowDownload: true,
+          schoolId: schoolId
+        };
+
+        await addDoc(collection(db, "schools", schoolId, "ai_materials"), materialData);
+        await addDoc(collection(db, "school_files"), materialData);
+
+        try {
+          await fetch('/api/school-files', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: finalTitle,
+              fileName: `${finalTitle}.md`,
+              fileUrl: uploadedUrls[0] || '',
+              imageUrl: uploadedUrls[0] || '',
+              imageUrls: uploadedUrls,
+              content: mdContent,
+              schoolId: schoolId,
+              subject: subject,
+              grade: targetGrade,
+              section: isAll ? null : selectedClass,
+              targetSections: targetSections,
+              targetSectionLabel: targetSectionLabel,
+              tag: 'ملخص مصور',
+              size: `${uploadedUrls.length} صفحات`,
+              downloads: 0,
+              allowDownload: true,
+              createdAt: new Date().toISOString()
+            })
+          });
+        } catch (apiErr) {
+          console.warn("API school-files sync error:", apiErr);
+        }
+
+        setIsPublished(true);
+        setTimeout(() => setIsPublished(false), 4000);
+      }
+    } catch (err: any) {
+      console.error("Failed to process summary images:", err);
+      alert(err?.message || "حدث خطأ أثناء معالجة صور الملخص");
+    } finally {
+      setIsUploadingSummaryImages(false);
+      setSummaryImageProgress(0);
+    }
+  };
+
+  const handleApplyManualSummaryToResult = async (publishDirectly: boolean = false) => {
+    if (!summaryManualText.trim()) {
+      alert("يرجى كتابة نص الملخص أولاً.");
+      return;
+    }
+
+    const defaultTitle = `ملخص ${teacherData?.subject || 'دراسي'} - ${new Date().toLocaleDateString('ar-IQ')}`;
+    const finalTitle = summaryManualTitle.trim() || defaultTitle;
+
+    let mdContent = '';
+    if (summaryManualTitle.trim()) {
+      mdContent += `# 📄 ${summaryManualTitle.trim()}\n\n`;
+    }
+    mdContent += summaryManualText.trim();
+
+    setManualSummaryResult(mdContent);
+    setGeneratedContent(mdContent);
+    setSaveName(finalTitle);
+
+    const newItem = {
+      id: Date.now().toString(),
+      name: finalTitle,
+      content: mdContent,
+      tool: 'إنشاء ملخصات (كتابة)',
+      date: new Date().toISOString()
+    };
+    setSavedResults(prev => [newItem, ...prev]);
+    try {
+      localStorage.setItem('teacher_ai_saved_results', JSON.stringify([newItem, ...savedResults]));
+    } catch {}
+
+    if (publishDirectly) {
+      if (!schoolId) {
+        alert("معرف المدرسة غير متوفر");
+        return;
+      }
+      try {
+        const isAll = !selectedClass || selectedClass === 'ALL' || selectedClass === 'كافة الشُعب' || selectedClass === 'all';
+        const rawClasses = teacherData?.classes;
+        const teacherSecNames = Array.isArray(rawClasses) 
+          ? rawClasses.filter(Boolean) 
+          : typeof rawClasses === 'string' && rawClasses.trim() 
+            ? [rawClasses.trim()] 
+            : [];
+        const targetGrade = isAll ? "الكل" : selectedClass;
+        const targetSections = isAll ? (teacherSecNames.length > 0 ? teacherSecNames : [selectedClass || "الكل"]) : [selectedClass];
+        const targetSectionLabel = isAll ? "كافة الشُعب" : selectedClass;
+        const subject = teacherData?.subject || "عام";
+
+        const materialData = {
+          name: finalTitle,
+          title: finalTitle,
+          content: mdContent,
+          fileUrl: '',
+          imageUrl: '',
+          imageUrls: [],
+          tool: 'إنشاء ملخصات',
+          subject: subject,
+          targetGrade: targetGrade,
+          grade: targetGrade,
+          section: isAll ? null : selectedClass,
+          targetSections: targetSections,
+          targetSectionLabel: targetSectionLabel,
+          teacherId: teacherData?.id || teacherData?.code || "unknown",
+          teacherName: teacherData?.name || "الأستاذ",
+          timestamp: serverTimestamp(),
+          createdAt: serverTimestamp(),
+          date: new Date().toISOString(),
+          publishDate: new Date().toLocaleDateString('ar-IQ'),
+          type: 'manual_summary',
+          tag: 'ملخص مكتوب',
+          isSummary: true,
+          category: 'ملخصات',
+          size: 'ملخص معتمد',
+          downloads: 0,
+          allowDownload: true,
+          schoolId: schoolId
+        };
+
+        await addDoc(collection(db, "schools", schoolId, "ai_materials"), materialData);
+        await addDoc(collection(db, "school_files"), materialData);
+
+        try {
+          await fetch('/api/school-files', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              title: finalTitle,
+              fileName: `${finalTitle}.md`,
+              fileUrl: '',
+              content: mdContent,
+              schoolId: schoolId,
+              subject: subject,
+              grade: targetGrade,
+              section: isAll ? null : selectedClass,
+              targetSections: targetSections,
+              targetSectionLabel: targetSectionLabel,
+              tag: 'ملخص مكتوب',
+              size: 'ملخص معتمد',
+              downloads: 0,
+              allowDownload: true,
+              createdAt: new Date().toISOString()
+            })
+          });
+        } catch (apiErr) {
+          console.warn("API school-files sync error:", apiErr);
+        }
+
+        setIsPublished(true);
+        setTimeout(() => setIsPublished(false), 4000);
+      } catch (err: any) {
+        console.error("Failed to publish manual summary:", err);
+        alert(err?.message || "حدث خطأ أثناء نشر الملخص للطلاب");
+      }
+    }
+  };
+
   const tools = [
     { 
       id: 'sovereignty', 
@@ -465,10 +914,31 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
     setTopicFiles(prev => prev.filter((_, i) => i !== index));
   };
 
+  const handleAiSummaryPdfChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const newFiles = Array.from(e.target.files);
+      setAiSummaryPdfFiles(prev => [...prev, ...newFiles]);
+    }
+  };
+
+  const removeAiSummaryPdfFile = (index: number) => {
+    setAiSummaryPdfFiles(prev => prev.filter((_, i) => i !== index));
+  };
+
   const handleGenerate = async () => {
-    if (topicFiles.length === 0) {
-      alert("يرجى إرفاق صور أو ملف الموضوع أولاً.");
-      return;
+    const isSummariesTool = activeTool === 'summaries';
+    const filesToUse = isSummariesTool ? aiSummaryPdfFiles : topicFiles;
+
+    if (isSummariesTool) {
+      if (!aiSummaryTopic.trim() && !aiSummaryPromptText.trim() && filesToUse.length === 0) {
+        alert("يرجى إدخال عنوان أو موضوع الدرس، أو لصق نصه، أو رفع مستند الدرس للتلخيص الذكي.");
+        return;
+      }
+    } else {
+      if (filesToUse.length === 0) {
+        alert("يرجى إرفاق صور أو ملف الموضوع أولاً.");
+        return;
+      }
     }
     
     setIsGenerating(true);
@@ -496,9 +966,11 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
           : `أهلاً. بناءً على الملفات المرفقة (لموضوع في مادة ${subject} لـ ${gradeLevel})، يرجى استخراج المعلومات الأساسية صفحة بصفحة وتوليد على الأقل 10 أسئلة متنوعة (اختيارات متعددة، صح وخطأ، وأسئلة استنتاجية قصيرة) أو أكثر حسب كمية المحتوى المرفوع. يرجى إرفاق الإجابة النموذجية لكل سؤال تحت بند منفصل ومخفي أو واضح للتصحيح. \n\n${baseFormatting}`;
         break;
       case 'summaries':
+        const lessonTopicStr = aiSummaryTopic.trim() ? ` (عنوان/موضوع الدرس: ${aiSummaryTopic.trim()})` : '';
+        const lessonTextStr = aiSummaryPromptText.trim() ? `\n\nنص ومحتوى الدرس المراد تلخيصه:\n${aiSummaryPromptText.trim()}` : '';
         promptMessage = isEnglish
-          ? `Hello. Based on the attached files (Subject: English, Grade: ${gradeLevel}), write a comprehensive, simplified, and well-structured lesson summary in English. Organize into clear bullet points and sub-headings. \n\n${baseFormatting}`
-          : `أهلاً. بناءً على الملفات المرفقة (مادة ${subject} لـ ${gradeLevel})، صغ لي ملخصاً شاملاً، مبسطاً، ومنظماً في نقاط مركزة صفحة بصفحة. قسم الملخص إلى عناوين فرعية تُسهل على الطلاب مراجعة الدرس بسرعة. \n\n${baseFormatting}`;
+          ? `Hello. Based on the lesson ${lessonTopicStr} (Subject: English, Grade: ${gradeLevel})${lessonTextStr}, write a comprehensive, simplified, and well-structured lesson summary in English. Organize into clear bullet points, key takeaways, and sub-headings. \n\n${baseFormatting}`
+          : `أهلاً. بناءً على موضوع الدرس${lessonTopicStr} لمادة ${subject} لـ ${gradeLevel}${lessonTextStr}، صغ لي ملخصاً شاملاً، مبسطاً، ومنظماً في نقاط مركزة. رتب الملخص في عناوين فرعية تُسهل على الطلاب مراجعة الدرس وحفظ المفاهيم والقوانين والملاحظات الهامة بسرعة. \n\n${baseFormatting}`;
         break;
       case 'homework':
         promptMessage = isEnglish
@@ -526,7 +998,7 @@ ${baseFormatting}`;
         break;
       case 'competitions':
         promptMessage = `أهلاً. انطلاقاً من محتوى الملفات المرفقة (مادة ${subject} لـ ${gradeLevel}) صفحة بصفحة، صمم مسابقة صفية تفاعلية سريعة (تحدي الـ 60 ثانية). أريد 5 أسئلة خيارات متعددة.
-يجب أن ترد بـ JSON فقط داخل كتلة كود (code block) كالتالي، ممنوع كتابة أي نص خارج هذه الكتلة:
+ must be valid JSON only enclosed inside a code block, no other text outside:
 \`\`\`json
 {
   "title": "${isEnglish ? 'English Challenge' : 'عنوان المسابقة'}",
@@ -554,37 +1026,40 @@ ${baseFormatting}`;
 
     try {
       const fileUrls: string[] = [];
-      const totalFiles = topicFiles.length;
+      const totalFiles = filesToUse.length;
       
-      for (let i = 0; i < totalFiles; i++) {
-        const file = topicFiles[i];
-        setProgressText(`جاري رفع الملف ${i + 1} من ${totalFiles}...`);
-        
-        let url: string;
-        try {
-          url = await uploadFileToR2(file, (progress) => {
-            setProgressText(`جاري رفع الملف ${i + 1} من ${totalFiles}... ${progress}%`);
-          });
-        } catch (error: any) {
-           const errMsg = String(error.message || '');
-           if (errMsg.includes('413') || errMsg.includes('<!doctype html>')) {
-             throw new Error("حجم الملف كبير جداً أو أن الخادم رفض استقباله. يرجى محاولة رفع ملف أصغر حجماً.");
-           }
-           if (errMsg.includes('502') || errMsg.includes('503') || errMsg.includes('504')) {
-             throw new Error("حدث خطأ في الخادم أثناء رفع الملف. يرجى المحاولة مرة أخرى.");
-           }
-           throw error;
-        }
+      if (totalFiles > 0) {
+        for (let i = 0; i < totalFiles; i++) {
+          const file = filesToUse[i];
+          setProgressText(`جاري رفع الملف ${i + 1} من ${totalFiles}...`);
+          
+          let url: string;
+          try {
+            url = await uploadFileToR2(file, (progress) => {
+              setProgressText(`جاري رفع الملف ${i + 1} من ${totalFiles}... ${progress}%`);
+            });
+          } catch (error: any) {
+             const errMsg = String(error.message || '');
+             if (errMsg.includes('413') || errMsg.includes('<!doctype html>')) {
+               throw new Error("حجم الملف كبير جداً أو أن الخادم رفض استقباله. يرجى محاولة رفع ملف أصغر حجماً.");
+             }
+             if (errMsg.includes('502') || errMsg.includes('503') || errMsg.includes('504')) {
+               throw new Error("حدث خطأ في الخادم أثناء رفع الملف. يرجى المحاولة مرة أخرى.");
+             }
+             throw error;
+          }
 
-        if (url) fileUrls.push(url);
-        
-        setProgressPercentage(((i + 1) / totalFiles) * 30);
+          if (url) fileUrls.push(url);
+          
+          setProgressPercentage(((i + 1) / totalFiles) * 30);
+        }
+        if (fileUrls.length === 0) throw new Error("لم يتم إرجاع رابط صالح للملفات");
+      } else {
+        setProgressPercentage(10);
       }
 
-      if (fileUrls.length === 0) throw new Error("لم يتم إرجاع رابط صالح للملفات");
-
       setProgressText('جاري تحليل المحتوى وتوليد النتيجة (قد يستغرق بعض الوقت)...');
-      let currentProgress = 30;
+      let currentProgress = totalFiles > 0 ? 30 : 10;
       progressInterval = setInterval(() => {
         if (currentProgress < 95) {
           currentProgress += Math.random() * 3;
@@ -624,6 +1099,10 @@ ${baseFormatting}`;
       const data = await response.json();
       if (isMountedRef.current) {
         setGeneratedContent(data.response);
+        if (activeTool === 'summaries') {
+          setAiSummaryResult(data.response);
+          setSaveName(aiSummaryTopic.trim() || `ملخص ${teacherData?.subject || 'دراسي'} ذكي`);
+        }
       }
     } catch (error: any) {
       clearInterval(progressInterval);
@@ -645,10 +1124,12 @@ ${baseFormatting}`;
       }
 
       if (isMountedRef.current) {
-        if (isAbort) {
-          setGeneratedContent(`تم إلغاء عملية التوليد بنجاح.`);
-        } else {
-          setGeneratedContent(`عذراً، حدث خطأ أثناء العملية: ${error.message || 'يرجى المحاولة مرة أخرى.'}`);
+        const msg = isAbort 
+          ? `تم إلغاء عملية التوليد بنجاح.` 
+          : `عذراً، حدث خطأ أثناء العملية: ${error.message || 'يرجى المحاولة مرة أخرى.'}`;
+        setGeneratedContent(msg);
+        if (activeTool === 'summaries') {
+          setAiSummaryResult(msg);
         }
       }
     } finally {
@@ -660,22 +1141,29 @@ ${baseFormatting}`;
   };
 
   const copyToClipboardHandler = async () => {
-    await copyToClipboard(generatedContent);
+    const textToCopy = activeTool === 'summaries' ? activeDisplayContent : generatedContent;
+    if (!textToCopy) return;
+    await copyToClipboard(textToCopy);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
   const handleSave = () => {
-    if (!generatedContent) return;
+    const contentToSave = activeTool === 'summaries' ? activeDisplayContent : generatedContent;
+    if (!contentToSave) return;
     
     const defaultTitle = activeToolData?.title ? `${activeToolData.title} - ${new Date().toLocaleDateString('ar-IQ')}` : 'ملف جديد';
     const finalName = saveName.trim() || defaultTitle;
     
+    const toolTitle = activeTool === 'summaries'
+      ? (summaryMode === 'image' ? 'إنشاء ملخصات (مصور)' : summaryMode === 'manual' ? 'إنشاء ملخصات (كتابة)' : 'إنشاء ملخصات (ذكي)')
+      : (activeToolData?.title || 'عام');
+
     const newItem = {
       id: Date.now().toString(),
       name: finalName,
-      content: generatedContent,
-      tool: activeToolData?.title || 'عام',
+      content: contentToSave,
+      tool: toolTitle,
       date: new Date().toISOString()
     };
     
@@ -709,7 +1197,7 @@ ${baseFormatting}`;
   }
 
   return (
-    <div ref={scrollContainerRef} className="h-full w-full max-w-full flex flex-col p-4 md:p-6 overflow-y-auto overflow-x-hidden custom-scrollbar relative" dir="rtl">
+    <div ref={scrollContainerRef} className={`h-full w-full max-w-full flex flex-col ${activeTool === 'summaries' ? 'p-0' : 'p-4 md:p-6'} overflow-y-auto overflow-x-hidden custom-scrollbar relative`} dir="rtl">
       <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-purple-500/10 rounded-full blur-[120px] pointer-events-none" />
       
             {activeTool === 'sovereignty' ? (
@@ -833,13 +1321,13 @@ ${baseFormatting}`;
           className="relative z-10 flex flex-col"
         >
           {/* Active Tool Bairaq Standard Platform Header Banner */}
-          <div className="shrink-0 relative rounded-2xl overflow-hidden border border-white/5 bg-[#0D47A1] shadow-[0_10px_30px_rgba(13,71,161,0.3)] h-[105px] flex items-center mb-6">
+          <div className={`shrink-0 relative overflow-hidden border border-white/5 bg-[#0D47A1] shadow-[0_10px_30px_rgba(13,71,161,0.3)] h-[105px] flex items-center ${activeTool === 'summaries' ? 'rounded-none border-x-0 border-t-0 mb-0 w-full' : 'rounded-2xl mb-6'}`}>
             <div className="absolute inset-0 bg-gradient-to-r from-[#0a2342] via-[#0D47A1] to-[#0D47A1] opacity-90" />
             <div className="absolute top-0 left-0 w-36 h-36 bg-[#FFD600]/10 rounded-full blur-2xl pointer-events-none" />
             <div className="absolute bottom-0 right-0 w-48 h-48 bg-cyan-500/5 rounded-full blur-3xl pointer-events-none" />
 
             {/* Bairaq Video Companion on the LEFT side */}
-            <div className="absolute left-0 top-0 bottom-0 h-full w-32 sm:w-36 md:w-40 z-10 overflow-hidden rounded-l-2xl flex items-center justify-center">
+            <div className={`absolute left-0 top-0 bottom-0 h-full w-32 sm:w-36 md:w-40 z-10 overflow-hidden ${activeTool === 'summaries' ? 'rounded-none' : 'rounded-l-2xl'} flex items-center justify-center`}>
               <div className="absolute -left-4 -top-4 w-28 h-28 sm:w-32 sm:h-32 rounded-full border border-amber-400/30 bg-amber-400/5 shadow-[0_0_15px_rgba(255,214,0,0.15)] animate-pulse" />
               <BerqCharacter
                 pose="pose_ai_companion"
@@ -871,6 +1359,16 @@ ${baseFormatting}`;
                   setActiveTool(null);
                   setGeneratedContent('');
                   setTopicFiles([]);
+                  setSummaryImageFiles([]);
+                  setSummaryImagePreviews(prev => {
+                    prev.forEach(url => { try { URL.revokeObjectURL(url); } catch {} });
+                    return [];
+                  });
+                  setSummaryImageTitle('');
+                  setSummaryImageNotes('');
+                  setSummaryManualTitle('');
+                  setSummaryManualText('');
+                  setPreviewingImageUrl(null);
                 }}
                 className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center text-white transition-all border border-white/10 shrink-0 cursor-pointer ml-2"
                 title="إغلاق"
@@ -880,10 +1378,56 @@ ${baseFormatting}`;
             </div>
           </div>
 
-          <div className="flex flex-col lg:flex-row gap-6 w-full max-w-full">
+          {/* Sticky Edge-to-Edge Summaries Mode Switcher Bar */}
+          {activeTool === 'summaries' && (
+            <div className="sticky top-0 z-30 bg-[#070e24]/95 backdrop-blur-xl border-b border-white/10 px-3 sm:px-6 py-2.5 shadow-2xl w-full">
+              <div className="w-full grid grid-cols-3 gap-2 sm:gap-4">
+                <button
+                  type="button"
+                  onClick={() => setSummaryMode('ai')}
+                  className={`py-3 px-2 sm:px-4 rounded-xl text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                    summaryMode === 'ai'
+                      ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-[0_0_20px_rgba(16,185,129,0.45)] ring-1 ring-emerald-400/50'
+                      : 'text-white/70 hover:text-white bg-white/5 hover:bg-white/10'
+                  }`}
+                >
+                  <Sparkles size={16} className={summaryMode === 'ai' ? 'text-emerald-200' : ''} />
+                  <span>توليد ذكي 🤖</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSummaryMode('image')}
+                  className={`py-3 px-2 sm:px-4 rounded-xl text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                    summaryMode === 'image'
+                      ? 'bg-gradient-to-r from-teal-600 to-cyan-600 text-white shadow-[0_0_20px_rgba(20,184,166,0.45)] ring-1 ring-teal-400/50'
+                      : 'text-white/70 hover:text-white bg-white/5 hover:bg-white/10'
+                  }`}
+                >
+                  <ImageIcon size={16} className={summaryMode === 'image' ? 'text-teal-200' : ''} />
+                  <span>رفع صورة جاهزة 🖼️</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setSummaryMode('manual')}
+                  className={`py-3 px-2 sm:px-4 rounded-xl text-xs sm:text-sm font-black transition-all flex items-center justify-center gap-2 cursor-pointer ${
+                    summaryMode === 'manual'
+                      ? 'bg-gradient-to-r from-amber-600 to-amber-700 text-white shadow-[0_0_20px_rgba(245,158,11,0.45)] ring-1 ring-amber-400/50'
+                      : 'text-white/70 hover:text-white bg-white/5 hover:bg-white/10'
+                  }`}
+                >
+                  <Edit2 size={16} className={summaryMode === 'manual' ? 'text-amber-200' : ''} />
+                  <span>إدراج ككتابة ✍️</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className={`flex flex-col lg:flex-row ${activeTool === 'summaries' ? 'w-full min-h-0 border-t border-white/5 gap-0' : 'gap-6 w-full max-w-full'}`}>
             {/* Input Form or History List */}
-            <div className="w-full lg:w-[350px] shrink-0 flex flex-col gap-4">
-              <div className="bg-[#0A1024]/80 border border-white/5 rounded-3xl p-5 shadow-lg h-fit max-h-[500px] overflow-y-auto custom-scrollbar">
+            <div className={`w-full ${activeTool === 'summaries' ? 'lg:w-[440px] xl:w-[480px] p-4 sm:p-6 lg:border-l border-white/10 bg-[#070e24]/70 shrink-0' : 'lg:w-[350px] shrink-0 flex flex-col gap-4'}`}>
+              <div className={`${activeTool === 'summaries' ? 'flex flex-col gap-4' : 'bg-[#0A1024]/80 border border-white/5 rounded-3xl p-5 shadow-lg h-fit max-h-[500px] overflow-y-auto custom-scrollbar'}`}>
                 {activeTool === 'history' ? (
                   <>
                     <div className="flex items-center justify-between mb-3 pb-2 border-b border-white/5 gap-2">
@@ -1039,6 +1583,8 @@ ${baseFormatting}`;
                       </div>
                     )}
 
+
+
                     {activeTool === 'homework' && hwMode === 'image' ? (
                       <div className="flex flex-col gap-3 shrink-0">
                         <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-3 text-right">
@@ -1169,9 +1715,346 @@ ${baseFormatting}`;
                           اعتماد الواجب المكتوب
                         </button>
                       </div>
+                    ) : activeTool === 'summaries' && summaryMode === 'image' ? (
+                      <div className="flex flex-col gap-3 shrink-0">
+                        <div className="space-y-1 text-right">
+                          <div className="flex items-center justify-between">
+                            <p className="text-xs font-black text-teal-300 flex items-center gap-1.5">
+                              <ImageIcon size={14} />
+                              <span>رفع صورة جاهزة للملخص</span>
+                            </p>
+                            <span className="text-[9px] font-bold bg-teal-500/20 text-teal-200 px-2 py-0.5 rounded-full">تحديد صور متعددة ✅</span>
+                          </div>
+                          <p className="text-[11px] text-white/50 leading-relaxed font-medium">
+                            يمكنك تحديد ورفع أكثر من صورة دفعة واحدة لصفحات الملخص أو الدفتر لاعتمادها ونشرها مباشرة للطلاب.
+                          </p>
+                        </div>
+
+                        <input 
+                          type="file" 
+                          accept="image/*"
+                          multiple
+                          className="hidden"
+                          ref={summaryImageInputRef}
+                          onChange={handleSummaryImageChange}
+                        />
+
+                        {/* Dropzone */}
+                        <div 
+                          onClick={() => summaryImageInputRef.current?.click()}
+                          className="w-full h-28 bg-black/40 border border-dashed border-teal-500/40 hover:border-teal-400 rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-all group shrink-0"
+                        >
+                          <div className="w-10 h-10 rounded-full bg-teal-500/10 flex items-center justify-center mb-1 group-hover:bg-teal-500/25 transition-colors text-teal-400">
+                            <Camera size={20} />
+                          </div>
+                          <span className="text-xs font-bold text-teal-200 group-hover:text-teal-100">انقر لتحديد صورة أو عدة صور للملخص</span>
+                          <span className="text-[9px] text-white/40 mt-0.5">يمكنك اختيار أكثر من صورة معاً (JPG, PNG, WEBP)</span>
+                        </div>
+
+                        {/* Image Previews & Multi-Select Counter */}
+                        {summaryImagePreviews.length > 0 && (
+                          <div className="flex flex-col gap-2">
+                            <div className="flex items-center justify-between text-[11px] font-bold px-1 text-white/70">
+                              <span>الصور المحددة ({summaryImagePreviews.length}):</span>
+                              <button
+                                type="button"
+                                onClick={() => summaryImageInputRef.current?.click()}
+                                className="text-teal-300 hover:text-teal-200 flex items-center gap-1 text-[10px] cursor-pointer"
+                              >
+                                <Plus size={12} />
+                                <span>إضافة المزيد من الصور</span>
+                              </button>
+                            </div>
+
+                            <div className="flex flex-col gap-2 max-h-48 overflow-y-auto custom-scrollbar p-1">
+                              {summaryImagePreviews.map((src, idx) => (
+                                <div key={idx} className="flex items-center gap-2 bg-white/5 border border-white/10 rounded-xl p-2 relative group/img">
+                                  <div 
+                                    onClick={() => setPreviewingImageUrl(src)}
+                                    className="relative cursor-pointer group/zoom shrink-0"
+                                    title="انقر لتكبير الصورة"
+                                  >
+                                    <img src={src} alt={`صفحة ${idx + 1}`} className="w-12 h-12 rounded-lg object-cover bg-black/40 border border-white/10" />
+                                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover/zoom:opacity-100 transition-opacity rounded-lg flex items-center justify-center text-white">
+                                      <ZoomIn size={14} />
+                                    </div>
+                                  </div>
+                                  <div className="flex-1 min-w-0 text-right">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-[10px] font-black bg-teal-500/20 text-teal-300 px-1.5 py-0.5 rounded">صفحة {idx + 1}</span>
+                                      <span className="text-xs font-bold text-white truncate">{summaryImageFiles[idx]?.name || `صورة ${idx + 1}`}</span>
+                                    </div>
+                                    <span className="text-[10px] text-white/40 mt-0.5 block">{( (summaryImageFiles[idx]?.size || 0) / 1024 ).toFixed(0)} KB</span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeSummaryImageFile(idx)}
+                                    className="text-white/40 hover:text-rose-400 p-1.5 rounded-lg hover:bg-white/5 transition-colors cursor-pointer"
+                                    title="حذف هذه الصورة"
+                                  >
+                                    <X size={14} />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Title input */}
+                        <div className="space-y-1 text-right">
+                          <label className="text-[11px] font-bold text-white/70">عنوان الملخص:</label>
+                          <input
+                            type="text"
+                            value={summaryImageTitle}
+                            onChange={(e) => {
+                              const title = e.target.value;
+                              setSummaryImageTitle(title);
+                              setImageSummaryResult(buildImageSummaryMarkdown(summaryImagePreviews, title, summaryImageNotes));
+                            }}
+                            placeholder="مثال: ملخص الفصل الثاني - المغناطيسية وتطبيقاتها"
+                            className="w-full h-10 bg-black/40 border border-white/10 focus:border-teal-500/60 rounded-xl px-3 text-xs text-white outline-none"
+                          />
+                        </div>
+
+                        {/* Notes / Instructions */}
+                        <div className="space-y-1 text-right">
+                          <label className="text-[11px] font-bold text-white/70">ملاحظات أو توضيحات للطلاب (اختياري):</label>
+                          <textarea
+                            value={summaryImageNotes}
+                            onChange={(e) => {
+                              const notes = e.target.value;
+                              setSummaryImageNotes(notes);
+                              setImageSummaryResult(buildImageSummaryMarkdown(summaryImagePreviews, summaryImageTitle, notes));
+                            }}
+                            placeholder="مثال: التركيز على القوانين والمقارنات في الصفحة الثانية..."
+                            className="w-full h-16 bg-black/40 border border-white/10 focus:border-teal-500/60 rounded-xl p-2.5 text-xs text-white outline-none resize-none"
+                          />
+                        </div>
+
+                        {/* Action Buttons */}
+                        {isUploadingSummaryImages ? (
+                          <div className="w-full space-y-2 py-2">
+                            <div className="flex items-center justify-between text-xs text-teal-300 font-bold">
+                              <span>جاري رفع صفحات الملخص ({summaryImageFiles.length} صور)...</span>
+                              <span>{summaryImageProgress}%</span>
+                            </div>
+                            <div className="w-full h-2 bg-black/40 rounded-full overflow-hidden border border-white/10">
+                              <div 
+                                className="h-full bg-gradient-to-r from-teal-500 to-emerald-500 transition-all duration-300 rounded-full"
+                                style={{ width: `${summaryImageProgress}%` }}
+                              />
+                            </div>
+                          </div>
+                        ) : (
+                          <div className="flex flex-col gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => handleApplySummaryImagesToResult(false)}
+                              disabled={summaryImageFiles.length === 0}
+                              className="w-full py-2.5 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl border border-white/10 flex items-center justify-center gap-1.5 transition-all disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                            >
+                              <Eye size={15} className="text-teal-300" />
+                              <span>اعتماد وعرض الملخص في لوحة النتائج</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleApplySummaryImagesToResult(true)}
+                              disabled={summaryImageFiles.length === 0}
+                              className="w-full py-3 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white font-black text-xs rounded-xl shadow-lg shadow-teal-500/20 flex items-center justify-center gap-2 transition-all disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                            >
+                              <UploadCloud size={16} />
+                              <span>اعتماد ونشر الملخص للطلاب مباشرة</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ) : activeTool === 'summaries' && summaryMode === 'manual' ? (
+                      <div className="flex flex-col gap-4 shrink-0 text-right">
+                        <div className="space-y-1">
+                          <p className="text-xs font-black text-amber-300 flex items-center gap-1.5">
+                            <Edit2 size={14} />
+                            <span>إدراج الملخص ككتابة</span>
+                          </p>
+                          <p className="text-[11px] text-white/50 leading-relaxed font-medium">
+                            اكتب أو الصق نص الملخص مباشرة للدرس ليتم إدراجه وعرضه فوراً.
+                          </p>
+                        </div>
+
+                        {/* Title input */}
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-white/80">عنوان الملخص:</label>
+                          <input
+                            type="text"
+                            value={summaryManualTitle}
+                            onChange={(e) => {
+                              const title = e.target.value;
+                              setSummaryManualTitle(title);
+                              if (summaryManualText.trim()) {
+                                const finalTitle = title.trim() || `ملخص ${teacherData?.subject || 'دراسي'} - ${new Date().toLocaleDateString('ar-IQ')}`;
+                                setManualSummaryResult(`# 📄 ${finalTitle}\n\n${summaryManualText.trim()}`);
+                              }
+                            }}
+                            placeholder="اكتب عنوان الملخص هنا..."
+                            className="w-full h-10 bg-black/40 border border-white/10 focus:border-amber-500/60 rounded-xl px-3 text-xs sm:text-sm text-white outline-none"
+                          />
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <label className="text-xs font-bold text-white/80">نص ومحتوى الملخص:</label>
+                          <textarea
+                            value={summaryManualText}
+                            onChange={(e) => {
+                              const text = e.target.value;
+                              setSummaryManualText(text);
+                              if (!text.trim()) {
+                                setManualSummaryResult('');
+                              } else {
+                                const title = summaryManualTitle.trim() || `ملخص ${teacherData?.subject || 'دراسي'} - ${new Date().toLocaleDateString('ar-IQ')}`;
+                                setManualSummaryResult(`# 📄 ${title}\n\n${text.trim()}`);
+                              }
+                            }}
+                            placeholder="اكتب أو الصق نص الملخص هنا مباشرة..."
+                            className="w-full h-64 bg-black/40 border border-white/10 focus:border-amber-500/60 rounded-2xl p-3.5 text-xs sm:text-sm text-white outline-none resize-none leading-relaxed placeholder:text-white/30"
+                          />
+                          <div className="flex justify-between items-center text-[10px] text-white/40 px-1">
+                            <span>عدد الكلمات: {summaryManualText.trim() ? summaryManualText.trim().split(/\s+/).length : 0}</span>
+                            <span>عدد الأحرف: {summaryManualText.length}</span>
+                          </div>
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div className="flex flex-col gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => handleApplyManualSummaryToResult(false)}
+                            disabled={!summaryManualText.trim()}
+                            className="w-full py-2.5 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl border border-white/10 flex items-center justify-center gap-1.5 transition-all disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                          >
+                            <CheckCircle size={14} className="text-amber-400" />
+                            <span>معاينة الملخص في لوحة النتائج</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => handleApplyManualSummaryToResult(true)}
+                            disabled={!summaryManualText.trim()}
+                            className="w-full py-3 bg-gradient-to-r from-amber-600 to-amber-700 hover:from-amber-500 hover:to-amber-600 text-white font-black text-xs rounded-xl shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 transition-all disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
+                          >
+                            <UploadCloud size={16} />
+                            <span>نشر الملخص المكتوب للطلاب مباشرة</span>
+                          </button>
+                        </div>
+                      </div>
+                    ) : activeTool === 'summaries' && summaryMode === 'ai' ? (
+                      <div className="flex flex-col gap-3.5 shrink-0 text-right">
+                        <div className="space-y-1">
+                          <p className="text-xs font-black text-emerald-300 flex items-center gap-1.5">
+                            <Sparkles size={14} className="text-emerald-300" />
+                            <span>التلخيص الذكي للدروس بواسطة الذكاء الاصطناعي 🤖</span>
+                          </p>
+                          <p className="text-[11px] text-white/50 leading-relaxed font-medium">
+                            أدخل موضوع الدرس أو الصق نصه أو أرفق مستندات الدرس ليقوم الذكاء الاصطناعي باستخراج المفاهيم وتلخيصها بدقة.
+                          </p>
+                        </div>
+
+                        {/* Title input */}
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-bold text-white/70">موضوع أو عنوان الدرس المراد تلخيصه:</label>
+                          <input
+                            type="text"
+                            value={aiSummaryTopic}
+                            onChange={(e) => setAiSummaryTopic(e.target.value)}
+                            placeholder="مثال: الجهاز الهضمي ووظائفه، المغناطيسية، الخلية النباتية..."
+                            className="w-full h-10 bg-black/40 border border-white/10 focus:border-emerald-500/60 rounded-xl px-3 text-xs text-white outline-none"
+                          />
+                        </div>
+
+                        {/* Text / Excerpt Paste */}
+                        <div className="space-y-1">
+                          <label className="text-[11px] font-bold text-white/70">نص أو فقرات من الدرس لتلخيصها (اختياري):</label>
+                          <textarea
+                            value={aiSummaryPromptText}
+                            onChange={(e) => setAiSummaryPromptText(e.target.value)}
+                            placeholder="الصق نص الشرح أو فقرات الكتاب المراد تركيزها وتلخيصها هنا..."
+                            className="w-full h-24 bg-black/40 border border-white/10 focus:border-emerald-500/60 rounded-xl p-2.5 text-xs text-white outline-none resize-none leading-relaxed"
+                          />
+                        </div>
+
+                        {/* File Upload for Lesson Material */}
+                        <div className="space-y-1.5">
+                          <label className="text-[11px] font-bold text-white/70">إرفاق ملفات أو صور الدرس (اختياري):</label>
+                          <input 
+                            type="file" 
+                            accept="image/*,.pdf,.ppt,.pptx"
+                            multiple
+                            className="hidden"
+                            ref={aiSummaryPdfInputRef}
+                            onChange={handleAiSummaryPdfChange}
+                          />
+
+                          <div 
+                            onClick={() => aiSummaryPdfInputRef.current?.click()}
+                            className="w-full h-20 bg-black/40 border border-dashed border-emerald-500/30 hover:border-emerald-400 rounded-2xl flex flex-col items-center justify-center cursor-pointer transition-all group shrink-0"
+                          >
+                            <div className="w-8 h-8 rounded-full bg-emerald-500/10 flex items-center justify-center mb-1 group-hover:bg-emerald-500/20 transition-colors text-emerald-400">
+                              <FileUp size={16} />
+                            </div>
+                            <span className="text-xs font-bold text-emerald-200 group-hover:text-emerald-100">انقر لإرفاق مستند الدرس (PDF, صور, PPT)</span>
+                            <span className="text-[9px] text-white/40 mt-0.5">يمكنك اختيار أكثر من ملف لتحليلها وتلخيصها معاً</span>
+                          </div>
+
+                          {aiSummaryPdfFiles.length > 0 && (
+                            <div className="flex flex-col gap-1.5 max-h-36 overflow-y-auto custom-scrollbar p-1">
+                              {aiSummaryPdfFiles.map((file, idx) => (
+                                <div key={idx} className="flex items-center justify-between bg-white/5 border border-white/10 rounded-xl px-2.5 py-1.5 text-right">
+                                  <div className="flex items-center gap-2 overflow-hidden min-w-0">
+                                    {file.type.startsWith('image/') ? (
+                                      <ImageIcon size={14} className="text-emerald-400 shrink-0" />
+                                    ) : (
+                                      <ScrollText size={14} className="text-teal-400 shrink-0" />
+                                    )}
+                                    <span className="text-xs text-white/90 truncate font-medium">{file.name}</span>
+                                    <span className="text-[10px] text-white/40 shrink-0">({((file.size || 0) / 1024).toFixed(0)} KB)</span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => removeAiSummaryPdfFile(idx)}
+                                    className="text-white/40 hover:text-rose-400 p-1 rounded transition-colors cursor-pointer shrink-0"
+                                    title="إزالة الملف"
+                                  >
+                                    <X size={14} />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <button 
+                          type="button"
+                          onClick={handleGenerate}
+                          disabled={(!aiSummaryTopic.trim() && !aiSummaryPromptText.trim() && aiSummaryPdfFiles.length === 0) || isGenerating}
+                          className="w-full mt-2 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white rounded-xl font-black text-xs transition-all shadow-[0_0_15px_rgba(16,185,129,0.3)] disabled:opacity-40 flex items-center justify-center gap-2 shrink-0 cursor-pointer disabled:cursor-not-allowed"
+                        >
+                          {isGenerating ? (
+                            <>
+                              <Loader2 size={16} className="animate-spin" />
+                              <span>جاري التلخيص الذكي للدرس...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Sparkles size={16} className="text-emerald-200" />
+                              <span>توليد الملخص بالذكاء الاصطناعي</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
                     ) : (
                       <>
-                        <label className="block text-sm font-bold text-white/70 mb-3">ارفع صور أو ملف (PDF, PPT)</label>
+                        <label className="block text-sm font-bold text-white/70 mb-3">
+                          ارفع صور أو ملف (PDF, PPT) للبدء
+                        </label>
                         
                         <input 
                           type="file" 
@@ -1233,40 +2116,54 @@ ${baseFormatting}`;
             </div>
 
             {/* Output Area */}
-            <div className="w-full flex-1 flex flex-col min-w-0 bg-[#0A1024]/80 border border-white/5 rounded-3xl p-5 shadow-lg relative h-fit min-h-[400px] overflow-hidden">
+            <div className={`w-full flex-1 flex flex-col min-w-0 ${activeTool === 'summaries' ? 'bg-[#040817]/90 p-4 sm:p-6 min-h-[500px]' : 'bg-[#0A1024]/80 border border-white/5 rounded-3xl p-5 shadow-lg relative h-fit min-h-[400px]'} overflow-hidden`}>
               <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 border-b border-white/5 pb-4 gap-4">
                 <h3 className="text-base font-black text-white flex items-center gap-2">
                   <Bot size={18} className={activeToolData?.color} />
                   النتيجة
                 </h3>
 
-                {generatedContent && !isGenerating && !generatedContent.startsWith('تم إلغاء') && !generatedContent.startsWith('عذراً، حدث خطأ') && (
+                {activeDisplayContent && !isGenerating && !activeDisplayContent.startsWith('تم إلغاء') && !activeDisplayContent.startsWith('عذراً، حدث خطأ') && (
                   <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2 bg-[#050812] border border-white/10 rounded-xl p-1.5 shadow-xl w-full">
-                    {activeTool === 'competitions' || activeTool === 'homework' ? (
+                    {activeTool === 'competitions' || activeTool === 'homework' || activeTool === 'summaries' ? (
                       <button 
                         onClick={() => {
-                          const title = activeTool === 'competitions' ? "اسم المسابقة" : "اسم الواجب";
-                          const newName = prompt(`أدخل ${title}:`, saveName);
+                          const title = activeTool === 'competitions' ? "اسم المسابقة" : activeTool === 'homework' ? "اسم الواجب" : "عنوان الملخص";
+                          const currentName = activeTool === 'summaries' ? activeSummaryTitle : saveName;
+                          const newName = prompt(`أدخل ${title}:`, currentName);
                           if (newName !== null) {
+                            if (activeTool === 'summaries') {
+                              if (summaryMode === 'image') setSummaryImageTitle(newName);
+                              else if (summaryMode === 'manual') setSummaryManualTitle(newName);
+                              else setAiSummaryTopic(newName);
+                            }
                             setSaveName(newName);
                           }
                         }}
-                        className={`flex items-center gap-1.5 px-3 h-9 ${activeTool === 'competitions' ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-300' : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300'} border border-white/10 rounded-lg text-xs font-bold transition-all flex-1 sm:flex-none justify-center`}
-                        title={activeTool === 'competitions' ? "تسمية المسابقة" : "تسمية الواجب"}
+                        className={`flex items-center gap-1.5 px-3 h-9 ${
+                          activeTool === 'competitions' 
+                            ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-300' 
+                            : activeTool === 'homework' 
+                            ? 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300' 
+                            : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300'
+                        } border border-white/10 rounded-lg text-xs font-bold transition-all flex-1 sm:flex-none justify-center`}
+                        title={activeTool === 'competitions' ? "تسمية المسابقة" : activeTool === 'homework' ? "تسمية الواجب" : "تسمية الملخص"}
                       >
                         <Edit2 size={14} />
-                        <span>{saveName ? `${saveName}` : (activeTool === 'competitions' ? 'تسمية المسابقة' : 'تسمية الواجب')}</span>
+                        <span className="truncate max-w-[120px]">
+                          {activeTool === 'summaries' ? activeSummaryTitle : (saveName ? `${saveName}` : (activeTool === 'competitions' ? 'تسمية المسابقة' : 'تسمية الواجب'))}
+                        </span>
                       </button>
-                    ) : (
-                      <button 
-                        onClick={copyToClipboardHandler}
-                        className="flex items-center gap-1.5 px-3 h-9 bg-white/5 hover:bg-white/10 rounded-lg text-xs font-bold text-white/60 hover:text-white transition-all flex-1 sm:flex-none justify-center"
-                        title="نسخ النتيجة"
-                      >
-                        {copied ? <CheckCircle size={14} className="text-emerald-400" /> : <Copy size={14} />}
-                        <span>{copied ? 'تم النسخ' : 'نسخ'}</span>
-                      </button>
-                    )}
+                    ) : null}
+
+                    <button 
+                      onClick={copyToClipboardHandler}
+                      className="flex items-center gap-1.5 px-3 h-9 bg-white/5 hover:bg-white/10 rounded-lg text-xs font-bold text-white/60 hover:text-white transition-all flex-1 sm:flex-none justify-center"
+                      title="نسخ النتيجة"
+                    >
+                      {copied ? <CheckCircle size={14} className="text-emerald-400" /> : <Copy size={14} />}
+                      <span>{copied ? 'تم النسخ' : 'نسخ'}</span>
+                    </button>
                     
                     {activeTool !== 'history' && (
                       <>
@@ -1279,10 +2176,21 @@ ${baseFormatting}`;
                                 ? "اسم المسابقة..." 
                                 : activeTool === 'homework' 
                                 ? "اسم الواجب..." 
+                                : activeTool === 'summaries'
+                                ? "عنوان أو اسم الملخص..."
                                 : "اسم الملف (اختياري)..."
                             }
-                            value={saveName}
-                            onChange={(e) => setSaveName(e.target.value)}
+                            value={activeTool === 'summaries' ? activeSummaryTitle : saveName}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              if (activeTool === 'summaries') {
+                                if (summaryMode === 'image') setSummaryImageTitle(val);
+                                else if (summaryMode === 'manual') setSummaryManualTitle(val);
+                                else setAiSummaryTopic(val);
+                              } else {
+                                setSaveName(val);
+                              }
+                            }}
                             className="bg-transparent text-white/80 text-xs font-medium px-3 h-full outline-none w-full transition-all placeholder:text-white/30"
                           />
                           <button 
@@ -1305,11 +2213,11 @@ ${baseFormatting}`;
                     )}
                     
                     {(() => {
-                      const isPublishable = activeTool === 'homework' || activeTool === 'competitions' || 
+                      const isPublishable = activeTool === 'homework' || activeTool === 'competitions' || activeTool === 'summaries' ||
                         (activeTool === 'history' && (() => {
                           const savedItem = savedResults.find(r => r.content === generatedContent);
                           const originalTool = tools.find(t => t.title === savedItem?.tool)?.id;
-                          return originalTool === 'homework' || originalTool === 'competitions';
+                          return originalTool === 'homework' || originalTool === 'competitions' || originalTool === 'summaries';
                         })());
                         
                       if (isPublishable) {
@@ -1430,7 +2338,7 @@ ${baseFormatting}`;
                       )}
                     </div>
                   </div>
-                ) : generatedContent ? (
+                ) : activeDisplayContent ? (
                   <div className="flex flex-col gap-4 pb-10 w-full relative group max-w-full overflow-x-hidden">
                     {localQuiz ? (
                       <div className="flex flex-col gap-6 w-full text-right" dir="rtl">
@@ -1714,11 +2622,15 @@ ${baseFormatting}`;
                             </pre>
                           ),
                           img: ({node, src, alt, ...props}: any) => (
-                            <span className="block my-4 rounded-2xl overflow-hidden border border-white/10 bg-black/40 shadow-xl max-w-full">
+                            <span 
+                              onClick={() => { if (src) setPreviewingImageUrl(src); }}
+                              className="block my-4 rounded-2xl overflow-hidden border border-white/10 bg-black/40 shadow-xl max-w-full cursor-pointer hover:border-emerald-500/50 transition-all group"
+                              title="انقر لتكبير الصورة في شاشة كاملة"
+                            >
                               <img 
                                 src={src} 
-                                alt={alt || "صورة الواجب"} 
-                                className="w-full max-h-[500px] object-contain rounded-xl block" 
+                                alt={alt || (activeTool === 'summaries' ? "صفحة الملخص" : "صورة الواجب")} 
+                                className="w-full max-h-[500px] object-contain rounded-xl block group-hover:scale-[1.01] transition-transform" 
                                 {...props} 
                               />
                               {alt && <span className="block p-2.5 text-center text-xs text-white/60 font-bold bg-black/20 border-t border-white/5">{alt}</span>}
@@ -1726,14 +2638,50 @@ ${baseFormatting}`;
                           )
                         }}
                       >
-                        {generatedContent}
+                        {activeDisplayContent}
                       </ReactMarkdown>
                     )}
                   </div>
                 ) : (
-                  <div className="absolute inset-0 flex flex-col items-center justify-center text-white/20">
-                    <Sparkles size={48} className="mb-4 opacity-20" />
-                    <p className="font-bold text-sm">ارفع صورة للموضوع واضغط للبدء</p>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-white/20 p-6 text-center">
+                    {activeTool === 'summaries' ? (
+                      summaryMode === 'image' ? (
+                        <div className="flex flex-col items-center gap-2 max-w-sm">
+                          <ImageIcon size={48} className="mb-2 opacity-30 text-teal-400" />
+                          <p className="font-bold text-sm text-teal-200/80">
+                            حدد صورة أو عدة صور للملخص لعرضها وتنسيقها هنا
+                          </p>
+                          <p className="text-xs text-white/40">
+                            يمكنك اختيار أكثر من صورة دفعة واحدة لصفحات الملخص واعتمادها أو نشرها للطلاب
+                          </p>
+                        </div>
+                      ) : summaryMode === 'manual' ? (
+                        <div className="flex flex-col items-center gap-2 max-w-sm">
+                          <Edit2 size={48} className="mb-2 opacity-30 text-amber-400" />
+                          <p className="font-bold text-sm text-amber-200/80">
+                            اكتب نص الملخص في الجانب الأيمن لعرضه هنا مباشرة
+                          </p>
+                          <p className="text-xs text-white/40">
+                            سيتم تنسيق العناوين والنقاط والملاحظات فوراً وبشكل مرتب للطلاب
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center gap-2 max-w-sm">
+                          <Sparkles size={48} className="mb-2 opacity-30 text-emerald-400" />
+                          <p className="font-bold text-sm text-white/70">
+                            ارفع ملف الدرس أو صوره واضغط توليد ذكي لإنشاء الملخص
+                          </p>
+                          <p className="text-xs text-white/40">
+                            سيقوم الذكاء الاصطناعي باستخراج الأفكار والمفاهيم الرئيسية وتلخيصها بدقة
+                          </p>
+                        </div>
+                      )
+                    ) : (
+                      <>
+                        <Sparkles size={48} className="mb-4 opacity-20" />
+                        <p className="font-bold text-sm">ارفع صورة للموضوع واضغط للبدء</p>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -1815,6 +2763,33 @@ ${baseFormatting}`;
                   إلغاء
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Fullscreen Image Preview Modal for Summary Images */}
+      <AnimatePresence>
+        {previewingImageUrl && (
+          <div 
+            onClick={() => setPreviewingImageUrl(null)}
+            className="fixed inset-0 z-[12000] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md cursor-pointer"
+          >
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="relative max-w-4xl max-h-[90vh] p-2 bg-[#0C1229] border border-white/20 rounded-2xl shadow-2xl flex flex-col items-center" 
+              onClick={e => e.stopPropagation()}
+            >
+              <button 
+                onClick={() => setPreviewingImageUrl(null)}
+                className="absolute top-3 right-3 w-8 h-8 rounded-full bg-black/60 hover:bg-black/90 text-white flex items-center justify-center border border-white/20 transition-all cursor-pointer z-10"
+                title="إغلاق"
+              >
+                <X size={16} />
+              </button>
+              <img src={previewingImageUrl} alt="معاينة الصورة" className="max-w-full max-h-[85vh] object-contain rounded-xl" />
             </motion.div>
           </div>
         )}

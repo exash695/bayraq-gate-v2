@@ -1,4 +1,5 @@
 import { printHTML } from '../lib/exportUtils';
+import { normalizeArabicSchoolName } from '../lib/constants';
 
 export interface AttendancePrintStudent {
   name: string;
@@ -34,7 +35,7 @@ export interface AttendancePrintOptions {
 
 export const printAttendanceReport = (options: AttendancePrintOptions) => {
   const {
-    schoolName = 'مجموعة مدارس بيرق الأهلية النموذجية',
+    schoolName,
     className,
     date,
     supervisorName = 'الكادر التعليمي والإداري',
@@ -42,6 +43,7 @@ export const printAttendanceReport = (options: AttendancePrintOptions) => {
     stats
   } = options;
 
+  const safeSchoolName = normalizeArabicSchoolName(schoolName || 'مجموعة مدارس بيرق الأهلية النموذجية');
   const total = stats?.total ?? students.length;
   const present = stats?.present ?? students.filter(s => s.dayStatus === 'present').length;
   const absent = stats?.absent ?? students.filter(s => s.dayStatus === 'absent').length;
@@ -71,6 +73,13 @@ export const printAttendanceReport = (options: AttendancePrintOptions) => {
     const reason = st.reason || st.dayLog?.reason || '';
     const period = st.period || st.dayLog?.period || '';
     const recordedBy = st.by || st.dayLog?.by || supervisorName || 'الإدارة';
+
+    // Strictly ensure student name only without any codes or technical IDs
+    const cleanStudentName = (st.name || 'طالب')
+      .replace(/\s*\([A-Za-z0-9_-]+\)\s*$/g, '')
+      .replace(/\s*\[[A-Za-z0-9_-]+\]\s*$/g, '')
+      .replace(/\s*كود\s*:\s*[A-Za-z0-9_-]+/gi, '')
+      .trim();
 
     if (dayStatus === 'present') {
       statusLabel = 'حاضر';
@@ -104,8 +113,7 @@ export const printAttendanceReport = (options: AttendancePrintOptions) => {
     return `
       <tr class="student-row" style="background-color: ${idx % 2 === 1 ? '#f8fafc' : '#ffffff'};">
         <td style="text-align: center; font-weight: 700; color: #475569; width: 40px;">${idx + 1}</td>
-        <td style="text-align: right; font-weight: 800; color: #0f172a; font-size: 11pt;">${st.name || 'طالب'}</td>
-        <td style="text-align: center; font-family: monospace; font-size: 9.5pt; color: #334155; direction: ltr; font-weight: 600;">${st.code || '-'}</td>
+        <td style="text-align: right; font-weight: 800; color: #0f172a; font-size: 11pt;">${cleanStudentName}</td>
         <td style="text-align: center;">
           <span style="display: inline-block; background-color: ${statusBg}; color: ${statusColor}; border: 1px solid ${statusBorder}; padding: 3px 10px; border-radius: 6px; font-weight: 800; font-size: 9.5pt; white-space: nowrap;">
             ${statusIcon} ${statusLabel}
@@ -231,7 +239,8 @@ export const printAttendanceReport = (options: AttendancePrintOptions) => {
       font-size: 18pt;
       font-weight: 900;
       color: #0f172a;
-      letter-spacing: -0.3px;
+      letter-spacing: normal !important;
+      font-family: 'Cairo', 'Tajawal', Tahoma, Arial, sans-serif;
       margin-bottom: 4px;
     }
 
@@ -466,7 +475,7 @@ export const printAttendanceReport = (options: AttendancePrintOptions) => {
       <table class="header-table">
         <tr>
           <td style="width: 55%;">
-            <div class="school-branding">🏫 ${schoolName}</div>
+            <div class="school-branding">🏫 ${safeSchoolName}</div>
             <div class="doc-main-title">
               <span>كشف تفصيلي لرصد الحضور والغياب اليومي</span>
             </div>
@@ -513,16 +522,15 @@ export const printAttendanceReport = (options: AttendancePrintOptions) => {
     <table class="attendance-data-table">
       <thead>
         <tr>
-          <th style="width: 35px;">ت</th>
+          <th style="width: 40px;">ت</th>
           <th style="text-align: right;">اسم الطالب الرباعي</th>
-          <th style="width: 85px;">كود الطالب</th>
-          <th style="width: 105px;">حالة الحضور</th>
+          <th style="width: 110px;">حالة الحضور</th>
           <th style="text-align: right;">الملاحظات / العذر / الحصة</th>
-          <th style="width: 100px;">المسجل</th>
+          <th style="width: 110px;">المسجل</th>
         </tr>
       </thead>
       <tbody>
-        ${tableRowsHtml || '<tr><td colspan="6" style="padding: 24px; text-align: center; color: #94a3b8; font-weight: bold;">لا يوجد طلاب مسجلين في هذه الشعبة</td></tr>'}
+        ${tableRowsHtml || '<tr><td colspan="5" style="padding: 24px; text-align: center; color: #94a3b8; font-weight: bold;">لا يوجد طلاب مسجلين في هذه الشعبة</td></tr>'}
       </tbody>
     </table>
 

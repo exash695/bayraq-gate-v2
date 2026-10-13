@@ -146,7 +146,7 @@ export const AdminHomeDashboard: React.FC<AdminHomeDashboardProps> = ({
           <img src="/logo.png" alt="شعار البوابة" className="w-full h-full object-contain" />
         </div>
         <div className="flex-1 text-center">
-          <span className="text-[#D4AF37] font-black font-amiri text-lg tracking-wide">وَقُل رَّبِّ زِدْنِي عِلْمًا</span>
+          <span className="text-[#D4AF37] font-black text-lg tracking-wide">وَقُل رَّبِّ زِدْنِي عِلْمًا</span>
         </div>
         <button 
           onClick={() => onOpenNotifications?.()}

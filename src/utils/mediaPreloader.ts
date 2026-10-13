@@ -1,7 +1,7 @@
 /**
  * Utility to asynchronously preload key Berq mascot media assets (videos & PNGs)
- * into browser memory/cache, ensuring instant 0ms rendering
- * when navigating between views and dashboards.
+ * into browser memory/cache without blocking user interaction or bandwidth
+ * on weak internet connections.
  */
 
 import { preloadSchoolAssets, preloadVideoBlob } from './imageCacher';
@@ -29,6 +29,20 @@ export const CRITICAL_MASCOT_IMAGES = [
 const SECONDARY_VIDEOS: string[] = [];
 
 /**
+ * Checks if the user is on a slow or metered network connection
+ */
+function isLowBandwidthConnection(): boolean {
+  if (typeof navigator === 'undefined') return false;
+  const nav = navigator as any;
+  if (nav.connection) {
+    if (nav.connection.saveData === true) return true;
+    const type = nav.connection.effectiveType;
+    if (type === 'slow-2g' || type === '2g' || type === '3g') return true;
+  }
+  return false;
+}
+
+/**
  * Preloads a single media URL silently into browser cache
  */
 export function preloadSingleAsset(url: string) {
@@ -37,7 +51,9 @@ export function preloadSingleAsset(url: string) {
   PRELOADED_ASSETS.add(url);
 
   if (url.endsWith('.mp4') || url.endsWith('.webm')) {
-    preloadVideoBlob(url);
+    if (!isLowBandwidthConnection()) {
+      preloadVideoBlob(url);
+    }
   } else {
     const img = new Image();
     img.src = url;
@@ -45,37 +61,47 @@ export function preloadSingleAsset(url: string) {
 }
 
 /**
- * Preloads all essential mascot assets and school cards/logos in the background after initial app mount
+ * Preloads assets smartly:
+ * Lightweight images immediately.
+ * Heavy MP4 videos only after the app has fully booted and only on adequate network speeds.
  */
 export function preloadAllMascotAssets() {
   if (typeof window === 'undefined') return;
 
-  // 1. Immediately preload critical images & critical videos (0ms priority)
+  // 1. Preload lightweight images in background
   CRITICAL_MASCOT_IMAGES.forEach((imgUrl) => {
     const img = new Image();
     img.src = imgUrl;
   });
 
-  CRITICAL_MASCOT_VIDEOS.forEach((videoUrl) => {
-    preloadVideoBlob(videoUrl);
-  });
+  // 2. Heavy video and school assets are delayed until the app is fully loaded & user is active
+  const runBackgroundPreload = () => {
+    if (isLowBandwidthConnection()) {
+      // On weak/metered connections, preserve all network bandwidth for app features
+      return;
+    }
 
-  preloadSchoolAssets();
+    preloadSchoolAssets();
 
-  // 2. Secondary assets preloaded in idle / background sequence
-  const runSecondaryPreload = () => {
-    let delay = 30;
-    SECONDARY_VIDEOS.forEach((videoUrl) => {
+    // Sequentially preload videos with generous delay so we never choke bandwidth
+    let delay = 1000;
+    CRITICAL_MASCOT_VIDEOS.forEach((videoUrl) => {
       setTimeout(() => {
-        preloadSingleAsset(videoUrl);
+        if (!PRELOADED_ASSETS.has(videoUrl)) {
+          PRELOADED_ASSETS.add(videoUrl);
+          preloadVideoBlob(videoUrl);
+        }
       }, delay);
-      delay += 50;
+      delay += 2500;
     });
   };
 
+  // Give initial UI and data fetching 5 seconds of clear bandwidth before any background media
   if ('requestIdleCallback' in window) {
-    (window as unknown as { requestIdleCallback: (cb: () => void) => void }).requestIdleCallback(runSecondaryPreload);
+    setTimeout(() => {
+      (window as unknown as { requestIdleCallback: (cb: () => void) => void }).requestIdleCallback(runBackgroundPreload);
+    }, 4000);
   } else {
-    setTimeout(runSecondaryPreload, 200);
+    setTimeout(runBackgroundPreload, 5000);
   }
 }

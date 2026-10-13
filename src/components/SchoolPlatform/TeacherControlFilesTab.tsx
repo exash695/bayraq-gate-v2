@@ -650,7 +650,7 @@ export const TeacherControlFilesTab: React.FC = () => {
                                     <button
                                       onClick={async () => {
                                         try {
-                                          const delRes = await fetch(resolveApiUrl()`/api/school-files/${file.id}`, { method: 'DELETE' });
+                                          const delRes = await fetch(resolveApiUrl(`/api/school-files/${file.id}`), { method: 'DELETE' });
                                           if (delRes.ok) {
                                             if (setSchoolFiles) {
                                               setSchoolFiles((prev: any[]) => prev.filter((f: any) => f.id !== file.id));

@@ -28,6 +28,7 @@ import { translations } from '../lib/translations';
 import { auth, db, doc, deleteDoc } from '../lib/firebase';
 import { customAuth } from '../services/customAuthService';
 import { safeStorage } from '../lib/storage';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface SidebarProps {
   activeSection: AppSection;
@@ -437,6 +438,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
               }}
             />
 
+            <MenuItem 
+              label={language === 'ar' ? 'المجلس 🏛️' : 'Council'}
+              subLabel="الملتقى التفاعلي وفرسان الصف"
+              icon={Users}
+              colorClass="amber"
+              isActive={activeSection === 'mayadeen'}
+              onClick={() => {
+                onSelectSection('mayadeen');
+                setIsOpen(false);
+              }}
+            />
+
             {(userProfile?.role === 'student' || !userProfile?.role) && (
               <>
                 <MenuItem 
@@ -484,6 +497,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 onClick={() => { onSelectSection('dev-dashboard'); setIsOpen(false); }}
               />
             )}
+
+            {/* PWA Install Button for Instant Launch */}
+            <div className="px-1 py-1">
+              <PWAInstallButton className="w-full justify-center" />
+            </div>
 
             {/* Bottom Divider */}
             <div className="relative flex items-center justify-center my-6">

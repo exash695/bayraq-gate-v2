@@ -186,6 +186,13 @@ console.log = function (...args: any[]) {
 */
 
 try {
+  const preloader = document.getElementById('bayraq-preloader');
+  if (preloader) {
+    preloader.remove();
+  }
+} catch (e) {}
+
+try {
   const rootElement = document.getElementById('root');
   if (rootElement) {
     const root = createRoot(rootElement);

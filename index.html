@@ -16,21 +16,33 @@
     <link rel="apple-touch-icon" href="/logo.png" />
     <link rel="apple-touch-icon" sizes="180x180" href="/logo.png" />
     <link rel="manifest" href="/manifest.json" />
+
+    <!-- High-Performance DNS prefetch and preconnect for zero latency -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Non-blocking asynchronous font loading -->
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+    <noscript>
+      <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&family=Tajawal:wght@400;500;700&display=swap" rel="stylesheet" />
+    </noscript>
+
     <style>
       html, body {
-        background-color: #020617 !important;
+        background-color: #02050F !important;
         color: #ffffff;
         margin: 0;
         padding: 0;
         width: 100%;
         min-height: 100%;
         overflow-x: hidden;
+        font-family: 'Cairo', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       }
       #root {
         min-height: 100%;
         width: 100%;
         display: flex;
         flex-direction: column;
+        background-color: #02050F;
       }
 
       @keyframes bayraqSpin {
@@ -48,10 +60,10 @@
     </style>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
   </head>
-  <body class="bg-[#020617] text-white">
+  <body class="bg-[#02050F] text-white">
     <div id="root">
       <!-- Instant Preloader prior to JS/React bundle execution -->
-      <div id="bayraq-preloader" style="position: fixed; inset: 0; background: linear-gradient(180deg, #020617 0%, #080f26 50%, #020617 100%); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 99999; font-family: 'Cairo', system-ui, -apple-system, sans-serif; direction: rtl; text-align: center; color: white; padding: 24px; overflow: hidden; user-select: none;">
+      <div id="bayraq-preloader" style="position: fixed; inset: 0; background: #02050F; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 99999; font-family: 'Cairo', system-ui, -apple-system, sans-serif; direction: rtl; text-align: center; color: white; padding: 24px; overflow: hidden; user-select: none;">
         
         <!-- Ambient radial glow background -->
         <div style="position: absolute; width: 320px; height: 320px; background: radial-gradient(circle, rgba(212,175,55,0.22) 0%, rgba(212,175,55,0) 70%); top: 50%; left: 50%; transform: translate(-50%, -50%); border-radius: 50%; pointer-events: none; animation: bayraqGlowPulse 2.8s ease-in-out infinite;"></div>
@@ -77,10 +89,19 @@
         </div>
 
         <!-- Loading hint text -->
-        <p style="font-size: 12px; color: rgba(255,255,255,0.6); margin-top: 14px; font-weight: 600; letter-spacing: 0.2px;">جاري فتح المنصة وتجهيز القاعات...</p>
+        <p id="bayraq-loader-hint" style="font-size: 12px; color: rgba(255,255,255,0.6); margin-top: 14px; font-weight: 600; letter-spacing: 0.2px;">جاري فتح المنصة وتجهيز القاعات...</p>
       </div>
+      <script>
+        // Weak-network intelligent status feedback
+        setTimeout(function() {
+          var hint = document.getElementById('bayraq-loader-hint');
+          if (hint) {
+            hint.textContent = 'جاري الفتح بالوضع فائق السرعة والمحفوظ محلياً ⚡...';
+            hint.style.color = '#F59E0B';
+          }
+        }, 1500);
+      </script>
     </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

@@ -18,35 +18,11 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ onFinish }) => {
     onFinishRef.current = onFinish;
   }, [onFinish]);
 
-  // Smooth animated progress bar from 15% to 100%
+  // Direct instant finish
   useEffect(() => {
-    const startTime = Date.now();
-    const duration = 900; // 0.9 seconds smooth fill
-
-    const interval = setInterval(() => {
-      const elapsed = Date.now() - startTime;
-      const current = Math.min(100, Math.round(15 + (elapsed / duration) * 85));
-      setProgress(current);
-
-      if (current >= 100) {
-        clearInterval(interval);
-        setTimeout(() => {
-          if (onFinishRef.current) {
-            onFinishRef.current();
-          }
-        }, 150);
-      }
-    }, 30);
-
-    // Safety timer showing direct button after 1.2s if stuck
-    const safetyTimer = setTimeout(() => {
-      setShowDirectButton(true);
-    }, 1200);
-
-    return () => {
-      clearInterval(interval);
-      clearTimeout(safetyTimer);
-    };
+    if (onFinishRef.current) {
+      onFinishRef.current();
+    }
   }, []);
 
   const getStatusMessage = (p: number) => {

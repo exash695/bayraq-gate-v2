@@ -309,7 +309,76 @@ export const StudentFilesTab: React.FC<{ disabledModules?: string[], rolePrefix?
           return Number(safeStorage.getItem('s6_last_seen_questions') || 0);
         });
 
-        const filteredDocs = schoolFiles.filter((doc) => {
+        // Summaries integration into "الملازم والملخصات"
+        const isSummaryMaterial = (r: any) => {
+          const tool = String(r.tool || '').toLowerCase();
+          const type = String(r.type || '').toLowerCase();
+          const name = String(r.name || '').toLowerCase();
+          const cat = String(r.category || '').toLowerCase();
+          return (
+            r.isSummary === true ||
+            String(r.isSummary) === 'true' ||
+            tool.includes('ملخص') ||
+            tool === 'summaries' ||
+            type.includes('summary') ||
+            type.includes('image_summary') ||
+            type.includes('manual_summary') ||
+            name.includes('ملخص') ||
+            cat.includes('ملخص')
+          );
+        };
+
+        const combinedFilesAndSummaries = useMemo(() => {
+          const map = new Map<string, any>();
+          
+          (schoolFiles || []).forEach(f => {
+            if (f.id) {
+              const isSum = isSummaryMaterial(f);
+              map.set(f.id, {
+                ...f,
+                title: f.title || f.name || 'ملف دراسي',
+                name: f.name || f.title || 'ملف دراسي',
+                content: f.content || f.description || '',
+                isSummary: f.isSummary || isSum,
+                tag: f.tag || (isSum ? (f.type === 'image_summary' ? 'ملخص مصور 🖼️' : f.type === 'manual_summary' ? 'ملخص مكتوب ✍️' : 'ملخص دراسي 📑') : f.tag || 'ملف معتمد 📑')
+              });
+            }
+          });
+
+          (teacherAiResults || []).filter(isSummaryMaterial).forEach(r => {
+            const existing = map.get(r.id);
+            if (!existing) {
+              map.set(r.id, {
+                id: r.id,
+                title: r.name || r.title || 'ملخص دراسي',
+                name: r.name || r.title || 'ملخص دراسي',
+                subject: r.subject || 'عام',
+                grade: r.targetGrade || r.grade || activeStudentGrade,
+                section: r.section,
+                targetSections: r.targetSections,
+                targetSectionLabel: r.targetSectionLabel,
+                fileUrl: r.fileUrl || r.imageUrl || (Array.isArray(r.imageUrls) ? r.imageUrls[0] : null) || '',
+                imageUrl: r.imageUrl || (Array.isArray(r.imageUrls) ? r.imageUrls[0] : null) || '',
+                imageUrls: r.imageUrls,
+                content: r.content,
+                teacherName: r.teacherName || 'الأستاذ',
+                tag: r.tag || (r.type === 'image_summary' || r.tool?.includes('مصور') ? 'ملخص مصور 🖼️' : r.type === 'manual_summary' ? 'ملخص مكتوب ✍️' : 'ملخص دراسي 📑'),
+                publishDate: r.publishDate || (r.date ? new Date(r.date).toLocaleDateString('ar-IQ') : 'مؤخراً'),
+                size: r.size || (r.imageUrls?.length ? `${r.imageUrls.length} صفحات` : 'ملخص معتمد'),
+                downloads: r.downloads || 0,
+                rating: r.rating || 5.0,
+                allowDownload: r.allowDownload !== undefined ? r.allowDownload : true,
+                createdAt: r.createdAt || r.timestamp || r.date,
+                isSummary: true,
+                type: r.type || (r.imageUrls?.length ? 'image_summary' : 'summary')
+              });
+            }
+          });
+
+          return Array.from(map.values());
+        }, [schoolFiles, teacherAiResults, activeStudentGrade]);
+
+        const filteredDocs = combinedFilesAndSummaries.filter((doc) => {
           const searchLower = String(studentLibrarySearch || '').toLowerCase();
           const matchesSearch = !searchLower || String(doc.title || '').toLowerCase().includes(searchLower) || 
                                 String(doc.name || '').toLowerCase().includes(searchLower);
@@ -782,9 +851,17 @@ export const StudentFilesTab: React.FC<{ disabledModules?: string[], rolePrefix?
                           </div>
 
                           <div className="flex items-start gap-3">
-                            <div className="w-12 h-12 rounded-xl bg-red-500/10 border border-red-500/20 flex flex-col items-center justify-center text-red-500 font-mono shrink-0">
-                              <span className="text-xs font-black leading-none">PDF</span>
-                              <span className="text-[7px] text-red-400/60 mt-0.5 uppercase font-bold">HIGH-RES</span>
+                            <div className={`w-12 h-12 rounded-xl border flex flex-col items-center justify-center font-mono shrink-0 ${
+                              docItem.isSummary || String(docItem.tag || '').includes('ملخص')
+                                ? 'bg-amber-500/10 border-amber-500/20 text-amber-400'
+                                : 'bg-red-500/10 border-red-500/20 text-red-500'
+                            }`}>
+                              <span className="text-xs font-black leading-none">
+                                {docItem.isSummary || String(docItem.tag || '').includes('ملخص') ? 'ملخص' : 'PDF'}
+                              </span>
+                              <span className="text-[7px] mt-0.5 uppercase font-bold opacity-75">
+                                {docItem.type === 'image_summary' || (docItem.imageUrls && docItem.imageUrls.length > 0) ? 'مصور' : docItem.type === 'manual_summary' ? 'مكتوب' : 'معتمد'}
+                              </span>
                             </div>
                             <div className="space-y-1 text-right flex-1">
                               <h4 className="text-xs font-black text-white group-hover:text-amber-400 transition-colors leading-snug">
@@ -846,13 +923,17 @@ export const StudentFilesTab: React.FC<{ disabledModules?: string[], rolePrefix?
                           <button
                             onClick={() => {
                               sounds.playClick();
-                              if (docItem?.fileUrl) {
-                                safeStorage.setItem("s6_last_read_file_name", docItem.title || docItem.name || "ملف دراسي");
-                                setPreviewingFile(docItem);
-                                setPdfLoadError(false);
-                              } else {
-                                showToast("رابط الملف غير متاح", "error");
-                              }
+                              const title = docItem?.title || docItem?.name || 'ملخص دراسي';
+                              const resolvedContent = docItem?.content || docItem?.description || docItem?.rawItem?.content || docItem?.rawItem?.description || `# 📄 ${title}\n\nهذا الملخص معتمد ومتاح للمراجعة. يمكنك قراءة النقاط الأساسية والمفاهيم الرئيسية المسجلة هنا.`;
+                              const itemToView = {
+                                ...docItem,
+                                title,
+                                content: resolvedContent,
+                                fileUrl: docItem?.fileUrl || ''
+                              };
+                              safeStorage.setItem("s6_last_read_file_name", itemToView.title);
+                              setPreviewingFile(itemToView);
+                              setPdfLoadError(false);
                             }}
                             className="flex-1 py-1.5 bg-amber-500 hover:bg-amber-400 text-black text-[10px] font-black rounded-lg transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-[0_2px_10px_rgba(245,158,11,0.2)]"
                           >

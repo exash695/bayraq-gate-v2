@@ -12,7 +12,7 @@ export interface SchoolItem {
 export const SCHOOLS_DATA: SchoolItem[] = [
   { 
     id: 'school1', 
-    name: 'ثانوية اوائل غماس الاهلية', 
+    name: 'ثانوية أوائل غماس الأهلية', 
     type: 'التميز في التعليم الأساسي',
     schoolBairaqImageUrl: '/schools/cover1.jpg',
     schoolLogoUrl: '/school-logos/logo1.jpg'
@@ -26,14 +26,14 @@ export const SCHOOLS_DATA: SchoolItem[] = [
   },
   { 
     id: 'school3', 
-    name: 'ثانوية نون والقلم الاهلية', 
+    name: 'ثانوية نون والقلم الأهلية', 
     type: 'صرح تربوي متميز',
     schoolBairaqImageUrl: '/schools/cover3.jpg',
     schoolLogoUrl: '/school-logos/logo3.jpg'
   },
   { 
     id: 'school4', 
-    name: 'ثانوية النبأ العظيم الاهلية للبنات', 
+    name: 'ثانوية النبأ العظيم الأهلية للبنات', 
     type: 'جيل واعد ومبدع',
     schoolBairaqImageUrl: '/schools/cover4.jpg',
     schoolLogoUrl: '/school-logos/logo4.jpg'
@@ -54,14 +54,14 @@ export const SCHOOLS_DATA: SchoolItem[] = [
   },
   { 
     id: 'school7', 
-    name: 'مدارس الجواهري الاهلية', 
+    name: 'مدارس الجواهري الأهلية', 
     type: 'منارة العلم والأدب',
     schoolBairaqImageUrl: '/schools/cover7.jpg',
     schoolLogoUrl: '/school-logos/logo7.jpg'
   },
   { 
     id: 'school8', 
-    name: 'معهد ابداعنا للتعليم المطور', 
+    name: 'معهد إبداعنا للتعليم المطور', 
     type: 'تعليم نوعي وتطوير مستمر',
     schoolBairaqImageUrl: '/schools/cover8.jpg',
     schoolLogoUrl: '/school-logos/logo8.jpg'
@@ -69,7 +69,7 @@ export const SCHOOLS_DATA: SchoolItem[] = [
   { 
     id: 'general', 
     name: 'أكاديمية بيرق الرقمية', 
-    type: 'منصة الدورات الألكترونية لنخبة الأساتذة',
+    type: 'منصة الدورات الإلكترونية لنخبة الأساتذة',
     schoolBairaqImageUrl: '/uploads/school_general_cover_1790088445960.png',
     schoolLogoUrl: '/logo.png'
   },
@@ -137,11 +137,59 @@ export function getOfficialSchoolLogoUrl(schoolId?: string, schoolName?: string,
 }
 
 /**
+ * Normalize and correct common Arabic spelling mistakes in School Names
+ */
+export function normalizeArabicSchoolName(name?: string): string {
+  if (!name || typeof name !== 'string') return 'مجموعة مدارس بيرق الأهلية النموذجية';
+  let cleaned = name.trim();
+  if (cleaned === 'general' || cleaned === 'undefined' || cleaned === 'null' || !cleaned) {
+    return 'مجموعة مدارس بيرق الأهلية النموذجية';
+  }
+  // Spelling fixes
+  cleaned = cleaned
+    .replace(/اوائل/g, 'أوائل')
+    .replace(/الاهلية/g, 'الأهلية')
+    .replace(/ابداعنا/g, 'إبداعنا')
+    .replace(/الابتدائية/g, 'الابتدائية')
+    .replace(/الالكترونية/g, 'الإلكترونية')
+    .replace(/الألكترونية/g, 'الإلكترونية');
+    
+  if (cleaned.includes('غماس') || cleaned.includes('أوائل')) {
+    return 'ثانوية أوائل غماس الأهلية';
+  }
+  if (cleaned.includes('يمامة') || cleaned.includes('اليمامة')) {
+    return 'مدرسة اليمامة الابتدائية';
+  }
+  if (cleaned.includes('نخبة') || cleaned.includes('النخبة')) {
+    return 'ثانوية النخبة العلمية للبنين';
+  }
+  if (cleaned.includes('نون')) {
+    return 'ثانوية نون والقلم الأهلية';
+  }
+  if (cleaned.includes('النبأ') || cleaned.includes('النبأ العظيم')) {
+    return 'ثانوية النبأ العظيم الأهلية للبنات';
+  }
+  if (cleaned.includes('عقيل')) {
+    return 'مدارس ابن عقيل الأهلية';
+  }
+  if (cleaned.includes('جواهري') || cleaned.includes('الجواهري')) {
+    return 'مدارس الجواهري الأهلية';
+  }
+  if (cleaned.includes('إبداعنا') || cleaned.includes('ابداعنا')) {
+    return 'معهد إبداعنا للتعليم المطور';
+  }
+  if (cleaned.includes('بيرق') || cleaned.includes('أكاديمية')) {
+    return 'أكاديمية بيرق الرقمية';
+  }
+  return cleaned;
+}
+
+/**
  * 3) اسم المدرسة الرسمي بالكامل (للختم والوصل الرقمي)
  */
 export function getOfficialSchoolName(schoolId?: string, schoolName?: string): string {
   if (schoolName && schoolName.trim() !== '' && schoolName.trim() !== 'المؤسسة التعليمية' && schoolName.trim() !== 'undefined' && schoolName.trim() !== 'null' && schoolName.trim() !== 'general') {
-    return schoolName.trim();
+    return normalizeArabicSchoolName(schoolName);
   }
 
   if (schoolId) {
@@ -153,32 +201,22 @@ export function getOfficialSchoolName(schoolId?: string, schoolName?: string): s
     const lower = cleanId.toLowerCase();
     if (lower.includes('يمامة') || lower.includes('اليمامة') || lower.includes('yamama') || baseId === 'school6') return 'مدرسة اليمامة الابتدائية';
     if (lower.includes('نخبة') || lower.includes('النخبة') || baseId === 'school2') return 'ثانوية النخبة العلمية للبنين';
-    if (lower.includes('نون') || baseId === 'school3') return 'ثانوية نون والقلم الاهلية';
-    if (lower.includes('نبأ') || lower.includes('النبأ') || baseId === 'school4') return 'ثانوية النبأ العظيم الاهلية للبنات';
+    if (lower.includes('نون') || baseId === 'school3') return 'ثانوية نون والقلم الأهلية';
+    if (lower.includes('نبأ') || lower.includes('النبأ') || baseId === 'school4') return 'ثانوية النبأ العظيم الأهلية للبنات';
     if (lower.includes('عقيل') || baseId === 'school5') return 'مدارس ابن عقيل الأهلية';
-    if (lower.includes('جواهري') || lower.includes('الجواهري') || baseId === 'school7') return 'مدارس الجواهري الاهلية';
-    if (lower.includes('ابداعنا') || lower.includes('إبداعنا') || baseId === 'school8') return 'معهد ابداعنا للتعليم المطور';
-    if (lower.includes('غماس') || lower.includes('أوائل') || lower.includes('اوائل') || baseId === 'school1') return 'ثانوية اوائل غماس الاهلية';
+    if (lower.includes('جواهري') || lower.includes('الجواهري') || baseId === 'school7') return 'مدارس الجواهري الأهلية';
+    if (lower.includes('ابداعنا') || lower.includes('إبداعنا') || baseId === 'school8') return 'معهد إبداعنا للتعليم المطور';
+    if (lower.includes('غماس') || lower.includes('أوائل') || lower.includes('اوائل') || baseId === 'school1') return 'ثانوية أوائل غماس الأهلية';
 
     if (cleanId.startsWith('مدرسة ') || cleanId.startsWith('ثانوية ') || cleanId.startsWith('معهد ') || cleanId.startsWith('مدارس ')) {
-      return baseId;
+      return normalizeArabicSchoolName(baseId);
     }
   }
 
   if (schoolName) {
-    const name = schoolName.trim();
-    if (name.includes('اليمامة') || name.includes('يمامة')) return 'مدرسة اليمامة الابتدائية';
-    if (name.includes('النخبة')) return 'ثانوية النخبة العلمية للبنين';
-    if (name.includes('نون')) return 'ثانوية نون والقلم الاهلية';
-    if (name.includes('النبأ')) return 'ثانوية النبأ العظيم الاهلية للبنات';
-    if (name.includes('عقيل')) return 'مدارس ابن عقيل الأهلية';
-    if (name.includes('الجواهري')) return 'مدارس الجواهري الاهلية';
-    if (name.includes('إبداعنا') || name.includes('ابداعنا')) return 'معهد ابداعنا للتعليم المطور';
-    if (name.includes('غماس') || name.includes('أوائل') || name.includes('اوائل')) return 'ثانوية اوائل غماس الاهلية';
-    if (name.includes('أكاديمية') || name.includes('اكاديمية') || name.includes('الرقمية') || name.includes('بيرق')) return 'أكاديمية بيرق الرقمية';
-    return name;
+    return normalizeArabicSchoolName(schoolName);
   }
 
-  return 'المؤسسة التعليمية';
+  return 'مجموعة مدارس بيرق الأهلية النموذجية';
 }
 

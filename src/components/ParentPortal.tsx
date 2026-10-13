@@ -59,6 +59,7 @@ import ReactMarkdown from 'react-markdown';
 import { cleanParentStudentName, formatParentGreetingTitle } from '../utils/studentUtils';
 import { matchesTargetGrades, extractSectionLetter } from '../utils/gradeMatcher';
 import { AnnouncementsCenterTab } from './SchoolPlatform/AnnouncementsCenterTab';
+import { AdminSectionErrorBoundary } from './AdminSectionErrorBoundary';
 import { doc, onSnapshot, collection, query, where, orderBy, limit, updateDoc, addDoc, serverTimestamp, increment, arrayUnion } from '../lib/firebase';
 import { academicService } from '../services/academicService';
 import { supportService } from '../services/supportService';
@@ -151,7 +152,15 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
       try {
         const saved = localStorage.getItem("bairaq_read_broadcast_ids");
         if (saved) {
-          setReadBroadcastIds(JSON.parse(saved));
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            setReadBroadcastIds(prev => {
+              if (Array.isArray(prev) && prev.length === parsed.length && prev.every((v, i) => v === parsed[i])) {
+                return prev;
+              }
+              return parsed;
+            });
+          }
         }
       } catch {}
     };
@@ -2227,16 +2236,18 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
           )}
           {activeSubPage === "announcements" ? (
             <div className="w-full flex flex-col min-h-full animate-in fade-in slide-in-from-bottom-2 pb-16 px-0">
-              <AnnouncementsCenterTab
-                schoolId={schoolId || studentData?.schoolId || 'school1'}
-                grade={studentData?.grade || grade || 'عام'}
-                section={studentData?.section || studentData?.studentSection || extractSectionLetter(studentData?.grade) || extractSectionLetter(studentData?.class) || extractSectionLetter(studentData?.className) || extractSectionLetter(grade) || ""}
-                isTeacher={false}
-                isParent={true}
-                notifications={generalNotifications}
-                hideHeader={true}
-                fullWidth={true}
-              />
+              <AdminSectionErrorBoundary sectionName="مركز التبليغات والإعلانات">
+                <AnnouncementsCenterTab
+                  schoolId={schoolId || studentData?.schoolId || 'school1'}
+                  grade={studentData?.grade || grade || 'عام'}
+                  section={studentData?.section || studentData?.studentSection || extractSectionLetter(studentData?.grade) || extractSectionLetter(studentData?.class) || extractSectionLetter(studentData?.className) || extractSectionLetter(grade) || ""}
+                  isTeacher={false}
+                  isParent={true}
+                  notifications={generalNotifications}
+                  hideHeader={true}
+                  fullWidth={true}
+                />
+              </AdminSectionErrorBoundary>
             </div>
           ) : activeSubPage === "homework" ? (
             <div className="w-full flex flex-col min-h-full animate-in fade-in slide-in-from-bottom-2 pb-16">

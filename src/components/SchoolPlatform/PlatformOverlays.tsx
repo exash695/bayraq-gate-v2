@@ -2964,271 +2964,470 @@ export const PlatformOverlays: React.FC = () => {
 
       {/* Academy Smart Document Viewer Modal */}
       <AnimatePresence>
-        {previewingFile && (
-          <div key="pdf-viewer-overlay" className="fixed inset-0 z-[9999] flex flex-col bg-[#05070F] text-white overflow-hidden" dir="rtl">
-            <motion.div
-              key="pdf-viewer-content"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="bg-[#0A0D18] w-full h-full flex flex-col overflow-hidden text-white"
-            >
-              {/* Sleek PDF Reader Toolbar */}
-              <div className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-6 py-1.5 border-b border-white/10 bg-[#0A0D18] text-white select-none shrink-0">
-                <div className="flex items-center gap-3">
-                  <div className="text-right truncate max-w-[200px] sm:max-w-xs md:max-w-md">
-                    <h2 className="text-white font-bold text-xs sm:text-sm leading-tight truncate">
-                      {(previewingFile.title || '').endsWith('.pdf') ? previewingFile.title : `${previewingFile.title || previewingFile.name || 'بدون_عنوان'}.pdf`}
-                    </h2>
-                  </div>
-                </div>
+        {previewingFile && (() => {
+          const isImgUrl = (url?: string | null) => {
+            if (!url || typeof url !== 'string') return false;
+            return /\.(jpg|jpeg|png|webp|gif|svg)(\?.*)?$/i.test(url) || url.startsWith('data:image/');
+          };
 
-                {/* PDF Viewer Page Count */}
-                {previewPdfNumPages && (
-                  <div className="flex items-center gap-1.5 bg-white/5 p-1 rounded-lg border border-white/5 text-[10px] font-sans text-white/60">
-                    <span className="px-2 py-0.5 rounded text-[10px] font-black bg-amber-500/10 text-amber-500">
-                      📖 القارئ التفاعلي
-                    </span>
-                    <span className="font-bold px-1 hidden md:inline-block">
-                      {previewPdfNumPages} صفحة
-                    </span>
-                  </div>
-                )}
+          const fileImages: string[] = [];
+          if (Array.isArray(previewingFile.imageUrls)) {
+            previewingFile.imageUrls.forEach((u: string) => {
+              if (u && typeof u === 'string') fileImages.push(u);
+            });
+          }
+          if (isImgUrl(previewingFile.fileUrl) && !fileImages.includes(previewingFile.fileUrl)) {
+            fileImages.push(previewingFile.fileUrl);
+          }
+          if (isImgUrl(previewingFile.imageUrl) && !fileImages.includes(previewingFile.imageUrl)) {
+            fileImages.push(previewingFile.imageUrl);
+          }
 
-                <div className="flex items-center gap-1.5 sm:gap-2">
-                  {(previewingFile.allowDownload === true || isTeacher || userProfile?.role === 'admin' || userProfile?.isAdmin) && (
-                    <div className="relative">
-                      <button
-                        onClick={() => handleForceDownload(previewingFile.fileUrl!, (previewingFile.title || previewingFile.name || 'document') + '.pdf', previewingFile.id)}
-                        disabled={downloadingFileId === previewingFile.id}
-                        className={`p-1.5 sm:p-2 rounded-lg ${downloadingFileId === previewingFile.id ? 'bg-slate-500/20 text-slate-400 border-slate-500/30' : 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 hover:text-emerald-200 cursor-pointer border-emerald-500/30 active:scale-95 shadow-[0_0_15px_rgba(16,185,129,0.15)]'} transition-colors border text-xs flex items-center gap-1.5 font-black`}
-                        title="تحميل نسخة من الملف للجهاز بصيغة PDF"
-                      >
-                        {downloadingFileId === previewingFile.id ? (
-                          <>
-                            <div className="w-3.5 h-3.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin shrink-0" />
-                            <span className="hidden sm:inline text-slate-300">{downloadProgress}%</span>
-                          </>
-                        ) : (
-                          <>
-                            <Download size={14} className="text-emerald-400 shrink-0" />
-                            <span className="hidden sm:inline">تحميل الملف</span>
-                            <span className="sm:hidden">تحميل</span>
-                          </>
-                        )}
-                      </button>
-                      {downloadingFileId === previewingFile.id && downloadProgress > 0 && downloadProgress < 100 && (
-                        <div className="absolute -bottom-1.5 left-0 right-0 h-1 bg-slate-700/50 rounded-full overflow-hidden">
-                          <div className="h-full bg-emerald-500 transition-all duration-300" style={{ width: `${downloadProgress}%` }} />
-                        </div>
+          const hasMarkdownContent = Boolean(
+            (previewingFile?.content && typeof previewingFile.content === 'string' && previewingFile.content.trim().length > 0) ||
+            (previewingFile?.description && typeof previewingFile.description === 'string' && previewingFile.description.trim().length > 0) ||
+            (previewingFile?.rawItem?.content && typeof previewingFile.rawItem.content === 'string' && previewingFile.rawItem.content.trim().length > 0)
+          );
+           if (!previewingFile?.content || typeof previewingFile.content !== 'string' || previewingFile.content.trim().length === 0) {
+             const tTitle = previewingFile?.title || previewingFile?.name || 'ملخص دراسي';
+             previewingFile.content = previewingFile?.description || previewingFile?.text || previewingFile?.body || previewingFile?.rawItem?.content || previewingFile?.rawItem?.description || `# 📄 ${tTitle}\n\nهذا الملخص معتمد ومتاح للمراجعة. يمكنك قراءة النقاط الأساسية والمفاهيم الرئيسية المسجلة هنا.`;
+           }
+
+          const isDirectPdf = Boolean(
+            previewingFile?.fileUrl && 
+            !isImgUrl(previewingFile.fileUrl) && 
+            (previewingFile.fileUrl.endsWith('.pdf') || previewingFile.fileUrl.includes('.pdf?') || (!hasMarkdownContent && fileImages.length === 0))
+          );
+
+          const formattedTitle = previewingFile.isSummary || fileImages.length > 0
+            ? (previewingFile.title || previewingFile.name || 'ملخص دراسي')
+            : ((previewingFile.title || '').endsWith('.pdf') ? previewingFile.title : `${previewingFile.title || previewingFile.name || 'بدون_عنوان'}.pdf`);
+
+          return (
+            <div key="pdf-viewer-overlay" className="fixed inset-0 z-[9999] flex flex-col bg-[#05070F] text-white overflow-hidden" dir="rtl">
+              <motion.div
+                key="pdf-viewer-content"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                className="bg-[#0A0D18] w-full h-full flex flex-col overflow-hidden text-white"
+              >
+                {/* Sleek PDF Reader Toolbar */}
+                <div className="flex flex-wrap items-center justify-between gap-3 px-4 sm:px-6 py-1.5 border-b border-white/10 bg-[#0A0D18] text-white select-none shrink-0">
+                  <div className="flex items-center gap-3">
+                    <div className="text-right truncate max-w-[200px] sm:max-w-xs md:max-w-md">
+                      <h2 className="text-white font-bold text-xs sm:text-sm leading-tight truncate">
+                        {formattedTitle}
+                      </h2>
+                    </div>
+                  </div>
+
+                  {/* PDF Viewer Page Count or Summary Badge */}
+                  {previewingFile.isSummary ? (
+                    <div className="flex items-center gap-1.5 bg-white/5 p-1 rounded-lg border border-white/5 text-[10px] font-sans text-white/60">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-black bg-amber-500/10 text-amber-500">
+                        {previewingFile.tag || '📑 ملخص دراسي'}
+                      </span>
+                      {fileImages.length > 0 && (
+                        <span className="font-bold px-1 hidden md:inline-block">
+                          {fileImages.length} صفحة
+                        </span>
                       )}
                     </div>
-                  )}
+                  ) : previewPdfNumPages ? (
+                    <div className="flex items-center gap-1.5 bg-white/5 p-1 rounded-lg border border-white/5 text-[10px] font-sans text-white/60">
+                      <span className="px-2 py-0.5 rounded text-[10px] font-black bg-amber-500/10 text-amber-500">
+                        📖 القارئ التفاعلي
+                      </span>
+                      <span className="font-bold px-1 hidden md:inline-block">
+                        {previewPdfNumPages} صفحة
+                      </span>
+                    </div>
+                  ) : null}
 
-                  <button
-                    onClick={() => {
-                      setPreviewingFile(null);
-                      setPreviewPdfNumPages(null);
-                      setPdfViewerMode('canvas');
-                    }}
-                    className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-red-600/15 border border-red-500/25 hover:bg-red-600/30 text-red-400 hover:text-white transition-colors flex items-center justify-center cursor-pointer font-bold text-xs"
-                    title="إغلاق"
-                  >
-                    ✕
-                  </button>
-                </div>
-              </div>
-
-              {/* Document Contents Area */}
-              <div className="bg-[#181920] flex-1 relative overflow-y-auto no-scrollbar">
-                {previewingFile.fileUrl && !pdfLoadError ? (
-                  <div className="w-full flex flex-col items-center py-6 px-2 sm:px-4 space-y-6">
-                    <Document
-                      file={previewingFile.fileUrl}
-                      options={pdfOptions}
-                      onLoadSuccess={({ numPages }) => {
-                        setPreviewPdfNumPages(numPages);
-                        setPdfLoadError(false);
-                      }}
-                      onLoadProgress={({ loaded, total }) => {
-                        if (total > 0) {
-                          setPdfDownloadProgress(Math.round((loaded / total) * 100));
-                        }
-                      }}
-                      onLoadError={(err) => {
-                        console.warn("PDF load error:", err);
-                        setPdfLoadError(true);
-                      }}
-                      onSourceError={(err) => {
-                        console.warn("PDF source error:", err);
-                        setPdfLoadError(true);
-                      }}
-                      loading={
-                        <div className="text-white text-sm font-bold text-center p-8 bg-white/5 rounded-2xl border border-white/10 mt-10 max-w-md mx-auto space-y-4 shadow-2xl backdrop-blur-xl">
-                          <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-center text-amber-400 text-2xl animate-pulse">
-                            📄
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-white font-black text-sm">جاري فتح وتجهيز صفحات المستند...</p>
-                            <p className="text-[11px] text-white/50">{previewingFile.title || 'ملف دراسي'} • {previewingFile.size || '30.8 MB'}</p>
-                          </div>
-                          {pdfDownloadProgress !== null && (
-                            <div className="space-y-1.5 pt-2">
-                              <div className="w-full bg-white/10 h-2 rounded-full overflow-hidden">
-                                <div
-                                  className="bg-gradient-to-r from-amber-500 to-emerald-400 h-full transition-all duration-300 rounded-full"
-                                  style={{ width: `${pdfDownloadProgress}%` }}
-                                />
-                              </div>
-                              <p className="text-[11px] text-amber-400 font-mono font-bold">تم تحميل {pdfDownloadProgress}%</p>
-                            </div>
+                  <div className="flex items-center gap-1.5 sm:gap-2">
+                    {(previewingFile.allowDownload === true || isTeacher || userProfile?.role === 'admin' || userProfile?.isAdmin) && (
+                      <div className="relative">
+                        <button
+                          onClick={() => {
+                            const isImg = fileImages.length > 0;
+                            const ext = isImg ? '.jpg' : '.pdf';
+                            const urlToDownload = previewingFile.fileUrl || fileImages[0] || '';
+                            const fileName = (previewingFile.title || previewingFile.name || 'document').replace(/\.(pdf|jpg|jpeg|png)$/i, '') + ext;
+                            handleForceDownload(urlToDownload, fileName, previewingFile.id);
+                          }}
+                          disabled={downloadingFileId === previewingFile.id}
+                          className={`p-1.5 sm:p-2 rounded-lg ${downloadingFileId === previewingFile.id ? 'bg-slate-500/20 text-slate-400 border-slate-500/30' : 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 hover:text-emerald-200 cursor-pointer border-emerald-500/30 active:scale-95 shadow-[0_0_15px_rgba(16,185,129,0.15)]'} transition-colors border text-xs flex items-center gap-1.5 font-black`}
+                          title="تحميل نسخة من الملف للجهاز"
+                        >
+                          {downloadingFileId === previewingFile.id ? (
+                            <>
+                              <div className="w-3.5 h-3.5 border-2 border-slate-400 border-t-transparent rounded-full animate-spin shrink-0" />
+                              <span className="hidden sm:inline text-slate-300">{downloadProgress}%</span>
+                            </>
+                          ) : (
+                            <>
+                              <Download size={14} className="text-emerald-400 shrink-0" />
+                              <span className="hidden sm:inline">تحميل الملف</span>
+                              <span className="sm:hidden">تحميل</span>
+                            </>
                           )}
-                        </div>
-                      }
-                      error={null}
-                      className="flex flex-col items-center space-y-6 w-full max-w-5xl"
-                    >
-                      {previewPdfNumPages && previewPdfNumPages > 0 ? (
-                        Array.from(new Array(previewPdfNumPages), (el, index) => (
-                          <div key={`page_${index + 1}`} className="flex justify-center w-full px-1">
-                            <Page
-                              pageNumber={index + 1}
-                              renderTextLayer={false}
-                              renderAnnotationLayer={false}
-                              width={typeof window !== 'undefined' ? Math.min(window.innerWidth - 16, 900) : 900}
-                              className="rounded-xl overflow-hidden shadow-[0_10px_40px_rgba(0,0,0,0.5)] border border-white/10 bg-white"
-                              loading={
-                                <div className="w-full h-80 flex items-center justify-center bg-white/5 rounded-xl border border-white/5 text-white/40 text-xs">
-                                  جاري تحضير صفحة {index + 1}...
-                                </div>
-                              }
-                            />
+                        </button>
+                        {downloadingFileId === previewingFile.id && downloadProgress > 0 && downloadProgress < 100 && (
+                          <div className="absolute -bottom-1.5 left-0 right-0 h-1 bg-slate-700/50 rounded-full overflow-hidden">
+                            <div className="h-full bg-emerald-500 transition-all duration-300" style={{ width: `${downloadProgress}%` }} />
                           </div>
-                        ))
-                      ) : null}
-                    </Document>
-                  </div>
-                ) : (
-                  <div className="space-y-8 p-4 sm:p-8 pb-12">
-                    {previewingFile.fileUrl && pdfLoadError && (
-                      <div className="max-w-2xl mx-auto bg-gradient-to-r from-red-500/10 to-orange-500/5 border border-red-500/20 rounded-2xl p-6 text-right space-y-3 mb-8 shadow-xl shadow-black/40 relative overflow-hidden">
-                        <div className="absolute -left-4 -top-4 text-8xl opacity-5 grayscale pointer-events-none">⚠️</div>
-                        <div className="w-12 h-12 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center border border-red-500/20 mb-4">
-                          <span className="text-xl">⚠️</span>
-                        </div>
-                        <h4 className="text-sm font-black text-white leading-relaxed">تعذر العرض المباشر عبر مشغل الكانفاس</h4>
-                        <p className="text-xs text-white/60 leading-relaxed max-w-lg">
-                          يمكنك تنزيل ملف الملزمة المرفوع فوراً أدناه إذا كان مسموحاً:
-                        </p>
-                        <div className="flex flex-wrap items-center gap-2 pt-2">
-                          {(previewingFile.allowDownload !== false || isTeacher || userProfile?.role === 'admin' || userProfile?.isAdmin) && (
-                            <button
-                              onClick={() => handleForceDownload(previewingFile.fileUrl!, (previewingFile.title || previewingFile.name || 'document') + '.pdf', previewingFile.id)}
-                              className="px-4 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-black rounded-xl transition-all cursor-pointer flex items-center gap-2 border border-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.15)] active:scale-95"
-                            >
-                              <Download size={15} className="text-emerald-400 shrink-0" />
-                              <span>تنزيل الملف للجهاز</span>
-                            </button>
-                          )}
-                        </div>
+                        )}
                       </div>
                     )}
-                    {/* Page 1 */}
-                  <div className="bg-white text-[#1A1A1A] max-w-2xl mx-auto rounded-sm shadow-[0_8px_30px_rgba(0,0,0,0.3)] border border-slate-300 p-8 sm:p-12 text-right space-y-6 relative overflow-hidden min-h-[750px] flex flex-col justify-between select-text">
-                    <div>
-                      {/* PDF Header Accent */}
-                      <div className="flex justify-between items-center border-b border-slate-200 pb-3 text-[10px] text-slate-400 font-bold mb-6">
-                        <span>وزارة التربية • المنهج العراقي</span>
-                        <span>مستند رسمي معتمد</span>
+
+                    <button
+                      onClick={() => {
+                        setPreviewingFile(null);
+                        setPreviewPdfNumPages(null);
+                        setPdfViewerMode('canvas');
+                      }}
+                      className="w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-red-600/15 border border-red-500/25 hover:bg-red-600/30 text-red-400 hover:text-white transition-colors flex items-center justify-center cursor-pointer font-bold text-xs"
+                      title="إغلاق"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+
+                {/* Document Contents Area */}
+                <div className="bg-[#181920] flex-1 relative overflow-y-auto no-scrollbar">
+                  {fileImages.length > 0 ? (
+                    /* Case 1: Image Gallery / Image Summary (Avoiding pdf.js completely) */
+                    <div className="w-full flex flex-col items-center py-6 px-3 sm:px-6 space-y-6 max-w-4xl mx-auto" dir="rtl">
+                      {/* Header banner for Image Summary */}
+                      <div className="w-full bg-[#0d1326] border border-teal-500/30 rounded-2xl p-4 sm:p-5 shadow-xl text-right">
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <span className="text-xs font-black text-teal-300 bg-teal-500/10 px-3 py-1 rounded-full border border-teal-500/20 flex items-center gap-1.5">
+                            <span>🖼️</span>
+                            <span>ملخص مصور ({fileImages.length} {fileImages.length === 1 ? 'صفحة' : 'صفحات'})</span>
+                          </span>
+                          {previewingFile.teacherName && (
+                            <span className="text-[11px] text-white/50 font-bold">
+                              إعداد: {previewingFile.teacherName}
+                            </span>
+                          )}
+                        </div>
+                        <h3 className="text-base sm:text-lg font-black text-white mb-2">
+                          {previewingFile.title || previewingFile.name || 'ملخص دراسي مصور'}
+                        </h3>
+                        {previewingFile.content && (
+                          <div className="text-xs text-white/70 leading-relaxed bg-black/30 p-3 rounded-xl border border-white/5 whitespace-pre-line">
+                            <ReactMarkdown>{previewingFile.content.replace(/!\[.*?\]\(.*?\)/g, '').trim()}</ReactMarkdown>
+                          </div>
+                        )}
                       </div>
 
-                      <div className="space-y-4">
-                        <div className="text-center space-y-2 mb-8">
-                          <span className="text-[10px] text-slate-500 border border-slate-300 px-3 py-1 rounded-full font-bold">
-                            المنهج الذهبي الشامل
-                          </span>
-                          <h3 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight pt-2">
-                            {previewingFile.title}
-                          </h3>
-                          <p className="text-xs text-slate-500 font-medium max-w-md mx-auto leading-relaxed">
-                            {getSimulatedFileContent(previewingFile.title, previewingFile.subject).subtitle}
-                          </p>
-                        </div>
-
-                        {/* Render sections on page 1 */}
-                        {getSimulatedFileContent(previewingFile.title, previewingFile.subject).sections.map((section: any, idx: number) => (
-                          <div key={idx} className="space-y-3 pt-4 border-t border-slate-100">
-                            <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
-                              <span className="w-1 h-3 bg-red-600 rounded-full" />
-                              {section.heading}
-                            </h4>
-                            <p className="text-xs sm:text-sm text-slate-700 leading-relaxed font-medium whitespace-pre-line font-sans">
-                              {section.body}
-                            </p>
-
-                            {section.hasReveal && (
-                              <div className="pt-2">
-                                <RevealBlock 
-                                  label={section.revealLabel}
-                                  text={section.revealText}
-                                />
-                              </div>
-                            )}
+                      {/* Pages rendering */}
+                      <div className="w-full flex flex-col items-center gap-6">
+                        {fileImages.map((imgSrc, idx) => (
+                          <div key={idx} className="w-full bg-[#0a0d18] border border-white/10 rounded-2xl overflow-hidden shadow-2xl flex flex-col">
+                            <div className="flex items-center justify-between px-4 py-2.5 bg-black/40 border-b border-white/10 text-xs">
+                              <span className="font-black text-teal-300 bg-teal-500/20 px-2.5 py-0.5 rounded-md font-mono">
+                                صفحة {idx + 1} من {fileImages.length}
+                              </span>
+                              <a 
+                                href={imgSrc} 
+                                target="_blank" 
+                                rel="noreferrer" 
+                                className="text-[11px] text-white/60 hover:text-white flex items-center gap-1 font-bold"
+                              >
+                                <span>فتح بحجم كامل</span>
+                                <span>↗</span>
+                              </a>
+                            </div>
+                            <div className="p-2 sm:p-4 flex items-center justify-center bg-black/20">
+                              <img 
+                                src={imgSrc} 
+                                alt={`صفحة ${idx + 1}`} 
+                                className="w-full max-h-[85vh] object-contain rounded-xl select-none"
+                                loading="lazy"
+                              />
+                            </div>
                           </div>
                         ))}
                       </div>
                     </div>
-
-                    {/* PDF Footer Accent */}
-                    <div className="flex justify-between items-center border-t border-slate-200 pt-3 text-[9px] text-slate-400 font-bold">
-                      <span className="font-mono">Page 1 of 2</span>
-                    </div>
-                  </div>
-
-                  {/* Page 2 - Sixty Second Challenge Callout (formatted like a printed quiz page) */}
-                  <div className="bg-white text-[#1A1A1A] max-w-2xl mx-auto rounded-sm shadow-[0_8px_30px_rgba(0,0,0,0.3)] border border-slate-300 p-8 sm:p-12 text-right space-y-6 relative overflow-hidden min-h-[600px] flex flex-col justify-between select-text">
-                    <div>
-                      <div className="flex justify-between items-center border-b border-slate-200 pb-3 text-[10px] text-slate-400 font-bold mb-6">
-                        <span>ملحق التقييم والمراجعة السريعة</span>
-                        <span className="text-emerald-600">QUIZ & ASSESSMENT</span>
+                  ) : hasMarkdownContent ? (
+                    /* Case 2: Markdown Content / Written Summary / AI Summary */
+                    <div className="w-full flex flex-col items-center py-6 px-3 sm:px-6 max-w-4xl mx-auto animate-in fade-in duration-300" dir="rtl">
+                      <div className="w-full bg-[#0d1326] border border-amber-500/30 rounded-2xl p-5 sm:p-6 shadow-2xl text-right mb-6">
+                        <div className="flex items-center justify-between gap-2 mb-2">
+                          <span className="text-xs font-black text-amber-300 bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/20 flex items-center gap-1.5">
+                            <span>📑</span>
+                            <span>{previewingFile.tag || 'ملخص دراسي معتمد'}</span>
+                          </span>
+                          {previewingFile.teacherName && (
+                            <span className="text-[11px] text-white/50 font-bold">
+                              إعداد: {previewingFile.teacherName}
+                            </span>
+                          )}
+                        </div>
+                        <h3 className="text-lg sm:text-xl font-black text-white">
+                          {previewingFile.title || previewingFile.name || 'ملخص دراسي'}
+                        </h3>
+                        <p className="text-[11px] text-white/40 mt-1 font-mono">
+                          {previewingFile.publishDate ? `تاريخ النشر: ${previewingFile.publishDate}` : ''} {previewingFile.subject ? ` • المادة: ${previewingFile.subject}` : ''}
+                        </p>
                       </div>
 
-                      <div className="flex flex-col justify-center items-center text-center space-y-6 py-12">
-                        <div className="w-16 h-16 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200 flex items-center justify-center mx-auto shadow-sm">
-                          <Zap size={32} className="animate-pulse" />
-                        </div>
-                        
-                        <div className="space-y-2">
-                          <h4 className="text-md sm:text-lg font-black text-slate-900">⚡ ورقة تقييم الفهم السريع</h4>
-                          <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
-                            هل ترغب في قياس مدى استيعابك للمفاهيم السابقة؟ أطلق تحدي الـ 60 ثانية لحل الأسئلة الوزارية التفاعلية المستوحاة مباشرة من هذا الملخص المعتمد!
-                          </p>
-                        </div>
-
-                        <button
-                          onClick={() => {
-                            const questions = generateQuestionsForDocument(previewingFile.title, previewingFile.subject);
-                            setActiveFileChallengeQuestions(questions);
-                            setIsChallengeActive(true);
+                      <div className="w-full bg-[#0a0d18] border border-white/10 rounded-2xl p-5 sm:p-8 shadow-2xl text-right text-white/90 leading-relaxed font-sans text-sm sm:text-base space-y-4">
+                        <ReactMarkdown
+                          components={{
+                            p: ({children, ...props}) => (
+                              <p className="text-white/80 leading-relaxed my-3 font-medium text-sm sm:text-base" dir="auto" {...props}>
+                                {children}
+                              </p>
+                            ),
+                            h1: ({children, ...props}) => (
+                              <h1 className="text-xl sm:text-2xl font-black text-amber-300 border-b border-amber-500/20 pb-2 mt-6 mb-3" dir="auto" {...props}>
+                                {children}
+                              </h1>
+                            ),
+                            h2: ({children, ...props}) => (
+                              <h2 className="text-lg sm:text-xl font-bold text-teal-300 mt-5 mb-2" dir="auto" {...props}>
+                                {children}
+                              </h2>
+                            ),
+                            h3: ({children, ...props}) => (
+                              <h3 className="text-base sm:text-lg font-bold text-emerald-300 mt-4 mb-2" dir="auto" {...props}>
+                                {children}
+                              </h3>
+                            ),
+                            ul: ({children, ...props}) => (
+                              <ul className="list-disc list-inside space-y-2 text-white/80 my-3 font-medium pr-2" dir="auto" {...props}>
+                                {children}
+                              </ul>
+                            ),
+                            ol: ({children, ...props}) => (
+                              <ol className="list-decimal list-inside space-y-2 text-white/80 my-3 font-medium pr-2" dir="auto" {...props}>
+                                {children}
+                              </ol>
+                            ),
+                            li: ({children, ...props}) => (
+                              <li className="text-sm sm:text-base leading-relaxed marker:text-amber-400" {...props}>
+                                {children}
+                              </li>
+                            ),
+                            blockquote: ({children, ...props}) => (
+                              <div className="border-r-4 border-amber-500 bg-amber-500/10 rounded-l-xl p-4 my-4" dir="auto">
+                                <blockquote className="text-amber-200/90 font-medium text-sm sm:text-base italic" {...props}>
+                                  {children}
+                                </blockquote>
+                              </div>
+                            ),
+                            img: ({src, alt, ...props}: any) => (
+                              <span className="block my-4 rounded-xl overflow-hidden border border-white/10 bg-black/40 shadow-xl max-w-full">
+                                <img src={src} alt={alt || "صورة توضيحية"} className="w-full max-h-[500px] object-contain rounded-lg block" {...props} />
+                                {alt && <span className="block p-2 text-center text-xs text-white/50 bg-black/20">{alt}</span>}
+                              </span>
+                            )
                           }}
-                          className="px-8 py-3 bg-red-600 hover:bg-red-700 text-white font-black text-xs rounded-lg transition-all shadow-md cursor-pointer flex items-center gap-2 hover:scale-[1.02]"
                         >
-                          <span>⚡ ابدأ تحدي الـ 60 ثانية الآن</span>
-                        </button>
+                          {previewingFile.content}
+                        </ReactMarkdown>
                       </div>
                     </div>
-
-                    {/* PDF Footer Accent */}
-                    <div className="flex justify-between items-center border-t border-slate-200 pt-3 text-[9px] text-slate-400 font-bold">
-                      <span className="font-mono">Page 2 of 2</span>
+                  ) : isDirectPdf && !pdfLoadError ? (
+                    /* Case 3: Standard PDF documents via react-pdf */
+                    <div className="w-full flex flex-col items-center py-6 px-2 sm:px-4 space-y-6">
+                      <Document
+                        file={previewingFile.fileUrl}
+                        options={pdfOptions}
+                        onLoadSuccess={({ numPages }) => {
+                          setPreviewPdfNumPages(numPages);
+                          setPdfLoadError(false);
+                        }}
+                        onLoadProgress={({ loaded, total }) => {
+                          if (total > 0) {
+                            setPdfDownloadProgress(Math.round((loaded / total) * 100));
+                          }
+                        }}
+                        onLoadError={(err) => {
+                          console.warn("PDF load error:", err);
+                          setPdfLoadError(true);
+                        }}
+                        onSourceError={(err) => {
+                          console.warn("PDF source error:", err);
+                          setPdfLoadError(true);
+                        }}
+                        loading={
+                          <div className="text-white text-sm font-bold text-center p-8 bg-white/5 rounded-2xl border border-white/10 mt-10 max-w-md mx-auto space-y-4 shadow-2xl backdrop-blur-xl">
+                            <div className="w-14 h-14 mx-auto rounded-2xl bg-amber-500/10 border border-amber-500/25 flex items-center justify-center text-amber-400 text-2xl animate-pulse">
+                              📄
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-white font-black text-sm">جاري فتح وتجهيز صفحات المستند...</p>
+                              <p className="text-[11px] text-white/50">{previewingFile.title || 'ملف دراسي'} • {previewingFile.size || '30.8 MB'}</p>
+                            </div>
+                            {pdfDownloadProgress !== null && (
+                              <div className="space-y-1.5 pt-2">
+                                <div className="w-full bg-white/10 h-2 rounded-full overflow-hidden">
+                                  <div
+                                    className="bg-gradient-to-r from-amber-500 to-emerald-400 h-full transition-all duration-300 rounded-full"
+                                    style={{ width: `${pdfDownloadProgress}%` }}
+                                  />
+                                </div>
+                                <p className="text-[11px] text-amber-400 font-mono font-bold">تم تحميل {pdfDownloadProgress}%</p>
+                              </div>
+                            )}
+                          </div>
+                        }
+                        error={null}
+                        className="flex flex-col items-center space-y-6 w-full max-w-5xl"
+                      >
+                        {previewPdfNumPages && previewPdfNumPages > 0 ? (
+                          Array.from(new Array(previewPdfNumPages), (el, index) => (
+                            <div key={`page_${index + 1}`} className="flex justify-center w-full px-1">
+                              <Page
+                                pageNumber={index + 1}
+                                renderTextLayer={false}
+                                renderAnnotationLayer={false}
+                                width={typeof window !== 'undefined' ? Math.min(window.innerWidth - 16, 900) : 900}
+                                className="rounded-xl overflow-hidden shadow-[0_10px_40px_rgba(0,0,0,0.5)] border border-white/10 bg-white"
+                                loading={
+                                  <div className="w-full h-80 flex items-center justify-center bg-white/5 rounded-xl border border-white/5 text-white/40 text-xs">
+                                    جاري تحضير صفحة {index + 1}...
+                                  </div>
+                                }
+                              />
+                            </div>
+                          ))
+                        ) : null}
+                      </Document>
                     </div>
-                  </div>
+                  ) : (
+                    /* Case 4: Simulated document contents fallback */
+                    <div className="space-y-8 p-4 sm:p-8 pb-12">
+                      {previewingFile.fileUrl && pdfLoadError && (
+                        <div className="max-w-2xl mx-auto bg-gradient-to-r from-red-500/10 to-orange-500/5 border border-red-500/20 rounded-2xl p-6 text-right space-y-3 mb-8 shadow-xl shadow-black/40 relative overflow-hidden">
+                          <div className="absolute -left-4 -top-4 text-8xl opacity-5 grayscale pointer-events-none">⚠️</div>
+                          <div className="w-12 h-12 rounded-full bg-red-500/10 text-red-400 flex items-center justify-center border border-red-500/20 mb-4">
+                            <span className="text-xl">⚠️</span>
+                          </div>
+                          <h4 className="text-sm font-black text-white leading-relaxed">تعذر العرض المباشر عبر مشغل الكانفاس</h4>
+                          <p className="text-xs text-white/60 leading-relaxed max-w-lg">
+                            يمكنك تنزيل ملف الملزمة المرفوع فوراً أدناه إذا كان مسموحاً:
+                          </p>
+                          <div className="flex flex-wrap items-center gap-2 pt-2">
+                            {(previewingFile.allowDownload !== false || isTeacher || userProfile?.role === 'admin' || userProfile?.isAdmin) && (
+                              <button
+                                onClick={() => {
+                                  const urlToDownload = previewingFile.fileUrl || '';
+                                  const fileName = (previewingFile.title || previewingFile.name || 'document') + '.pdf';
+                                  handleForceDownload(urlToDownload, fileName, previewingFile.id);
+                                }}
+                                className="px-4 py-2 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 text-xs font-black rounded-xl transition-all cursor-pointer flex items-center gap-2 border border-emerald-500/30 shadow-[0_0_15px_rgba(16,185,129,0.15)] active:scale-95"
+                              >
+                                <Download size={15} className="text-emerald-400 shrink-0" />
+                                <span>تنزيل الملف للجهاز</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                      {/* Page 1 */}
+                      <div className="bg-white text-[#1A1A1A] max-w-2xl mx-auto rounded-sm shadow-[0_8px_30px_rgba(0,0,0,0.3)] border border-slate-300 p-8 sm:p-12 text-right space-y-6 relative overflow-hidden min-h-[750px] flex flex-col justify-between select-text">
+                        <div>
+                          {/* PDF Header Accent */}
+                          <div className="flex justify-between items-center border-b border-slate-200 pb-3 text-[10px] text-slate-400 font-bold mb-6">
+                            <span>وزارة التربية • المنهج العراقي</span>
+                            <span>مستند رسمي معتمد</span>
+                          </div>
+
+                          <div className="space-y-4">
+                            <div className="text-center space-y-2 mb-8">
+                              <span className="text-[10px] text-slate-500 border border-slate-300 px-3 py-1 rounded-full font-bold">
+                                المنهج الذهبي الشامل
+                              </span>
+                              <h3 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight pt-2">
+                                {previewingFile.title}
+                              </h3>
+                              <p className="text-xs text-slate-500 font-medium max-w-md mx-auto leading-relaxed">
+                                {getSimulatedFileContent(previewingFile.title, previewingFile.subject).subtitle}
+                              </p>
+                            </div>
+
+                            {/* Render sections on page 1 */}
+                            {getSimulatedFileContent(previewingFile.title, previewingFile.subject).sections.map((section: any, idx: number) => (
+                              <div key={idx} className="space-y-3 pt-4 border-t border-slate-100">
+                                <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                                  <span className="w-1 h-3 bg-red-600 rounded-full" />
+                                  {section.heading}
+                                </h4>
+                                <p className="text-xs sm:text-sm text-slate-700 leading-relaxed font-medium whitespace-pre-line font-sans">
+                                  {section.body}
+                                </p>
+
+                                {section.hasReveal && (
+                                  <div className="pt-2">
+                                    <RevealBlock 
+                                      label={section.revealLabel}
+                                      text={section.revealText}
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        {/* PDF Footer Accent */}
+                        <div className="flex justify-between items-center border-t border-slate-200 pt-3 text-[9px] text-slate-400 font-bold">
+                          <span className="font-mono">Page 1 of 2</span>
+                        </div>
+                      </div>
+
+                      {/* Page 2 - Sixty Second Challenge Callout (formatted like a printed quiz page) */}
+                      <div className="bg-white text-[#1A1A1A] max-w-2xl mx-auto rounded-sm shadow-[0_8px_30px_rgba(0,0,0,0.3)] border border-slate-300 p-8 sm:p-12 text-right space-y-6 relative overflow-hidden min-h-[600px] flex flex-col justify-between select-text">
+                        <div>
+                          <div className="flex justify-between items-center border-b border-slate-200 pb-3 text-[10px] text-slate-400 font-bold mb-6">
+                            <span>ملحق التقييم والمراجعة السريعة</span>
+                            <span className="text-emerald-600">QUIZ & ASSESSMENT</span>
+                          </div>
+
+                          <div className="flex flex-col justify-center items-center text-center space-y-6 py-12">
+                            <div className="w-16 h-16 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-200 flex items-center justify-center mx-auto shadow-sm">
+                              <Zap size={32} className="animate-pulse" />
+                            </div>
+                            
+                            <div className="space-y-2">
+                              <h4 className="text-md sm:text-lg font-black text-slate-900">⚡ ورقة تقييم الفهم السريع</h4>
+                              <p className="text-xs text-slate-500 max-w-sm mx-auto leading-relaxed">
+                                هل ترغب في قياس مدى استيعابك للمفاهيم السابقة؟ أطلق تحدي الـ 60 ثانية لحل الأسئلة الوزارية التفاعلية المستوحاة مباشرة من هذا الملخص المعتمد!
+                              </p>
+                            </div>
+
+                            <button
+                              onClick={() => {
+                                const questions = generateQuestionsForDocument(previewingFile.title, previewingFile.subject);
+                                setActiveFileChallengeQuestions(questions);
+                                setIsChallengeActive(true);
+                              }}
+                              className="px-8 py-3 bg-red-600 hover:bg-red-700 text-white font-black text-xs rounded-lg transition-all shadow-md cursor-pointer flex items-center gap-2 hover:scale-[1.02]"
+                            >
+                              <span>⚡ ابدأ تحدي الـ 60 ثانية الآن</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* PDF Footer Accent */}
+                        <div className="flex justify-between items-center border-t border-slate-200 pt-3 text-[9px] text-slate-400 font-bold">
+                          <span className="font-mono">Page 2 of 2</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
-                )}
-              </div>
-            </motion.div>
-          </div>
-        )}
+              </motion.div>
+            </div>
+          );
+        })()}
       </AnimatePresence>
 
       {/* 60s Challenge Modal Triggered from Document */}

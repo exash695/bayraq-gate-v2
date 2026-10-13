@@ -1642,10 +1642,64 @@ async function startServer() {
     }
   };
 
-  // Cleanup phantom suffix schools on startup
+  // Cleanup phantom suffix schools on startup safely
   (async () => {
     try {
+      // 1. Ensure canonical schools exist first
+      for (let i = 1; i <= 8; i++) {
+        await ensureSchoolExists(`school${i}`);
+      }
+      await ensureSchoolExists('general', 'أكاديمية بيرق الرقمية');
+
+      // 2. Re-assign foreign keys in dependent tables away from phantom suffixes (-boys, -girls, school_awail_ghamas)
+      await db.execute(sql`
+        UPDATE users SET school_id = REGEXP_REPLACE(school_id, '-(boys|girls)$', '') 
+        WHERE school_id LIKE '%-boys' OR school_id LIKE '%-girls';
+      `);
+      await db.execute(sql`
+        UPDATE users SET school_id = 'school1' 
+        WHERE school_id = 'school_awail_ghamas';
+      `);
+
+      await db.execute(sql`
+        UPDATE students SET school_id = REGEXP_REPLACE(school_id, '-(boys|girls)$', '') 
+        WHERE school_id LIKE '%-boys' OR school_id LIKE '%-girls';
+      `);
+      await db.execute(sql`
+        UPDATE students SET school_id = 'school1' 
+        WHERE school_id = 'school_awail_ghamas';
+      `);
+
+      await db.execute(sql`
+        UPDATE teachers SET school_id = REGEXP_REPLACE(school_id, '-(boys|girls)$', '') 
+        WHERE school_id LIKE '%-boys' OR school_id LIKE '%-girls';
+      `);
+      await db.execute(sql`
+        UPDATE teachers SET school_id = 'school1' 
+        WHERE school_id = 'school_awail_ghamas';
+      `);
+
+      await db.execute(sql`
+        UPDATE academic_lists SET school_id = REGEXP_REPLACE(school_id, '-(boys|girls)$', '') 
+        WHERE school_id LIKE '%-boys' OR school_id LIKE '%-girls';
+      `);
+      await db.execute(sql`
+        UPDATE academic_lists SET school_id = 'school1' 
+        WHERE school_id = 'school_awail_ghamas';
+      `);
+
+      await db.execute(sql`
+        UPDATE activation_codes SET school_id = REGEXP_REPLACE(school_id, '-(boys|girls)$', '') 
+        WHERE school_id LIKE '%-boys' OR school_id LIKE '%-girls';
+      `);
+      await db.execute(sql`
+        UPDATE activation_codes SET school_id = 'school1' 
+        WHERE school_id = 'school_awail_ghamas';
+      `);
+
+      // 3. Delete phantom schools safely
       await db.execute(sql`DELETE FROM schools WHERE id LIKE '%-boys' OR id LIKE '%-girls' OR id = 'school_awail_ghamas'`);
+      console.log("[DB] Successfully re-assigned references and purged phantom school records.");
     } catch (e) {
       console.warn("[DB] Phantom school purge notice:", e);
     }
@@ -5215,19 +5269,88 @@ async function startServer() {
     if (imageUrl) urlsToProcess.push(imageUrl);
     if (Array.isArray(fileUrls)) urlsToProcess.push(...fileUrls);
 
-    for (const url of urlsToProcess) {
+    for (const urlItem of urlsToProcess) {
       try {
-        const fileRes = await fetch(url);
-        const arrayBuffer = await fileRes.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-        let mimeType = fileRes.headers.get("content-type") || "application/octet-stream";
-        
-        if (url.toLowerCase().endsWith('.pdf')) {
+        if (!urlItem || typeof urlItem !== 'string') continue;
+        const rawUrl = urlItem.trim();
+        let buffer: Buffer | null = null;
+        let mimeType = 'application/octet-stream';
+
+        // 1. Data URL (Base64)
+        if (rawUrl.startsWith('data:')) {
+          const matches = rawUrl.match(/^data:([^;]+);base64,(.+)$/);
+          if (matches) {
+            mimeType = matches[1];
+            buffer = Buffer.from(matches[2], 'base64');
+          }
+        }
+
+        // Detect MIME type from extension if possible
+        const cleanLower = rawUrl.toLowerCase().split('?')[0];
+        if (cleanLower.endsWith('.pdf')) {
           mimeType = 'application/pdf';
-        } else if (url.toLowerCase().endsWith('.png')) {
+        } else if (cleanLower.endsWith('.png')) {
           mimeType = 'image/png';
-        } else if (url.toLowerCase().endsWith('.jpg') || url.toLowerCase().endsWith('.jpeg')) {
+        } else if (cleanLower.endsWith('.jpg') || cleanLower.endsWith('.jpeg')) {
           mimeType = 'image/jpeg';
+        } else if (cleanLower.endsWith('.webp')) {
+          mimeType = 'image/webp';
+        }
+
+        // 2. Local File / Relative URL (/uploads/..., uploads/..., etc.)
+        if (!buffer && (rawUrl.startsWith('/') || rawUrl.startsWith('uploads/') || !rawUrl.startsWith('http'))) {
+          const stripped = decodeURIComponent(rawUrl.replace(/^\/+/, ''));
+          const candidatePaths = [
+            path.join(process.cwd(), stripped),
+            path.join(process.cwd(), 'uploads', path.basename(stripped)),
+            path.join(process.cwd(), 'public', stripped),
+            path.join(process.cwd(), 'public', 'uploads', path.basename(stripped))
+          ];
+
+          for (const cp of candidatePaths) {
+            try {
+              if (fs.existsSync(cp)) {
+                buffer = await fsPromises.readFile(cp);
+                break;
+              }
+            } catch {}
+          }
+        }
+
+        // 3. Remote HTTP / HTTPS URL
+        if (!buffer && (rawUrl.startsWith('http://') || rawUrl.startsWith('https://'))) {
+          try {
+            const targetUrl = encodeURI(decodeURI(rawUrl));
+            const fileRes = await fetch(targetUrl);
+            if (fileRes.ok) {
+              const arrayBuffer = await fileRes.arrayBuffer();
+              buffer = Buffer.from(arrayBuffer);
+              const headerMime = fileRes.headers.get("content-type");
+              if (headerMime && headerMime !== 'application/octet-stream') {
+                mimeType = headerMime;
+              }
+            }
+          } catch (netErr) {
+            console.warn("Remote network fetch error for Gemini file:", netErr);
+          }
+        }
+
+        // 4. Localhost Fallback for relative paths
+        if (!buffer && rawUrl.startsWith('/')) {
+          try {
+            const port = process.env.PORT || 3000;
+            const localUrl = `http://127.0.0.1:${port}${encodeURI(rawUrl)}`;
+            const fileRes = await fetch(localUrl);
+            if (fileRes.ok) {
+              const arrayBuffer = await fileRes.arrayBuffer();
+              buffer = Buffer.from(arrayBuffer);
+            }
+          } catch {}
+        }
+
+        if (!buffer) {
+          console.warn(`Could not resolve file for Gemini: ${rawUrl}`);
+          continue;
         }
         
         const supportedPrefixes = ['image/', 'audio/', 'video/', 'application/pdf', 'text/'];
@@ -9011,6 +9134,59 @@ async function startServer() {
         });
       } 
       
+      const parseTeacherCodeMeta = (c: string) => {
+        const clean = c.trim().toUpperCase();
+        const parts = clean.split('-');
+        let subject = 'اللغة الإنجليزية';
+        let grade = 'أول ابتدائي';
+        let classes = ['أول ابتدائي أ'];
+
+        if (parts.length >= 2) {
+          const subPart = parts[1] || '';
+          switch (subPart) {
+            case 'ENG': subject = 'اللغة الإنجليزية'; break;
+            case 'MATH': subject = 'الرياضيات'; break;
+            case 'ARA': subject = 'اللغة العربية'; break;
+            case 'SCI': subject = 'العلوم'; break;
+            case 'ISL': subject = 'التربية الإسلامية'; break;
+            case 'BIO': subject = 'الأحياء'; break;
+            case 'CHE': subject = 'الكيمياء'; break;
+            case 'PHY': subject = 'الفيزياء'; break;
+            case 'GEO': subject = 'الجغرافيا'; break;
+            case 'HIS': subject = 'التاريخ'; break;
+            case 'SOC': subject = 'الاجتماعيات'; break;
+            case 'COM': case 'CS': subject = 'الحاسوب'; break;
+            case 'ART': subject = 'التربية الفنية'; break;
+            case 'PE': subject = 'التربية الرياضية'; break;
+            case 'STAFF': subject = 'الكادر التعليمي والإداري'; break;
+            default: subject = 'المنهج الوزاري'; break;
+          }
+        }
+
+        if (parts.length >= 3) {
+          const gradePart = parts[2] || '';
+          switch (gradePart) {
+            case 'P1': case '1P': case 'PRI1': grade = 'أول ابتدائي'; classes = ['أول ابتدائي أ']; break;
+            case 'P2': case '2P': case 'PRI2': grade = 'ثاني ابتدائي'; classes = ['ثاني ابتدائي أ']; break;
+            case 'P3': case '3P': case 'PRI3': grade = 'ثالث ابتدائي'; classes = ['ثالث ابتدائي أ']; break;
+            case 'P4': case '4P': case 'PRI4': grade = 'رابع ابتدائي'; classes = ['رابع ابتدائي أ']; break;
+            case 'P5': case '5P': case 'PRI5': grade = 'خامس ابتدائي'; classes = ['خامس ابتدائي أ']; break;
+            case 'P6': case '6P': case 'PRI6': grade = 'سادس ابتدائي'; classes = ['سادس ابتدائي أ']; break;
+            case 'M1': case '1M': case 'INT1': grade = 'أول متوسط'; classes = ['أول متوسط أ']; break;
+            case 'M2': case '2M': case 'INT2': grade = 'ثاني متوسط'; classes = ['ثاني متوسط أ']; break;
+            case 'M3': case '3M': case 'INT3': grade = 'ثالث متوسط'; classes = ['ثالث متوسط أ']; break;
+            case 'S4': case 'S4S': case '4S': grade = 'رابع علمي'; classes = ['رابع علمي أ']; break;
+            case 'S4A': case '4A': grade = 'رابع أدبي'; classes = ['رابع أدبي أ']; break;
+            case 'S5': case 'S5S': case '5S': grade = 'خامس علمي'; classes = ['خامس علمي أ']; break;
+            case 'S5A': case '5A': grade = 'خامس أدبي'; classes = ['خامس أدبي أ']; break;
+            case 'S6': case 'S6S': case '6S': case 'SCI': grade = 'السادس العلمي'; classes = ['السادس العلمي - أ']; break;
+            case 'S6A': case '6A': case 'LIT': grade = 'السادس الأدبي'; classes = ['السادس الأدبي - أ']; break;
+          }
+        }
+
+        return { subject, grade, classes };
+      };
+
       // 2. Teacher codes check
       if (isTeacherPrefix) {
         let tchs = await db.select().from(teachers).where(or(eq(teachers.code, code), eq(teachers.id, code), eq(teachers.code, cleanCode)));
@@ -9020,8 +9196,15 @@ async function startServer() {
             const matched = allTchs.find(t => {
               if (!t) return false;
               if (t.code === code || t.id === code || String(t.code).toUpperCase() === cleanCode) return true;
-              if (t.classCodes && typeof t.classCodes === 'object') {
-                return Object.values(t.classCodes).some((c: any) => String(c).trim().toUpperCase() === cleanCode);
+              let classCodesVal: any = t.classCodes;
+              if (typeof classCodesVal === 'string') {
+                try { classCodesVal = JSON.parse(classCodesVal); } catch {}
+              }
+              if (classCodesVal && typeof classCodesVal === 'object') {
+                return Object.values(classCodesVal).some((c: any) => String(c).trim().toUpperCase() === cleanCode);
+              }
+              if (Array.isArray(classCodesVal)) {
+                return classCodesVal.some((c: any) => String(c).trim().toUpperCase() === cleanCode);
               }
               return false;
             });
@@ -9031,16 +9214,34 @@ async function startServer() {
           }
         }
 
+        // Check users table for teachers
+        if (tchs.length === 0) {
+          try {
+            const userTeachers = await db.select().from(users).where(or(eq(users.code, code), eq(users.code, cleanCode), eq(users.id, code), eq(users.id, cleanCode)));
+            const tchUser = userTeachers.find(u => (u.role || '').toLowerCase() === 'teacher' || u.role === 'cadre');
+            if (tchUser) {
+              const meta = parseTeacherCodeMeta(cleanCode);
+              tchs = [{
+                id: tchUser.id,
+                name: tchUser.name || tchUser.displayName || `أستاذ ${meta.subject}`,
+                code: tchUser.code || cleanCode,
+                schoolId: tchUser.schoolId || targetSchoolId || 'school1',
+                subject: tchUser.subject || meta.subject,
+                grade: tchUser.grade || meta.grade,
+                classes: tchUser.classes || meta.classes,
+                isActive: tchUser.isActive !== false
+              }];
+            }
+          } catch {}
+        }
+
         if (tchs.length === 0) {
           const actCodes = await db.select().from(activation_codes).where(or(eq(activation_codes.code, code), eq(activation_codes.code, cleanCode)));
           activationList = actCodes.filter(a => (a.role || '').toLowerCase().includes('teacher'));
-        } else {
-          teacherDirectList = tchs;
         }
 
-        if (targetSchoolId && targetSchoolId !== 'all') {
-          teacherDirectList = teacherDirectList.filter(t => areSchoolsCompatible(t.schoolId, targetSchoolId));
-          activationList = activationList.filter(a => areSchoolsCompatible(a.schoolId, targetSchoolId));
+        if (tchs.length > 0) {
+          teacherDirectList = tchs;
         }
       } 
       
@@ -9162,12 +9363,7 @@ async function startServer() {
           });
         }
 
-        if (targetSchoolId && tch.schoolId && !areSchoolsCompatible(tch.schoolId, targetSchoolId)) {
-          return res.status(400).json({ 
-            success: false, 
-            message: 'هذا الكود غير صحيح لهذه المدرسة، حيث تم توليده حصراً لمدرسة أخرى.' 
-          });
-        }
+        const effectiveSchoolId = tch.schoolId || targetSchoolId || 'school1';
         if (tch.isBanned || await checkBanned(tch.id)) {
           return res.status(400).json({ success: false, isBanned: true, message: 'ACCOUNT_BANNED' });
         }
@@ -9185,7 +9381,7 @@ async function startServer() {
         clearFailedAuthAttempt(req);
 
         const token = jwt.sign(
-          { uid: tch.id, name: tch.name, role: 'teacher', schoolId: tch.schoolId || 'school8', subject: tch.subject, grade: tch.grade },
+          { uid: tch.id, name: tch.name, role: 'teacher', schoolId: effectiveSchoolId, subject: tch.subject, grade: tch.grade },
           JWT_SECRET,
           { expiresIn: '30d' }
         );
@@ -9198,7 +9394,7 @@ async function startServer() {
             displayName: tch.name, 
             name: tch.name,
             role: 'teacher', 
-            schoolId: tch.schoolId || targetSchoolId || 'school8',
+            schoolId: effectiveSchoolId,
             subject: tch.subject || 'المنهج الوزاري',
             grade: tch.grade || 'السادس العلمي',
             classes: tch.classes || [],
