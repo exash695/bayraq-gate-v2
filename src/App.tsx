@@ -4593,6 +4593,17 @@ export default function App() {
     );
   }
 
+  const isDevBypassSection = Boolean(
+    activeSection === "admin-hub" || 
+    activeSection === "dev-dashboard" || 
+    portalType === "developer" || 
+    userProfile?.role === "dev" || 
+    userProfile?.role === "developer" || 
+    userProfile?.role === "superadmin" || 
+    auth.currentUser?.email?.toLowerCase() === "mntzralghanm527@gmail.com" || 
+    userProfile?.email?.toLowerCase() === "mntzralghanm527@gmail.com"
+  );
+
   return (
     <ErrorBoundary>
       {/* 🚨 REMOTE CONTROL & SYSTEM DIALOGS MODALS */}
@@ -4600,7 +4611,7 @@ export default function App() {
       <SystemDialogsModal
         type="maintenance"
         remoteConfig={remoteConfig}
-        isOpen={Boolean(remoteConfig.maintenanceMode && !bypassMaintenance && activeSection !== "admin-hub" && userProfile?.role !== "dev")}
+        isOpen={Boolean(remoteConfig.maintenanceMode && !bypassMaintenance && !isDevBypassSection)}
         onDeveloperBypass={() => {
           setBypassMaintenance(true);
           setActiveSection("admin-hub");
@@ -4611,7 +4622,7 @@ export default function App() {
       <SystemDialogsModal
         type="system_pause"
         remoteConfig={remoteConfig}
-        isOpen={Boolean(remoteConfig.systemPaused && !remoteConfig.maintenanceMode && !bypassMaintenance && activeSection !== "admin-hub" && userProfile?.role !== "dev")}
+        isOpen={Boolean(remoteConfig.systemPaused && !remoteConfig.maintenanceMode && !bypassMaintenance && !isDevBypassSection)}
         onDeveloperBypass={() => {
           setBypassMaintenance(true);
           setActiveSection("admin-hub");
@@ -4622,7 +4633,7 @@ export default function App() {
       <SystemDialogsModal
         type="mandatory_update"
         remoteConfig={remoteConfig}
-        isOpen={Boolean(remoteConfig.forceUpdateActive && !remoteConfig.maintenanceMode && !remoteConfig.systemPaused && !bypassMaintenance && activeSection !== "admin-hub" && userProfile?.role !== "dev")}
+        isOpen={Boolean(remoteConfig.forceUpdateActive && !remoteConfig.maintenanceMode && !remoteConfig.systemPaused && !bypassMaintenance && !isDevBypassSection)}
         onDeveloperBypass={() => {
           setBypassMaintenance(true);
           setActiveSection("admin-hub");
@@ -4633,7 +4644,7 @@ export default function App() {
       <SystemDialogsModal
         type="optional_update"
         remoteConfig={remoteConfig}
-        isOpen={Boolean(remoteConfig.optionalUpdateActive && !remoteConfig.forceUpdateActive && !remoteConfig.maintenanceMode && !remoteConfig.systemPaused && !dismissedOptionalUpdate && activeSection !== "admin-hub")}
+        isOpen={Boolean(remoteConfig.optionalUpdateActive && !remoteConfig.forceUpdateActive && !remoteConfig.maintenanceMode && !remoteConfig.systemPaused && !dismissedOptionalUpdate && !isDevBypassSection)}
         onClose={() => setDismissedOptionalUpdate(true)}
       />
 
@@ -4641,7 +4652,7 @@ export default function App() {
       <SystemDialogsModal
         type="new_version"
         remoteConfig={remoteConfig}
-        isOpen={Boolean(remoteConfig.newVersionNoticeActive && !remoteConfig.optionalUpdateActive && !remoteConfig.forceUpdateActive && !remoteConfig.maintenanceMode && !remoteConfig.systemPaused && !dismissedNewVersionNotice && activeSection !== "admin-hub")}
+        isOpen={Boolean(remoteConfig.newVersionNoticeActive && !remoteConfig.optionalUpdateActive && !remoteConfig.forceUpdateActive && !remoteConfig.maintenanceMode && !remoteConfig.systemPaused && !dismissedNewVersionNotice && !isDevBypassSection)}
         onClose={() => setDismissedNewVersionNotice(true)}
       />
 
