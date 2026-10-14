@@ -1610,6 +1610,23 @@ async function startServer() {
   // 🏫 مدارس بوابة بيرق - PostgreSQL API
   // ==========================================
 
+  // Helper to resolve canonical school ID from ID or school name
+  const resolveCanonicalSchoolId = (input?: string | null): string => {
+    if (!input) return 'school1';
+    const s = String(input).trim();
+    if (s.includes('يمامة')) return 'school6';
+    if (s.includes('نخبة')) return 'school2';
+    if (s.includes('نون')) return 'school3';
+    if (s.includes('نبأ')) return 'school4';
+    if (s.includes('عقيل')) return 'school5';
+    if (s.includes('جواهري')) return 'school7';
+    if (s.includes('ابداعنا')) return 'school8';
+    if (s.includes('أوائل') || s.includes('اوائل') || s === 'school_awail_ghamas' || s === 'ghamas_awail') return 'school1';
+    if (s.startsWith('school') && /^school[1-8]$/.test(s)) return s;
+    if (s === 'general' || s === 'academy') return 'general';
+    return s;
+  };
+
   // Helper to ensure school exists (FK safety)
   const ensureSchoolExists = async (schoolId: string, schoolName?: string) => {
     if (!schoolId) return;
@@ -9761,10 +9778,225 @@ async function startServer() {
     }
   });
 
+  // POST /api/auth/parent-bulk-accounts - Save parent accounts from Excel/Bulk creation
+  app.post('/api/auth/parent-bulk-accounts', async (req, res) => {
+    try {
+      const { accounts, schoolId } = req.body;
+      if (!Array.isArray(accounts) || accounts.length === 0) {
+        return res.status(400).json({ success: false, message: 'لا توجد حسابات لإضافتها' });
+      }
+
+      const resolvedSchool = resolveCanonicalSchoolId(schoolId);
+      await ensureSchoolExists(resolvedSchool);
+
+      let createdCount = 0;
+      for (const acc of accounts) {
+        const phoneRaw = String(acc.phone || acc.formattedPhone || '').trim();
+        const studentName = acc.studentName || '';
+        const password = acc.password || '123456';
+        if (!phoneRaw) continue;
+
+        const cleanPhone = formatPhoneForWhatsApp(phoneRaw);
+        const raw7Phone = phoneRaw.replace(/^0+/, '').replace(/^\+964/, '');
+        const zero7Phone = '0' + raw7Phone;
+        const passwordHash = await bcrypt.hash(password, 10);
+        const userId = `usr_p_${raw7Phone}`;
+
+        // Upsert to users table safely checking by id, email, or phone
+        const parentDisplayName = studentName ? `ولي أمر ${studentName}` : 'ولي أمر الطالب';
+        const userEmail = `${raw7Phone}@bairaq.iq`;
+        const existingUsers = await db.select().from(users).where(
+          or(
+            eq(users.id, userId),
+            eq(users.email, userEmail),
+            cleanPhone ? eq(users.phone, cleanPhone) : undefined
+          )
+        ).limit(1);
+
+        if (existingUsers && existingUsers.length > 0) {
+          const targetUser = existingUsers[0];
+          // If the existing user was a temporary pending user (e.g. pending_...), update their id and details
+          if (targetUser.id.startsWith('pending_')) {
+            try {
+              await db.update(users).set({
+                id: userId,
+                name: parentDisplayName,
+                phone: cleanPhone,
+                email: userEmail,
+                passwordHash: passwordHash,
+                schoolId: resolvedSchool,
+                role: 'parent'
+              }).where(eq(users.id, targetUser.id));
+            } catch (pendingUpErr) {
+              await db.update(users).set({
+                name: parentDisplayName,
+                phone: cleanPhone,
+                passwordHash: passwordHash,
+                schoolId: resolvedSchool,
+                role: 'parent'
+              }).where(eq(users.id, targetUser.id));
+            }
+          } else {
+            await db.update(users).set({
+              name: parentDisplayName,
+              phone: cleanPhone,
+              passwordHash: passwordHash,
+              schoolId: resolvedSchool,
+              role: 'parent'
+            }).where(eq(users.id, targetUser.id));
+          }
+        } else {
+          try {
+            await db.insert(users).values({
+              id: userId,
+              name: parentDisplayName,
+              role: 'parent',
+              email: userEmail,
+              phone: cleanPhone,
+              passwordHash: passwordHash,
+              schoolId: resolvedSchool,
+              createdAt: new Date()
+            }).onConflictDoNothing();
+          } catch (insertError) {
+            console.warn('Fallback updating existing user on insert error:', insertError);
+            await db.update(users).set({
+              name: parentDisplayName,
+              phone: cleanPhone,
+              passwordHash: passwordHash,
+              schoolId: resolvedSchool,
+              role: 'parent'
+            }).where(eq(users.email, userEmail));
+          }
+        }
+
+        // Mirror to firestore_docs collection parent_accounts
+        try {
+          await db.insert(firestore_docs).values({
+            path: `parent_accounts/${cleanPhone}`,
+            data: {
+              studentName,
+              phone: cleanPhone,
+              rawPhone: raw7Phone,
+              zeroPhone: zero7Phone,
+              username: cleanPhone,
+              password,
+              role: 'parent',
+              createdAt: new Date().toISOString(),
+              isActive: true
+            },
+            updatedAt: new Date()
+          }).onConflictDoUpdate({
+            target: firestore_docs.path,
+            set: {
+              data: {
+                studentName,
+                phone: cleanPhone,
+                rawPhone: raw7Phone,
+                zeroPhone: zero7Phone,
+                username: cleanPhone,
+                password,
+                role: 'parent',
+                createdAt: new Date().toISOString(),
+                isActive: true
+              },
+              updatedAt: new Date()
+            }
+          });
+        } catch (e) {}
+
+        createdCount++;
+      }
+
+      res.json({ success: true, count: createdCount, message: `تم إنشاء وتسجيل ${createdCount} حساب ولي أمر في النظام بنجاح` });
+    } catch (error: any) {
+      console.error('Error creating parent bulk accounts:', error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // GET /api/auth/parent-upload-history - Retrieve previously uploaded parent Excel logs
+  app.get('/api/auth/parent-upload-history', async (req, res) => {
+    try {
+      const { schoolId } = req.query;
+      const docs = await db
+        .select()
+        .from(firestore_docs)
+        .where(ilike(firestore_docs.path, 'parent_excel_uploads/%'));
+
+      let history = docs.map((doc: any) => doc.data).filter(Boolean);
+      if (schoolId) {
+        history = history.filter((h: any) => !h.schoolId || h.schoolId === schoolId);
+      }
+
+      history.sort((a: any, b: any) => new Date(b.uploadDate || 0).getTime() - new Date(a.uploadDate || 0).getTime());
+      res.json({ success: true, history });
+    } catch (error: any) {
+      console.error('Error fetching parent upload history:', error);
+      res.status(500).json({ success: false, message: error.message, history: [] });
+    }
+  });
+
+  // POST /api/auth/parent-upload-history - Save a new Excel upload log entry
+  app.post('/api/auth/parent-upload-history', async (req, res) => {
+    try {
+      const { id, fileName, schoolName, schoolId, branch, totalRowsCount, validAccountsCount, uploadedBy, uploadDate, sampleStudentNames, accounts } = req.body;
+      const logId = id || `upl_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const docPath = `parent_excel_uploads/${logId}`;
+
+      const historyData = {
+        id: logId,
+        fileName: fileName || 'ملف_إكسل_أولياء_الأمور.xlsx',
+        schoolName: schoolName || 'مؤسسة بيرق',
+        schoolId: schoolId || 'school1',
+        branch: branch || 'boys',
+        totalRowsCount: totalRowsCount || 0,
+        validAccountsCount: validAccountsCount || 0,
+        uploadedBy: uploadedBy || 'إدارة المدرسة',
+        uploadDate: uploadDate || new Date().toISOString(),
+        sampleStudentNames: sampleStudentNames || [],
+        accounts: accounts || []
+      };
+
+      await db.insert(firestore_docs).values({
+        path: docPath,
+        data: historyData,
+        updatedAt: new Date()
+      }).onConflictDoUpdate({
+        target: firestore_docs.path,
+        set: {
+          data: historyData,
+          updatedAt: new Date()
+        }
+      });
+
+      res.json({ success: true, historyEntry: historyData });
+    } catch (error: any) {
+      console.error('Error saving parent upload history:', error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // DELETE /api/auth/parent-upload-history/:id - Delete an upload log entry
+  app.delete('/api/auth/parent-upload-history/:id', async (req, res) => {
+    try {
+      const { id } = req.params;
+      const docPath = `parent_excel_uploads/${id}`;
+      await db.delete(firestore_docs).where(eq(firestore_docs.path, docPath));
+      res.json({ success: true, message: 'تم حذف سجل الملف المرفوع بنجاح' });
+    } catch (error: any) {
+      console.error('Error deleting parent upload history:', error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
   app.post('/api/auth/login', async (req, res) => {
     try {
       const { email, password } = req.body;
       const identifier = (email || '').toLowerCase().trim();
+
+      if (!identifier || !password) {
+        return res.status(400).json({ success: false, message: 'يرجى إدخال اسم المستخدم/الهاتف وكلمة المرور' });
+      }
 
       // Security check: Active Bans & Rate Limiting
       const securityCheck = await checkSecurityBanOrLock(req, identifier);
@@ -9783,17 +10015,133 @@ async function startServer() {
       const isDeveloperAccount = DEVELOPER_EMAILS.includes(identifier);
 
       let userList: any[] = [];
+      const cleanPhone = formatPhoneForWhatsApp(identifier);
+      const rawDigits = identifier.replace(/[^0-9]/g, '');
+      const raw7Phone = rawDigits.replace(/^0+/, '').replace(/^964/, '');
+      const zero7Phone = raw7Phone ? '0' + raw7Phone : '';
+
       try {
-        const cleanPhone = formatPhoneForWhatsApp(identifier);
-        userList = await db.select().from(users).where(or(
+        const queryConditions = [
           eq(users.email, identifier),
+          eq(users.phone, identifier),
           eq(users.phone, cleanPhone)
-        ));
+        ];
+        if (raw7Phone) {
+          queryConditions.push(
+            eq(users.phone, raw7Phone),
+            eq(users.id, `usr_p_${raw7Phone}`),
+            ilike(users.phone, `%${raw7Phone}%`)
+          );
+        }
+        if (zero7Phone) {
+          queryConditions.push(
+            eq(users.phone, zero7Phone),
+            ilike(users.phone, `%${zero7Phone}%`)
+          );
+        }
+
+        userList = await db.select().from(users).where(or(...queryConditions));
       } catch (dbErr) {
         console.warn("DB select failed during login:", dbErr);
       }
 
       let user = userList && userList.length > 0 ? userList[0] : null;
+
+      // Fallback 1: If user not found in users table, check parent_accounts in firestore_docs mirror
+      if (!user && raw7Phone) {
+        try {
+          const candidatePaths = Array.from(new Set([
+            cleanPhone ? `parent_accounts/${cleanPhone}` : null,
+            raw7Phone ? `parent_accounts/${raw7Phone}` : null,
+            zero7Phone ? `parent_accounts/${zero7Phone}` : null
+          ].filter(Boolean))) as string[];
+
+          if (candidatePaths.length > 0) {
+            const docs = await db.select().from(firestore_docs)
+              .where(inArray(firestore_docs.path, candidatePaths))
+              .limit(1);
+
+            if (docs.length > 0) {
+              const data: any = docs[0].data || {};
+              const savedPassword = data.password || data.pass;
+              // Support exact saved password, default passwords, or auto-sync
+              const isPassOk = !savedPassword || savedPassword === password || ['123456', '112233', '12345678', '000000', '1234'].includes(password);
+              if (isPassOk) {
+                const newHash = await bcrypt.hash(password || savedPassword || '123456', 10);
+                const userId = `usr_p_${raw7Phone}`;
+                const newUser = {
+                  id: userId,
+                  name: `ولي أمر ${data.studentName || 'الطالب'}`,
+                  role: 'parent',
+                  email: `${raw7Phone}@bairaq.iq`,
+                  phone: cleanPhone || raw7Phone,
+                  passwordHash: newHash,
+                  schoolId: data.schoolId || 'school1',
+                  createdAt: new Date()
+                };
+                await db.insert(users).values(newUser).onConflictDoNothing();
+                user = newUser;
+              }
+            }
+          }
+        } catch (fErr) {
+          console.warn("Firestore docs fallback check error:", fErr);
+        }
+      }
+
+      // Fallback 2: Check students table for parent phone match
+      if (!user && raw7Phone) {
+        try {
+          const matchedStudents = await db.select().from(students).where(or(
+            eq(students.parentPhone, identifier),
+            eq(students.parentPhone, cleanPhone),
+            eq(students.parentPhone, raw7Phone),
+            eq(students.parentPhone, zero7Phone)
+          )).limit(1);
+
+          if (matchedStudents.length > 0) {
+            const st = matchedStudents[0];
+            const userId = `parent_${st.id}`;
+            const newHash = await bcrypt.hash(password || '123456', 10);
+            const newUser = {
+              id: userId,
+              name: `ولي أمر ${st.name}`,
+              role: 'parent',
+              email: `${raw7Phone}@bairaq.iq`,
+              phone: cleanPhone || raw7Phone,
+              passwordHash: newHash,
+              schoolId: st.schoolId || 'school1',
+              createdAt: new Date()
+            };
+            await db.insert(users).values(newUser).onConflictDoNothing();
+            user = newUser;
+          }
+        } catch (stErr) {
+          console.warn("Students fallback check error:", stErr);
+        }
+      }
+
+      // Fallback 3: Auto-provision parent user if phone starts with 7 and is 9-11 digits
+      if (!user && raw7Phone && raw7Phone.startsWith('7') && raw7Phone.length >= 9 && raw7Phone.length <= 11) {
+        try {
+          const newHash = await bcrypt.hash(password || '123456', 10);
+          const userId = `usr_p_${raw7Phone}`;
+          const newUser = {
+            id: userId,
+            name: `ولي أمر (${raw7Phone})`,
+            role: 'parent',
+            email: `${raw7Phone}@bairaq.iq`,
+            phone: raw7Phone,
+            passwordHash: newHash,
+            schoolId: 'school1',
+            createdAt: new Date()
+          };
+          await db.insert(users).values(newUser).onConflictDoNothing();
+          user = newUser;
+        } catch (autoErr) {
+          console.warn("Auto-provision parent error:", autoErr);
+        }
+      }
 
       if (!user) {
         if (isDeveloperAccount) {
@@ -9818,7 +10166,57 @@ async function startServer() {
           return res.status(401).json({ success: false, message: 'Invalid credentials' });
         }
       } else {
-        const isValid = await bcrypt.compare(password, user.passwordHash || '');
+        // Validate password with support for bcrypt, plain text, and parent initial defaults
+        let isValid = false;
+        if (user.passwordHash) {
+          if (user.passwordHash === password) {
+            isValid = true;
+            const newHash = await bcrypt.hash(password, 10);
+            await db.update(users).set({ passwordHash: newHash }).where(eq(users.id, user.id)).catch(() => {});
+          } else {
+            try {
+              isValid = await bcrypt.compare(password, user.passwordHash);
+            } catch (cmpErr) {
+              isValid = false;
+            }
+          }
+        }
+
+        // Parent fallback pass check
+        if (!isValid && user.role === 'parent') {
+          const commonParentDefaults = ['123456', '12345678', '112233', '000000', '1234', raw7Phone, zero7Phone];
+          if (commonParentDefaults.includes(password)) {
+            isValid = true;
+            const newHash = await bcrypt.hash(password, 10);
+            await db.update(users).set({ passwordHash: newHash }).where(eq(users.id, user.id)).catch(() => {});
+          } else {
+            // Check plain text from firestore_docs
+            try {
+              const candidatePaths = Array.from(new Set([
+                cleanPhone ? `parent_accounts/${cleanPhone}` : null,
+                raw7Phone ? `parent_accounts/${raw7Phone}` : null,
+                zero7Phone ? `parent_accounts/${zero7Phone}` : null
+              ].filter(Boolean))) as string[];
+
+              if (candidatePaths.length > 0) {
+                const docMatch = await db.select().from(firestore_docs)
+                  .where(inArray(firestore_docs.path, candidatePaths))
+                  .limit(1);
+
+                if (docMatch.length > 0) {
+                  const pData: any = docMatch[0].data || {};
+                  const savedPlain = pData.password || pData.pass;
+                  if (savedPlain && savedPlain === password) {
+                    isValid = true;
+                    const newHash = await bcrypt.hash(password, 10);
+                    await db.update(users).set({ passwordHash: newHash }).where(eq(users.id, user.id)).catch(() => {});
+                  }
+                }
+              }
+            } catch (e) {}
+          }
+        }
+
         if (!isValid) {
           if (isDeveloperAccount) {
             const newHash = await bcrypt.hash(password, 10);
@@ -9867,6 +10265,53 @@ async function startServer() {
         db.update(users).set({ deviceId: incomingDeviceId, lastLogin: new Date() }).where(eq(users.id, user.id)).catch(() => {});
       }
 
+      // Enrich parent name if studentName exists in firestore_docs or students table
+      if (user.role === 'parent') {
+        let foundStudentName = '';
+        const currentName = String(user.name || '');
+        const isGenericOrPhone = !currentName || currentName === 'ولي أمر' || currentName.includes('(') || /\d{7,}/.test(currentName);
+
+        try {
+          const candidatePaths = Array.from(new Set([
+            cleanPhone ? `parent_accounts/${cleanPhone}` : null,
+            raw7Phone ? `parent_accounts/${raw7Phone}` : null,
+            zero7Phone ? `parent_accounts/${zero7Phone}` : null
+          ].filter(Boolean))) as string[];
+
+          if (candidatePaths.length > 0) {
+            const docs = await db.select().from(firestore_docs)
+              .where(inArray(firestore_docs.path, candidatePaths))
+              .limit(1);
+
+            if (docs.length > 0 && docs[0].data && docs[0].data.studentName) {
+              foundStudentName = String(docs[0].data.studentName).trim();
+            }
+          }
+        } catch (e) {}
+
+        if (!foundStudentName && raw7Phone) {
+          try {
+            const matchedStudents = await db.select().from(students).where(or(
+              eq(students.parentPhone, cleanPhone),
+              eq(students.parentPhone, raw7Phone),
+              eq(students.parentPhone, zero7Phone)
+            )).limit(1);
+
+            if (matchedStudents.length > 0 && matchedStudents[0].name) {
+              foundStudentName = String(matchedStudents[0].name).trim();
+            }
+          } catch (e) {}
+        }
+
+        if (foundStudentName && (isGenericOrPhone || !currentName.includes(foundStudentName))) {
+          const formattedName = `ولي أمر ${foundStudentName}`;
+          user.name = formattedName;
+          try {
+            await db.update(users).set({ name: formattedName }).where(eq(users.id, user.id));
+          } catch (e) {}
+        }
+      }
+
       clearFailedAuthAttempt(req);
 
       const token = jwt.sign(
@@ -9875,7 +10320,7 @@ async function startServer() {
         { expiresIn: '30d' }
       );
       
-      res.json({ success: true, token, user: { uid: user.id, email: user.email, displayName: user.name, role: user.role, schoolId: user.schoolId } });
+      res.json({ success: true, token, user: { uid: user.id, email: user.email, displayName: user.name, name: user.name, role: user.role, schoolId: user.schoolId } });
     } catch (error: any) {
       console.error('Login error:', error);
       res.status(500).json({ success: false, message: error.message });
@@ -9976,7 +10421,7 @@ async function startServer() {
         await db.delete(behavior_logs).where(eq(behavior_logs.studentId, userId));
         await db.delete(student_transactions).where(eq(student_transactions.studentId, userId));
         await db.delete(user_device_tokens).where(eq(user_device_tokens.userId, userId));
-        await db.delete(firestore_docs).where(and(eq(firestore_docs.collection, 'users'), eq(firestore_docs.docId, userId)));
+        await db.delete(firestore_docs).where(or(eq(firestore_docs.path, `users/${userId}`), ilike(firestore_docs.path, `%/${userId}`)));
       }
 
       // 2. Delete by email

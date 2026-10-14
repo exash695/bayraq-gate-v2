@@ -41,7 +41,7 @@ const toBase64 = (data: Blob | ArrayBuffer): Promise<string> => {
  * Web: uses iframe.print()
  * Mobile: Converts to PDF and shares via OS share sheet.
  */
-export const printHTML = async (html: string) => {
+export const printHTML = async (html: string, customFileName?: string) => {
   const platform = Capacitor.getPlatform();
   
   // Create hidden iframe to render the HTML
@@ -50,28 +50,27 @@ export const printHTML = async (html: string) => {
     iframe = document.createElement('iframe');
     iframe.id = 'bairaq-universal-render-frame';
     iframe.style.position = 'fixed';
-    iframe.style.top = '-10000px';
-    iframe.style.left = '-10000px';
-    iframe.style.width = '1200px'; // Wide enough for high-quality rendering
-    iframe.style.height = '1600px';
+    iframe.style.top = '0';
+    iframe.style.left = '-9999px';
+    iframe.style.width = '1024px';
+    iframe.style.height = '1448px';
+    iframe.style.opacity = '0';
+    iframe.style.pointerEvents = 'none';
+    iframe.style.border = 'none';
+    iframe.style.zIndex = '-9999';
     document.body.appendChild(iframe);
   }
 
   const renderPromise = new Promise<void>((resolve) => {
     const doc = iframe.contentWindow?.document || iframe.contentDocument;
     if (doc && iframe.contentWindow) {
-      // Disable print command to prevent browser dialog from appearing during PDF generation
-      (iframe.contentWindow as any).print = () => { console.log('Internal print disabled during PDF generation'); };
-      
       doc.open();
       doc.write(html);
       doc.close();
       
-      // Wait for fonts and images to load
       const checkLoaded = () => {
         if (doc.readyState === 'complete') {
-          // Additional delay for any scripts or font rendering
-          setTimeout(resolve, 1000);
+          setTimeout(resolve, 800);
         } else {
           setTimeout(checkLoaded, 100);
         }
@@ -85,42 +84,116 @@ export const printHTML = async (html: string) => {
   await renderPromise;
 
   try {
-    const docElement = iframe.contentWindow?.document.body;
+    const doc = iframe.contentWindow?.document || iframe.contentDocument;
+    const docElement = doc?.body;
     if (!docElement) throw new Error('Render frame body not found');
 
-    const canvas = await html2canvas(docElement, {
-      scale: 2, // High quality
-      useCORS: true,
-      logging: false,
-      backgroundColor: '#ffffff'
-    });
+    // Attempt 1: Try generating PDF using html-to-image (handles Arabic SVG + CSS cleanly without html2canvas CSS parser crashes)
+    let imgData: string | null = null;
+    let canvasWidth = 1024;
+    let canvasHeight = 1448;
 
-    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+    try {
+      const { toPng } = await import('html-to-image');
+      const pngUrl = await toPng(docElement, {
+        quality: 0.98,
+        backgroundColor: '#ffffff',
+        pixelRatio: 2,
+        skipFonts: true,
+        filter: (domNode: HTMLElement) => {
+          // Filter out external stylesheet link tags to Google Fonts to prevent CORS/inlining errors
+          if (domNode.tagName === 'LINK' && domNode.getAttribute('href')?.includes('fonts.googleapis.com')) {
+            return false;
+          }
+          return true;
+        }
+      });
+      imgData = pngUrl;
+      canvasWidth = docElement.scrollWidth || 1024;
+      canvasHeight = docElement.scrollHeight || 1448;
+    } catch (toImgErr) {
+      console.warn('html-to-image failed, falling back to html2canvas:', toImgErr);
+      const canvas = await html2canvas(docElement, {
+        scale: 1.5,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+        windowWidth: 1024,
+        windowHeight: 1448
+      });
+      imgData = canvas.toDataURL('image/jpeg', 0.95);
+      canvasWidth = canvas.width;
+      canvasHeight = canvas.height;
+    }
+
+    if (!imgData) throw new Error('Could not render image data');
+
     const pdf = new jsPDF({
       orientation: 'portrait',
       unit: 'mm',
       format: 'a4'
     });
 
-    const imgProps = pdf.getImageProperties(imgData);
     const pdfWidth = pdf.internal.pageSize.getWidth();
-    const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+    const pdfPageHeight = pdf.internal.pageSize.getHeight();
+    const computedHeight = (canvasHeight * pdfWidth) / (canvasWidth || 1);
 
-    pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight);
-
-    const fileName = `Bairaq_Report_${new Date().getTime()}.pdf`;
-
-    if (platform !== 'web') {
-      const pdfBase64 = pdf.output('datauristring').split(',')[1];
-      await saveAndShareFile(pdfBase64, fileName, 'application/pdf', true);
+    if (computedHeight <= pdfPageHeight) {
+      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, computedHeight);
     } else {
-      pdf.save(fileName);
+      // Multi-page slicing or fit
+      let remainingHeight = computedHeight;
+      let position = 0;
+
+      while (remainingHeight > 0) {
+        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, computedHeight);
+        remainingHeight -= pdfPageHeight;
+        if (remainingHeight > 0) {
+          position -= pdfPageHeight;
+          pdf.addPage();
+        }
+      }
+    }
+
+    const fileName = customFileName || `Bairaq_Report_${new Date().getTime()}.pdf`;
+
+    const pdfBlob = pdf.output('blob');
+    const pdfFile = new File([pdfBlob], fileName, { type: 'application/pdf' });
+
+    let shared = false;
+    if (typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
+      try {
+        await navigator.share({
+          files: [pdfFile],
+          title: 'قصاصات حسابات أولياء الأمور - بوابة بيرق',
+          text: 'مرفق لكم ملف قصاصات حسابات أولياء الأمور بصيغة PDF (تليجرام / واتساب)'
+        });
+        shared = true;
+      } catch (shareErr: any) {
+        if (shareErr?.name !== 'AbortError') {
+          console.warn('Share sheet cancelled or failed:', shareErr);
+        }
+      }
+    }
+
+    if (!shared) {
+      if (platform !== 'web') {
+        const pdfBase64 = pdf.output('datauristring').split(',')[1];
+        await saveAndShareFile(pdfBase64, fileName, 'application/pdf', true);
+      } else {
+        pdf.save(fileName);
+      }
     }
   } catch (err) {
     console.error('PDF generation failed:', err);
-    // Fallback to basic print if PDF generation fails
+    // Robust fallback: native browser print dialog
     if (platform === 'web') {
-      iframe.contentWindow?.print();
+      try {
+        iframe.contentWindow?.focus();
+        iframe.contentWindow?.print();
+      } catch (printErr) {
+        console.error('Direct print failed:', printErr);
+      }
     } else {
       const base64 = btoa(unescape(encodeURIComponent(html)));
       await saveAndShareFile(base64, `Print_${Date.now()}.html`, 'text/html', true);

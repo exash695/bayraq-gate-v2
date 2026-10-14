@@ -8,6 +8,12 @@ export const cleanParentStudentName = (name?: string): string => {
   while (/^(ولي\s*أمر|ولي\s*امر)\s*/i.test(clean)) {
     clean = clean.replace(/^(ولي\s*أمر|ولي\s*امر)\s*/i, '').trim();
   }
+  // Remove numbers in parentheses e.g. (7501122334) or (07701234567)
+  clean = clean.replace(/[\(\[\{\（\「\【]\s*\+?\d[\d\s-]*[\)\]\}\）\」\】]/g, '').trim();
+  // Remove standalone phone numbers or digits
+  clean = clean.replace(/\b\d{7,11}\b/g, '').trim();
+  // Remove purely non-alphabetic/numeric leftovers
+  clean = clean.replace(/^[\s\(\)\-\_\,\.\:\;\#\/\\]+$/, '').trim();
   return clean || 'الطالب';
 };
 

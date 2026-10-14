@@ -18,12 +18,41 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ onFinish }) => {
     onFinishRef.current = onFinish;
   }, [onFinish]);
 
-  // Direct instant finish
+  // Smooth progress animation and auto-finish failsafe
   useEffect(() => {
+    const progressInterval = setInterval(() => {
+      setProgress((prev) => {
+        if (prev >= 100) {
+          clearInterval(progressInterval);
+          return 100;
+        }
+        return Math.min(100, prev + 25);
+      });
+    }, 120);
+
+    const buttonTimer = setTimeout(() => {
+      setShowDirectButton(true);
+    }, 350);
+
+    const finishTimer = setTimeout(() => {
+      if (onFinishRef.current) {
+        onFinishRef.current();
+      }
+    }, 600);
+
+    return () => {
+      clearInterval(progressInterval);
+      clearTimeout(buttonTimer);
+      clearTimeout(finishTimer);
+    };
+  }, []);
+
+  const handleManualEnter = () => {
+    setProgress(100);
     if (onFinishRef.current) {
       onFinishRef.current();
     }
-  }, []);
+  };
 
   const getStatusMessage = (p: number) => {
     if (p < 35) return "جاري الاتصال والتحقق من الأمان...";
@@ -106,12 +135,12 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({ onFinish }) => {
           </div>
         </div>
 
-        {/* Direct Action Button if needed */}
-        {(showDirectButton || onFinish) && (
+        {/* Direct Action Button */}
+        {showDirectButton && (
           <motion.button
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
-            onClick={() => onFinishRef.current?.()}
+            onClick={handleManualEnter}
             className="mt-2 flex items-center justify-center gap-2.5 bg-gradient-to-r from-[#D4AF37] via-[#F59E0B] to-[#D4AF37] hover:brightness-110 text-slate-950 font-black px-8 py-3 rounded-full text-sm shadow-[0_0_25px_rgba(212,175,55,0.4)] active:scale-95 transition-all cursor-pointer border border-amber-300/30"
           >
             <GraduationCap className="w-4 h-4" />

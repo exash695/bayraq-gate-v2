@@ -20,9 +20,11 @@ import {
 import { copyToClipboard } from '../utils/clipboard';
 import { activationCodesService } from '../services/activationCodesService';
 import { ArchiveSection } from './ArchiveSection';
+import { ParentBulkAccountsModal } from './ParentBulkAccountsModal';
 
 interface CodesSectionProps {
   schoolName: string;
+  schoolId?: string;
   adminBranch: 'boys' | 'girls';
   availableGrades: string[];
   discountLabels: Record<string, string>;
@@ -44,6 +46,7 @@ interface CodesSectionProps {
 
 export const CodesSection: React.FC<CodesSectionProps> = ({
   schoolName,
+  schoolId,
   adminBranch,
   availableGrades,
   discountLabels,
@@ -113,6 +116,7 @@ export const CodesSection: React.FC<CodesSectionProps> = ({
   
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [adminObserverCode, setAdminObserverCode] = useState('');
+  const [isParentBulkModalOpen, setIsParentBulkModalOpen] = useState(false);
 
   useEffect(() => {
     if (onSubViewChange) {
@@ -812,14 +816,27 @@ export const CodesSection: React.FC<CodesSectionProps> = ({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 w-full lg:w-auto">
+            <button
+              onClick={() => setIsParentBulkModalOpen(true)}
+              className="flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl bg-[#0A0F1D] hover:bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-xs sm:text-sm font-black shadow-lg shadow-emerald-500/5 active:scale-95 transition-all cursor-pointer group"
+            >
+              <div className="w-7 h-7 rounded-lg bg-emerald-500/20 flex items-center justify-center text-emerald-400 group-hover:scale-110 transition-transform shrink-0">
+                <FileSpreadsheet size={16} />
+              </div>
+              <span className="truncate">إنشاء حسابات أولياء الأمور</span>
+            </button>
+
             <button
               onClick={handleGenerateAdminCode}
-              className="flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-[#FFD600]/10 text-[#FFD600] border border-[#FFD600]/20 text-xs font-black shadow-lg shadow-[#FFD600]/5 active:scale-95 transition-all hover:bg-[#FFD600]/20"
+              className="flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl bg-[#0A0F1D] hover:bg-[#FFD600]/10 text-[#FFD600] border border-[#FFD600]/30 text-xs sm:text-sm font-black shadow-lg shadow-[#FFD600]/5 active:scale-95 transition-all cursor-pointer group"
             >
-              <ShieldCheck size={16} />
-              <span>كود مراقب إداري</span>
+              <div className="w-7 h-7 rounded-lg bg-[#FFD600]/20 flex items-center justify-center text-[#FFD600] group-hover:scale-110 transition-transform shrink-0">
+                <ShieldCheck size={16} />
+              </div>
+              <span className="truncate">توليد كود إداري</span>
             </button>
+
             <button 
               onClick={() => {
                 if (isAddingStudent && listToEdit && setListToEdit) {
@@ -830,14 +847,18 @@ export const CodesSection: React.FC<CodesSectionProps> = ({
                 setBulkStudents([{ id: crypto.randomUUID(), name: '', address: '', gender: adminBranch === 'girls' ? 'female' : 'male', grade: selectedGrade }]);
                 setCurrentListName('');
               }}
-              className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-white text-xs font-black shadow-lg active:scale-95 transition-all ${
+              className={`flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl text-xs sm:text-sm font-black shadow-lg active:scale-95 transition-all cursor-pointer group ${
                 isAddingStudent 
-                  ? 'bg-rose-500 hover:bg-rose-600 shadow-rose-600/20' 
-                  : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-blue-600/20'
+                  ? 'bg-rose-500/15 text-rose-400 border border-rose-500/40 hover:bg-rose-500/25' 
+                  : 'bg-[#0A0F1D] hover:bg-blue-500/10 text-blue-400 border border-blue-500/30 shadow-blue-500/5'
               }`}
             >
-              {isAddingStudent ? <X size={16} /> : <UserPlus size={16} />}
-              <span>{isAddingStudent ? (listToEdit ? 'إلغاء التعديل' : 'إغلاق المحرر') : 'إضافة وجبة طلاب جديدة'}</span>
+              <div className={`w-7 h-7 rounded-lg flex items-center justify-center group-hover:scale-110 transition-transform shrink-0 ${
+                isAddingStudent ? 'bg-rose-500/20 text-rose-400' : 'bg-blue-500/20 text-blue-400'
+              }`}>
+                {isAddingStudent ? <X size={16} /> : <UserPlus size={16} />}
+              </div>
+              <span className="truncate">{isAddingStudent ? (listToEdit ? 'إلغاء التعديل' : 'إغلاق المحرر') : 'إضافة وجبة جديدة'}</span>
             </button>
           </div>
         </div>
@@ -2016,6 +2037,16 @@ export const CodesSection: React.FC<CodesSectionProps> = ({
           </div>
         )}
       </AnimatePresence>
+
+      {/* Parent Bulk Accounts Modal */}
+      <ParentBulkAccountsModal
+        isOpen={isParentBulkModalOpen}
+        onClose={() => setIsParentBulkModalOpen(false)}
+        schoolName={schoolName}
+        schoolId={schoolId}
+        adminBranch={adminBranch}
+        showToast={showToast}
+      />
     </div>
   );
 };

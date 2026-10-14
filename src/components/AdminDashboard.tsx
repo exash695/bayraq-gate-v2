@@ -1913,6 +1913,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <>
                   <CodesSection 
                     schoolName={schoolName}
+                    schoolId={resolvedSchoolId}
                     adminBranch={adminBranch}
                     availableGrades={AVAILABLE_GRADES}
                     discountLabels={discountLabels}
