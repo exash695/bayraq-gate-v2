@@ -101,6 +101,7 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
     matchedUpdates: { phone: string; studentName: string; currentName: string; status: 'matched' | 'new' }[];
   } | null>(null);
   const [isExecutingMatch, setIsExecutingMatch] = useState(false);
+  const [isPrintingSlips, setIsPrintingSlips] = useState(false);
 
   // Load history logs from server and cache
   const fetchUploadHistory = async () => {
@@ -596,6 +597,8 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
   };
 
   const handlePrintSlips = async (targetAccounts?: ParentAccountRow[]) => {
+    if (isPrintingSlips) return;
+
     const validRows = (targetAccounts || rows).filter(r => r.status === 'valid');
     const targetRows = validRows.length > 0 ? validRows : (targetAccounts || rows);
 
@@ -605,7 +608,9 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
     }
 
     try {
+      setIsPrintingSlips(true);
       showToast('جاري تحضير ملف PDF بدقة عالية وشديدة الوضوح...', 'info');
+      await new Promise(r => setTimeout(r, 50));
 
       // Chunk cards into groups of 8 cards per A4 page for perfect printing
       const cardsPerPage = 8;
@@ -779,6 +784,8 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
     } catch (err: any) {
       console.error(err);
       showToast('حدث خطأ أثناء إعداد القصاصات للطباعة: ' + (err?.message || ''), 'error');
+    } finally {
+      setIsPrintingSlips(false);
     }
   };
 
@@ -1079,11 +1086,16 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
                         <div className="flex items-center gap-1.5 self-end sm:self-auto shrink-0 flex-wrap">
                           <button
                             onClick={() => handlePrintSlips(entry.accounts)}
-                            className="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer transition-colors"
+                            disabled={isPrintingSlips}
+                            className="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50"
                             title="إعادة طباعة قصاصات هذا الملف"
                           >
-                            <Printer size={14} />
-                            <span>طباعة PDF</span>
+                            {isPrintingSlips ? (
+                              <RefreshCw size={14} className="animate-spin text-amber-300" />
+                            ) : (
+                              <Printer size={14} />
+                            )}
+                            <span>{isPrintingSlips ? 'جاري التحضير...' : 'طباعة PDF'}</span>
                           </button>
 
                           <button
@@ -1356,12 +1368,16 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
             <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
               <button
                 onClick={() => handlePrintSlips()}
-                disabled={rows.length === 0}
+                disabled={rows.length === 0 || isPrintingSlips}
                 className="px-4 py-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 font-black text-xs flex items-center justify-center gap-1.5 disabled:opacity-40 transition-all cursor-pointer"
                 title="طباعة وتحميل قصاصات PDF"
               >
-                <Printer size={15} />
-                <span>طباعة (PDF)</span>
+                {isPrintingSlips ? (
+                  <RefreshCw size={15} className="animate-spin text-amber-300" />
+                ) : (
+                  <Printer size={15} />
+                )}
+                <span>{isPrintingSlips ? 'جاري التوليد...' : 'طباعة (PDF)'}</span>
               </button>
             </div>
 

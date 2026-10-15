@@ -38,7 +38,7 @@ const toBase64 = (data: Blob | ArrayBuffer): Promise<string> => {
 
 /**
  * Universal print helper.
- * Strictly generates a genuine, high-quality .PDF document file and saves/shares it.
+ * Strictly generates a genuine, high-quality .PDF document file without freezing the UI thread.
  */
 export const printHTML = async (
   html: string,
@@ -59,7 +59,7 @@ export const printHTML = async (
     iframe.style.left = '-9999px';
     iframe.style.width = '1024px';
     iframe.style.height = '1448px';
-    iframe.style.opacity = '0';
+    iframe.style.opacity = '0.01';
     iframe.style.pointerEvents = 'none';
     iframe.style.border = 'none';
     iframe.style.zIndex = '-9999';
@@ -75,7 +75,7 @@ export const printHTML = async (
       
       const checkLoaded = () => {
         if (doc.readyState === 'complete') {
-          setTimeout(resolve, 150);
+          setTimeout(resolve, 100);
         } else {
           setTimeout(checkLoaded, 30);
         }
@@ -90,116 +90,66 @@ export const printHTML = async (
 
   try {
     const doc = iframe.contentWindow?.document || iframe.contentDocument;
-    const docElement = doc?.body;
-    if (!docElement) throw new Error('Render frame body not found');
-
-    const pdf = new jsPDF({
-      orientation: 'portrait',
-      unit: 'mm',
-      format: 'a4'
-    });
-
-    const pdfWidth = pdf.internal.pageSize.getWidth();
-    const pdfPageHeight = pdf.internal.pageSize.getHeight();
+    if (!doc || !iframe.contentWindow) throw new Error('Render frame body not found');
 
     const pageNodes = doc.querySelectorAll('.a4-page');
 
     if (pageNodes && pageNodes.length > 0) {
-      const { toPng } = await import('html-to-image');
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+        compress: true
+      });
+
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfPageHeight = pdf.internal.pageSize.getHeight();
+
+      let canvasSuccess = true;
 
       for (let i = 0; i < pageNodes.length; i++) {
         const pageEl = pageNodes[i] as HTMLElement;
-        let imgData: string | null = null;
-
+        
         try {
-          imgData = await toPng(pageEl, {
-            quality: 0.92,
-            pixelRatio: 1.8,
-            backgroundColor: '#ffffff',
-            cacheBust: false,
-          });
-        } catch (toImgErr) {
-          console.warn(`Page ${i + 1} html-to-image failed, falling back to html2canvas:`, toImgErr);
           const canvas = await html2canvas(pageEl, {
-            scale: 1.8,
+            scale: 1.5,
             useCORS: true,
             logging: false,
-            backgroundColor: '#ffffff'
+            backgroundColor: '#ffffff',
+            allowTaint: true
           });
-          imgData = canvas.toDataURL('image/png', 0.92);
-        }
 
-        if (imgData) {
+          const imgData = canvas.toDataURL('image/jpeg', 0.88);
           if (i > 0) pdf.addPage();
-          pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfPageHeight, undefined, 'FAST');
+          pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfPageHeight, undefined, 'FAST');
+        } catch (pageErr) {
+          console.warn(`Page ${i + 1} capture failed:`, pageErr);
+          canvasSuccess = false;
+          break;
         }
 
-        if (i % 2 === 0) {
-          await new Promise(r => setTimeout(r, 0));
-        }
-      }
-    } else {
-      // Fallback single container capture
-      let imgData: string | null = null;
-      let canvasWidth = 1024;
-      let canvasHeight = 1448;
-
-      try {
-        const { toPng } = await import('html-to-image');
-        imgData = await toPng(docElement, {
-          quality: 0.92,
-          backgroundColor: '#ffffff',
-          pixelRatio: 1.8,
-          cacheBust: false
-        });
-        canvasWidth = docElement.scrollWidth || 1024;
-        canvasHeight = docElement.scrollHeight || 1448;
-      } catch (toImgErr) {
-        console.warn('html-to-image failed, falling back to html2canvas:', toImgErr);
-        const canvas = await html2canvas(docElement, {
-          scale: 1.8,
-          useCORS: true,
-          logging: false,
-          backgroundColor: '#ffffff',
-          windowWidth: 1024,
-          windowHeight: 1448
-        });
-        imgData = canvas.toDataURL('image/png', 0.92);
-        canvasWidth = canvas.width;
-        canvasHeight = canvas.height;
+        // YIELD to browser main event loop so UI does not freeze or block
+        await new Promise(r => setTimeout(r, 15));
       }
 
-      if (imgData) {
-        const computedHeight = (canvasHeight * pdfWidth) / (canvasWidth || 1);
-        if (computedHeight <= pdfPageHeight) {
-          pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, computedHeight);
-        } else {
-          let remainingHeight = computedHeight;
-          let position = 0;
-          while (remainingHeight > 0) {
-            pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, computedHeight);
-            remainingHeight -= pdfPageHeight;
-            if (remainingHeight > 0) {
-              position -= pdfPageHeight;
-              pdf.addPage();
-            }
-          }
-        }
+      if (canvasSuccess) {
+        await saveOrSharePDF(pdf, fileName);
+        return;
       }
     }
 
-    // Save strictly as PDF
-    await saveOrSharePDF(pdf, fileName);
+    // Fallback if canvas rendering is skipped or failed: Direct native print dialog
+    iframe.contentWindow.focus();
+    iframe.contentWindow.print();
   } catch (err) {
-    console.error('PDF generation failed:', err);
-    // Even on error, fallback to direct browser window/print or jsPDF save, never HTML file
-    if (platform === 'web') {
-      try {
-        iframe.contentWindow?.focus();
-        iframe.contentWindow?.print();
-      } catch (printErr) {
-        console.error('Direct print failed:', printErr);
+    console.error('PDF generation error:', err);
+    try {
+      if (iframe.contentWindow) {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
       }
+    } catch (fallbackErr) {
+      console.error('Native print fallback failed:', fallbackErr);
     }
   }
 };
