@@ -38,16 +38,17 @@ const toBase64 = (data: Blob | ArrayBuffer): Promise<string> => {
 
 /**
  * Universal print helper.
- * Web: Uses native iframe.print() for INSTANT (<50ms) high-dpi vector printing / Save-as-PDF.
- * Mobile / Force PDF: Converts to PDF using jsPDF and shares/downloads.
+ * Strictly generates a genuine, high-quality .PDF document file and saves/shares it.
  */
 export const printHTML = async (
   html: string,
-  customFileName?: string,
-  options?: { forcePdfDownload?: boolean }
+  customFileName?: string
 ) => {
   const platform = Capacitor.getPlatform();
-  
+  const fileName = customFileName
+    ? (customFileName.toLowerCase().endsWith('.pdf') ? customFileName : `${customFileName}.pdf`)
+    : `Bairaq_Parent_Slips_${Date.now()}.pdf`;
+
   // Create or reuse hidden iframe to render the HTML
   let iframe = document.getElementById('bairaq-universal-render-frame') as HTMLIFrameElement;
   if (!iframe) {
@@ -87,26 +88,10 @@ export const printHTML = async (
 
   await renderPromise;
 
-  // On Web Platform (or when forcePdfDownload is false/omitted):
-  // Native iframe print is INSTANT (<50ms), 100% vector sharp, supports physical printers AND native "Save as PDF"
-  if (platform === 'web' && !options?.forcePdfDownload) {
-    try {
-      iframe.contentWindow?.focus();
-      iframe.contentWindow?.print();
-      return;
-    } catch (printErr) {
-      console.warn('Native iframe print failed, falling back to PDF capture:', printErr);
-    }
-  }
-
-  // Fallback / Mobile Capacitor App / Explicit PDF download requested:
   try {
     const doc = iframe.contentWindow?.document || iframe.contentDocument;
     const docElement = doc?.body;
     if (!docElement) throw new Error('Render frame body not found');
-
-    // Check for multi-page A4 containers
-    const pageNodes = doc.querySelectorAll('.a4-page');
 
     const pdf = new jsPDF({
       orientation: 'portrait',
@@ -117,6 +102,8 @@ export const printHTML = async (
     const pdfWidth = pdf.internal.pageSize.getWidth();
     const pdfPageHeight = pdf.internal.pageSize.getHeight();
 
+    const pageNodes = doc.querySelectorAll('.a4-page');
+
     if (pageNodes && pageNodes.length > 0) {
       const { toPng } = await import('html-to-image');
 
@@ -126,20 +113,20 @@ export const printHTML = async (
 
         try {
           imgData = await toPng(pageEl, {
-            quality: 0.95,
-            pixelRatio: 2.0,
+            quality: 0.92,
+            pixelRatio: 1.8,
             backgroundColor: '#ffffff',
             cacheBust: false,
           });
         } catch (toImgErr) {
           console.warn(`Page ${i + 1} html-to-image failed, falling back to html2canvas:`, toImgErr);
           const canvas = await html2canvas(pageEl, {
-            scale: 2.0,
+            scale: 1.8,
             useCORS: true,
             logging: false,
             backgroundColor: '#ffffff'
           });
-          imgData = canvas.toDataURL('image/png', 0.95);
+          imgData = canvas.toDataURL('image/png', 0.92);
         }
 
         if (imgData) {
@@ -147,8 +134,7 @@ export const printHTML = async (
           pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfPageHeight, undefined, 'FAST');
         }
 
-        // Give event loop a breather on large documents
-        if (i % 3 === 0) {
+        if (i % 2 === 0) {
           await new Promise(r => setTimeout(r, 0));
         }
       }
@@ -161,9 +147,9 @@ export const printHTML = async (
       try {
         const { toPng } = await import('html-to-image');
         imgData = await toPng(docElement, {
-          quality: 0.95,
+          quality: 0.92,
           backgroundColor: '#ffffff',
-          pixelRatio: 2.0,
+          pixelRatio: 1.8,
           cacheBust: false
         });
         canvasWidth = docElement.scrollWidth || 1024;
@@ -171,71 +157,42 @@ export const printHTML = async (
       } catch (toImgErr) {
         console.warn('html-to-image failed, falling back to html2canvas:', toImgErr);
         const canvas = await html2canvas(docElement, {
-          scale: 2.0,
+          scale: 1.8,
           useCORS: true,
           logging: false,
           backgroundColor: '#ffffff',
           windowWidth: 1024,
           windowHeight: 1448
         });
-        imgData = canvas.toDataURL('image/png', 0.95);
+        imgData = canvas.toDataURL('image/png', 0.92);
         canvasWidth = canvas.width;
         canvasHeight = canvas.height;
       }
 
-      if (!imgData) throw new Error('Could not render image data');
-
-      const computedHeight = (canvasHeight * pdfWidth) / (canvasWidth || 1);
-
-      if (computedHeight <= pdfPageHeight) {
-        pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, computedHeight);
-      } else {
-        let remainingHeight = computedHeight;
-        let position = 0;
-
-        while (remainingHeight > 0) {
-          pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, computedHeight);
-          remainingHeight -= pdfPageHeight;
-          if (remainingHeight > 0) {
-            position -= pdfPageHeight;
-            pdf.addPage();
+      if (imgData) {
+        const computedHeight = (canvasHeight * pdfWidth) / (canvasWidth || 1);
+        if (computedHeight <= pdfPageHeight) {
+          pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, computedHeight);
+        } else {
+          let remainingHeight = computedHeight;
+          let position = 0;
+          while (remainingHeight > 0) {
+            pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, computedHeight);
+            remainingHeight -= pdfPageHeight;
+            if (remainingHeight > 0) {
+              position -= pdfPageHeight;
+              pdf.addPage();
+            }
           }
         }
       }
     }
 
-    const fileName = customFileName || `Bairaq_Report_${new Date().getTime()}.pdf`;
-
-    const pdfBlob = pdf.output('blob');
-    const pdfFile = new File([pdfBlob], fileName, { type: 'application/pdf' });
-
-    let shared = false;
-    if (typeof navigator !== 'undefined' && navigator.canShare && navigator.canShare({ files: [pdfFile] })) {
-      try {
-        await navigator.share({
-          files: [pdfFile],
-          title: 'قصاصات حسابات أولياء الأمور - بوابة بيرق',
-          text: 'مرفق لكم ملف قصاصات حسابات أولياء الأمور بصيغة PDF (تليجرام / واتساب)'
-        });
-        shared = true;
-      } catch (shareErr: any) {
-        if (shareErr?.name !== 'AbortError') {
-          console.warn('Share sheet cancelled or failed:', shareErr);
-        }
-      }
-    }
-
-    if (!shared) {
-      if (platform !== 'web') {
-        const pdfBase64 = pdf.output('datauristring').split(',')[1];
-        await saveAndShareFile(pdfBase64, fileName, 'application/pdf', true);
-      } else {
-        pdf.save(fileName);
-      }
-    }
+    // Save strictly as PDF
+    await saveOrSharePDF(pdf, fileName);
   } catch (err) {
     console.error('PDF generation failed:', err);
-    // Robust fallback: native browser print dialog
+    // Even on error, fallback to direct browser window/print or jsPDF save, never HTML file
     if (platform === 'web') {
       try {
         iframe.contentWindow?.focus();
@@ -243,9 +200,6 @@ export const printHTML = async (
       } catch (printErr) {
         console.error('Direct print failed:', printErr);
       }
-    } else {
-      const base64 = btoa(unescape(encodeURIComponent(html)));
-      await saveAndShareFile(base64, `Print_${Date.now()}.html`, 'text/html', true);
     }
   }
 };

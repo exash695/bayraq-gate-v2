@@ -775,7 +775,7 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
       `;
 
       await printHTML(fullHtml, `Bairaq_Parent_Slips_${Date.now()}.pdf`);
-      showToast('تم فتح نافذة الطباعة الفورية بنجاح! 🖨️', 'success');
+      showToast('تم استخراج واستحداث ملف PDF بنجاح! 📄🎉', 'success');
     } catch (err: any) {
       console.error(err);
       showToast('حدث خطأ أثناء إعداد القصاصات للطباعة: ' + (err?.message || ''), 'error');
