@@ -54,6 +54,34 @@ export const printHTML = async (
   const parsedDoc = parser.parseFromString(html, 'text/html');
   const pageNodes = Array.from(parsedDoc.querySelectorAll('.a4-page'));
 
+  // Create progress indicator overlay
+  const progressOverlay = document.createElement('div');
+  progressOverlay.id = 'bairaq-pdf-progress';
+  progressOverlay.style.cssText = `
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: #0f172a;
+    color: #ffffff;
+    padding: 14px 20px;
+    border-radius: 14px;
+    font-size: 14px;
+    font-weight: 700;
+    z-index: 999999;
+    box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);
+    border: 1px solid #334155;
+    direction: rtl;
+    font-family: system-ui, -apple-system, sans-serif;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  `;
+  progressOverlay.innerHTML = `
+    <span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:#38bdf8; animation: ping 1s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
+    <span id="bairaq-pdf-progress-text">جاري إعداد ملف PDF...</span>
+  `;
+  document.body.appendChild(progressOverlay);
+
   // Create isolated single-page render container in offscreen space
   const container = document.createElement('div');
   container.id = 'bairaq-pdf-render-container';
@@ -79,11 +107,16 @@ export const printHTML = async (
 
     if (pageNodes.length > 0) {
       for (let i = 0; i < pageNodes.length; i++) {
+        const progressTxt = document.getElementById('bairaq-pdf-progress-text');
+        if (progressTxt) {
+          progressTxt.innerText = `جاري تجهيز الصفحة ${i + 1} من ${pageNodes.length}...`;
+        }
+
         container.innerHTML = '';
         container.appendChild(document.importNode(pageNodes[i], true));
 
         // Brief delay for inline layout & fonts calculation
-        await new Promise((r) => setTimeout(r, 20));
+        await new Promise((r) => setTimeout(r, 15));
 
         const canvas = await html2canvas(container, {
           scale: 1.25,
@@ -140,12 +173,18 @@ export const printHTML = async (
     if (document.body.contains(container)) {
       document.body.removeChild(container);
     }
+    if (document.body.contains(progressOverlay)) {
+      document.body.removeChild(progressOverlay);
+    }
 
     await saveOrSharePDF(pdf, fileName);
   } catch (err) {
     console.error('PDF generation error:', err);
     if (document.body.contains(container)) {
       document.body.removeChild(container);
+    }
+    if (document.body.contains(progressOverlay)) {
+      document.body.removeChild(progressOverlay);
     }
     try {
       window.print();
@@ -265,44 +304,169 @@ async function saveAndShareFile(data: any, fileName: string, mimeType: string, i
       });
       return;
     } catch (nativeErr) {
-      console.error('Native Capacitor share failed, falling back to Web Share / download:', nativeErr);
+      console.error('Native Capacitor share failed, falling back to Web Share / modal:', nativeErr);
     }
   }
 
-  // 2. Web Share API for Mobile Browsers (Chrome Android, Safari iOS, PWA, etc.)
+  // 2. Open Native Share Dialog via Interactive User-Gesture Modal on Web / Mobile Browsers
+  showInteractiveShareModal(blob, fileName, mimeType);
+}
+
+/**
+ * Displays an interactive RTL popup modal that guarantees the native Android / iOS
+ * share sheet pops up upon direct user touch, solving browser user-gesture timeouts.
+ */
+function showInteractiveShareModal(blob: Blob, fileName: string, mimeType: string) {
+  const existing = document.getElementById('bairaq-share-modal-dialog');
+  if (existing) existing.remove();
+
+  const file = new File([blob], fileName, { type: mimeType });
+  const objectUrl = URL.createObjectURL(blob);
+
+  const modal = document.createElement('div');
+  modal.id = 'bairaq-share-modal-dialog';
+  modal.style.cssText = `
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(15, 23, 42, 0.75);
+    backdrop-filter: blur(8px);
+    z-index: 999999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    font-family: system-ui, -apple-system, sans-serif;
+    direction: rtl;
+  `;
+
+  modal.innerHTML = `
+    <div style="
+      background: #ffffff;
+      border-radius: 20px;
+      max-width: 440px;
+      width: 100%;
+      padding: 24px;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.35);
+      border: 1px solid #e2e8f0;
+      text-align: center;
+      animation: popIn 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    ">
+      <div style="
+        width: 64px;
+        height: 64px;
+        background: #dcfce7;
+        color: #15803d;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 32px;
+        margin: 0 auto 16px auto;
+      ">🎉</div>
+      <h3 style="font-size: 20px; font-weight: 800; color: #0f172a; margin-bottom: 8px;">تم تجهيز الملف بنجاح!</h3>
+      <p style="font-size: 13.5px; color: #475569; margin-bottom: 22px; line-height: 1.6;">
+        اضغط على الزر الأزرق أدناه لفتح **نافذة مشاركة التطبيقات** ومشاركة الملف مباشرة عبر <strong>تليجرام (Telegram)</strong> أو <strong>واتساب</strong> أو الطباعة.
+      </p>
+
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+        <button id="bairaq-share-main-btn" style="
+          width: 100%;
+          background: linear-gradient(135deg, #2563eb, #1d4ed8);
+          color: #ffffff;
+          border: none;
+          padding: 15px 20px;
+          border-radius: 12px;
+          font-weight: 800;
+          font-size: 15px;
+          cursor: pointer;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 10px;
+          box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
+        ">
+          <span>📲 فتح نافذة المشاركة (تليجرام / واتساب)</span>
+        </button>
+
+        <a id="bairaq-download-direct-btn" href="${objectUrl}" download="${fileName}" style="
+          width: 100%;
+          background: #f8fafc;
+          color: #334155;
+          border: 1px solid #cbd5e1;
+          padding: 12px 20px;
+          border-radius: 12px;
+          font-weight: 700;
+          font-size: 14px;
+          text-decoration: none;
+          box-sizing: border-box;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          gap: 8px;
+        ">
+          <span>💾 حفظ / تنزيل الملف على الجهاز</span>
+        </a>
+
+        <button id="bairaq-close-modal-btn" style="
+          background: transparent;
+          color: #94a3b8;
+          border: none;
+          padding: 8px;
+          font-size: 13px;
+          font-weight: 600;
+          cursor: pointer;
+          margin-top: 2px;
+        ">
+          إغلاق
+        </button>
+      </div>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  const mainShareBtn = document.getElementById('bairaq-share-main-btn');
+  const closeBtn = document.getElementById('bairaq-close-modal-btn');
+
+  const executeShare = async () => {
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      try {
+        if (!navigator.canShare || navigator.canShare({ files: [file] })) {
+          await navigator.share({
+            files: [file],
+            title: fileName,
+            text: fileName
+          });
+          modal.remove();
+          return;
+        }
+      } catch (err: any) {
+        if (err.name === 'AbortError') return;
+        console.warn('Navigator share error:', err);
+      }
+    }
+    // Fallback if browser can't share files
+    const downloadLink = document.getElementById('bairaq-download-direct-btn') as HTMLAnchorElement;
+    if (downloadLink) downloadLink.click();
+  };
+
+  mainShareBtn?.addEventListener('click', executeShare);
+
+  closeBtn?.addEventListener('click', () => {
+    modal.remove();
+  });
+
+  // Try auto-sharing immediately in case browser allows it
   if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
-    try {
-      const file = new File([blob], fileName, { type: mimeType });
-      if (!navigator.canShare || navigator.canShare({ files: [file] })) {
-        await navigator.share({
-          files: [file],
-          title: fileName,
-          text: fileName,
-        });
-        return;
-      }
-    } catch (shareErr: any) {
-      if (shareErr.name === 'AbortError') {
-        console.log('User dismissed share sheet window');
-        return;
-      }
-      console.warn('Web Share API failed, falling back to browser download:', shareErr);
-    }
-  }
-
-  // 3. Standard Web Download (Blob URL trigger)
-  try {
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', fileName);
-    document.body.appendChild(link);
-    link.click();
-    setTimeout(() => {
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
-    }, 500);
-  } catch (webErr) {
-    console.error('Web blob download failed:', webErr);
+    navigator.share({
+      files: [file],
+      title: fileName,
+      text: fileName
+    }).then(() => {
+      modal.remove();
+    }).catch(() => {
+      // Ignored: User can click the prominent blue button with fresh gesture!
+    });
   }
 }
+
