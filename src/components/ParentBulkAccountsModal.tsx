@@ -89,6 +89,8 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
   const [historySearchQuery, setHistorySearchQuery] = useState('');
   const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
   const [selectedHistoryItem, setSelectedHistoryItem] = useState<ExcelUploadHistoryEntry | null>(null);
+  const historySyncInputRef = useRef<HTMLInputElement>(null);
+  const [isSavingHistory, setIsSavingHistory] = useState(false);
 
   // Load history logs from server and cache
   const fetchUploadHistory = async () => {
@@ -118,6 +120,160 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
       fetchUploadHistory();
     }
   }, [isOpen]);
+
+  // Handle editing student name inside an expanded history entry
+  const handleHistoryNameEdit = (entryId: string, accId: string, newName: string) => {
+    setHistoryLogs(prev => prev.map(entry => {
+      if (entry.id !== entryId) return entry;
+      const updatedAccounts = entry.accounts.map(acc => {
+        if (acc.id === accId) {
+          return { ...acc, studentName: newName };
+        }
+        return acc;
+      });
+      const sampleNames = updatedAccounts.slice(0, 4).map(a => a.studentName);
+      return { ...entry, accounts: updatedAccounts, sampleStudentNames: sampleNames };
+    }));
+
+    if (selectedHistoryItem && selectedHistoryItem.id === entryId) {
+      const updatedAccs = selectedHistoryItem.accounts.map(acc => acc.id === accId ? { ...acc, studentName: newName } : acc);
+      setSelectedHistoryItem({ ...selectedHistoryItem, accounts: updatedAccs, sampleStudentNames: updatedAccs.slice(0, 4).map(a => a.studentName) });
+    }
+  };
+
+  // Save updated history student names to server
+  const handleSaveHistoryEntryNames = async (entry: ExcelUploadHistoryEntry) => {
+    setIsSavingHistory(true);
+    try {
+      const updates = entry.accounts.map(acc => ({
+        phone: acc.formattedPhone || acc.rawPhone,
+        studentName: acc.studentName
+      }));
+
+      // 1. Update accounts in backend DB
+      await fetch('/api/auth/parent-update-student-names', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updates })
+      });
+
+      // 2. Save history entry back
+      await fetch('/api/auth/parent-upload-history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(entry)
+      });
+
+      // 3. Update local cache
+      localStorage.setItem('berq_parent_excel_uploads_history', JSON.stringify(historyLogs));
+
+      showToast('تم حفظ وتحديث أسماء الطلاب في السجل وجميع الحسابات بنجاح ⚡', 'success');
+    } catch (err: any) {
+      console.error(err);
+      showToast('خطأ أثناء حفظ التحديثات: ' + (err?.message || ''), 'error');
+    } finally {
+      setIsSavingHistory(false);
+    }
+  };
+
+  // Handle smart sync by re-uploading an Excel file in History tab
+  const handleHistorySyncFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (evt) => {
+      try {
+        const bstr = evt.target?.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const data: any[] = XLSX.utils.sheet_to_json(ws, { header: 1 });
+
+        if (!data || data.length === 0) {
+          showToast('الملف فارغ', 'error');
+          return;
+        }
+
+        let nameColIdx = 0;
+        let phoneColIdx = 1;
+
+        const headerRow = data[0] || [];
+        headerRow.forEach((cellVal: any, idx: number) => {
+          const str = String(cellVal || '').toLowerCase().trim();
+          if (str.includes('هاتف') || str.includes('رقم') || str.includes('phone') || str.includes('موبايل') || str.includes('جوال')) {
+            phoneColIdx = idx;
+          } else if (str.includes('اسم') || str.includes('طالب') || str.includes('name') || str.includes('تلميذ')) {
+            nameColIdx = idx;
+          }
+        });
+
+        const isPhonePattern = (str: string) => {
+          if (!str) return false;
+          const cleaned = str.toString().replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString()).replace(/\D/g, '');
+          return cleaned.length >= 8 && cleaned.length <= 12 && (cleaned.startsWith('7') || cleaned.startsWith('07') || cleaned.startsWith('964') || cleaned.startsWith('00964'));
+        };
+
+        let startRowIdx = 0;
+        const firstRowStr = JSON.stringify(data[0] || []).toLowerCase();
+        if (firstRowStr.includes('اسم') || firstRowStr.includes('طالب') || firstRowStr.includes('هاتف') || firstRowStr.includes('رقم')) {
+          startRowIdx = 1;
+        }
+
+        const updates: { phone: string; studentName: string }[] = [];
+
+        for (let i = startRowIdx; i < data.length; i++) {
+          const rowData = data[i];
+          if (!rowData || rowData.length === 0) continue;
+
+          let valA = rowData[nameColIdx] !== undefined ? String(rowData[nameColIdx]).trim() : '';
+          let valB = rowData[phoneColIdx] !== undefined ? String(rowData[phoneColIdx]).trim() : '';
+
+          let finalStudentName = '';
+          let finalPhoneRaw = '';
+
+          if (isPhonePattern(valA) && !isPhonePattern(valB) && valB.length > 0) {
+            finalStudentName = valB;
+            finalPhoneRaw = valA;
+          } else if (isPhonePattern(valA) && (!valB || isPhonePattern(valB))) {
+            finalStudentName = '';
+            finalPhoneRaw = valA;
+          } else {
+            finalStudentName = valA;
+            finalPhoneRaw = valB;
+          }
+
+          if (finalPhoneRaw && finalStudentName && !/^\d+$/.test(finalStudentName.replace(/\s+/g, ''))) {
+            updates.push({ phone: finalPhoneRaw, studentName: finalStudentName });
+          }
+        }
+
+        if (updates.length === 0) {
+          showToast('لم يتم العثور على أرقام هواتف وأسماء صالحة في الملف', 'error');
+          return;
+        }
+
+        showToast(`جاري مطابقة وتحديث ${updates.length} اسم طالب بالهاتف...`, 'info');
+
+        const res = await fetch('/api/auth/parent-update-student-names', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ updates })
+        });
+
+        const resData = await res.json();
+        if (resData.success) {
+          await fetchUploadHistory();
+          showToast(`تمت المطابقة الذكية بالهاتف وتحديث أسماء ${resData.updatedCount} طالب في السجل بنجاح! 🎉`, 'success');
+        } else {
+          showToast('فشل التحديث: ' + (resData.message || ''), 'error');
+        }
+      } catch (err: any) {
+        console.error(err);
+        showToast('خطأ أثناء معالجة ملف المطابقة: ' + (err?.message || ''), 'error');
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
 
   if (!isOpen) return null;
 
@@ -779,9 +935,28 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
                     className="w-full pr-9 pl-3 py-2 bg-black/30 border border-white/10 rounded-xl text-xs text-white placeholder-white/30 outline-none focus:border-emerald-500"
                   />
                 </div>
-                <span className="text-xs text-white/60 font-bold self-end sm:self-auto">
-                  إجمالي الملفات المسجلة: <strong className="text-emerald-400">{historyLogs.length}</strong>
-                </span>
+
+                <div className="flex items-center gap-2 self-end sm:self-auto flex-wrap">
+                  <input
+                    type="file"
+                    ref={historySyncInputRef}
+                    accept=".xlsx, .xls, .csv"
+                    onChange={handleHistorySyncFileUpload}
+                    className="hidden"
+                  />
+                  <button
+                    onClick={() => historySyncInputRef.current?.click()}
+                    className="px-3.5 py-2 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white border border-emerald-400/30 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-md transition-all"
+                    title="تحديث أسماء الطلاب السابقة عبر رفع ملف إكسل يضم أرقام الهواتف والأسماء"
+                  >
+                    <RefreshCw size={14} />
+                    <span>مطابقة إكسل وتحديث الأسماء بالهاتف ⚡</span>
+                  </button>
+
+                  <span className="text-xs text-white/60 font-bold">
+                    إجمالي الملفات: <strong className="text-emerald-400">{historyLogs.length}</strong>
+                  </span>
+                </div>
               </div>
 
               {filteredHistory.length === 0 ? (
@@ -839,7 +1014,7 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
                             className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
                           >
                             <Eye size={14} />
-                            <span>{selectedHistoryItem?.id === entry.id ? 'إخفاء' : 'عرض البيانات'}</span>
+                            <span>{selectedHistoryItem?.id === entry.id ? 'إخفاء' : 'عرض البيانات / تعديل الأسماء'}</span>
                           </button>
 
                           <button
@@ -866,17 +1041,39 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
 
                       {/* Expanded View of Accounts */}
                       {selectedHistoryItem?.id === entry.id && (
-                        <div className="mt-3 bg-black/40 border border-white/10 rounded-xl p-3 space-y-2 animate-in fade-in">
-                          <h4 className="text-xs font-black text-emerald-400 flex items-center justify-between">
-                            <span>قائمة كافة الحسابات لهذا الملف ({entry.accounts.length})</span>
-                            <span className="text-[10px] text-white/40 font-mono">ID: {entry.id}</span>
-                          </h4>
-                          <div className="max-h-48 overflow-y-auto space-y-1">
+                        <div className="mt-3 bg-black/40 border border-white/10 rounded-xl p-3 space-y-3 animate-in fade-in">
+                          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-white/10 pb-2">
+                            <h4 className="text-xs font-black text-emerald-400 flex items-center gap-2">
+                              <span>قائمة كافة الحسابات لهذا الملف ({entry.accounts.length})</span>
+                              <span className="text-[10px] text-white/40 font-mono">ID: {entry.id}</span>
+                            </h4>
+                            <button
+                              onClick={() => handleSaveHistoryEntryNames(entry)}
+                              disabled={isSavingHistory}
+                              className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black rounded-lg flex items-center gap-1.5 shadow cursor-pointer transition-colors"
+                            >
+                              <RefreshCw size={12} className={isSavingHistory ? 'animate-spin' : ''} />
+                              <span>حفظ وتحديث أسماء الطلاب بالسيرفر</span>
+                            </button>
+                          </div>
+
+                          <p className="text-[10px] text-amber-300/80 font-bold">
+                            💡 يمكنك تعديل اسم أي طالب في الحقل المخصص أدناه، ثم الضغط على "حفظ وتحديث أسماء الطلاب بالسيرفر" لحفظ التعديل وإعادة طباعة القصاصات بالاسم الجديد فوراً دون تغيير كلمة المرور.
+                          </p>
+
+                          <div className="max-h-60 overflow-y-auto space-y-1.5 pr-1">
                             {entry.accounts.map((acc, idx) => (
-                              <div key={idx} className="flex items-center justify-between text-xs py-1 px-2 hover:bg-white/5 rounded border-b border-white/5 last:border-0 font-bold">
-                                <span>{idx + 1}. {acc.studentName}</span>
-                                <span className="font-mono text-emerald-400 dir-ltr" style={{ direction: 'ltr' }}>{acc.formattedPhone}</span>
-                                <span className="font-mono text-amber-300">{acc.password}</span>
+                              <div key={acc.id || idx} className="flex items-center justify-between text-xs py-1.5 px-2.5 bg-white/5 hover:bg-white/10 rounded-lg border border-white/5 gap-2">
+                                <span className="text-white/40 font-mono w-6 shrink-0 text-center">{idx + 1}.</span>
+                                <input
+                                  type="text"
+                                  value={acc.studentName}
+                                  onChange={e => handleHistoryNameEdit(entry.id, acc.id, e.target.value)}
+                                  placeholder="اسم الطالب..."
+                                  className="bg-black/40 border border-white/10 focus:border-emerald-500 text-white rounded px-2.5 py-1 text-xs font-bold flex-1 outline-none"
+                                />
+                                <span className="font-mono text-emerald-400 text-[11px] font-bold shrink-0 px-2" style={{ direction: 'ltr' }}>{acc.formattedPhone}</span>
+                                <span className="font-mono text-amber-300 text-[11px] font-bold shrink-0">{acc.password}</span>
                               </div>
                             ))}
                           </div>

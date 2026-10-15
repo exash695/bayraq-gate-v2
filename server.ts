@@ -9818,35 +9818,13 @@ async function startServer() {
 
           if (existingUsers && existingUsers.length > 0) {
             const targetUser = existingUsers[0];
-            if (targetUser.id.startsWith('pending_')) {
-              try {
-                await db.update(users).set({
-                  id: userId,
-                  name: parentDisplayName,
-                  phone: cleanPhone,
-                  email: userEmail,
-                  passwordHash: passwordHash,
-                  schoolId: resolvedSchool,
-                  role: 'parent'
-                }).where(eq(users.id, targetUser.id));
-              } catch (pendingUpErr) {
-                await db.update(users).set({
-                  name: parentDisplayName,
-                  phone: cleanPhone,
-                  passwordHash: passwordHash,
-                  schoolId: resolvedSchool,
-                  role: 'parent'
-                }).where(eq(users.id, targetUser.id));
-              }
-            } else {
-              await db.update(users).set({
-                name: parentDisplayName,
-                phone: cleanPhone,
-                passwordHash: passwordHash,
-                schoolId: resolvedSchool,
-                role: 'parent'
-              }).where(eq(users.id, targetUser.id));
-            }
+            // Update name and schoolId without overwriting existing password if account exists
+            await db.update(users).set({
+              name: parentDisplayName,
+              phone: cleanPhone,
+              schoolId: resolvedSchool,
+              role: 'parent'
+            }).where(eq(users.id, targetUser.id));
           } else {
             try {
               await db.insert(users).values({
@@ -9863,7 +9841,6 @@ async function startServer() {
               await db.update(users).set({
                 name: parentDisplayName,
                 phone: cleanPhone,
-                passwordHash: passwordHash,
                 schoolId: resolvedSchool,
                 role: 'parent'
               }).where(eq(users.email, userEmail));
@@ -9909,9 +9886,136 @@ async function startServer() {
         }));
       }
 
-      res.json({ success: true, count: createdCount, message: `تم إنشاء وتسجيل ${createdCount} حساب ولي أمر في النظام بنجاح` });
+      // Automatically update all historical Excel upload entries where these phone numbers exist
+      try {
+        const phoneToNameMap = new Map<string, string>();
+        accounts.forEach((acc: any) => {
+          const p = String(acc.phone || acc.formattedPhone || '').replace(/^0+/, '').replace(/^\+964/, '');
+          if (p && acc.studentName && !/^\d+$/.test(acc.studentName)) {
+            phoneToNameMap.set(p, acc.studentName);
+          }
+        });
+
+        if (phoneToNameMap.size > 0) {
+          const historyDocs = await db.select().from(firestore_docs).where(ilike(firestore_docs.path, 'parent_excel_uploads/%'));
+          for (const doc of historyDocs) {
+            const data = doc.data;
+            if (data && Array.isArray(data.accounts)) {
+              let modified = false;
+              const updatedAccounts = data.accounts.map((acc: any) => {
+                const accPhone = String(acc.formattedPhone || acc.phone || acc.rawPhone || '').replace(/^0+/, '').replace(/^\+964/, '');
+                if (phoneToNameMap.has(accPhone)) {
+                  modified = true;
+                  return { ...acc, studentName: phoneToNameMap.get(accPhone) };
+                }
+                return acc;
+              });
+
+              if (modified) {
+                const updatedSamples = updatedAccounts.slice(0, 4).map((a: any) => a.studentName);
+                await db.update(firestore_docs).set({
+                  data: { ...data, accounts: updatedAccounts, sampleStudentNames: updatedSamples },
+                  updatedAt: new Date()
+                }).where(eq(firestore_docs.path, doc.path));
+              }
+            }
+          }
+        }
+      } catch (histSyncErr) {
+        console.error('Error syncing student names to previous history entries:', histSyncErr);
+      }
+
+      res.json({ success: true, count: createdCount, message: `تم إنشاء وتسجيل/تحديث ${createdCount} حساب ولي أمر في النظام بنجاح` });
     } catch (error: any) {
       console.error('Error creating parent bulk accounts:', error);
+      res.status(500).json({ success: false, message: error.message });
+    }
+  });
+
+  // POST /api/auth/parent-update-student-names - Update student names for existing parent accounts by phone number
+  app.post('/api/auth/parent-update-student-names', async (req, res) => {
+    try {
+      const { updates } = req.body;
+      if (!Array.isArray(updates) || updates.length === 0) {
+        return res.status(400).json({ success: false, message: 'لا توجد بيانات للتحديث' });
+      }
+
+      let updatedCount = 0;
+      const phoneToNameMap = new Map<string, string>();
+
+      for (const item of updates) {
+        const phoneRaw = String(item.phone || item.formattedPhone || '').trim();
+        const studentName = String(item.studentName || '').trim();
+        if (!phoneRaw || !studentName) continue;
+
+        const cleanPhone = formatPhoneForWhatsApp(phoneRaw);
+        const raw7Phone = phoneRaw.replace(/^0+/, '').replace(/^\+964/, '');
+        phoneToNameMap.set(raw7Phone, studentName);
+        if (cleanPhone) phoneToNameMap.set(cleanPhone, studentName);
+
+        const parentDisplayName = `ولي أمر ${studentName}`;
+        const userId = `usr_p_${raw7Phone}`;
+
+        // 1. Update users table
+        try {
+          await db.update(users).set({
+            name: parentDisplayName
+          }).where(or(
+            eq(users.id, userId),
+            cleanPhone ? eq(users.phone, cleanPhone) : undefined
+          ));
+        } catch (e) {}
+
+        // 2. Update firestore_docs parent_accounts
+        try {
+          const docPath = `parent_accounts/${cleanPhone}`;
+          const existingDoc = await db.select().from(firestore_docs).where(eq(firestore_docs.path, docPath)).limit(1);
+          if (existingDoc && existingDoc.length > 0) {
+            const currentData = existingDoc[0].data || {};
+            await db.update(firestore_docs).set({
+              data: { ...currentData, studentName },
+              updatedAt: new Date()
+            }).where(eq(firestore_docs.path, docPath));
+          }
+        } catch (e) {}
+
+        updatedCount++;
+      }
+
+      // 3. Update all parent_excel_uploads history entries
+      try {
+        const historyDocs = await db.select().from(firestore_docs).where(ilike(firestore_docs.path, 'parent_excel_uploads/%'));
+        for (const doc of historyDocs) {
+          const data = doc.data;
+          if (data && Array.isArray(data.accounts)) {
+            let modified = false;
+            const updatedAccounts = data.accounts.map((acc: any) => {
+              const accPhone = String(acc.formattedPhone || acc.phone || acc.rawPhone || '').replace(/^0+/, '').replace(/^\+964/, '');
+              for (const [pKey, newName] of phoneToNameMap.entries()) {
+                if (accPhone === pKey || accPhone.endsWith(pKey) || pKey.endsWith(accPhone)) {
+                  modified = true;
+                  return { ...acc, studentName: newName };
+                }
+              }
+              return acc;
+            });
+
+            if (modified) {
+              const updatedSamples = updatedAccounts.slice(0, 4).map((a: any) => a.studentName);
+              await db.update(firestore_docs).set({
+                data: { ...data, accounts: updatedAccounts, sampleStudentNames: updatedSamples },
+                updatedAt: new Date()
+              }).where(eq(firestore_docs.path, doc.path));
+            }
+          }
+        }
+      } catch (histUpErr) {
+        console.error('Error updating parent_excel_uploads with new student names:', histUpErr);
+      }
+
+      res.json({ success: true, updatedCount, message: `تم تحديث أسماء ${updatedCount} طالب في الحسابات والسجلات بنجاح` });
+    } catch (error: any) {
+      console.error('Error in parent-update-student-names:', error);
       res.status(500).json({ success: false, message: error.message });
     }
   });
