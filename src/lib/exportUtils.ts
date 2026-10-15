@@ -49,28 +49,24 @@ export const printHTML = async (
     ? (customFileName.toLowerCase().endsWith('.pdf') ? customFileName : `${customFileName}.pdf`)
     : `Bairaq_Parent_Slips_${Date.now()}.pdf`;
 
-  // Render temporary container directly in document.body for lightning-fast, non-blocking DOM capture
+  // Parse HTML string into DOM structure
+  const parser = new DOMParser();
+  const parsedDoc = parser.parseFromString(html, 'text/html');
+  const pageNodes = Array.from(parsedDoc.querySelectorAll('.a4-page'));
+
+  // Create isolated single-page render container in offscreen space
   const container = document.createElement('div');
   container.id = 'bairaq-pdf-render-container';
-  container.style.position = 'fixed';
+  container.style.position = 'absolute';
+  container.style.left = '-9999px';
   container.style.top = '0';
-  container.style.left = '0';
-  container.style.width = '794px'; // A4 width at 96 DPI
-  container.style.zIndex = '-99999';
-  container.style.opacity = '0.01';
-  container.style.pointerEvents = 'none';
+  container.style.width = '794px'; // Standard A4 width at 96 DPI
   container.style.background = '#ffffff';
+  container.style.zIndex = '-99999';
   container.style.overflow = 'hidden';
-  container.innerHTML = html;
   document.body.appendChild(container);
 
-  // Give browser a micro-tick to calculate layouts and inline styles
-  await new Promise((r) => setTimeout(r, 60));
-
   try {
-    const pageNodes = container.querySelectorAll('.a4-page');
-    const nodesToRender = pageNodes.length > 0 ? Array.from(pageNodes) : [container];
-
     const pdf = new jsPDF({
       orientation: 'portrait',
       unit: 'mm',
@@ -81,14 +77,16 @@ export const printHTML = async (
     const pdfWidth = pdf.internal.pageSize.getWidth();
     const pdfHeight = pdf.internal.pageSize.getHeight();
 
-    let canvasSuccess = true;
+    if (pageNodes.length > 0) {
+      for (let i = 0; i < pageNodes.length; i++) {
+        container.innerHTML = '';
+        container.appendChild(document.importNode(pageNodes[i], true));
 
-    for (let i = 0; i < nodesToRender.length; i++) {
-      const pageEl = nodesToRender[i] as HTMLElement;
+        // Brief delay for inline layout & fonts calculation
+        await new Promise((r) => setTimeout(r, 20));
 
-      try {
-        const canvas = await html2canvas(pageEl, {
-          scale: 1.5,
+        const canvas = await html2canvas(container, {
+          scale: 1.25,
           useCORS: true,
           logging: false,
           backgroundColor: '#ffffff',
@@ -97,31 +95,53 @@ export const printHTML = async (
           windowHeight: 1123,
         });
 
-        const imgData = canvas.toDataURL('image/jpeg', 0.88);
+        const imgData = canvas.toDataURL('image/jpeg', 0.85);
         if (i > 0) pdf.addPage();
         pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
-      } catch (pageErr) {
-        console.warn(`Page ${i + 1} capture failed:`, pageErr);
-        canvasSuccess = false;
-        break;
-      }
 
-      // Yield event loop
-      await new Promise((r) => setTimeout(r, 10));
+        // Free memory immediately
+        container.innerHTML = '';
+        canvas.width = 0;
+        canvas.height = 0;
+
+        // Yield to event loop
+        await new Promise((r) => setTimeout(r, 5));
+      }
+    } else {
+      // Fallback for single raw HTML string
+      container.innerHTML = html;
+      await new Promise((r) => setTimeout(r, 50));
+
+      const canvas = await html2canvas(container, {
+        scale: 1.25,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+        allowTaint: true,
+        windowWidth: 794,
+      });
+
+      const imgData = canvas.toDataURL('image/jpeg', 0.85);
+      const imgHeight = (canvas.height * pdfWidth) / canvas.width;
+      let heightLeft = imgHeight;
+      let position = 0;
+
+      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, Math.min(imgHeight, pdfHeight), undefined, 'FAST');
+      heightLeft -= pdfHeight;
+
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, imgHeight, undefined, 'FAST');
+        heightLeft -= pdfHeight;
+      }
     }
 
-    // Clean up temporary DOM container
     if (document.body.contains(container)) {
       document.body.removeChild(container);
     }
 
-    if (canvasSuccess) {
-      await saveOrSharePDF(pdf, fileName);
-      return;
-    }
-
-    // Fallback: window print
-    window.print();
+    await saveOrSharePDF(pdf, fileName);
   } catch (err) {
     console.error('PDF generation error:', err);
     if (document.body.contains(container)) {
