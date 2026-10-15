@@ -122,10 +122,16 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
   if (!isOpen) return null;
 
   const processPhoneRow = (studentName: string, phoneRaw: string): ParentAccountRow => {
-    const cleanStudent = studentName ? studentName.trim() : 'طالب بدون اسم';
+    let cleanStudent = studentName ? studentName.trim() : '';
     const cleanPhone = sanitizeIraqiPhoneNumber(phoneRaw);
     let status: 'valid' | 'duplicate' | 'invalid_phone' = 'valid';
     let errorMessage = '';
+
+    // If student name is empty or consists purely of digits/phone numbers, sanitize it
+    const digitsOnly = cleanStudent.replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString()).replace(/\D/g, '');
+    if (!cleanStudent || (digitsOnly.length >= 8 && digitsOnly === cleanStudent.replace(/\D/g, ''))) {
+      cleanStudent = cleanPhone ? `طالب (ولي الأمر: ${cleanPhone})` : 'طالب بدون اسم';
+    }
 
     if (!cleanPhone || !cleanPhone.startsWith('7') || cleanPhone.length < 9 || cleanPhone.length > 11) {
       status = 'invalid_phone';
@@ -185,6 +191,21 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
         const newRows: ParentAccountRow[] = [];
         const phoneSet = new Set<string>();
 
+        let nameColIdx = 0;
+        let phoneColIdx = 1;
+
+        if (data.length > 0) {
+          const headerRow = data[0] || [];
+          headerRow.forEach((cellVal: any, idx: number) => {
+            const str = String(cellVal || '').toLowerCase().trim();
+            if (str.includes('هاتف') || str.includes('رقم') || str.includes('phone') || str.includes('موبايل') || str.includes('جوال')) {
+              phoneColIdx = idx;
+            } else if (str.includes('اسم') || str.includes('طالب') || str.includes('name') || str.includes('تلميذ')) {
+              nameColIdx = idx;
+            }
+          });
+        }
+
         let startRowIdx = 0;
         const firstRowStr = JSON.stringify(data[0] || []).toLowerCase();
         if (
@@ -198,16 +219,41 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
           startRowIdx = 1;
         }
 
+        const isPhonePattern = (str: string) => {
+          if (!str) return false;
+          const cleaned = str.toString().replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d).toString()).replace(/\D/g, '');
+          return cleaned.length >= 8 && cleaned.length <= 12 && (cleaned.startsWith('7') || cleaned.startsWith('07') || cleaned.startsWith('964') || cleaned.startsWith('00964'));
+        };
+
         for (let i = startRowIdx; i < data.length; i++) {
           const rowData = data[i];
           if (!rowData || rowData.length === 0) continue;
 
-          const studentName = rowData[0] ? String(rowData[0]).trim() : '';
-          const phoneRaw = rowData[1] ? String(rowData[1]).trim() : (rowData[0] ? String(rowData[0]).trim() : '');
+          let valA = rowData[nameColIdx] !== undefined ? String(rowData[nameColIdx]).trim() : '';
+          let valB = rowData[phoneColIdx] !== undefined ? String(rowData[phoneColIdx]).trim() : '';
 
-          if (!studentName && !phoneRaw) continue;
+          if (!valB && rowData.length > 1) {
+            valB = String(rowData.find((v: any, idx: number) => idx !== nameColIdx && v !== undefined && v !== null && String(v).trim() !== '') || '').trim();
+          }
 
-          const parsed = processPhoneRow(studentName, phoneRaw);
+          let finalStudentName = '';
+          let finalPhoneRaw = '';
+
+          // Smart auto-detection if columns are swapped or column A is phone
+          if (isPhonePattern(valA) && !isPhonePattern(valB) && valB.length > 0) {
+            finalStudentName = valB;
+            finalPhoneRaw = valA;
+          } else if (isPhonePattern(valA) && (!valB || isPhonePattern(valB))) {
+            finalStudentName = '';
+            finalPhoneRaw = valA;
+          } else {
+            finalStudentName = valA;
+            finalPhoneRaw = valB;
+          }
+
+          if (!finalStudentName && !finalPhoneRaw) continue;
+
+          const parsed = processPhoneRow(finalStudentName, finalPhoneRaw);
 
           if (parsed.status === 'valid' && phoneSet.has(parsed.formattedPhone)) {
             parsed.status = 'duplicate';
@@ -358,111 +404,148 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
     }
 
     try {
-      const cardsHtml = targetRows.map((item) => `
-        <div style="
-          box-sizing: border-box;
-          border: 2px dashed #94a3b8;
-          border-radius: 12px;
-          padding: 12px;
-          background: #ffffff;
-          display: flex;
-          flex-direction: column;
-          justify-content: space-between;
-          position: relative;
-          page-break-inside: avoid;
-          height: 100%;
-          min-height: 200px;
-          font-family: 'Tajawal', 'Segoe UI', Tahoma, sans-serif;
-        ">
-          <span style="position: absolute; top: -10px; right: 16px; background: #ffffff; padding: 0 6px; font-size: 11px; color: #64748b; font-weight: bold;">✂ قص من هنا</span>
-          
-          <div>
-            <div style="
-              background: linear-gradient(135deg, #101935 0%, #1e293b 100%);
-              color: #ffd600;
-              padding: 8px 12px;
-              border-radius: 8px;
-              text-align: center;
-              font-weight: 800;
-              font-size: 14px;
-              margin-bottom: 10px;
-            ">
-              بَوّابة بيرق - مدرسة ${schoolName}
-            </div>
+      showToast('جاري تحضير ملف PDF بدقة عالية وشديدة الوضوح...', 'info');
 
-            <div style="text-align: center; font-size: 13px; font-weight: 800; color: #0f172a; margin-bottom: 10px;">
-              إلى ولي أمر الطالب/ة: <span style="color: #0284c7;">${item.studentName}</span>
-            </div>
+      // Chunk cards into groups of 8 cards per A4 page for perfect printing
+      const cardsPerPage = 8;
+      const pages: ParentAccountRow[][] = [];
+      for (let i = 0; i < targetRows.length; i += cardsPerPage) {
+        pages.push(targetRows.slice(i, i + cardsPerPage));
+      }
 
+      const totalPages = pages.length;
+
+      const pagesHtml = pages.map((pageCards, pageIdx) => {
+        const cardsHtml = pageCards.map((item) => {
+          let displayStudentName = item.studentName || '';
+          // Ensure phone numbers never appear as student names
+          if (!displayStudentName || /^\+?\d+$/.test(displayStudentName.replace(/\s+/g, ''))) {
+            displayStudentName = item.formattedPhone ? `طالب (ولي الأمر: ${item.formattedPhone})` : 'طالب بدون اسم';
+          }
+
+          return `
             <div style="
-              background: #f8fafc;
-              border: 1px solid #cbd5e1;
-              border-radius: 8px;
+              box-sizing: border-box;
+              border: 1.5px dashed #475569;
+              border-radius: 10px;
               padding: 10px 12px;
-              margin-bottom: 10px;
+              background: #ffffff;
+              display: flex;
+              flex-direction: column;
+              justify-content: space-between;
+              position: relative;
+              height: 220px;
+              font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             ">
-              <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; margin-bottom: 6px; border-bottom: 1px solid #e2e8f0; padding-bottom: 6px;">
-                <span style="color: #64748b; font-weight: 700;">اسم المستخدم (الهاتف):</span>
-                <span style="font-family: monospace; font-weight: 800; font-size: 14px; color: #059669; direction: ltr;">${item.formattedPhone}</span>
+              <span style="position: absolute; top: -10px; right: 14px; background: #ffffff; padding: 0 6px; font-size: 10px; color: #64748b; font-weight: 700;">✂ قص من هنا</span>
+              
+              <div>
+                <div style="
+                  background: #0f172a;
+                  color: #facc15;
+                  padding: 6px 10px;
+                  border-radius: 6px;
+                  text-align: center;
+                  font-weight: 800;
+                  font-size: 13px;
+                  margin-bottom: 8px;
+                ">
+                  بَوّابة بيرق - مدرسة ${schoolName}
+                </div>
+
+                <div style="text-align: center; font-size: 13px; font-weight: 800; color: #0f172a; margin-bottom: 8px; background: #e0f2fe; padding: 5px 8px; border-radius: 6px; border: 1px solid #bae6fd;">
+                  إلى ولي أمر الطالب/ة: <span style="color: #0369a1; font-weight: 900;">${displayStudentName}</span>
+                </div>
+
+                <div style="
+                  background: #f8fafc;
+                  border: 1px solid #cbd5e1;
+                  border-radius: 6px;
+                  padding: 8px 10px;
+                ">
+                  <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; margin-bottom: 5px; border-bottom: 1px dashed #cbd5e1; padding-bottom: 4px;">
+                    <span style="color: #475569; font-weight: 700;">اسم المستخدم (الهاتف):</span>
+                    <span style="font-family: monospace; font-weight: 800; font-size: 14px; color: #047857; direction: ltr;">${item.formattedPhone}</span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px;">
+                    <span style="color: #475569; font-weight: 700;">كلمة المرور الابتدائية:</span>
+                    <span style="font-family: monospace; font-weight: 800; font-size: 14px; color: #b45309; letter-spacing: 1px;">${item.password}</span>
+                  </div>
+                </div>
               </div>
-              <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px;">
-                <span style="color: #64748b; font-weight: 700;">كلمة المرور الابتدائية:</span>
-                <span style="font-family: monospace; font-weight: 800; font-size: 14px; color: #d97706; letter-spacing: 1px;">${item.password}</span>
+
+              <div style="text-align: center; font-size: 9.5px; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 4px; margin-top: 4px;">
+                <strong>📱 يرجى تحميل تطبيق (بَوّابة بيرق) وتسجيل الدخول بهذه البيانات.</strong>
               </div>
             </div>
-          </div>
+          `;
+        }).join('');
 
-          <div style="text-align: center; font-size: 10px; color: #64748b; border-top: 1px solid #f1f5f9; padding-top: 6px;">
-            <div style="font-weight: 700;">📱 يرجى تحميل تطبيق (بَوّابة بيرق) وتسجيل الدخول بهذه البيانات.</div>
-            <div style="font-size: 9px; color: #94a3b8; margin-top: 2px;">* رابط التطبيق متوفر في قناة التليجرام الخاصة بصفكم.</div>
+        return `
+          <div class="a4-page" style="
+            width: 794px;
+            height: 1123px;
+            padding: 24px;
+            box-sizing: border-box;
+            background: #ffffff;
+            page-break-after: always;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            overflow: hidden;
+            margin: 0 auto;
+          ">
+            <div style="text-align: center; margin-bottom: 14px; border-bottom: 2px solid #0284c7; padding-bottom: 8px;">
+              <h2 style="font-size: 17px; color: #0f172a; font-weight: 900; margin: 0;">بَوّابة بيرق التعليمية - قصاصات دخول أولياء الأمور</h2>
+              <p style="font-size: 11px; color: #64748b; margin-top: 3px; font-weight: 700;">مدرسة ${schoolName} • صفحة ${pageIdx + 1} من ${totalPages} • إجمالي القصاصات: ${targetRows.length}</p>
+            </div>
+
+            <div style="
+              display: grid;
+              grid-template-columns: repeat(2, 1fr);
+              grid-template-rows: repeat(4, 1fr);
+              gap: 12px;
+              flex-grow: 1;
+            ">
+              ${cardsHtml}
+            </div>
           </div>
-        </div>
-      `).join('');
+        `;
+      }).join('');
 
       const fullHtml = `
         <!DOCTYPE html>
         <html dir="rtl" lang="ar">
         <head>
           <meta charset="utf-8">
-          <link rel="preconnect" href="https://fonts.googleapis.com">
-          <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-          <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@500;700;800;900&display=swap" rel="stylesheet">
           <style>
             * { box-sizing: border-box; margin: 0; padding: 0; }
             body {
-              font-family: 'Tajawal', sans-serif;
               background: #ffffff;
-              padding: 16px;
               direction: rtl;
-            }
-            .grid-container {
-              display: grid;
-              grid-template-columns: repeat(2, 1fr);
-              gap: 16px;
-              width: 100%;
-              max-width: 800px;
-              margin: 0 auto;
+              font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             }
             @media print {
-              body { padding: 8px; }
-              .grid-container { gap: 12px; }
+              .a4-page {
+                box-shadow: none !important;
+                margin: 0 !important;
+                width: 100% !important;
+                height: 100vh !important;
+              }
             }
           </style>
         </head>
         <body>
-          <div class="grid-container">
-            ${cardsHtml}
-          </div>
+          ${pagesHtml}
         </body>
         </html>
       `;
 
-      showToast('جاري تحضير قصاصات الطباعة...', 'info');
-      await printHTML(fullHtml, 'بوابة_بيرق_حسابات_أولياء_الأمور.pdf');
-      showToast('تم إرسال القصاصات للطباعة/التنزيل بنجاح', 'success');
+      await printHTML(fullHtml, `Bairaq_Parent_Slips_${Date.now()}.pdf`);
+      showToast('تم إنشاء ملف قصاصات الطباعة بنجاح!', 'success');
     } catch (err: any) {
       console.error(err);
-      showToast('حدث خطأ أثناء إنشاء ملف الطباعة: ' + (err?.message || ''), 'error');
+      showToast('حدث خطأ أثناء إعداد القصاصات للطباعة: ' + (err?.message || ''), 'error');
     }
   };
 

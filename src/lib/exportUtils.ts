@@ -88,45 +88,8 @@ export const printHTML = async (html: string, customFileName?: string) => {
     const docElement = doc?.body;
     if (!docElement) throw new Error('Render frame body not found');
 
-    // Attempt 1: Try generating PDF using html-to-image (handles Arabic SVG + CSS cleanly without html2canvas CSS parser crashes)
-    let imgData: string | null = null;
-    let canvasWidth = 1024;
-    let canvasHeight = 1448;
-
-    try {
-      const { toPng } = await import('html-to-image');
-      const pngUrl = await toPng(docElement, {
-        quality: 0.98,
-        backgroundColor: '#ffffff',
-        pixelRatio: 2,
-        skipFonts: true,
-        filter: (domNode: HTMLElement) => {
-          // Filter out external stylesheet link tags to Google Fonts to prevent CORS/inlining errors
-          if (domNode.tagName === 'LINK' && domNode.getAttribute('href')?.includes('fonts.googleapis.com')) {
-            return false;
-          }
-          return true;
-        }
-      });
-      imgData = pngUrl;
-      canvasWidth = docElement.scrollWidth || 1024;
-      canvasHeight = docElement.scrollHeight || 1448;
-    } catch (toImgErr) {
-      console.warn('html-to-image failed, falling back to html2canvas:', toImgErr);
-      const canvas = await html2canvas(docElement, {
-        scale: 1.5,
-        useCORS: true,
-        logging: false,
-        backgroundColor: '#ffffff',
-        windowWidth: 1024,
-        windowHeight: 1448
-      });
-      imgData = canvas.toDataURL('image/jpeg', 0.95);
-      canvasWidth = canvas.width;
-      canvasHeight = canvas.height;
-    }
-
-    if (!imgData) throw new Error('Could not render image data');
+    // Check for multi-page A4 containers
+    const pageNodes = doc.querySelectorAll('.a4-page');
 
     const pdf = new jsPDF({
       orientation: 'portrait',
@@ -136,21 +99,86 @@ export const printHTML = async (html: string, customFileName?: string) => {
 
     const pdfWidth = pdf.internal.pageSize.getWidth();
     const pdfPageHeight = pdf.internal.pageSize.getHeight();
-    const computedHeight = (canvasHeight * pdfWidth) / (canvasWidth || 1);
 
-    if (computedHeight <= pdfPageHeight) {
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, computedHeight);
+    if (pageNodes && pageNodes.length > 0) {
+      // PAGE-BY-PAGE HIGH DPI RENDERING (ZERO TEXT SLICING, 100% CRYSTAL CLEAR)
+      const { toPng } = await import('html-to-image');
+
+      for (let i = 0; i < pageNodes.length; i++) {
+        const pageEl = pageNodes[i] as HTMLElement;
+        let imgData: string | null = null;
+
+        try {
+          imgData = await toPng(pageEl, {
+            quality: 1.0,
+            pixelRatio: 2.5,
+            backgroundColor: '#ffffff',
+            cacheBust: true,
+          });
+        } catch (toImgErr) {
+          console.warn(`Page ${i + 1} html-to-image failed, falling back to html2canvas:`, toImgErr);
+          const canvas = await html2canvas(pageEl, {
+            scale: 2.5,
+            useCORS: true,
+            logging: false,
+            backgroundColor: '#ffffff'
+          });
+          imgData = canvas.toDataURL('image/png', 1.0);
+        }
+
+        if (imgData) {
+          if (i > 0) pdf.addPage();
+          pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfPageHeight, undefined, 'FAST');
+        }
+      }
     } else {
-      // Multi-page slicing or fit
-      let remainingHeight = computedHeight;
-      let position = 0;
+      // Fallback single container capture
+      let imgData: string | null = null;
+      let canvasWidth = 1024;
+      let canvasHeight = 1448;
 
-      while (remainingHeight > 0) {
-        pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, computedHeight);
-        remainingHeight -= pdfPageHeight;
-        if (remainingHeight > 0) {
-          position -= pdfPageHeight;
-          pdf.addPage();
+      try {
+        const { toPng } = await import('html-to-image');
+        imgData = await toPng(docElement, {
+          quality: 0.98,
+          backgroundColor: '#ffffff',
+          pixelRatio: 2.5,
+          cacheBust: true
+        });
+        canvasWidth = docElement.scrollWidth || 1024;
+        canvasHeight = docElement.scrollHeight || 1448;
+      } catch (toImgErr) {
+        console.warn('html-to-image failed, falling back to html2canvas:', toImgErr);
+        const canvas = await html2canvas(docElement, {
+          scale: 2.0,
+          useCORS: true,
+          logging: false,
+          backgroundColor: '#ffffff',
+          windowWidth: 1024,
+          windowHeight: 1448
+        });
+        imgData = canvas.toDataURL('image/png', 0.98);
+        canvasWidth = canvas.width;
+        canvasHeight = canvas.height;
+      }
+
+      if (!imgData) throw new Error('Could not render image data');
+
+      const computedHeight = (canvasHeight * pdfWidth) / (canvasWidth || 1);
+
+      if (computedHeight <= pdfPageHeight) {
+        pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, computedHeight);
+      } else {
+        let remainingHeight = computedHeight;
+        let position = 0;
+
+        while (remainingHeight > 0) {
+          pdf.addImage(imgData, 'PNG', 0, position, pdfWidth, computedHeight);
+          remainingHeight -= pdfPageHeight;
+          if (remainingHeight > 0) {
+            position -= pdfPageHeight;
+            pdf.addPage();
+          }
         }
       }
     }
