@@ -556,65 +556,189 @@ export const exportStudentsToCSV = (generatedCodes: any[]) => {
 
 export const printStudentCards = (generatedCodes: any[], schoolName: string) => {
   const resolvedSchool = schoolName || 'المدرسة';
-  const rowsHtml = generatedCodes.map(code => {
-    const sName = code.school || code.schoolName || resolvedSchool || 'المدرسة';
-    const gName = code.grade || code.stage || code.gradeName || 'غير محدد';
-    const stName = code.name || code.studentName || code.fullName || 'طالب';
-    const stCode = code.student || code.code || code.studentCode || '';
-    const pCode = code.parent || code.parentCode || '';
+
+  if (!generatedCodes || generatedCodes.length === 0) {
+    return;
+  }
+
+  // Chunk cards into groups of 8 cards per A4 page for perfect printing
+  const cardsPerPage = 8;
+  const totalPages = Math.ceil(generatedCodes.length / cardsPerPage);
+
+  const pagesHtml = Array.from({ length: totalPages }).map((_, pageIdx) => {
+    const pageCodes = generatedCodes.slice(pageIdx * cardsPerPage, (pageIdx + 1) * cardsPerPage);
+
+    const cardsHtml = pageCodes.map((code) => {
+      const sName = code.school || code.schoolName || resolvedSchool || 'المدرسة';
+      const gName = code.grade || code.stage || code.gradeName || 'غير محدد';
+      const stName = code.name || code.studentName || code.fullName || 'طالب';
+      const stCode = code.student || code.code || code.studentCode || '—';
+      const pCode = code.parent || code.parentCode || '—';
+
+      return `
+        <div style="
+          border: 1.5px solid #cbd5e1;
+          border-radius: 10px;
+          padding: 10px 12px;
+          background: #ffffff;
+          box-sizing: border-box;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          height: 100%;
+          direction: rtl;
+        ">
+          <div>
+            <div style="
+              background: #0f172a;
+              color: #facc15;
+              padding: 5px 8px;
+              border-radius: 6px;
+              text-align: center;
+              font-weight: 800;
+              font-size: 12px;
+              margin-bottom: 6px;
+            ">
+              بَوّابة بيرق - ${sName}
+            </div>
+
+            <div style="
+              text-align: center;
+              font-size: 13px;
+              font-weight: 900;
+              color: #0f172a;
+              margin-bottom: 8px;
+              background: #e0f2fe;
+              padding: 5px 8px;
+              border-radius: 6px;
+              border: 1px solid #bae6fd;
+            ">
+              بطاقة الطالب: <span style="color: #0369a1; font-weight: 900;">${stName}</span>
+            </div>
+
+            <div style="
+              background: #f8fafc;
+              border: 1px solid #cbd5e1;
+              border-radius: 6px;
+              padding: 8px 10px;
+              font-size: 11px;
+            ">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; border-bottom: 1px dashed #cbd5e1; padding-bottom: 4px;">
+                <span style="color: #475569; font-weight: 700;">الصف / المرحلة:</span>
+                <span style="font-weight: 800; color: #1e293b;">${gName}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; border-bottom: 1px dashed #cbd5e1; padding-bottom: 4px;">
+                <span style="color: #475569; font-weight: 700;">كود الطالب:</span>
+                <span style="font-family: monospace; font-weight: 900; font-size: 13px; color: #dc2626; direction: ltr;">${stCode}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: #475569; font-weight: 700;">كود ولي الأمر:</span>
+                <span style="font-family: monospace; font-weight: 900; font-size: 13px; color: #0284c7; direction: ltr;">${pCode}</span>
+              </div>
+            </div>
+          </div>
+
+          <div style="text-align: center; font-size: 9.5px; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 4px; margin-top: 4px;">
+            <strong>📱 يرجى الاحتفاظ بهذه البيانات لتسجيل الدخول في تطبيق (بَوّابة بيرق).</strong>
+          </div>
+        </div>
+      `;
+    }).join('');
 
     return `
-    <div style="border: 2px solid #0f172a; padding: 14px; margin: 8px; border-radius: 12px; display: inline-block; width: 250px; direction: rtl; font-family: system-ui, -apple-system, sans-serif; vertical-align: top; background-color: #ffffff; color: #0f172a; box-sizing: border-box; page-break-inside: avoid; text-align: right;">
-      <div style="font-weight: 900; border-bottom: 2px solid #eab308; margin-bottom: 10px; padding-bottom: 6px; color: #0f172a; display: flex; justify-content: space-between; align-items: center;">
-        <span style="font-size: 13px; color: #0f172a;">بطاقة الطالب الذكية 🛡️</span>
-        <span style="font-size: 10px; font-weight: bold; color: #64748b;">بوابة بيرق</span>
+      <div class="a4-page" style="
+        width: 794px;
+        height: 1123px;
+        padding: 24px;
+        box-sizing: border-box;
+        background: #ffffff;
+        page-break-after: always;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-start;
+        overflow: hidden;
+        margin: 0 auto;
+      ">
+        <div style="text-align: center; margin-bottom: 12px; border-bottom: 2px solid #0284c7; padding-bottom: 6px;">
+          <h2 style="font-size: 16px; color: #0f172a; font-weight: 900; margin: 0;">بَوّابة بيرق التعليمية - بطاقات وأكواد دخول الطلاب</h2>
+          <p style="font-size: 11px; color: #64748b; margin-top: 2px; font-weight: 700;">مدرسة ${resolvedSchool} • صفحة ${pageIdx + 1} من ${totalPages} • إجمالي البطاقات: ${generatedCodes.length}</p>
+        </div>
+
+        <div style="
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          grid-template-rows: repeat(4, 1fr);
+          gap: 12px;
+          flex-grow: 1;
+        ">
+          ${cardsHtml}
+        </div>
       </div>
-      <div style="margin-bottom: 6px; font-size: 12px; color: #0f172a;"><strong style="color: #0f172a;">المدرسة:</strong> <span style="color: #1e293b; font-weight: 700;">${sName}</span></div>
-      <div style="margin-bottom: 6px; font-size: 12px; color: #0f172a;"><strong style="color: #0f172a;">الصف:</strong> <span style="color: #1e293b; font-weight: 700;">${gName}</span></div>
-      <div style="margin-bottom: 6px; font-size: 12px; color: #0f172a;"><strong style="color: #0f172a;">الاسم:</strong> <span style="color: #1e293b; font-weight: 800;">${stName}</span></div>
-      <div style="margin-bottom: 6px; font-size: 12px; color: #0f172a;"><strong style="color: #0f172a;">كود الطالب:</strong> <span style="color: #dc2626; font-weight: 900; font-family: monospace; font-size: 13px;">${stCode}</span></div>
-      <div style="margin-bottom: 6px; font-size: 12px; color: #0f172a;"><strong style="color: #0f172a;">كود ولي الأمر:</strong> <span style="color: #2563eb; font-weight: 900; font-family: monospace; font-size: 13px;">${pCode}</span></div>
-      <div style="font-size: 9.5px; color: #64748b; margin-top: 10px; border-top: 1px dashed #cbd5e1; padding-top: 6px; text-align: center;">يرجى الاحتفاظ بهذه الأكواد للدخول للمنصة</div>
-    </div>
-  `;
+    `;
   }).join('');
-  
-  const html = `
+
+  const fullHtml = `
     <!DOCTYPE html>
     <html dir="rtl" lang="ar">
       <head>
         <meta charset="utf-8" />
-        <title>طباعة بطاقات الطلاب - ${resolvedSchool}</title>
+        <title>بطاقات الطلاب والأكواد - ${resolvedSchool}</title>
         <style>
-          * { box-sizing: border-box; }
+          @page {
+            size: A4 portrait;
+            margin: 0;
+          }
+          * { box-sizing: border-box; margin: 0; padding: 0; }
           body { 
             background: #ffffff !important; 
             color: #0f172a !important; 
-            margin: 0; 
-            padding: 16px; 
-            font-family: system-ui, -apple-system, sans-serif;
             direction: rtl;
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          .a4-page {
+            width: 210mm;
+            height: 297mm;
+            padding: 12mm;
+            box-sizing: border-box;
+            background: #ffffff;
+            page-break-after: always;
+            break-after: page;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-start;
+            overflow: hidden;
+            margin: 0 auto;
+          }
+          .a4-page:last-child {
+            page-break-after: auto !important;
+            break-after: auto !important;
           }
           @media print {
-            body { padding: 0; background: #ffffff !important; color: #0f172a !important; }
-            div { page-break-inside: avoid; }
+            html, body {
+              width: 210mm;
+              height: 297mm;
+              background: #ffffff !important;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            .a4-page {
+              box-shadow: none !important;
+              margin: 0 !important;
+              width: 210mm !important;
+              height: 297mm !important;
+            }
           }
         </style>
       </head>
-      <body style="background-color: #ffffff; color: #0f172a;">
-        <div style="display: flex; flex-wrap: wrap; justify-content: flex-start; gap: 8px; background: #ffffff;">
-          ${rowsHtml}
-        </div>
-        <script>
-          window.onload = function() {
-            setTimeout(function() { window.print(); }, 500);
-          };
-        </script>
+      <body>
+        ${pagesHtml}
       </body>
     </html>
   `;
-  
-  printHTML(html);
+
+  printHTML(fullHtml, `Bairaq_Student_Cards_${Date.now()}.pdf`);
 };
 
 export const generateSingleStudentPDF = (student: any) => {

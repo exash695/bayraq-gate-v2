@@ -1919,33 +1919,66 @@ export const CodesSection: React.FC<CodesSectionProps> = ({
                     </span>
                   </div>
 
-                  <div className="flex items-center justify-end gap-2 pt-2 border-t border-white/5">
-                    <button
-                      onClick={() => {
-                        if (setListToEdit) setListToEdit(list);
-                        setIsAddingStudent(true);
-                      }}
-                      className="px-3 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 rounded-xl text-xs font-black transition-all"
-                    >
-                      تعديل وإدارة
-                    </button>
-                    <button
-                      onClick={() => {
-                        if (list.id) {
-                          if (setSavedLists) {
-                            setSavedLists(prev => prev.filter(l => l.id !== list.id));
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/5">
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => {
+                          if (!list.students || list.students.length === 0) {
+                            showToast('لا توجد بيانات طلاب بالطابعة', 'error');
+                            return;
                           }
-                          if (onDeleteList) {
-                            onDeleteList(list.id);
-                          } else {
-                            showToast('تم الحذف بنجاح', 'success');
+                          printStudentCards(list.students, schoolName);
+                        }}
+                        className="px-2.5 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 rounded-xl text-xs font-black transition-all flex items-center gap-1"
+                        title="طباعة بطاقات وأكواد هذه القائمة (PDF)"
+                      >
+                        <Printer size={13} />
+                        <span>طباعة</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (!list.students || list.students.length === 0) {
+                            showToast('لا توجد بيانات طلاب للتصدير', 'error');
+                            return;
                           }
-                        }
-                      }}
-                      className="px-3 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-xl text-xs font-black transition-all"
-                    >
-                      حذف
-                    </button>
+                          exportStudentsToCSV(list.students);
+                        }}
+                        className="px-2.5 py-1.5 bg-purple-500/10 hover:bg-purple-500/20 text-purple-400 border border-purple-500/20 rounded-xl text-xs font-black transition-all flex items-center gap-1"
+                        title="تصدير هذه القائمة كملف إكسل"
+                      >
+                        <FileSpreadsheet size={13} />
+                        <span>إكسل</span>
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => {
+                          if (setListToEdit) setListToEdit(list);
+                          setIsAddingStudent(true);
+                        }}
+                        className="px-2.5 py-1.5 bg-blue-500/10 hover:bg-blue-500/20 text-blue-400 border border-blue-500/20 rounded-xl text-xs font-black transition-all"
+                      >
+                        تعديل
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (list.id) {
+                            if (setSavedLists) {
+                              setSavedLists(prev => prev.filter(l => l.id !== list.id));
+                            }
+                            if (onDeleteList) {
+                              onDeleteList(list.id);
+                            } else {
+                              showToast('تم الحذف بنجاح', 'success');
+                            }
+                          }
+                        }}
+                        className="px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 rounded-xl text-xs font-black transition-all"
+                      >
+                        حذف
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
