@@ -38,116 +38,97 @@ const toBase64 = (data: Blob | ArrayBuffer): Promise<string> => {
 
 /**
  * Universal print helper.
- * Strictly generates a genuine, high-quality .PDF document file without freezing the UI thread.
+ * Strictly generates a genuine, high-quality .PDF document file without freezing the UI thread,
+ * then opens the native App Sharing Window (Share Sheet) on mobile/app, or downloads on web.
  */
 export const printHTML = async (
   html: string,
   customFileName?: string
 ) => {
-  const platform = Capacitor.getPlatform();
   const fileName = customFileName
     ? (customFileName.toLowerCase().endsWith('.pdf') ? customFileName : `${customFileName}.pdf`)
     : `Bairaq_Parent_Slips_${Date.now()}.pdf`;
 
-  // Create or reuse hidden iframe to render the HTML
-  let iframe = document.getElementById('bairaq-universal-render-frame') as HTMLIFrameElement;
-  if (!iframe) {
-    iframe = document.createElement('iframe');
-    iframe.id = 'bairaq-universal-render-frame';
-    iframe.style.position = 'fixed';
-    iframe.style.top = '0';
-    iframe.style.left = '-9999px';
-    iframe.style.width = '1024px';
-    iframe.style.height = '1448px';
-    iframe.style.opacity = '0.01';
-    iframe.style.pointerEvents = 'none';
-    iframe.style.border = 'none';
-    iframe.style.zIndex = '-9999';
-    document.body.appendChild(iframe);
-  }
+  // Render temporary container directly in document.body for lightning-fast, non-blocking DOM capture
+  const container = document.createElement('div');
+  container.id = 'bairaq-pdf-render-container';
+  container.style.position = 'fixed';
+  container.style.top = '0';
+  container.style.left = '0';
+  container.style.width = '794px'; // A4 width at 96 DPI
+  container.style.zIndex = '-99999';
+  container.style.opacity = '0.01';
+  container.style.pointerEvents = 'none';
+  container.style.background = '#ffffff';
+  container.style.overflow = 'hidden';
+  container.innerHTML = html;
+  document.body.appendChild(container);
 
-  const renderPromise = new Promise<void>((resolve) => {
-    const doc = iframe.contentWindow?.document || iframe.contentDocument;
-    if (doc && iframe.contentWindow) {
-      doc.open();
-      doc.write(html);
-      doc.close();
-      
-      const checkLoaded = () => {
-        if (doc.readyState === 'complete') {
-          setTimeout(resolve, 100);
-        } else {
-          setTimeout(checkLoaded, 30);
-        }
-      };
-      checkLoaded();
-    } else {
-      resolve();
-    }
-  });
-
-  await renderPromise;
+  // Give browser a micro-tick to calculate layouts and inline styles
+  await new Promise((r) => setTimeout(r, 60));
 
   try {
-    const doc = iframe.contentWindow?.document || iframe.contentDocument;
-    if (!doc || !iframe.contentWindow) throw new Error('Render frame body not found');
+    const pageNodes = container.querySelectorAll('.a4-page');
+    const nodesToRender = pageNodes.length > 0 ? Array.from(pageNodes) : [container];
 
-    const pageNodes = doc.querySelectorAll('.a4-page');
+    const pdf = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'a4',
+      compress: true
+    });
 
-    if (pageNodes && pageNodes.length > 0) {
-      const pdf = new jsPDF({
-        orientation: 'portrait',
-        unit: 'mm',
-        format: 'a4',
-        compress: true
-      });
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = pdf.internal.pageSize.getHeight();
 
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfPageHeight = pdf.internal.pageSize.getHeight();
+    let canvasSuccess = true;
 
-      let canvasSuccess = true;
+    for (let i = 0; i < nodesToRender.length; i++) {
+      const pageEl = nodesToRender[i] as HTMLElement;
 
-      for (let i = 0; i < pageNodes.length; i++) {
-        const pageEl = pageNodes[i] as HTMLElement;
-        
-        try {
-          const canvas = await html2canvas(pageEl, {
-            scale: 1.5,
-            useCORS: true,
-            logging: false,
-            backgroundColor: '#ffffff',
-            allowTaint: true
-          });
+      try {
+        const canvas = await html2canvas(pageEl, {
+          scale: 1.5,
+          useCORS: true,
+          logging: false,
+          backgroundColor: '#ffffff',
+          allowTaint: true,
+          windowWidth: 794,
+          windowHeight: 1123,
+        });
 
-          const imgData = canvas.toDataURL('image/jpeg', 0.88);
-          if (i > 0) pdf.addPage();
-          pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfPageHeight, undefined, 'FAST');
-        } catch (pageErr) {
-          console.warn(`Page ${i + 1} capture failed:`, pageErr);
-          canvasSuccess = false;
-          break;
-        }
-
-        // YIELD to browser main event loop so UI does not freeze or block
-        await new Promise(r => setTimeout(r, 15));
+        const imgData = canvas.toDataURL('image/jpeg', 0.88);
+        if (i > 0) pdf.addPage();
+        pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+      } catch (pageErr) {
+        console.warn(`Page ${i + 1} capture failed:`, pageErr);
+        canvasSuccess = false;
+        break;
       }
 
-      if (canvasSuccess) {
-        await saveOrSharePDF(pdf, fileName);
-        return;
-      }
+      // Yield event loop
+      await new Promise((r) => setTimeout(r, 10));
     }
 
-    // Fallback if canvas rendering is skipped or failed: Direct native print dialog
-    iframe.contentWindow.focus();
-    iframe.contentWindow.print();
+    // Clean up temporary DOM container
+    if (document.body.contains(container)) {
+      document.body.removeChild(container);
+    }
+
+    if (canvasSuccess) {
+      await saveOrSharePDF(pdf, fileName);
+      return;
+    }
+
+    // Fallback: window print
+    window.print();
   } catch (err) {
     console.error('PDF generation error:', err);
+    if (document.body.contains(container)) {
+      document.body.removeChild(container);
+    }
     try {
-      if (iframe.contentWindow) {
-        iframe.contentWindow.focus();
-        iframe.contentWindow.print();
-      }
+      window.print();
     } catch (fallbackErr) {
       console.error('Native print fallback failed:', fallbackErr);
     }
@@ -188,17 +169,11 @@ export const exportToCSV = async (csvContent: string, fileName: string) => {
 /**
  * Unified PDF Save/Share
  */
-export const saveOrSharePDF = async (doc: any, fileName: string) => {
+export const saveOrSharePDF = async (doc: jsPDF, fileName: string) => {
   try {
     const actualFileName = fileName.endsWith('.pdf') ? fileName : `${fileName}.pdf`;
-    const platform = Capacitor.getPlatform();
-
-    if (platform !== 'web') {
-      const pdfBase64 = doc.output('datauristring').split(',')[1];
-      await saveAndShareFile(pdfBase64, actualFileName, 'application/pdf', true);
-    } else {
-      doc.save(actualFileName);
-    }
+    const pdfBlob = doc.output('blob');
+    await saveAndShareFile(pdfBlob, actualFileName, 'application/pdf');
   } catch (err) {
     console.error('PDF save/share failed:', err);
     try { doc.save(fileName); } catch(e) {}
@@ -211,7 +186,7 @@ export const saveOrSharePDF = async (doc: any, fileName: string) => {
 export const downloadFileFromUrl = async (url: string, fileName: string) => {
   const platform = Capacitor.getPlatform();
   
-  if (platform === 'web') {
+  if (platform === 'web' && typeof navigator === 'undefined') {
     const link = document.createElement('a');
     link.href = url;
     link.download = fileName;
@@ -223,13 +198,11 @@ export const downloadFileFromUrl = async (url: string, fileName: string) => {
   }
 
   try {
-    // For mobile, we fetch the file and use Share
     const response = await fetch(url);
     const blob = await response.blob();
-    const buffer = await blob.arrayBuffer();
-    await saveAndShareFile(buffer, fileName, blob.type);
+    await saveAndShareFile(blob, fileName, blob.type);
   } catch (err) {
-    console.error('Mobile download failed:', err);
+    console.error('File download from URL failed:', err);
   }
 };
 
@@ -239,29 +212,26 @@ export const downloadFileFromUrl = async (url: string, fileName: string) => {
 async function saveAndShareFile(data: any, fileName: string, mimeType: string, isBase64 = false) {
   const platform = Capacitor.getPlatform();
 
-  // 1. Try Web Share API if supported on mobile browsers
-  if (typeof navigator !== 'undefined' && navigator.canShare) {
-    try {
-      const blob = isBase64 
-        ? await (await fetch(`data:${mimeType};base64,${data}`)).blob() 
-        : new Blob([data], { type: mimeType });
-      const file = new File([blob], fileName, { type: mimeType });
-      if (navigator.canShare({ files: [file] })) {
-        await navigator.share({
-          files: [file],
-          title: fileName,
-        });
-        return;
-      }
-    } catch (shareErr) {
-      console.warn('Web Share API failed or cancelled:', shareErr);
+  let blob: Blob;
+  if (data instanceof Blob) {
+    blob = data;
+  } else if (data instanceof ArrayBuffer) {
+    blob = new Blob([data], { type: mimeType });
+  } else if (isBase64) {
+    const byteCharacters = atob(data);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
     }
+    blob = new Blob([new Uint8Array(byteNumbers)], { type: mimeType });
+  } else {
+    blob = new Blob([data], { type: mimeType });
   }
 
-  // 2. Try Native Capacitor Filesystem if running in APK / Native shell
+  // 1. Mobile Native App (Capacitor Android APK / iOS)
   if (platform !== 'web') {
     try {
-      const base64Data = isBase64 ? data : await toBase64(data);
+      const base64Data = isBase64 ? data : await toBase64(blob);
       const savedFile = await Filesystem.writeFile({
         path: fileName,
         data: base64Data,
@@ -270,19 +240,38 @@ async function saveAndShareFile(data: any, fileName: string, mimeType: string, i
 
       await Share.share({
         title: fileName,
+        text: fileName,
         url: savedFile.uri,
       });
       return;
     } catch (nativeErr) {
-      console.error('Native file operation failed, falling back to web download:', nativeErr);
+      console.error('Native Capacitor share failed, falling back to Web Share / download:', nativeErr);
     }
   }
 
-  // 3. Standard Web Download (Blob URL)
+  // 2. Web Share API for Mobile Browsers (Chrome Android, Safari iOS, PWA, etc.)
+  if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+    try {
+      const file = new File([blob], fileName, { type: mimeType });
+      if (!navigator.canShare || navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: fileName,
+          text: fileName,
+        });
+        return;
+      }
+    } catch (shareErr: any) {
+      if (shareErr.name === 'AbortError') {
+        console.log('User dismissed share sheet window');
+        return;
+      }
+      console.warn('Web Share API failed, falling back to browser download:', shareErr);
+    }
+  }
+
+  // 3. Standard Web Download (Blob URL trigger)
   try {
-    const blob = isBase64 
-      ? await (await fetch(`data:${mimeType};base64,${data}`)).blob() 
-      : new Blob([data], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -292,22 +281,8 @@ async function saveAndShareFile(data: any, fileName: string, mimeType: string, i
     setTimeout(() => {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-    }, 300);
+    }, 500);
   } catch (webErr) {
     console.error('Web blob download failed:', webErr);
-    // 4. Ultimate Fallback: Data URI
-    try {
-      const base64Data = isBase64 ? data : await toBase64(data);
-      const dataUri = `data:${mimeType};base64,${base64Data}`;
-      const link = document.createElement('a');
-      link.href = dataUri;
-      link.download = fileName;
-      link.target = '_blank';
-      document.body.appendChild(link);
-      link.click();
-      setTimeout(() => document.body.removeChild(link), 300);
-    } catch (uriErr) {
-      console.error('Data URI download failed:', uriErr);
-    }
   }
 }
