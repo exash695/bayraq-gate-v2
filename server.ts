@@ -9790,44 +9790,55 @@ async function startServer() {
       await ensureSchoolExists(resolvedSchool);
 
       let createdCount = 0;
-      for (const acc of accounts) {
-        const phoneRaw = String(acc.phone || acc.formattedPhone || '').trim();
-        const studentName = acc.studentName || '';
-        const password = acc.password || '123456';
-        if (!phoneRaw) continue;
+      // Process accounts in parallel batches (chunk size 25) for ultra fast execution on large files (e.g. 650+ students)
+      const BATCH_SIZE = 25;
+      for (let i = 0; i < accounts.length; i += BATCH_SIZE) {
+        const chunk = accounts.slice(i, i + BATCH_SIZE);
+        await Promise.all(chunk.map(async (acc: any) => {
+          const phoneRaw = String(acc.phone || acc.formattedPhone || '').trim();
+          const studentName = acc.studentName || '';
+          const password = acc.password || '123456';
+          if (!phoneRaw) return;
 
-        const cleanPhone = formatPhoneForWhatsApp(phoneRaw);
-        const raw7Phone = phoneRaw.replace(/^0+/, '').replace(/^\+964/, '');
-        const zero7Phone = '0' + raw7Phone;
-        const passwordHash = await bcrypt.hash(password, 10);
-        const userId = `usr_p_${raw7Phone}`;
+          const cleanPhone = formatPhoneForWhatsApp(phoneRaw);
+          const raw7Phone = phoneRaw.replace(/^0+/, '').replace(/^\+964/, '');
+          const zero7Phone = '0' + raw7Phone;
+          const passwordHash = await bcrypt.hash(password, 10);
+          const userId = `usr_p_${raw7Phone}`;
 
-        // Upsert to users table safely checking by id, email, or phone
-        const parentDisplayName = studentName ? `ولي أمر ${studentName}` : 'ولي أمر الطالب';
-        const userEmail = `${raw7Phone}@bairaq.iq`;
-        const existingUsers = await db.select().from(users).where(
-          or(
-            eq(users.id, userId),
-            eq(users.email, userEmail),
-            cleanPhone ? eq(users.phone, cleanPhone) : undefined
-          )
-        ).limit(1);
+          const parentDisplayName = studentName ? `ولي أمر ${studentName}` : 'ولي أمر الطالب';
+          const userEmail = `${raw7Phone}@bairaq.iq`;
+          const existingUsers = await db.select().from(users).where(
+            or(
+              eq(users.id, userId),
+              eq(users.email, userEmail),
+              cleanPhone ? eq(users.phone, cleanPhone) : undefined
+            )
+          ).limit(1);
 
-        if (existingUsers && existingUsers.length > 0) {
-          const targetUser = existingUsers[0];
-          // If the existing user was a temporary pending user (e.g. pending_...), update their id and details
-          if (targetUser.id.startsWith('pending_')) {
-            try {
-              await db.update(users).set({
-                id: userId,
-                name: parentDisplayName,
-                phone: cleanPhone,
-                email: userEmail,
-                passwordHash: passwordHash,
-                schoolId: resolvedSchool,
-                role: 'parent'
-              }).where(eq(users.id, targetUser.id));
-            } catch (pendingUpErr) {
+          if (existingUsers && existingUsers.length > 0) {
+            const targetUser = existingUsers[0];
+            if (targetUser.id.startsWith('pending_')) {
+              try {
+                await db.update(users).set({
+                  id: userId,
+                  name: parentDisplayName,
+                  phone: cleanPhone,
+                  email: userEmail,
+                  passwordHash: passwordHash,
+                  schoolId: resolvedSchool,
+                  role: 'parent'
+                }).where(eq(users.id, targetUser.id));
+              } catch (pendingUpErr) {
+                await db.update(users).set({
+                  name: parentDisplayName,
+                  phone: cleanPhone,
+                  passwordHash: passwordHash,
+                  schoolId: resolvedSchool,
+                  role: 'parent'
+                }).where(eq(users.id, targetUser.id));
+              }
+            } else {
               await db.update(users).set({
                 name: parentDisplayName,
                 phone: cleanPhone,
@@ -9837,57 +9848,32 @@ async function startServer() {
               }).where(eq(users.id, targetUser.id));
             }
           } else {
-            await db.update(users).set({
-              name: parentDisplayName,
-              phone: cleanPhone,
-              passwordHash: passwordHash,
-              schoolId: resolvedSchool,
-              role: 'parent'
-            }).where(eq(users.id, targetUser.id));
+            try {
+              await db.insert(users).values({
+                id: userId,
+                name: parentDisplayName,
+                role: 'parent',
+                email: userEmail,
+                phone: cleanPhone,
+                passwordHash: passwordHash,
+                schoolId: resolvedSchool,
+                createdAt: new Date()
+              }).onConflictDoNothing();
+            } catch (insertError) {
+              await db.update(users).set({
+                name: parentDisplayName,
+                phone: cleanPhone,
+                passwordHash: passwordHash,
+                schoolId: resolvedSchool,
+                role: 'parent'
+              }).where(eq(users.email, userEmail));
+            }
           }
-        } else {
-          try {
-            await db.insert(users).values({
-              id: userId,
-              name: parentDisplayName,
-              role: 'parent',
-              email: userEmail,
-              phone: cleanPhone,
-              passwordHash: passwordHash,
-              schoolId: resolvedSchool,
-              createdAt: new Date()
-            }).onConflictDoNothing();
-          } catch (insertError) {
-            console.warn('Fallback updating existing user on insert error:', insertError);
-            await db.update(users).set({
-              name: parentDisplayName,
-              phone: cleanPhone,
-              passwordHash: passwordHash,
-              schoolId: resolvedSchool,
-              role: 'parent'
-            }).where(eq(users.email, userEmail));
-          }
-        }
 
-        // Mirror to firestore_docs collection parent_accounts
-        try {
-          await db.insert(firestore_docs).values({
-            path: `parent_accounts/${cleanPhone}`,
-            data: {
-              studentName,
-              phone: cleanPhone,
-              rawPhone: raw7Phone,
-              zeroPhone: zero7Phone,
-              username: cleanPhone,
-              password,
-              role: 'parent',
-              createdAt: new Date().toISOString(),
-              isActive: true
-            },
-            updatedAt: new Date()
-          }).onConflictDoUpdate({
-            target: firestore_docs.path,
-            set: {
+          // Mirror to firestore_docs collection parent_accounts
+          try {
+            await db.insert(firestore_docs).values({
+              path: `parent_accounts/${cleanPhone}`,
               data: {
                 studentName,
                 phone: cleanPhone,
@@ -9900,11 +9886,27 @@ async function startServer() {
                 isActive: true
               },
               updatedAt: new Date()
-            }
-          });
-        } catch (e) {}
+            }).onConflictDoUpdate({
+              target: firestore_docs.path,
+              set: {
+                data: {
+                  studentName,
+                  phone: cleanPhone,
+                  rawPhone: raw7Phone,
+                  zeroPhone: zero7Phone,
+                  username: cleanPhone,
+                  password,
+                  role: 'parent',
+                  createdAt: new Date().toISOString(),
+                  isActive: true
+                },
+                updatedAt: new Date()
+              }
+            });
+          } catch (e) {}
 
-        createdCount++;
+          createdCount++;
+        }));
       }
 
       res.json({ success: true, count: createdCount, message: `تم إنشاء وتسجيل ${createdCount} حساب ولي أمر في النظام بنجاح` });

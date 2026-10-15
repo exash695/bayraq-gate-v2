@@ -286,8 +286,50 @@ export const downloadFileFromUrl = async (url: string, fileName: string) => {
 async function saveAndShareFile(data: any, fileName: string, mimeType: string, isBase64 = false) {
   const platform = Capacitor.getPlatform();
 
-  if (platform === 'web') {
-    const blob = isBase64 ? await (await fetch(`data:${mimeType};base64,${data}`)).blob() : new Blob([data], { type: mimeType });
+  // 1. Try Web Share API if supported on mobile browsers
+  if (typeof navigator !== 'undefined' && navigator.canShare) {
+    try {
+      const blob = isBase64 
+        ? await (await fetch(`data:${mimeType};base64,${data}`)).blob() 
+        : new Blob([data], { type: mimeType });
+      const file = new File([blob], fileName, { type: mimeType });
+      if (navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: fileName,
+        });
+        return;
+      }
+    } catch (shareErr) {
+      console.warn('Web Share API failed or cancelled:', shareErr);
+    }
+  }
+
+  // 2. Try Native Capacitor Filesystem if running in APK / Native shell
+  if (platform !== 'web') {
+    try {
+      const base64Data = isBase64 ? data : await toBase64(data);
+      const savedFile = await Filesystem.writeFile({
+        path: fileName,
+        data: base64Data,
+        directory: Directory.Cache,
+      });
+
+      await Share.share({
+        title: fileName,
+        url: savedFile.uri,
+      });
+      return;
+    } catch (nativeErr) {
+      console.error('Native file operation failed, falling back to web download:', nativeErr);
+    }
+  }
+
+  // 3. Standard Web Download (Blob URL)
+  try {
+    const blob = isBase64 
+      ? await (await fetch(`data:${mimeType};base64,${data}`)).blob() 
+      : new Blob([data], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
@@ -297,26 +339,22 @@ async function saveAndShareFile(data: any, fileName: string, mimeType: string, i
     setTimeout(() => {
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
-    }, 100);
-    return;
-  }
-
-  try {
-    const base64Data = isBase64 ? data : await toBase64(data);
-    
-    // Choose directory based on platform
-    // iOS usually works better with Directory.Documents for persistence or Directory.Cache for sharing
-    const savedFile = await Filesystem.writeFile({
-      path: fileName,
-      data: base64Data,
-      directory: Directory.Cache, // Use Cache so it's temporary but accessible for share sheet
-    });
-
-    await Share.share({
-      title: fileName,
-      url: savedFile.uri,
-    });
-  } catch (err) {
-    console.error('Native file operation failed:', err);
+    }, 300);
+  } catch (webErr) {
+    console.error('Web blob download failed:', webErr);
+    // 4. Ultimate Fallback: Data URI
+    try {
+      const base64Data = isBase64 ? data : await toBase64(data);
+      const dataUri = `data:${mimeType};base64,${base64Data}`;
+      const link = document.createElement('a');
+      link.href = dataUri;
+      link.download = fileName;
+      link.target = '_blank';
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => document.body.removeChild(link), 300);
+    } catch (uriErr) {
+      console.error('Data URI download failed:', uriErr);
+    }
   }
 }

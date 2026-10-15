@@ -3,10 +3,10 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   FileSpreadsheet, Upload, UserCheck, Printer, Trash2, Plus, 
   CheckCircle2, AlertCircle, RefreshCw, X, ShieldCheck, History, 
-  Search, Calendar, Eye, AlertTriangle 
+  Search, Calendar, Eye, AlertTriangle, Send, MessageCircle, Share2 
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
-import { printHTML } from '../lib/exportUtils';
+import { printHTML, exportToExcel } from '../lib/exportUtils';
 import { logActivity } from '../utils/auditLogger';
 
 export interface ParentAccountRow {
@@ -466,6 +466,64 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
     }
   };
 
+  const handleShareTelegram = async (targetAccounts?: ParentAccountRow[]) => {
+    const validRows = (targetAccounts || rows).filter(r => r.status === 'valid');
+    const targetRows = validRows.length > 0 ? validRows : (targetAccounts || rows);
+
+    if (targetRows.length === 0) {
+      showToast('لا توجد بيانات للمشاركة', 'error');
+      return;
+    }
+
+    try {
+      showToast('جاري توجيه كشف الحسابات وملف الـ PDF إلى تليجرام...', 'info');
+
+      const sampleList = targetRows.slice(0, 10).map((acc, i) => (
+        `• ${acc.studentName} | هاتف: ${acc.formattedPhone} | رمز: ${acc.password}`
+      )).join('\n');
+
+      const tgText = `📋 **قصاصات حسابات أولياء الأمور - بَوّابة بيرق**\n🏫 المدرسة: ${schoolName}\n👥 عدد الحسابات: ${targetRows.length} طالب/ة\n\n${sampleList}${targetRows.length > 10 ? `\n...وغيرهم من الحسابات (${targetRows.length - 10})` : ''}\n\n📲 **رابط المنصة:** ${window.location.origin}`;
+
+      const tgShareUrl = `https://t.me/share/url?url=${encodeURIComponent(window.location.origin)}&text=${encodeURIComponent(tgText)}`;
+      window.open(tgShareUrl, '_blank');
+
+      await handlePrintSlips(targetAccounts);
+      showToast('تم توجيه الملف إلى تليجرام وتوليد PDF بنجاح ✈️', 'success');
+    } catch (err: any) {
+      console.error(err);
+      showToast('خطأ أثناء إرسال التليجرام: ' + (err?.message || ''), 'error');
+    }
+  };
+
+  const handleShareWhatsApp = async (targetAccounts?: ParentAccountRow[]) => {
+    const validRows = (targetAccounts || rows).filter(r => r.status === 'valid');
+    const targetRows = validRows.length > 0 ? validRows : (targetAccounts || rows);
+
+    if (targetRows.length === 0) {
+      showToast('لا توجد بيانات للمشاركة', 'error');
+      return;
+    }
+
+    try {
+      showToast('جاري توجيه كشف الحسابات وملف الـ PDF إلى واتساب...', 'info');
+
+      const sampleList = targetRows.slice(0, 10).map((acc, i) => (
+        `• *${acc.studentName}* | هاتف: \`${acc.formattedPhone}\` | الرمز: \`${acc.password}\``
+      )).join('\n');
+
+      const waText = `📋 *قصاصات حسابات أولياء الأمور - بَوّابة بيرق*\n🏫 *المدرسة:* ${schoolName}\n👥 *عدد الحسابات:* ${targetRows.length}\n\n${sampleList}${targetRows.length > 10 ? `\n_(بقية الحسابات موجودة في ملف PDF المرفق)_` : ''}\n\n📲 *رابط المنصة:* ${window.location.origin}`;
+
+      const waShareUrl = `https://api.whatsapp.com/send?text=${encodeURIComponent(waText)}`;
+      window.open(waShareUrl, '_blank');
+
+      await handlePrintSlips(targetAccounts);
+      showToast('تم توجيه الملف إلى واتساب وتوليد PDF بنجاح 💬', 'success');
+    } catch (err: any) {
+      console.error(err);
+      showToast('خطأ أثناء إرسال الواتساب: ' + (err?.message || ''), 'error');
+    }
+  };
+
   const handleDeleteHistoryEntry = async (id: string) => {
     if (!window.confirm('هل أنت تأكد من إزالة هذا السجل من قائمة الملفات المرفوعة؟')) return;
 
@@ -480,21 +538,18 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
     }
   };
 
-  const handleDownloadSampleTemplate = () => {
+  const handleDownloadSampleTemplate = async () => {
     try {
       const sampleData = [
-        ['اسم الطالب', 'رقم هاتف ولي الأمر'],
-        ['علي محمد حسين', '07701234567'],
-        ['فاطمة أحمد كاظم', '07809876543'],
-        ['حسين علي عباس', '7501122334'],
+        { 'اسم الطالب': 'علي محمد حسين', 'رقم هاتف ولي الأمر': '07701234567' },
+        { 'اسم الطالب': 'فاطمة أحمد كاظم', 'رقم هاتف ولي الأمر': '07809876543' },
+        { 'اسم الطالب': 'حسين علي عباس', 'رقم هاتف ولي الأمر': '07501122334' },
       ];
 
-      const ws = XLSX.utils.aoa_to_sheet(sampleData);
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'نموذج_الحسابات');
-      XLSX.writeFile(wb, 'نموذج_إكسل_حسابات_أولياء_الأمور.xlsx');
-      showToast('تم تحميل نموذج ملف الإكسل بنجاح', 'success');
+      await exportToExcel(sampleData, 'نموذج_إكسل_حسابات_أولياء_الأمور.xlsx', 'نموذج_الحسابات');
+      showToast('تم تحميل نموذج ملف الإكسل بنجاح 📊', 'success');
     } catch (err: any) {
+      console.error(err);
       showToast('خطأ في تحضير ملف النموذج: ' + (err?.message || ''), 'error');
     }
   };
@@ -534,26 +589,26 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
             <p>2. تم تدوين اسم الملف المرفوع وزمن الإنشاء في سِجل رفع الإكسل لمنع تكراره مستقبلاً.</p>
           </div>
 
-          <div className="flex flex-col sm:flex-row gap-3 pt-2">
+          <div className="pt-2">
             <button
               onClick={() => handlePrintSlips()}
-              className="flex-1 py-3.5 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer transition-all"
+              className="w-full py-3.5 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer transition-all"
             >
               <Printer size={18} />
-              <span>طباعة قصاصات الصفوف (PDF) 🖨️</span>
-            </button>
-
-            <button
-              onClick={() => {
-                setIsSuccess(false);
-                setRows([]);
-                onClose();
-              }}
-              className="py-3.5 px-5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs cursor-pointer transition-colors"
-            >
-              إغلاق النافذة
+              <span>طباعة قصاصات PDF 🖨️</span>
             </button>
           </div>
+
+          <button
+            onClick={() => {
+              setIsSuccess(false);
+              setRows([]);
+              onClose();
+            }}
+            className="w-full py-2.5 px-5 rounded-xl bg-white/10 hover:bg-white/20 text-white/80 hover:text-white font-bold text-xs cursor-pointer transition-colors"
+          >
+            إغلاق النافذة
+          </button>
 
           <button
             onClick={() => {
@@ -572,8 +627,8 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
   }
 
   return (
-    <div className="fixed inset-0 z-[9999] flex items-start sm:items-center justify-center p-2 sm:p-4 bg-black/85 backdrop-blur-md animate-in fade-in overflow-y-auto pt-6 sm:pt-4">
-      <div className="relative w-full max-w-4xl bg-[#0c1329] border border-white/10 rounded-2xl sm:rounded-3xl shadow-2xl overflow-hidden text-right flex flex-col max-h-[92vh] sm:max-h-[88vh] my-auto text-white shrink-0" style={{ direction: 'rtl' }}>
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-0 sm:p-4 bg-black/90 backdrop-blur-md animate-in fade-in overflow-hidden">
+      <div className="relative w-full h-full sm:h-[95vh] max-w-full sm:max-w-6xl bg-[#0c1329] border-0 sm:border border-white/10 rounded-none sm:rounded-3xl shadow-2xl overflow-hidden text-right flex flex-col my-auto text-white shrink-0" style={{ direction: 'rtl' }}>
         
         {/* Header */}
         <div className="p-4 sm:p-6 bg-gradient-to-r from-[#101935] to-[#0d1428] border-b border-white/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 sticky top-0 z-20 shrink-0">
@@ -686,14 +741,14 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
+                        <div className="flex items-center gap-1.5 self-end sm:self-auto shrink-0 flex-wrap">
                           <button
                             onClick={() => handlePrintSlips(entry.accounts)}
                             className="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer transition-colors"
                             title="إعادة طباعة قصاصات هذا الملف"
                           >
                             <Printer size={14} />
-                            <span>طباعة (PDF)</span>
+                            <span>طباعة PDF</span>
                           </button>
 
                           <button
@@ -856,16 +911,16 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
                     </button>
                   </div>
 
-                  <div className="border border-white/10 rounded-2xl overflow-hidden bg-black/20 max-h-[350px] overflow-y-auto">
-                    <table className="w-full text-right text-xs">
+                  <div className="border border-white/10 rounded-2xl overflow-x-auto overflow-y-auto bg-black/20 max-h-[50vh] sm:max-h-[420px] overscroll-contain touch-auto">
+                    <table className="w-full min-w-[720px] text-right text-xs">
                       <thead className="bg-[#101935] text-white/60 sticky top-0 font-black border-b border-white/10 z-10">
                         <tr>
-                          <th className="p-3 text-center">#</th>
-                          <th className="p-3">اسم الطالب (القصاصة)</th>
-                          <th className="p-3 text-center">رقم هاتف ولي الأمر (يبدأ بـ 7)</th>
-                          <th className="p-3 text-center">كلمة المرور الابتدائية</th>
-                          <th className="p-3 text-center">الحالة</th>
-                          <th className="p-3 text-center">إجراء</th>
+                          <th className="p-3 text-center w-12">#</th>
+                          <th className="p-3 min-w-[180px]">اسم الطالب (القصاصة)</th>
+                          <th className="p-3 text-center min-w-[170px]">رقم هاتف ولي الأمر (يبدأ بـ 7)</th>
+                          <th className="p-3 text-center min-w-[120px]">كلمة المرور الابتدائية</th>
+                          <th className="p-3 text-center min-w-[140px]">الحالة</th>
+                          <th className="p-3 text-center w-16">إجراء</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/5 text-white">
@@ -894,11 +949,11 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
                             </td>
                             <td className="p-3 text-center">
                               {r.status === 'valid' ? (
-                                <span className="inline-flex items-center gap-1 text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2 py-0.5 rounded-full font-bold">
+                                <span className="inline-flex items-center gap-1 text-[10px] bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 px-2.5 py-1 rounded-full font-bold whitespace-nowrap">
                                   <CheckCircle2 size={12} /> جاهز
                                 </span>
                               ) : (
-                                <span className="inline-flex items-center gap-1 text-[10px] bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2 py-0.5 rounded-full font-bold" title={r.errorMessage}>
+                                <span className="inline-flex items-center gap-1 text-[10px] bg-rose-500/10 text-rose-400 border border-rose-500/20 px-2.5 py-1 rounded-full font-bold whitespace-nowrap" title={r.errorMessage}>
                                   <AlertCircle size={12} /> {r.errorMessage || 'غير صالح'}
                                 </span>
                               )}
@@ -932,14 +987,15 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
         {/* Footer Actions */}
         {activeTab === 'new_upload' && (
           <div className="p-4 sm:p-6 bg-[#0d1428] border-t border-white/10 flex flex-wrap items-center justify-between gap-3 shrink-0 sticky bottom-0 z-20">
-            <div className="flex items-center gap-2 w-full sm:w-auto">
+            <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto">
               <button
                 onClick={() => handlePrintSlips()}
                 disabled={rows.length === 0}
-                className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 font-black text-xs flex items-center justify-center gap-2 disabled:opacity-40 transition-all cursor-pointer"
+                className="px-4 py-2.5 rounded-xl bg-amber-500/10 hover:bg-amber-500/20 border border-amber-500/30 text-amber-300 font-black text-xs flex items-center justify-center gap-1.5 disabled:opacity-40 transition-all cursor-pointer"
+                title="طباعة وتحميل قصاصات PDF"
               >
-                <Printer size={16} />
-                <span>طباعة قصاصات الدخول (PDF الصفوف)</span>
+                <Printer size={15} />
+                <span>طباعة (PDF)</span>
               </button>
             </div>
 
