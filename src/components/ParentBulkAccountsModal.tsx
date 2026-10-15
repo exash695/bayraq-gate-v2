@@ -92,6 +92,16 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
   const historySyncInputRef = useRef<HTMLInputElement>(null);
   const [isSavingHistory, setIsSavingHistory] = useState(false);
 
+  // Interactive Smart Matching Preview State
+  const [matchingPreviewModalOpen, setMatchingPreviewModalOpen] = useState(false);
+  const [matchSearchQuery, setMatchSearchQuery] = useState('');
+  const [matchingData, setMatchingData] = useState<{
+    fileName: string;
+    totalParsed: number;
+    matchedUpdates: { phone: string; studentName: string; currentName: string; status: 'matched' | 'new' }[];
+  } | null>(null);
+  const [isExecutingMatch, setIsExecutingMatch] = useState(false);
+
   // Load history logs from server and cache
   const fetchUploadHistory = async () => {
     try {
@@ -176,7 +186,7 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
     }
   };
 
-  // Handle smart sync by re-uploading an Excel file in History tab
+  // Handle smart sync by re-uploading an Excel file in History tab or via Match button
   const handleHistorySyncFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -191,21 +201,9 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
 
         if (!data || data.length === 0) {
           showToast('الملف فارغ', 'error');
+          if (e.target) e.target.value = '';
           return;
         }
-
-        let nameColIdx = 0;
-        let phoneColIdx = 1;
-
-        const headerRow = data[0] || [];
-        headerRow.forEach((cellVal: any, idx: number) => {
-          const str = String(cellVal || '').toLowerCase().trim();
-          if (str.includes('هاتف') || str.includes('رقم') || str.includes('phone') || str.includes('موبايل') || str.includes('جوال')) {
-            phoneColIdx = idx;
-          } else if (str.includes('اسم') || str.includes('طالب') || str.includes('name') || str.includes('تلميذ')) {
-            nameColIdx = idx;
-          }
-        });
 
         const isPhonePattern = (str: string) => {
           if (!str) return false;
@@ -213,66 +211,113 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
           return cleaned.length >= 8 && cleaned.length <= 12 && (cleaned.startsWith('7') || cleaned.startsWith('07') || cleaned.startsWith('964') || cleaned.startsWith('00964'));
         };
 
-        let startRowIdx = 0;
-        const firstRowStr = JSON.stringify(data[0] || []).toLowerCase();
-        if (firstRowStr.includes('اسم') || firstRowStr.includes('طالب') || firstRowStr.includes('هاتف') || firstRowStr.includes('رقم')) {
-          startRowIdx = 1;
-        }
+        // Build phone lookup map from current history logs
+        const phoneToCurrentName = new Map<string, string>();
+        historyLogs.forEach(entry => {
+          entry.accounts.forEach(acc => {
+            const clean = sanitizeIraqiPhoneNumber(acc.formattedPhone || acc.rawPhone);
+            if (clean) {
+              phoneToCurrentName.set(clean, acc.studentName || '');
+            }
+          });
+        });
 
-        const updates: { phone: string; studentName: string }[] = [];
+        const updates: { phone: string; studentName: string; currentName: string; status: 'matched' | 'new' }[] = [];
 
-        for (let i = startRowIdx; i < data.length; i++) {
+        for (let i = 0; i < data.length; i++) {
           const rowData = data[i];
-          if (!rowData || rowData.length === 0) continue;
+          if (!rowData || !Array.isArray(rowData) || rowData.length === 0) continue;
 
-          let valA = rowData[nameColIdx] !== undefined ? String(rowData[nameColIdx]).trim() : '';
-          let valB = rowData[phoneColIdx] !== undefined ? String(rowData[phoneColIdx]).trim() : '';
+          let foundPhone = '';
+          let foundName = '';
 
-          let finalStudentName = '';
-          let finalPhoneRaw = '';
+          for (const cell of rowData) {
+            const cellStr = String(cell || '').trim();
+            if (!cellStr) continue;
 
-          if (isPhonePattern(valA) && !isPhonePattern(valB) && valB.length > 0) {
-            finalStudentName = valB;
-            finalPhoneRaw = valA;
-          } else if (isPhonePattern(valA) && (!valB || isPhonePattern(valB))) {
-            finalStudentName = '';
-            finalPhoneRaw = valA;
-          } else {
-            finalStudentName = valA;
-            finalPhoneRaw = valB;
+            if (isPhonePattern(cellStr) && !foundPhone) {
+              foundPhone = sanitizeIraqiPhoneNumber(cellStr);
+            } else if (
+              !/^\d+$/.test(cellStr.replace(/\s+/g, '')) &&
+              cellStr.length > 1 &&
+              !cellStr.toLowerCase().includes('هاتف') &&
+              !cellStr.toLowerCase().includes('تلميذ') &&
+              !cellStr.toLowerCase().includes('طالب') &&
+              !cellStr.toLowerCase().includes('موبايل') &&
+              !cellStr.toLowerCase().includes('رقم')
+            ) {
+              if (!foundName) {
+                foundName = cellStr;
+              }
+            }
           }
 
-          if (finalPhoneRaw && finalStudentName && !/^\d+$/.test(finalStudentName.replace(/\s+/g, ''))) {
-            updates.push({ phone: finalPhoneRaw, studentName: finalStudentName });
+          if (foundPhone && foundName) {
+            const current = phoneToCurrentName.get(foundPhone) || 'ولي أمر (غير محدد)';
+            updates.push({
+              phone: foundPhone,
+              studentName: foundName,
+              currentName: current,
+              status: phoneToCurrentName.has(foundPhone) ? 'matched' : 'new'
+            });
           }
         }
+
+        if (e.target) e.target.value = '';
 
         if (updates.length === 0) {
-          showToast('لم يتم العثور على أرقام هواتف وأسماء صالحة في الملف', 'error');
+          showToast('لم يتم العثور على أرقام هواتف وأسماء صالحة للمطابقة في هذا الملف', 'error');
           return;
         }
 
-        showToast(`جاري مطابقة وتحديث ${updates.length} اسم طالب بالهاتف...`, 'info');
-
-        const res = await fetch('/api/auth/parent-update-student-names', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ updates })
+        setMatchingData({
+          fileName: file.name,
+          totalParsed: data.length,
+          matchedUpdates: updates
         });
-
-        const resData = await res.json();
-        if (resData.success) {
-          await fetchUploadHistory();
-          showToast(`تمت المطابقة الذكية بالهاتف وتحديث أسماء ${resData.updatedCount} طالب في السجل بنجاح! 🎉`, 'success');
-        } else {
-          showToast('فشل التحديث: ' + (resData.message || ''), 'error');
-        }
+        setMatchSearchQuery('');
+        setMatchingPreviewModalOpen(true);
+        showToast(`تم اكتشاف ${updates.length} طالب وجاهز للمطابقة والعرض ⚡`, 'success');
       } catch (err: any) {
         console.error(err);
         showToast('خطأ أثناء معالجة ملف المطابقة: ' + (err?.message || ''), 'error');
+        if (e.target) e.target.value = '';
       }
     };
     reader.readAsBinaryString(file);
+  };
+
+  // Execute matching updates to server and refresh state
+  const handleConfirmExecuteMatching = async () => {
+    if (!matchingData || matchingData.matchedUpdates.length === 0) return;
+    setIsExecutingMatch(true);
+
+    try {
+      const updates = matchingData.matchedUpdates.map(u => ({
+        phone: u.phone,
+        studentName: u.studentName
+      }));
+
+      const res = await fetch('/api/auth/parent-update-student-names', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updates })
+      });
+
+      const resData = await res.json();
+      if (resData.success) {
+        await fetchUploadHistory();
+        setMatchingPreviewModalOpen(false);
+        showToast(`تمت المطابقة الذكية بنجاح! تم تحديث أسماء ${resData.updatedCount || updates.length} طالب في كافة الحسابات والقصاصات 🎉`, 'success');
+      } else {
+        showToast('فشل التحديث: ' + (resData.message || ''), 'error');
+      }
+    } catch (err: any) {
+      console.error(err);
+      showToast('خطأ أثناء معالجة المطابقة: ' + (err?.message || ''), 'error');
+    } finally {
+      setIsExecutingMatch(false);
+    }
   };
 
   if (!isOpen) return null;
@@ -674,19 +719,51 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
         <html dir="rtl" lang="ar">
         <head>
           <meta charset="utf-8">
+          <title>قصاصات حسابات أولياء الأمور - مدرسة ${schoolName}</title>
           <style>
+            @page {
+              size: A4 portrait;
+              margin: 0;
+            }
             * { box-sizing: border-box; margin: 0; padding: 0; }
             body {
               background: #ffffff;
               direction: rtl;
               font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            .a4-page {
+              width: 210mm;
+              height: 297mm;
+              padding: 12mm;
+              box-sizing: border-box;
+              background: #ffffff;
+              page-break-after: always;
+              break-after: page;
+              display: flex;
+              flex-direction: column;
+              justify-content: flex-start;
+              overflow: hidden;
+              margin: 0 auto;
+            }
+            .a4-page:last-child {
+              page-break-after: auto !important;
+              break-after: auto !important;
             }
             @media print {
+              html, body {
+                width: 210mm;
+                height: 297mm;
+                background: #ffffff !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
               .a4-page {
                 box-shadow: none !important;
                 margin: 0 !important;
-                width: 100% !important;
-                height: 100vh !important;
+                width: 210mm !important;
+                height: 297mm !important;
               }
             }
           </style>
@@ -698,7 +775,7 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
       `;
 
       await printHTML(fullHtml, `Bairaq_Parent_Slips_${Date.now()}.pdf`);
-      showToast('تم إنشاء ملف قصاصات الطباعة بنجاح!', 'success');
+      showToast('تم فتح نافذة الطباعة الفورية بنجاح! 🖨️', 'success');
     } catch (err: any) {
       console.error(err);
       showToast('حدث خطأ أثناء إعداد القصاصات للطباعة: ' + (err?.message || ''), 'error');
@@ -1121,6 +1198,15 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
                     <span>تحميل نموذج Excel</span>
                   </button>
 
+                  <button
+                    onClick={() => historySyncInputRef.current?.click()}
+                    className="flex-1 sm:flex-none px-3.5 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs flex items-center justify-center gap-1.5 shadow-md cursor-pointer transition-all border border-amber-400/30"
+                    title="مطابقة أرقام الهواتف وتحديث أسماء الطلاب من الملف الأصلي"
+                  >
+                    <RefreshCw size={14} />
+                    <span>مطابقة ملف أصلي بأسماء الطلاب ⚡</span>
+                  </button>
+
                   <input
                     type="file"
                     ref={fileInputRef}
@@ -1133,7 +1219,7 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
                     className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-600/20 cursor-pointer transition-all"
                   >
                     <Upload size={16} />
-                    <span>رفع ملف الإكسل (Excel)</span>
+                    <span>رفع إنشاء جديد (Excel)</span>
                   </button>
                 </div>
               </div>
@@ -1304,6 +1390,146 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
                   </>
                 )}
               </button>
+            </div>
+          </div>
+        )}
+
+        {/* Interactive Smart Matching Preview Modal */}
+        {matchingPreviewModalOpen && matchingData && (
+          <div className="fixed inset-0 z-[10000] flex items-center justify-center p-3 sm:p-6 bg-black/90 backdrop-blur-md animate-in fade-in">
+            <div className="relative w-full max-w-4xl max-h-[90vh] bg-[#090d1a] border border-emerald-500/40 rounded-3xl p-5 sm:p-7 shadow-2xl flex flex-col space-y-4 text-white overflow-hidden" style={{ direction: 'rtl' }}>
+              
+              {/* Modal Header */}
+              <div className="flex items-center justify-between border-b border-white/10 pb-4 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-emerald-500/20 to-teal-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0">
+                    <RefreshCw size={22} className="animate-spin" />
+                  </div>
+                  <div>
+                    <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
+                      <span>معاينة نتائج المطابقة الذكية للملف الأصلي ⚡</span>
+                    </h3>
+                    <p className="text-xs text-emerald-400/90 font-bold mt-0.5">
+                      الملف المرفوع: <strong className="text-white font-mono">{matchingData.fileName}</strong> ({matchingData.matchedUpdates.length} طالب)
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => setMatchingPreviewModalOpen(false)}
+                  className="w-9 h-9 rounded-xl bg-white/5 hover:bg-white/10 text-white/60 hover:text-white flex items-center justify-center transition-colors cursor-pointer shrink-0"
+                  title="إلغاء المعاينة"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+
+              {/* Summary Badges */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 shrink-0">
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-3 text-right">
+                  <span className="text-[11px] text-white/50 block font-bold">إجمالي السطور المعالجة</span>
+                  <span className="text-lg font-black text-white font-mono">{matchingData.totalParsed}</span>
+                </div>
+                <div className="bg-emerald-500/10 border border-emerald-500/20 rounded-2xl p-3 text-right">
+                  <span className="text-[11px] text-emerald-300 block font-bold">مطابقة وجاهزة للتحديث بالاسم الصريح</span>
+                  <span className="text-lg font-black text-emerald-400 font-mono">{matchingData.matchedUpdates.length} طالب</span>
+                </div>
+                <div className="col-span-2 sm:col-span-1 bg-amber-500/10 border border-amber-500/20 rounded-2xl p-3 text-right">
+                  <span className="text-[11px] text-amber-300 block font-bold">تحديث الحسابات والقصاصات</span>
+                  <span className="text-xs font-bold text-amber-200">فور التأكيد بنقرة زر</span>
+                </div>
+              </div>
+
+              {/* Search filter in matching preview */}
+              <div className="flex items-center justify-between gap-3 shrink-0">
+                <div className="relative w-full sm:w-72">
+                  <Search size={16} className="absolute right-3 top-3 text-white/40" />
+                  <input
+                    type="text"
+                    value={matchSearchQuery}
+                    onChange={e => setMatchSearchQuery(e.target.value)}
+                    placeholder="تصفية بالاسم أو رقم الهاتف..."
+                    className="w-full pr-9 pl-3 py-2 bg-black/40 border border-white/10 rounded-xl text-xs text-white placeholder-white/30 outline-none focus:border-emerald-500 font-bold"
+                  />
+                </div>
+                <span className="text-xs text-white/50 font-bold shrink-0">
+                  معروض: {matchingData.matchedUpdates.filter(u => !matchSearchQuery.trim() || u.studentName.includes(matchSearchQuery) || u.phone.includes(matchSearchQuery)).length}
+                </span>
+              </div>
+
+              {/* Matched Students Table */}
+              <div className="border border-white/10 rounded-2xl overflow-x-auto overflow-y-auto bg-black/30 flex-1 max-h-[45vh] min-h-[220px] touch-pan-y overscroll-contain">
+                <table className="w-full min-w-[650px] text-right text-xs">
+                  <thead className="bg-[#101935] text-white/60 sticky top-0 font-black border-b border-white/10 z-10">
+                    <tr>
+                      <th className="p-3 text-center w-12">#</th>
+                      <th className="p-3 text-center min-w-[140px]">رقم الهاتف</th>
+                      <th className="p-3 min-w-[170px]">الاسم الحالي بالنظام</th>
+                      <th className="p-3 min-w-[180px]">الاسم المستخرج من الملف الأصلي</th>
+                      <th className="p-3 text-center min-w-[120px]">حالة الربط</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5 text-white">
+                    {matchingData.matchedUpdates
+                      .filter(u => !matchSearchQuery.trim() || u.studentName.includes(matchSearchQuery) || u.phone.includes(matchSearchQuery))
+                      .map((item, idx) => (
+                        <tr key={idx} className="hover:bg-white/5 transition-colors">
+                          <td className="p-3 text-center font-mono text-white/40">{idx + 1}</td>
+                          <td className="p-3 text-center font-mono text-emerald-400 font-black" style={{ direction: 'ltr' }}>
+                            {item.phone}
+                          </td>
+                          <td className="p-3 text-white/60 font-bold">
+                            {item.currentName}
+                          </td>
+                          <td className="p-3 font-black text-amber-300">
+                            {item.studentName}
+                          </td>
+                          <td className="p-3 text-center">
+                            <span className="inline-flex items-center gap-1 text-[10px] bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-2.5 py-1 rounded-full font-bold">
+                              <CheckCircle2 size={12} /> مطابق للربط
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 border-t border-white/10 pt-4 shrink-0">
+                <p className="text-xs text-white/60 font-bold text-right">
+                  سيتم تحديث كافة أسماء أولياء الأمور والقصاصات وسجل الملفات بأرقام الهواتف المطابقة فوراً.
+                </p>
+
+                <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                  <button
+                    onClick={() => setMatchingPreviewModalOpen(false)}
+                    disabled={isExecutingMatch}
+                    className="px-4 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs cursor-pointer transition-colors"
+                  >
+                    إلغاء
+                  </button>
+
+                  <button
+                    onClick={handleConfirmExecuteMatching}
+                    disabled={isExecutingMatch}
+                    className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-500 hover:from-emerald-500 hover:to-teal-400 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 cursor-pointer transition-all disabled:opacity-50"
+                  >
+                    {isExecutingMatch ? (
+                      <>
+                        <RefreshCw size={16} className="animate-spin" />
+                        <span>جاري تنفيذ المطابقة والتحديث...</span>
+                      </>
+                    ) : (
+                      <>
+                        <UserCheck size={16} />
+                        <span>تأكيد واستبدال الأسماء ({matchingData.matchedUpdates.length} طالب) 🚀</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+
             </div>
           </div>
         )}

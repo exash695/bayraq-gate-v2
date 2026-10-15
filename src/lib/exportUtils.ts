@@ -38,13 +38,17 @@ const toBase64 = (data: Blob | ArrayBuffer): Promise<string> => {
 
 /**
  * Universal print helper.
- * Web: uses iframe.print()
- * Mobile: Converts to PDF and shares via OS share sheet.
+ * Web: Uses native iframe.print() for INSTANT (<50ms) high-dpi vector printing / Save-as-PDF.
+ * Mobile / Force PDF: Converts to PDF using jsPDF and shares/downloads.
  */
-export const printHTML = async (html: string, customFileName?: string) => {
+export const printHTML = async (
+  html: string,
+  customFileName?: string,
+  options?: { forcePdfDownload?: boolean }
+) => {
   const platform = Capacitor.getPlatform();
   
-  // Create hidden iframe to render the HTML
+  // Create or reuse hidden iframe to render the HTML
   let iframe = document.getElementById('bairaq-universal-render-frame') as HTMLIFrameElement;
   if (!iframe) {
     iframe = document.createElement('iframe');
@@ -70,9 +74,9 @@ export const printHTML = async (html: string, customFileName?: string) => {
       
       const checkLoaded = () => {
         if (doc.readyState === 'complete') {
-          setTimeout(resolve, 800);
+          setTimeout(resolve, 150);
         } else {
-          setTimeout(checkLoaded, 100);
+          setTimeout(checkLoaded, 30);
         }
       };
       checkLoaded();
@@ -83,6 +87,19 @@ export const printHTML = async (html: string, customFileName?: string) => {
 
   await renderPromise;
 
+  // On Web Platform (or when forcePdfDownload is false/omitted):
+  // Native iframe print is INSTANT (<50ms), 100% vector sharp, supports physical printers AND native "Save as PDF"
+  if (platform === 'web' && !options?.forcePdfDownload) {
+    try {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+      return;
+    } catch (printErr) {
+      console.warn('Native iframe print failed, falling back to PDF capture:', printErr);
+    }
+  }
+
+  // Fallback / Mobile Capacitor App / Explicit PDF download requested:
   try {
     const doc = iframe.contentWindow?.document || iframe.contentDocument;
     const docElement = doc?.body;
@@ -101,7 +118,6 @@ export const printHTML = async (html: string, customFileName?: string) => {
     const pdfPageHeight = pdf.internal.pageSize.getHeight();
 
     if (pageNodes && pageNodes.length > 0) {
-      // PAGE-BY-PAGE HIGH DPI RENDERING (ZERO TEXT SLICING, 100% CRYSTAL CLEAR)
       const { toPng } = await import('html-to-image');
 
       for (let i = 0; i < pageNodes.length; i++) {
@@ -110,25 +126,30 @@ export const printHTML = async (html: string, customFileName?: string) => {
 
         try {
           imgData = await toPng(pageEl, {
-            quality: 1.0,
-            pixelRatio: 2.5,
+            quality: 0.95,
+            pixelRatio: 2.0,
             backgroundColor: '#ffffff',
-            cacheBust: true,
+            cacheBust: false,
           });
         } catch (toImgErr) {
           console.warn(`Page ${i + 1} html-to-image failed, falling back to html2canvas:`, toImgErr);
           const canvas = await html2canvas(pageEl, {
-            scale: 2.5,
+            scale: 2.0,
             useCORS: true,
             logging: false,
             backgroundColor: '#ffffff'
           });
-          imgData = canvas.toDataURL('image/png', 1.0);
+          imgData = canvas.toDataURL('image/png', 0.95);
         }
 
         if (imgData) {
           if (i > 0) pdf.addPage();
           pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfPageHeight, undefined, 'FAST');
+        }
+
+        // Give event loop a breather on large documents
+        if (i % 3 === 0) {
+          await new Promise(r => setTimeout(r, 0));
         }
       }
     } else {
@@ -140,10 +161,10 @@ export const printHTML = async (html: string, customFileName?: string) => {
       try {
         const { toPng } = await import('html-to-image');
         imgData = await toPng(docElement, {
-          quality: 0.98,
+          quality: 0.95,
           backgroundColor: '#ffffff',
-          pixelRatio: 2.5,
-          cacheBust: true
+          pixelRatio: 2.0,
+          cacheBust: false
         });
         canvasWidth = docElement.scrollWidth || 1024;
         canvasHeight = docElement.scrollHeight || 1448;
@@ -157,7 +178,7 @@ export const printHTML = async (html: string, customFileName?: string) => {
           windowWidth: 1024,
           windowHeight: 1448
         });
-        imgData = canvas.toDataURL('image/png', 0.98);
+        imgData = canvas.toDataURL('image/png', 0.95);
         canvasWidth = canvas.width;
         canvasHeight = canvas.height;
       }
