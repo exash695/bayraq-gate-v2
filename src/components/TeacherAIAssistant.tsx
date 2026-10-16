@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Bot, FileUp, ClipboardCheck, RotateCcw, HelpCircle, ScrollText, Edit2, Sparkles, Trophy, ChevronRight, Loader2, Copy, CheckCircle, Image as ImageIcon, X, Save, History, Trash2, Plus, Minus, Lock, Search, Camera, CheckCircle2, UploadCloud, Eye, ZoomIn, Clock, Calendar, Send } from 'lucide-react';
+import { Bot, FileUp, ClipboardCheck, HelpCircle, ScrollText, Edit2, Sparkles, Trophy, ChevronRight, Loader2, Copy, CheckCircle, Image as ImageIcon, X, Save, History, Trash2, Plus, Minus, Lock, Search, Camera, CheckCircle2, UploadCloud, Eye, ZoomIn, Clock, Calendar, Send } from 'lucide-react';
 
 import ReactMarkdown from 'react-markdown';
 import TeacherActivities from "./TeacherActivities";
@@ -54,10 +54,15 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
   // Homework & Material Scheduling States
   const [showPublishScheduleModal, setShowPublishScheduleModal] = useState(false);
   const [scheduleChoice, setScheduleChoice] = useState<'now' | 'tomorrow_am' | 'tomorrow_pm' | 'after_tomorrow_am' | 'custom'>('now');
-  const [customScheduleTime, setCustomScheduleTime] = useState<string>('');
+  const [customDate, setCustomDate] = useState<string>(() => {
+    const tm = new Date();
+    tm.setDate(tm.getDate() + 1);
+    return tm.toISOString().split('T')[0];
+  });
+  const [customTime, setCustomTime] = useState<string>('08:00');
   const [publishPendingMode, setPublishPendingMode] = useState<'regular' | 'image_hw' | null>(null);
 
-  const computeScheduleDetails = (choice: string, customVal: string) => {
+  const computeScheduleDetails = (choice: string, cDate?: string, cTime?: string) => {
     const now = new Date();
     if (choice === 'now') {
       return { isScheduled: false, scheduledAt: null, scheduledLabel: 'نشر فوري الآن', status: 'published' };
@@ -72,18 +77,19 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
     } else if (choice === 'after_tomorrow_am') {
       target.setDate(now.getDate() + 2);
       target.setHours(8, 0, 0, 0);
-    } else if (choice === 'custom' && customVal) {
-      target = new Date(customVal);
+    } else if (choice === 'custom') {
+      const dStr = cDate || new Date().toISOString().split('T')[0];
+      const tStr = cTime || '08:00';
+      target = new Date(`${dStr}T${tStr}`);
     } else {
       return { isScheduled: false, scheduledAt: null, scheduledLabel: 'نشر فوري الآن', status: 'published' };
     }
 
-    const isFuture = target.getTime() > Date.now();
-    if (!isFuture) {
+    if (isNaN(target.getTime()) || target.getTime() <= Date.now()) {
       return { isScheduled: false, scheduledAt: null, scheduledLabel: 'نشر فوري الآن', status: 'published' };
     }
 
-    const options = {
+    const options: Intl.DateTimeFormatOptions = {
       weekday: 'short',
       month: 'numeric',
       day: 'numeric',
@@ -113,12 +119,15 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
     }
     setPublishPendingMode(mode);
     setScheduleChoice('now');
-    setCustomScheduleTime('');
+    const tm = new Date();
+    tm.setDate(tm.getDate() + 1);
+    setCustomDate(tm.toISOString().split('T')[0]);
+    setCustomTime('08:00');
     setShowPublishScheduleModal(true);
   };
 
   const confirmAndExecutePublish = async () => {
-    const sched = computeScheduleDetails(scheduleChoice, customScheduleTime);
+    const sched = computeScheduleDetails(scheduleChoice, customDate, customTime);
     setShowPublishScheduleModal(false);
     if (publishPendingMode === 'image_hw') {
       await handleDirectImageHwPublish(sched);
@@ -581,67 +590,6 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
       return [];
     }
   });
-
-  // Cloud synchronization for Saved Results (المحفوظات)
-  useEffect(() => {
-    if (!schoolId) return;
-    const teacherId = teacherData?.id || teacherData?.code || "unknown";
-    const qSaved = query(
-      collection(db, "schools", schoolId, "teacher_ai_saved"),
-      where("teacherId", "==", teacherId)
-    );
-    getDocs(qSaved).then((snap) => {
-      if (snap && snap.docs.length > 0) {
-        const cloudItems = snap.docs.map(d => {
-          const data = d.data();
-          return {
-            id: d.id,
-            name: data.name || data.title || 'ملف محفوظ',
-            content: data.content || '',
-            tool: data.tool || 'عام',
-            date: data.date || (data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString())
-          };
-        });
-        setSavedResults(prev => {
-          const map = new Map();
-          // merge local + cloud
-          prev.forEach(item => map.set(item.id, item));
-          cloudItems.forEach(item => map.set(item.id, item));
-          const merged = Array.from(map.values()).sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
-          localStorage.setItem('teacher_ai_saved_results', JSON.stringify(merged));
-          return merged;
-        });
-      }
-    }).catch(err => {
-      console.warn("Could not sync cloud saved items:", err);
-    });
-  }, [schoolId, teacherData?.id, teacherData?.code]);
-
-  // Re-apply a saved item back to its original tool (إعادة تطبيق المحفوظة)
-  const handleReapplySavedItem = (result: { id: string; name: string; content: string; tool: string; date: string }) => {
-    let targetTool: AITool = 'homework';
-    const toolLower = (result.tool || '').toLowerCase();
-    if (toolLower.includes('سؤال') || toolLower.includes('اسئلة') || toolLower.includes('questions')) {
-      targetTool = 'questions';
-    } else if (toolLower.includes('ملخص') || toolLower.includes('summary')) {
-      targetTool = 'summaries';
-    } else if (toolLower.includes('مسابق') || toolLower.includes('تحدي') || toolLower.includes('competition')) {
-      targetTool = 'competitions';
-    } else if (toolLower.includes('فكر') || toolLower.includes('شرح') || toolLower.includes('ideas')) {
-      targetTool = 'ideas';
-    } else if (toolLower.includes('واجب') || toolLower.includes('homework')) {
-      targetTool = 'homework';
-    }
-
-    setGeneratedContent(result.content);
-    setSaveName(result.name || '');
-    if (targetTool === 'summaries') {
-      setAiSummaryTopic(result.name || '');
-      setAiSummaryResult(result.content);
-      setSummaryMode('ai');
-    }
-    setActiveTool(targetTool);
-  };
 
   const [historySearch, setHistorySearch] = useState('');
 
@@ -1316,15 +1264,6 @@ ${baseFormatting}`;
     const updated = [newItem, ...savedResults];
     setSavedResults(updated);
     localStorage.setItem('teacher_ai_saved_results', JSON.stringify(updated));
-
-    if (schoolId) {
-      addDoc(collection(db, "schools", schoolId, "teacher_ai_saved"), {
-        ...newItem,
-        teacherId: teacherData?.id || teacherData?.code || "unknown",
-        teacherName: teacherData?.name || "الأستاذ",
-        createdAt: serverTimestamp()
-      }).catch(err => console.warn("Failed to save to cloud:", err));
-    }
     
     setIsSaved(true);
     setTimeout(() => {
@@ -1666,42 +1605,24 @@ ${baseFormatting}`;
                               onClick={() => {
                                 setGeneratedContent(result.content);
                               }}
-                              className={`p-3 rounded-2xl cursor-pointer transition-all flex flex-col gap-2 group relative border ${
-                                generatedContent === result.content 
-                                  ? 'bg-teal-500/10 border-teal-500/40 shadow-lg shadow-teal-500/5' 
-                                  : 'bg-white/5 border-white/10 hover:border-teal-500/30 hover:bg-white/10'
-                              }`}
+                              className="bg-white/5 border border-white/10 hover:border-teal-500/30 hover:bg-white/10 p-3 rounded-xl cursor-pointer transition-all flex flex-col gap-1 group relative overflow-hidden pl-10"
                             >
-                              <div className="flex items-center justify-between pl-8">
+                              <div className="flex items-center justify-between">
                                 <span className="text-sm font-bold text-white truncate max-w-[150px]">{result.name}</span>
-                                <span className="text-[10px] text-teal-300 bg-teal-500/20 border border-teal-500/30 px-2 py-0.5 rounded-lg font-bold">{result.tool}</span>
+                                <span className="text-[10px] text-teal-400 bg-teal-400/10 px-1.5 py-0.5 rounded font-bold">{result.tool}</span>
                               </div>
-                              <div className="flex items-center justify-between gap-2 pt-1 border-t border-white/5">
-                                <span className="text-[10px] text-white/40 font-medium">
-                                  {new Date(result.date).toLocaleDateString('ar-SA')} - {new Date(result.date).toLocaleTimeString('ar-SA', {hour: '2-digit', minute:'2-digit'})}
-                                </span>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleReapplySavedItem(result);
-                                  }}
-                                  className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all shadow-sm cursor-pointer"
-                                  title="إعادة فتح وتطبيق هذه النتيجة في أداتها المخصصة"
-                                >
-                                  <RotateCcw size={11} />
-                                  <span>إعادة تطبيق</span>
-                                </button>
-                              </div>
+                              <span className="text-[10px] text-white/40 font-medium">
+                                {new Date(result.date).toLocaleDateString('ar-SA')} - {new Date(result.date).toLocaleTimeString('ar-SA', {hour: '2-digit', minute:'2-digit'})}
+                              </span>
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setDeleteConfirmTarget(result.id);
                                 }}
-                                className="absolute left-2 top-2.5 w-6 h-6 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center opacity-40 group-hover:opacity-100 transition-opacity hover:bg-rose-500/20 cursor-pointer border border-rose-500/20"
+                                className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center opacity-60 group-hover:opacity-100 transition-opacity hover:bg-rose-500/20 cursor-pointer border border-rose-500/20"
                                 title="حذف"
                               >
-                                <Trash2 size={12} />
+                                <Trash2 size={13} />
                               </button>
                             </div>
                           ))}
@@ -2918,16 +2839,6 @@ ${baseFormatting}`;
                             .filter(d => d.data().content === deletedItem.content)
                             .map(d => deleteDoc(doc(db, "schools", schoolId, "ai_materials", d.id)));
                           await Promise.all(deletePromises);
-
-                          const qSaved = query(
-                            collection(db, "schools", schoolId, "teacher_ai_saved"),
-                            where("teacherId", "==", teacherData?.id || teacherData?.code || "unknown")
-                          );
-                          const snapSaved = await getDocs(qSaved);
-                          const deleteSavedPromises = snapSaved.docs
-                            .filter(d => d.data().content === deletedItem.content || d.id === deletedItem.id)
-                            .map(d => deleteDoc(doc(db, "schools", schoolId, "teacher_ai_saved", d.id)));
-                          await Promise.all(deleteSavedPromises);
                         }
                       }
                     } catch (error) {
@@ -3053,17 +2964,92 @@ ${baseFormatting}`;
                     <motion.div
                       initial={{ opacity: 0, height: 0 }}
                       animate={{ opacity: 1, height: 'auto' }}
-                      className="p-3.5 bg-black/40 border border-amber-500/30 rounded-2xl flex flex-col gap-2 mt-1"
+                      className="p-3.5 bg-black/50 border border-amber-500/40 rounded-2xl flex flex-col gap-3 mt-1 text-right"
                     >
-                      <label className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
-                        <Calendar size={14} /> حدد تاريخ ووقت النشر الدقيق:
-                      </label>
-                      <input
-                        type="datetime-local"
-                        value={customScheduleTime}
-                        onChange={(e) => setCustomScheduleTime(e.target.value)}
-                        className="w-full bg-white/5 border border-white/20 rounded-xl px-3 py-2 text-white text-xs outline-none focus:border-amber-400"
-                      />
+                      <div className="flex items-center justify-between text-xs font-bold text-amber-300">
+                        <span className="flex items-center gap-1.5">
+                          <Calendar size={14} /> حدد تاريخ ووقت النشر الدقيق:
+                        </span>
+                        <span className="text-[11px] text-amber-200/90 font-mono" dir="ltr">
+                          {customDate} | {customTime}
+                        </span>
+                      </div>
+
+                      {/* Date Row with Quick Day Buttons */}
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[11px] font-bold text-white/70">التاريخ:</label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="date"
+                            dir="ltr"
+                            value={customDate}
+                            min={new Date().toISOString().split('T')[0]}
+                            onChange={(e) => setCustomDate(e.target.value)}
+                            className="flex-1 bg-white/10 border border-white/20 rounded-xl px-3 py-2 text-white font-mono text-xs outline-none focus:border-amber-400 cursor-pointer"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setCustomDate(new Date().toISOString().split('T')[0])}
+                            className={`px-2.5 py-2 border rounded-xl text-[11px] font-bold shrink-0 transition-colors cursor-pointer ${
+                              customDate === new Date().toISOString().split('T')[0]
+                                ? 'bg-amber-500/25 border-amber-400 text-amber-300'
+                                : 'bg-white/5 border-white/10 text-white/80 hover:text-white'
+                            }`}
+                          >
+                            اليوم
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const tm = new Date();
+                              tm.setDate(tm.getDate() + 1);
+                              setCustomDate(tm.toISOString().split('T')[0]);
+                            }}
+                            className={`px-2.5 py-2 border rounded-xl text-[11px] font-bold shrink-0 transition-colors cursor-pointer ${
+                              customDate === (() => { const tm = new Date(); tm.setDate(tm.getDate() + 1); return tm.toISOString().split('T')[0]; })()
+                                ? 'bg-amber-500/25 border-amber-400 text-amber-300'
+                                : 'bg-white/5 border-white/10 text-white/80 hover:text-white'
+                            }`}
+                          >
+                            غداً
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Time Row with Quick Presets */}
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[11px] font-bold text-white/70">الساعة / الوقت:</label>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="time"
+                            dir="ltr"
+                            value={customTime}
+                            onChange={(e) => setCustomTime(e.target.value)}
+                            className="w-28 bg-white/10 border border-white/20 rounded-xl px-3 py-2 text-white font-mono text-xs outline-none focus:border-amber-400 cursor-pointer"
+                          />
+                          <div className="flex items-center gap-1 overflow-x-auto py-0.5">
+                            {[
+                              { label: '08:00 ص', val: '08:00' },
+                              { label: '12:00 ظ', val: '12:00' },
+                              { label: '04:00 م', val: '16:00' },
+                              { label: '08:00 م', val: '20:00' },
+                            ].map(t => (
+                              <button
+                                key={t.val}
+                                type="button"
+                                onClick={() => setCustomTime(t.val)}
+                                className={`px-2.5 py-1.5 rounded-lg text-[10px] font-black border transition-all shrink-0 cursor-pointer ${
+                                  customTime === t.val 
+                                    ? 'bg-amber-500/25 border-amber-400 text-amber-300 shadow-md' 
+                                    : 'bg-white/5 border-white/10 text-white/60 hover:text-white'
+                                }`}
+                              >
+                                {t.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
                     </motion.div>
                   )}
                 </div>

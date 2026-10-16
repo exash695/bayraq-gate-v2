@@ -764,14 +764,22 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
                   بَوّابة بيرق - مدرسة ${schoolName}
                 </div>
 
-                <div style="text-align: center; font-size: 13px; font-weight: 800; color: #0f172a; margin-bottom: 8px; background: #e0f2fe; padding: 5px 8px; border-radius: 6px; border: 1px solid #bae6fd;">
+                ${item.grade ? `
+                  <span style="position: absolute; top: -10px; left: 14px; background: #0284c7; color: #ffffff; padding: 1px 8px; border-radius: 4px; font-size: 10.5px; font-weight: 800;">
+                    ${item.grade}
+                  </span>
+                ` : ''}
+
+                <div style="text-align: center; font-size: 13px; font-weight: 800; color: #0f172a; margin-bottom: 6px; background: #e0f2fe; padding: 6px 8px; border-radius: 6px; border: 1px solid #bae6fd;">
                   إلى ولي أمر الطالب/ة: <span style="color: #0369a1; font-weight: 900;">${displayStudentName}</span>
-                  ${item.grade ? `
-                    <div style="margin-top: 4px; display: inline-block; background: #0284c7; color: #ffffff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 800;">
-                      الصف: ${item.grade}
-                    </div>
-                  ` : ''}
                 </div>
+
+                ${item.grade ? `
+                  <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; background: #f1f5f9; padding: 4px 8px; border-radius: 5px; margin-bottom: 6px; border: 1px solid #e2e8f0;">
+                    <span style="color: #475569; font-weight: 700;">الصف الدراسي:</span>
+                    <span style="color: #0284c7; font-weight: 900;">${item.grade}</span>
+                  </div>
+                ` : ''}
 
                 <div style="
                   background: #f8fafc;
@@ -1205,7 +1213,7 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
                             ) : (
                               <Printer size={14} />
                             )}
-                            <span>{isPrintingSlips ? 'جاري التحضير...' : 'طباعة PDF'}</span>
+                            <span>طباعة PDF</span>
                           </button>
 
                           <button

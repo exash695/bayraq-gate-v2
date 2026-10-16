@@ -54,31 +54,60 @@ export const printHTML = async (
   const parsedDoc = parser.parseFromString(html, 'text/html');
   const pageNodes = Array.from(parsedDoc.querySelectorAll('.a4-page'));
 
-  // Create progress indicator overlay
+  // Create full-screen centered progress indicator overlay with progress bar
   const progressOverlay = document.createElement('div');
-  progressOverlay.id = 'bairaq-pdf-progress';
+  progressOverlay.id = 'bairaq-pdf-progress-overlay';
   progressOverlay.style.cssText = `
     position: fixed;
-    bottom: 24px;
-    right: 24px;
-    background: #0f172a;
-    color: #ffffff;
-    padding: 14px 20px;
-    border-radius: 14px;
-    font-size: 14px;
-    font-weight: 700;
-    z-index: 999999;
-    box-shadow: 0 10px 25px -5px rgba(0,0,0,0.3);
-    border: 1px solid #334155;
-    direction: rtl;
-    font-family: system-ui, -apple-system, sans-serif;
+    top: 0; left: 0; right: 0; bottom: 0;
+    z-index: 9999999;
+    background: rgba(15, 23, 42, 0.85);
+    backdrop-filter: blur(10px);
     display: flex;
     align-items: center;
-    gap: 10px;
+    justify-content: center;
+    padding: 20px;
+    direction: rtl;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   `;
+
   progressOverlay.innerHTML = `
-    <span style="display:inline-block; width:12px; height:12px; border-radius:50%; background:#38bdf8; animation: ping 1s cubic-bezier(0, 0, 0.2, 1) infinite;"></span>
-    <span id="bairaq-pdf-progress-text">جاري إعداد ملف PDF...</span>
+    <div style="
+      background: #0f172a;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 24px;
+      padding: 28px 24px;
+      max-width: 400px;
+      width: 100%;
+      text-align: center;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+      color: #ffffff;
+    ">
+      <div style="
+        width: 52px;
+        height: 52px;
+        border-radius: 18px;
+        background: rgba(56, 189, 248, 0.15);
+        border: 1px solid rgba(56, 189, 248, 0.3);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto 16px auto;
+        color: #38bdf8;
+      ">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
+      </div>
+
+      <h3 style="font-size: 16px; font-weight: 900; margin-bottom: 6px; color: #f8fafc;">جاري إعداد وتحضير ملف PDF</h3>
+      <p id="bairaq-pdf-progress-text" style="font-size: 13px; color: #94a3b8; font-weight: 700; margin-bottom: 16px;">جاري تجهيز الصفحة 1 من ${pageNodes.length || 1}...</p>
+
+      <!-- Progress Bar Track -->
+      <div style="width: 100%; height: 10px; background: rgba(255, 255, 255, 0.1); border-radius: 999px; overflow: hidden; position: relative;">
+        <div id="bairaq-pdf-progress-bar" style="width: 2%; height: 100%; background: linear-gradient(90deg, #0284c7, #38bdf8); border-radius: 999px; transition: width 0.15s linear;"></div>
+      </div>
+
+      <div id="bairaq-pdf-progress-percent" style="font-size: 12px; font-weight: 800; color: #38bdf8; margin-top: 10px; font-family: monospace;">2%</div>
+    </div>
   `;
   document.body.appendChild(progressOverlay);
 
@@ -107,10 +136,14 @@ export const printHTML = async (
 
     if (pageNodes.length > 0) {
       for (let i = 0; i < pageNodes.length; i++) {
+        const percent = Math.min(100, Math.max(1, Math.round(((i + 1) / pageNodes.length) * 100)));
         const progressTxt = document.getElementById('bairaq-pdf-progress-text');
-        if (progressTxt) {
-          progressTxt.innerText = `جاري تجهيز الصفحة ${i + 1} من ${pageNodes.length}...`;
-        }
+        const progressBar = document.getElementById('bairaq-pdf-progress-bar');
+        const progressPercent = document.getElementById('bairaq-pdf-progress-percent');
+
+        if (progressTxt) progressTxt.innerText = `جاري تجهيز الصفحة ${i + 1} من ${pageNodes.length}`;
+        if (progressBar) progressBar.style.width = `${percent}%`;
+        if (progressPercent) progressPercent.innerText = `${percent}%`;
 
         container.innerHTML = '';
         container.appendChild(document.importNode(pageNodes[i], true));

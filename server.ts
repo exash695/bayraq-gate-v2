@@ -9944,11 +9944,22 @@ async function startServer() {
       const phoneToNameMap = new Map<string, string>();
       const phoneToGradeMap = new Map<string, string>();
 
+      const isGradeStr = (s: string) => {
+        if (!s) return false;
+        const c = s.replace(/[أإآ]/g, 'ا').toLowerCase();
+        return c.includes('ابتدائي') || c.includes('صف') || c === 'الاول' || c === 'الثاني' || c === 'الثالث' || c === 'الرابع' || c === 'الخامس' || c === 'السادس';
+      };
+
       for (const item of updates) {
         const phoneRaw = String(item.phone || item.formattedPhone || '').trim();
-        const studentName = String(item.studentName || '').trim();
+        let studentName = String(item.studentName || '').trim();
         const grade = item.grade ? String(item.grade).trim() : '';
-        if (!phoneRaw || !studentName) continue;
+        if (!phoneRaw) continue;
+
+        // CRITICAL: Never let studentName be overwritten by a grade string!
+        if (isGradeStr(studentName)) {
+          studentName = ''; // Do not update student name with grade text
+        }
 
         const cleanPhone = formatPhoneForWhatsApp(phoneRaw);
         const raw7Phone = phoneRaw.replace(/^0+/, '').replace(/^\+964/, '');
