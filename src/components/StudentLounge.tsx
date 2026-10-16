@@ -389,6 +389,22 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
     return () => unsub();
   }, [schoolId, currentUserUid, grade, isTeacher, isParent]);
 
+  // All students belonging strictly to the teacher's assigned sections
+  const teacherAssignedKnights = useMemo(() => {
+    if (!isTeacher || availableSections.length === 0) return knights;
+    return knights.filter(k => 
+      availableSections.some(secName => isSectionMatch(k.grade, secName, k))
+    );
+  }, [isTeacher, availableSections, knights, academicLists]);
+
+  // Count of students across all available sections
+  const allSectionsStudentCount = useMemo(() => {
+    if (isTeacher && availableSections.length > 0) {
+      return teacherAssignedKnights.length;
+    }
+    return knights.length;
+  }, [isTeacher, availableSections, teacherAssignedKnights, knights]);
+
   // Memoized filtered knights based on selected section and search
   const filteredKnights = useMemo(() => {
     return knights.filter(k => {
@@ -399,10 +415,16 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
         return isSectionMatch(k.grade, selectedSection, k);
       }
 
-      const matchesGrade = isTeacher || !grade || isGradeMatch(k.grade, grade);
+      // When selectedSection === 'all':
+      // If user is a teacher and has assigned sections, restrict strictly to those sections
+      if (isTeacher && availableSections.length > 0) {
+        return availableSections.some(secName => isSectionMatch(k.grade, secName, k));
+      }
+
+      const matchesGrade = !grade || grade === 'all' || isGradeMatch(k.grade, grade);
       return matchesGrade;
     });
-  }, [knights, searchQuery, selectedSection, isTeacher, grade, academicLists]);
+  }, [knights, searchQuery, selectedSection, isTeacher, availableSections, grade, academicLists]);
 
   // Memoized filtered parents based on selected section and search
   const filteredParents = useMemo(() => {
@@ -426,9 +448,28 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
         return false;
       }
 
+      // When selectedSection === 'all':
+      // If user is a teacher and has assigned sections, restrict parents strictly to those sections
+      if (isTeacher && availableSections.length > 0) {
+        const parentGradeMatch = p.grade && availableSections.some(secName => isSectionMatch(p.grade, secName));
+        if (parentGradeMatch) return true;
+
+        if (p.studentId || p.studentCode || p.childCode) {
+          const matchedStudent = knights.find(k => 
+            (p.studentId && k.id === p.studentId) ||
+            (p.studentCode && (k.code === p.studentCode || k.studentCode === p.studentCode)) ||
+            (p.childCode && (k.code === p.childCode || k.parentCode === p.childCode))
+          );
+          if (matchedStudent) {
+            return availableSections.some(secName => isSectionMatch(matchedStudent.grade, secName, matchedStudent));
+          }
+        }
+        return false;
+      }
+
       return true;
     });
-  }, [parents, searchQuery, selectedSection, knights, academicLists]);
+  }, [parents, searchQuery, selectedSection, isTeacher, availableSections, knights, academicLists]);
 
 
   // Track unread messages per user (PostgreSQL)
@@ -908,7 +949,7 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                  <>
                    <h2 className="text-lg font-black text-white leading-tight">أولياء الأمور</h2>
                    <p className="text-white/40 text-[10px] font-bold">
-                       {selectedSection !== 'all' ? `${filteredParents.length} ولي أمر في (${selectedSection})` : `${parents.length} من أولياء الأمور`}
+                       {selectedSection !== 'all' ? `${filteredParents.length} ولي أمر في (${selectedSection})` : `${filteredParents.length} من أولياء الأمور`}
                    </p>
                  </>
              ) : activeTab === 'teachers' ? (
@@ -922,7 +963,7 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                  <>
                    <h2 className="text-lg font-black text-white leading-tight">المجلس</h2>
                    <p className="text-white/40 text-[10px] font-bold">
-                       {selectedSection !== 'all' ? `${filteredKnights.length} بطل في (${selectedSection})` : `${knights.length} من الأبطال النشطين`}
+                       {selectedSection !== 'all' ? `${filteredKnights.length} بطل في (${selectedSection})` : `${filteredKnights.length} من الأبطال النشطين`}
                    </p>
                  </>
              )}
@@ -991,7 +1032,7 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                           <span>جميع الشعب</span>
                         </div>
                         <span className="text-[10px] text-white/40 font-mono bg-white/5 px-1.5 py-0.5 rounded-md">
-                          {knights.length}
+                          {allSectionsStudentCount}
                         </span>
                       </button>
 
