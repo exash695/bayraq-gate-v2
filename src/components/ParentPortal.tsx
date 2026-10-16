@@ -963,6 +963,8 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
           setActiveSubPage('grades');
         } else if (target === 'finance') {
           setActiveSubPage('finance');
+        } else if (target === 'conduct' || target === 'discipline') {
+          setActiveSubPage('conduct');
         } else if (target === 'notifications') {
           setActiveSubPage('ideas');
         } else if (target === 'messages' || target === 'support' || target === 'meeting') {
@@ -1967,7 +1969,6 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
           border: "border-blue-400/20",
           badge: activeSubPage !== 'meeting' && unreadLoungeMessagesCount > 0 ? unreadLoungeMessagesCount : null
         },
-        { id: "finance", icon: Wallet, name: "المحفظة المالية والأقساط", color: "text-amber-400", bg: "bg-amber-400/10", border: "border-amber-400/20", cap: 'financial_view' },
         { id: "conduct", icon: AlertTriangle, name: "تقارير الانضباط والسلوك", color: "text-rose-400", bg: "bg-rose-400/10", border: "border-rose-400/20" },
       ]
     },

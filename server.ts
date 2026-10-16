@@ -9956,32 +9956,37 @@ async function startServer() {
         const grade = item.grade ? String(item.grade).trim() : '';
         if (!phoneRaw) continue;
 
-        // CRITICAL: Never let studentName be overwritten by a grade string!
-        if (isGradeStr(studentName)) {
-          studentName = ''; // Do not update student name with grade text
+        // CRITICAL: Never let studentName be overwritten by a grade string or phone number!
+        const isPhoneNum = (s: string) => !s || /^\+?\d+$/.test(s.replace(/\s+/g, '')) || s.includes('طالب (07') || s.includes('طالب (ولي');
+        if (isGradeStr(studentName) || isPhoneNum(studentName)) {
+          studentName = ''; // Do not update student name if invalid
         }
 
         const cleanPhone = formatPhoneForWhatsApp(phoneRaw);
         const raw7Phone = phoneRaw.replace(/^0+/, '').replace(/^\+964/, '');
-        phoneToNameMap.set(raw7Phone, studentName);
-        if (cleanPhone) phoneToNameMap.set(cleanPhone, studentName);
+        if (studentName) {
+          phoneToNameMap.set(raw7Phone, studentName);
+          if (cleanPhone) phoneToNameMap.set(cleanPhone, studentName);
+        }
         if (grade) {
           phoneToGradeMap.set(raw7Phone, grade);
           if (cleanPhone) phoneToGradeMap.set(cleanPhone, grade);
         }
 
-        const parentDisplayName = `ولي أمر ${studentName}`;
+        const parentDisplayName = studentName ? `ولي أمر ${studentName}` : undefined;
         const userId = `usr_p_${raw7Phone}`;
 
-        // 1. Update users table
-        try {
-          await db.update(users).set({
-            name: parentDisplayName
-          }).where(or(
-            eq(users.id, userId),
-            cleanPhone ? eq(users.phone, cleanPhone) : undefined
-          ));
-        } catch (e) {}
+        // 1. Update users table if studentName is valid
+        if (parentDisplayName) {
+          try {
+            await db.update(users).set({
+              name: parentDisplayName
+            }).where(or(
+              eq(users.id, userId),
+              cleanPhone ? eq(users.phone, cleanPhone) : undefined
+            ));
+          } catch (e) {}
+        }
 
         // 2. Update firestore_docs parent_accounts
         try {
@@ -9989,8 +9994,9 @@ async function startServer() {
           const existingDoc = await db.select().from(firestore_docs).where(eq(firestore_docs.path, docPath)).limit(1);
           if (existingDoc && existingDoc.length > 0) {
             const currentData = existingDoc[0].data || {};
+            const finalDocName = studentName || currentData.studentName;
             await db.update(firestore_docs).set({
-              data: { ...currentData, studentName, grade: grade || currentData.grade },
+              data: { ...currentData, studentName: finalDocName, grade: grade || currentData.grade },
               updatedAt: new Date()
             }).where(eq(firestore_docs.path, docPath));
           }
@@ -10008,14 +10014,17 @@ async function startServer() {
             let modified = false;
             const updatedAccounts = data.accounts.map((acc: any) => {
               const accPhone = String(acc.formattedPhone || acc.phone || acc.rawPhone || '').replace(/^0+/, '').replace(/^\+964/, '');
-              for (const [pKey, newName] of phoneToNameMap.entries()) {
-                if (accPhone === pKey || accPhone.endsWith(pKey) || pKey.endsWith(accPhone)) {
-                  modified = true;
-                  const matchedGrade = phoneToGradeMap.get(pKey) || phoneToGradeMap.get(accPhone) || acc.grade;
-                  return { ...acc, studentName: newName, grade: matchedGrade };
-                }
+              const matchedName = phoneToNameMap.get(accPhone) || phoneToNameMap.get(String(acc.formattedPhone || '').replace(/^0+/, '').replace(/^\+964/, ''));
+              const matchedGrade = phoneToGradeMap.get(accPhone) || phoneToGradeMap.get(String(acc.formattedPhone || '').replace(/^0+/, '').replace(/^\+964/, '')) || acc.grade;
+              
+              const isInvalidName = (s?: string) => !s || /^\+?\d+$/.test(s.replace(/\s+/g, '')) || s.includes('طالب (07') || isGradeStr(s);
+              const finalName = (matchedName && !isInvalidName(matchedName)) ? matchedName : (acc.studentName && !isInvalidName(acc.studentName) ? acc.studentName : 'طالب بدون اسم');
+
+              if ((matchedName && matchedName !== acc.studentName) || (matchedGrade && matchedGrade !== acc.grade)) {
+                modified = true;
+                return { ...acc, studentName: finalName, grade: matchedGrade };
               }
-              return acc;
+              return { ...acc, studentName: finalName, grade: matchedGrade };
             });
 
             if (modified) {

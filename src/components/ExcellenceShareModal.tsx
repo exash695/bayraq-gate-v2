@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Share2, Download, Sparkles, CheckCircle2 } from 'lucide-react';
 import { toPng } from 'html-to-image';
+import { getOfficialSchoolLogoUrl } from '../lib/constants';
 
 interface ExcellenceShareModalProps {
   isOpen: boolean;
@@ -68,6 +69,7 @@ export const ExcellenceShareModal: React.FC<ExcellenceShareModalProps> = ({
   const studentName = studentData?.studentName || studentData?.name || '';
   const cleanStudentName = studentName.replace(/^ولي أمر\s*/, '').trim() || 'طالب متميز';
   const schoolLabel = studentData?.schoolName || studentData?.school || schoolName || schoolConfigs?.schoolName || schoolConfigs?.name || 'المدرسة الإلكترونية';
+  const resolvedSchoolLogo = studentData?.schoolLogoUrl || studentData?.schoolLogo || schoolConfigs?.schoolLogoUrl || schoolConfigs?.schoolLogo || schoolConfigs?.logoUrl || getOfficialSchoolLogoUrl(studentData?.schoolId || schoolConfigs?.schoolId, schoolLabel);
   const gradeLabel = studentData?.grade || academicProfile?.levelData?.gradeTag || studentData?.academicLevel || 'المرحلة الأكاديمية';
   const studentCode = studentData?.code || studentData?.student || studentData?.id || '2026';
   const certSerial = `BYR-${String(studentCode).slice(-6).toUpperCase() || '6X'}-2026`;
@@ -379,7 +381,7 @@ export const ExcellenceShareModal: React.FC<ExcellenceShareModalProps> = ({
                              <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
                                 <div style={{ width: '115px', height: '115px', borderRadius: '28px', backgroundColor: '#091128', border: '3px solid rgba(255,214,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', padding: '10px', boxShadow: '0 8px 25px rgba(0,0,0,0.6), 0 0 15px rgba(255,214,0,0.2)', flexShrink: 0 }}>
                                    <img 
-                                      src="/school-logos/logo1.jpg" 
+                                      src={resolvedSchoolLogo} 
                                       alt="School Brand" 
                                       crossOrigin="anonymous"
                                       style={{ width: '100%', height: '100%', objectFit: 'contain' }} 
@@ -758,7 +760,7 @@ export const ExcellenceShareModal: React.FC<ExcellenceShareModalProps> = ({
                   {/* Right: School */}
                   <div className="flex items-center gap-2">
                       <div className="w-9 h-9 rounded-xl bg-[#0d1738] border border-[#FFD600]/30 flex items-center justify-center relative overflow-hidden shadow-sm">
-                         <img src="/school-logos/logo1.jpg" alt="School" className="w-full h-full object-contain p-1" onError={(e) => {
+                         <img src={resolvedSchoolLogo} alt="School" className="w-full h-full object-contain p-1" onError={(e) => {
                             e.currentTarget.style.display = 'none';
                             const pr = e.currentTarget.parentElement;
                             if (pr) pr.innerHTML = '🏫';

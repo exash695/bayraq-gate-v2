@@ -391,19 +391,20 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
 
   // All students belonging strictly to the teacher's assigned sections
   const teacherAssignedKnights = useMemo(() => {
-    if (!isTeacher || availableSections.length === 0) return knights;
+    if (!isTeacher) return knights;
+    if (availableSections.length === 0) return [];
     return knights.filter(k => 
       availableSections.some(secName => isSectionMatch(k.grade, secName, k))
     );
   }, [isTeacher, availableSections, knights, academicLists]);
 
-  // Count of students across all available sections
+  // Count of students across all available sections (for teacher: strictly assigned sections)
   const allSectionsStudentCount = useMemo(() => {
-    if (isTeacher && availableSections.length > 0) {
+    if (isTeacher) {
       return teacherAssignedKnights.length;
     }
     return knights.length;
-  }, [isTeacher, availableSections, teacherAssignedKnights, knights]);
+  }, [isTeacher, teacherAssignedKnights, knights]);
 
   // Memoized filtered knights based on selected section and search
   const filteredKnights = useMemo(() => {
@@ -416,9 +417,9 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
       }
 
       // When selectedSection === 'all':
-      // If user is a teacher and has assigned sections, restrict strictly to those sections
-      if (isTeacher && availableSections.length > 0) {
-        return availableSections.some(secName => isSectionMatch(k.grade, secName, k));
+      // If user is a teacher, restrict strictly to their assigned sections only (never all center students)
+      if (isTeacher) {
+        return availableSections.length > 0 && availableSections.some(secName => isSectionMatch(k.grade, secName, k));
       }
 
       const matchesGrade = !grade || grade === 'all' || isGradeMatch(k.grade, grade);

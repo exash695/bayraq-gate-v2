@@ -133,6 +133,7 @@ import {
   Bell,
   X,
   Shield,
+  ShieldAlert,
   Menu,
   Swords,
   UserPlus,
@@ -3633,26 +3634,26 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* 4. الرسوم الدراسية */}
+                  {/* 4. تقارير الانضباط والسلوك */}
                   <div
-                    onClick={() => navigateToParentPlatform("finance")}
-                    className="bg-[#0A0F1D] border border-purple-500/20 hover:border-purple-500/50 rounded-[1.5rem] p-4 flex flex-col justify-between relative overflow-hidden group transition-all cursor-pointer shadow-sm hover:shadow-[0_4px_25px_rgba(168,85,247,0.2)] active:scale-95 min-h-[110px]"
+                    onClick={() => navigateToParentPlatform("conduct")}
+                    className="bg-[#0A0F1D] border border-rose-500/20 hover:border-rose-500/50 rounded-[1.5rem] p-4 flex flex-col justify-between relative overflow-hidden group transition-all cursor-pointer shadow-sm hover:shadow-[0_4px_25px_rgba(244,63,94,0.2)] active:scale-95 min-h-[110px]"
                   >
-                    <div className="absolute left-0 top-0 w-24 h-full bg-gradient-to-r from-purple-500/10 to-transparent pointer-events-none" />
+                    <div className="absolute left-0 top-0 w-24 h-full bg-gradient-to-r from-rose-500/10 to-transparent pointer-events-none" />
                     <div className="flex items-center justify-between w-full mb-2">
-                      <span className="text-[10px] font-bold text-purple-400 bg-purple-500/10 px-2 py-0.5 rounded-full border border-purple-500/20">
-                        الأقساط
+                      <span className="text-[10px] font-bold text-rose-400 bg-rose-500/10 px-2 py-0.5 rounded-full border border-rose-500/20">
+                        الانضباط
                       </span>
-                      <div className="w-10 h-10 rounded-2xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 transition-transform">
-                        <Wallet size={20} className="text-purple-400" />
+                      <div className="w-10 h-10 rounded-2xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center shrink-0 shadow-sm group-hover:scale-105 transition-transform">
+                        <ShieldAlert size={20} className="text-rose-400" />
                       </div>
                     </div>
                     <div className="text-right">
-                      <span className="block text-sm font-black text-white group-hover:text-purple-300 transition-colors">
-                        الرسوم الدراسية 💳
+                      <span className="block text-sm font-black text-white group-hover:text-rose-300 transition-colors">
+                        تقارير الانضباط والسلوك 🛡️
                       </span>
                       <span className="block text-[10px] font-medium text-white/50 mt-0.5">
-                        سجل الدفعات والوصل الرقمي
+                        متابعة السلوك والملاحظات الانضباطية
                       </span>
                     </div>
                   </div>

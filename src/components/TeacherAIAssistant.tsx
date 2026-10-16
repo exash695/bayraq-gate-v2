@@ -2982,6 +2982,7 @@ ${baseFormatting}`;
                           <input
                             type="date"
                             dir="ltr"
+                            lang="en-US"
                             value={customDate}
                             min={new Date().toISOString().split('T')[0]}
                             onChange={(e) => setCustomDate(e.target.value)}
@@ -3023,6 +3024,7 @@ ${baseFormatting}`;
                           <input
                             type="time"
                             dir="ltr"
+                            lang="en-US"
                             value={customTime}
                             onChange={(e) => setCustomTime(e.target.value)}
                             className="w-28 bg-white/10 border border-white/20 rounded-xl px-3 py-2 text-white font-mono text-xs outline-none focus:border-amber-400 cursor-pointer"
@@ -3049,6 +3051,22 @@ ${baseFormatting}`;
                             ))}
                           </div>
                         </div>
+                      </div>
+
+                      {/* Arabic Readable Date & Time Preview Badge */}
+                      <div className="mt-1 p-2 bg-amber-500/10 border border-amber-500/30 rounded-xl text-center">
+                        <span className="text-[11px] font-bold text-amber-300">
+                          📅 موعد النشر المحدد: {(() => {
+                            try {
+                              const [y, m, d] = customDate.split('-').map(Number);
+                              const [hh, mm] = customTime.split(':').map(Number);
+                              const dateObj = new Date(y, m - 1, d, hh, mm);
+                              return dateObj.toLocaleDateString('ar-IQ', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }) + ' - الساعة ' + dateObj.toLocaleTimeString('ar-IQ', { hour: '2-digit', minute: '2-digit' });
+                            } catch {
+                              return `${customDate} الساعة ${customTime}`;
+                            }
+                          })()}
+                        </span>
                       </div>
                     </motion.div>
                   )}
