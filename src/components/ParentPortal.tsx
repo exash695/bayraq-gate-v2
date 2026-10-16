@@ -1,3 +1,4 @@
+import { isItemPublished } from '../utils/scheduleUtils';
 import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { pushNotificationManager } from '../services/pushNotificationManager';
@@ -842,7 +843,7 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
       orderBy("timestamp", "desc")
     );
     const unsub = onSnapshot(q, (snapshot) => {
-      const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const items = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })).filter(isItemPublished);
       setParentHomeworks(items);
     }, (err) => {
       console.warn("Failed to fetch homework materials in ParentPortal", err);

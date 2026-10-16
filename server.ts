@@ -9942,16 +9942,22 @@ async function startServer() {
 
       let updatedCount = 0;
       const phoneToNameMap = new Map<string, string>();
+      const phoneToGradeMap = new Map<string, string>();
 
       for (const item of updates) {
         const phoneRaw = String(item.phone || item.formattedPhone || '').trim();
         const studentName = String(item.studentName || '').trim();
+        const grade = item.grade ? String(item.grade).trim() : '';
         if (!phoneRaw || !studentName) continue;
 
         const cleanPhone = formatPhoneForWhatsApp(phoneRaw);
         const raw7Phone = phoneRaw.replace(/^0+/, '').replace(/^\+964/, '');
         phoneToNameMap.set(raw7Phone, studentName);
         if (cleanPhone) phoneToNameMap.set(cleanPhone, studentName);
+        if (grade) {
+          phoneToGradeMap.set(raw7Phone, grade);
+          if (cleanPhone) phoneToGradeMap.set(cleanPhone, grade);
+        }
 
         const parentDisplayName = `ولي أمر ${studentName}`;
         const userId = `usr_p_${raw7Phone}`;
@@ -9973,7 +9979,7 @@ async function startServer() {
           if (existingDoc && existingDoc.length > 0) {
             const currentData = existingDoc[0].data || {};
             await db.update(firestore_docs).set({
-              data: { ...currentData, studentName },
+              data: { ...currentData, studentName, grade: grade || currentData.grade },
               updatedAt: new Date()
             }).where(eq(firestore_docs.path, docPath));
           }
@@ -9994,13 +10000,34 @@ async function startServer() {
               for (const [pKey, newName] of phoneToNameMap.entries()) {
                 if (accPhone === pKey || accPhone.endsWith(pKey) || pKey.endsWith(accPhone)) {
                   modified = true;
-                  return { ...acc, studentName: newName };
+                  const matchedGrade = phoneToGradeMap.get(pKey) || phoneToGradeMap.get(accPhone) || acc.grade;
+                  return { ...acc, studentName: newName, grade: matchedGrade };
                 }
               }
               return acc;
             });
 
             if (modified) {
+              // Sort accounts strictly starting from 1st Grade to 6th Grade, then studentName
+              const getGradeOrder = (g?: string) => {
+                if (!g) return 99;
+                const c = String(g).replace(/[أإآ]/g, 'ا').toLowerCase();
+                if (c.includes('اول') || c === '1' || c === '١') return 1;
+                if (c.includes('ثاني') || c === '2' || c === '٢') return 2;
+                if (c.includes('ثالث') || c === '3' || c === '٣') return 3;
+                if (c.includes('رابع') || c === '4' || c === '٤') return 4;
+                if (c.includes('خامس') || c === '5' || c === '٥') return 5;
+                if (c.includes('سادس') || c === '6' || c === '٦') return 6;
+                return 99;
+              };
+
+              updatedAccounts.sort((a: any, b: any) => {
+                const oA = getGradeOrder(a.grade);
+                const oB = getGradeOrder(b.grade);
+                if (oA !== oB) return oA - oB;
+                return (a.studentName || '').localeCompare(b.studentName || '', 'ar');
+              });
+
               const updatedSamples = updatedAccounts.slice(0, 4).map((a: any) => a.studentName);
               await db.update(firestore_docs).set({
                 data: { ...data, accounts: updatedAccounts, sampleStudentNames: updatedSamples },
@@ -10010,7 +10037,7 @@ async function startServer() {
           }
         }
       } catch (histUpErr) {
-        console.error('Error updating parent_excel_uploads with new student names:', histUpErr);
+        console.error('Error updating parent_excel_uploads with new student names and grades:', histUpErr);
       }
 
       res.json({ success: true, updatedCount, message: `تم تحديث أسماء ${updatedCount} طالب في الحسابات والسجلات بنجاح` });

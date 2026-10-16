@@ -1,3 +1,4 @@
+import { isItemPublished } from '../../utils/scheduleUtils';
 import * as FirebaseMock from "@/src/lib/firebase.ts"; const { db, auth, storage, collection, doc, setDoc, updateDoc, deleteDoc, onSnapshot, query, where, orderBy, limit, serverTimestamp, getDocs, getDoc, getDocFromServer, getDocFromCache, increment, arrayUnion, arrayRemove, writeBatch, runTransaction, purgeFirestore, getStorage, ref, uploadBytesResumable, getDownloadURL, deleteObject } = FirebaseMock;
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import ReactMarkdown from "react-markdown";
@@ -289,7 +290,7 @@ export const StudentFilesTab: React.FC<{ disabledModules?: string[], rolePrefix?
           const rSections = Array.isArray(r.targetSections) ? r.targetSections : (r.section ? [r.section] : undefined);
           const matchesGrade = isGradeMatch(r.targetGrade, activeStudentGrade, rSections);
           const matchesSection = isSectionMatch(r.section, r.targetSections);
-          return isHomeworkItem(r) && matchesGrade && matchesSection && !studentSubmissions.some(sub => sub.taskId === r.id && sub.type === 'homework');
+          return isItemPublished(r) && isHomeworkItem(r) && matchesGrade && matchesSection && !studentSubmissions.some(sub => sub.taskId === r.id && sub.type === 'homework');
         }).length;
 
         const uncompletedCompCount = teacherAiResults.filter(r => {
@@ -1638,7 +1639,7 @@ export const StudentFilesTab: React.FC<{ disabledModules?: string[], rolePrefix?
                     const matchesSection = isSectionMatch(r.section, r.targetSections);
                     const rNameStr = String(r.name || "");
                     const rContentStr = String(r.content || "");
-                    return isHomeworkItem(r) && 
+                    return isItemPublished(r) && isHomeworkItem(r) && 
                       matchesGrade &&
                       matchesSection &&
                       (isSubjectMatch(r.subject, studentLibrarySubject) || rNameStr.includes(studentLibrarySubject) || rContentStr.includes(studentLibrarySubject)) && 

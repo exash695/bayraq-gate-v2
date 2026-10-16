@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Bot, FileUp, ClipboardCheck, HelpCircle, ScrollText, Edit2, Sparkles, Trophy, ChevronRight, Loader2, Copy, CheckCircle, Image as ImageIcon, X, Save, History, Trash2, Plus, Minus, Lock, Search, Camera, CheckCircle2, UploadCloud, Eye, ZoomIn } from 'lucide-react';
+import { Bot, FileUp, ClipboardCheck, RotateCcw, HelpCircle, ScrollText, Edit2, Sparkles, Trophy, ChevronRight, Loader2, Copy, CheckCircle, Image as ImageIcon, X, Save, History, Trash2, Plus, Minus, Lock, Search, Camera, CheckCircle2, UploadCloud, Eye, ZoomIn, Clock, Calendar, Send } from 'lucide-react';
+
 import ReactMarkdown from 'react-markdown';
 import TeacherActivities from "./TeacherActivities";
 import { TeacherSovereigntyManager } from './Sovereignty/TeacherSovereigntyManager';
@@ -50,6 +51,82 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
       setActiveTool(targetTool);
     }
   }, []);
+  // Homework & Material Scheduling States
+  const [showPublishScheduleModal, setShowPublishScheduleModal] = useState(false);
+  const [scheduleChoice, setScheduleChoice] = useState<'now' | 'tomorrow_am' | 'tomorrow_pm' | 'after_tomorrow_am' | 'custom'>('now');
+  const [customScheduleTime, setCustomScheduleTime] = useState<string>('');
+  const [publishPendingMode, setPublishPendingMode] = useState<'regular' | 'image_hw' | null>(null);
+
+  const computeScheduleDetails = (choice: string, customVal: string) => {
+    const now = new Date();
+    if (choice === 'now') {
+      return { isScheduled: false, scheduledAt: null, scheduledLabel: 'نشر فوري الآن', status: 'published' };
+    }
+    let target = new Date();
+    if (choice === 'tomorrow_am') {
+      target.setDate(now.getDate() + 1);
+      target.setHours(8, 0, 0, 0);
+    } else if (choice === 'tomorrow_pm') {
+      target.setDate(now.getDate() + 1);
+      target.setHours(16, 0, 0, 0);
+    } else if (choice === 'after_tomorrow_am') {
+      target.setDate(now.getDate() + 2);
+      target.setHours(8, 0, 0, 0);
+    } else if (choice === 'custom' && customVal) {
+      target = new Date(customVal);
+    } else {
+      return { isScheduled: false, scheduledAt: null, scheduledLabel: 'نشر فوري الآن', status: 'published' };
+    }
+
+    const isFuture = target.getTime() > Date.now();
+    if (!isFuture) {
+      return { isScheduled: false, scheduledAt: null, scheduledLabel: 'نشر فوري الآن', status: 'published' };
+    }
+
+    const options = {
+      weekday: 'short',
+      month: 'numeric',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    };
+    const label = target.toLocaleDateString('ar-IQ', options);
+
+    return {
+      isScheduled: true,
+      scheduledAt: target.toISOString(),
+      scheduledLabel: label,
+      status: 'scheduled'
+    };
+  };
+
+  const openPublishModal = (mode = 'regular') => {
+    if (activeTool === 'summaries') {
+      if (summaryMode === 'image' && !imageSummaryResult && summaryImageFiles.length > 0) {
+        handleApplySummaryImagesToResult(true);
+        return;
+      }
+      if (summaryMode === 'manual' && !manualSummaryResult && summaryManualText.trim()) {
+        handleApplyManualSummaryToResult(true);
+        return;
+      }
+    }
+    setPublishPendingMode(mode);
+    setScheduleChoice('now');
+    setCustomScheduleTime('');
+    setShowPublishScheduleModal(true);
+  };
+
+  const confirmAndExecutePublish = async () => {
+    const sched = computeScheduleDetails(scheduleChoice, customScheduleTime);
+    setShowPublishScheduleModal(false);
+    if (publishPendingMode === 'image_hw') {
+      await handleDirectImageHwPublish(sched);
+    } else {
+      await handlePublish(sched);
+    }
+  };
+
   const [topicFiles, setTopicFiles] = useState<File[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [progressPercentage, setProgressPercentage] = useState<number>(0);
@@ -237,7 +314,8 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
 
   // Note: We preserve user inputs across summary mode tabs (AI, Image, Manual) so data is not wiped when switching views.
 
-  const handlePublish = async () => {
+  const handlePublish = async (schedInfo) => {
+    const sched = schedInfo || { isScheduled: false, scheduledAt: null, scheduledLabel: 'نشر فوري الآن', status: 'published' };
     if (!schoolId) return;
 
     // In summaries tool: if direct image or manual modes haven't been applied yet, trigger them; if already applied, publish content directly
@@ -297,7 +375,10 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
         type: isSummary ? 'summary' : undefined,
         isSummary: isSummary,
         category: isSummary ? 'ملخصات' : undefined,
-        allowDownload: true
+        allowDownload: true,
+        status: sched.status,
+        scheduledAt: sched.scheduledAt,
+        scheduledLabel: sched.scheduledLabel
       };
 
       await addDoc(collection(db, "schools", schoolId, "ai_materials"), materialData);
@@ -372,7 +453,8 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
     });
   };
 
-  const handleDirectImageHwPublish = async () => {
+  const handleDirectImageHwPublish = async (schedInfo) => {
+    const sched = schedInfo || { isScheduled: false, scheduledAt: null, scheduledLabel: 'نشر فوري الآن', status: 'published' };
     if (imageHwFiles.length === 0) {
       alert("يرجى اختيار صورة أو ورقة عمل للواجب أولاً");
       return;
@@ -450,7 +532,10 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
         teacherName: teacherData?.name || "الأستاذ",
         timestamp: serverTimestamp(),
         date: new Date().toISOString(),
-        type: 'image_homework'
+        type: 'image_homework',
+        status: sched.status,
+        scheduledAt: sched.scheduledAt,
+        scheduledLabel: sched.scheduledLabel
       });
 
       setImageHwProgress(100);
@@ -496,6 +581,67 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
       return [];
     }
   });
+
+  // Cloud synchronization for Saved Results (المحفوظات)
+  useEffect(() => {
+    if (!schoolId) return;
+    const teacherId = teacherData?.id || teacherData?.code || "unknown";
+    const qSaved = query(
+      collection(db, "schools", schoolId, "teacher_ai_saved"),
+      where("teacherId", "==", teacherId)
+    );
+    getDocs(qSaved).then((snap) => {
+      if (snap && snap.docs.length > 0) {
+        const cloudItems = snap.docs.map(d => {
+          const data = d.data();
+          return {
+            id: d.id,
+            name: data.name || data.title || 'ملف محفوظ',
+            content: data.content || '',
+            tool: data.tool || 'عام',
+            date: data.date || (data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString())
+          };
+        });
+        setSavedResults(prev => {
+          const map = new Map();
+          // merge local + cloud
+          prev.forEach(item => map.set(item.id, item));
+          cloudItems.forEach(item => map.set(item.id, item));
+          const merged = Array.from(map.values()).sort((a, b) => new Date(b.date || 0).getTime() - new Date(a.date || 0).getTime());
+          localStorage.setItem('teacher_ai_saved_results', JSON.stringify(merged));
+          return merged;
+        });
+      }
+    }).catch(err => {
+      console.warn("Could not sync cloud saved items:", err);
+    });
+  }, [schoolId, teacherData?.id, teacherData?.code]);
+
+  // Re-apply a saved item back to its original tool (إعادة تطبيق المحفوظة)
+  const handleReapplySavedItem = (result: { id: string; name: string; content: string; tool: string; date: string }) => {
+    let targetTool: AITool = 'homework';
+    const toolLower = (result.tool || '').toLowerCase();
+    if (toolLower.includes('سؤال') || toolLower.includes('اسئلة') || toolLower.includes('questions')) {
+      targetTool = 'questions';
+    } else if (toolLower.includes('ملخص') || toolLower.includes('summary')) {
+      targetTool = 'summaries';
+    } else if (toolLower.includes('مسابق') || toolLower.includes('تحدي') || toolLower.includes('competition')) {
+      targetTool = 'competitions';
+    } else if (toolLower.includes('فكر') || toolLower.includes('شرح') || toolLower.includes('ideas')) {
+      targetTool = 'ideas';
+    } else if (toolLower.includes('واجب') || toolLower.includes('homework')) {
+      targetTool = 'homework';
+    }
+
+    setGeneratedContent(result.content);
+    setSaveName(result.name || '');
+    if (targetTool === 'summaries') {
+      setAiSummaryTopic(result.name || '');
+      setAiSummaryResult(result.content);
+      setSummaryMode('ai');
+    }
+    setActiveTool(targetTool);
+  };
 
   const [historySearch, setHistorySearch] = useState('');
 
@@ -1170,6 +1316,15 @@ ${baseFormatting}`;
     const updated = [newItem, ...savedResults];
     setSavedResults(updated);
     localStorage.setItem('teacher_ai_saved_results', JSON.stringify(updated));
+
+    if (schoolId) {
+      addDoc(collection(db, "schools", schoolId, "teacher_ai_saved"), {
+        ...newItem,
+        teacherId: teacherData?.id || teacherData?.code || "unknown",
+        teacherName: teacherData?.name || "الأستاذ",
+        createdAt: serverTimestamp()
+      }).catch(err => console.warn("Failed to save to cloud:", err));
+    }
     
     setIsSaved(true);
     setTimeout(() => {
@@ -1511,24 +1666,42 @@ ${baseFormatting}`;
                               onClick={() => {
                                 setGeneratedContent(result.content);
                               }}
-                              className="bg-white/5 border border-white/10 hover:border-teal-500/30 hover:bg-white/10 p-3 rounded-xl cursor-pointer transition-all flex flex-col gap-1 group relative overflow-hidden pl-10"
+                              className={`p-3 rounded-2xl cursor-pointer transition-all flex flex-col gap-2 group relative border ${
+                                generatedContent === result.content 
+                                  ? 'bg-teal-500/10 border-teal-500/40 shadow-lg shadow-teal-500/5' 
+                                  : 'bg-white/5 border-white/10 hover:border-teal-500/30 hover:bg-white/10'
+                              }`}
                             >
-                              <div className="flex items-center justify-between">
+                              <div className="flex items-center justify-between pl-8">
                                 <span className="text-sm font-bold text-white truncate max-w-[150px]">{result.name}</span>
-                                <span className="text-[10px] text-teal-400 bg-teal-400/10 px-1.5 py-0.5 rounded font-bold">{result.tool}</span>
+                                <span className="text-[10px] text-teal-300 bg-teal-500/20 border border-teal-500/30 px-2 py-0.5 rounded-lg font-bold">{result.tool}</span>
                               </div>
-                              <span className="text-[10px] text-white/40 font-medium">
-                                {new Date(result.date).toLocaleDateString('ar-SA')} - {new Date(result.date).toLocaleTimeString('ar-SA', {hour: '2-digit', minute:'2-digit'})}
-                              </span>
+                              <div className="flex items-center justify-between gap-2 pt-1 border-t border-white/5">
+                                <span className="text-[10px] text-white/40 font-medium">
+                                  {new Date(result.date).toLocaleDateString('ar-SA')} - {new Date(result.date).toLocaleTimeString('ar-SA', {hour: '2-digit', minute:'2-digit'})}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleReapplySavedItem(result);
+                                  }}
+                                  className="px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 rounded-lg text-[10px] font-black flex items-center gap-1 transition-all shadow-sm cursor-pointer"
+                                  title="إعادة فتح وتطبيق هذه النتيجة في أداتها المخصصة"
+                                >
+                                  <RotateCcw size={11} />
+                                  <span>إعادة تطبيق</span>
+                                </button>
+                              </div>
                               <button
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   setDeleteConfirmTarget(result.id);
                                 }}
-                                className="absolute left-2 top-1/2 -translate-y-1/2 w-7 h-7 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center opacity-60 group-hover:opacity-100 transition-opacity hover:bg-rose-500/20 cursor-pointer border border-rose-500/20"
+                                className="absolute left-2 top-2.5 w-6 h-6 rounded-lg bg-rose-500/10 text-rose-400 flex items-center justify-center opacity-40 group-hover:opacity-100 transition-opacity hover:bg-rose-500/20 cursor-pointer border border-rose-500/20"
                                 title="حذف"
                               >
-                                <Trash2 size={13} />
+                                <Trash2 size={12} />
                               </button>
                             </div>
                           ))}
@@ -1681,7 +1854,7 @@ ${baseFormatting}`;
                         ) : (
                           <button
                             type="button"
-                            onClick={handleDirectImageHwPublish}
+                            onClick={() => openPublishModal('image_hw')}
                             disabled={imageHwFiles.length === 0}
                             className="w-full py-3 bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white font-black text-xs rounded-xl shadow-lg shadow-teal-500/20 flex items-center justify-center gap-2 transition-all disabled:opacity-40 cursor-pointer disabled:cursor-not-allowed"
                           >
@@ -2225,7 +2398,7 @@ ${baseFormatting}`;
                           <>
                             <div className="hidden sm:block w-px h-5 bg-white/10 mx-1"></div>
                             <button
-                              onClick={handlePublish}
+                              onClick={() => openPublishModal('regular')}
                               disabled={isPublishing || isPublished}
                               className="flex flex-1 sm:flex-none items-center justify-center gap-1.5 px-3 h-9 bg-emerald-600/20 hover:bg-emerald-600/40 border border-emerald-500/30 rounded-lg text-xs font-bold text-emerald-400 hover:text-emerald-300 transition-all disabled:opacity-50"
                               title="نشر في منصة الطالب"
@@ -2745,6 +2918,16 @@ ${baseFormatting}`;
                             .filter(d => d.data().content === deletedItem.content)
                             .map(d => deleteDoc(doc(db, "schools", schoolId, "ai_materials", d.id)));
                           await Promise.all(deletePromises);
+
+                          const qSaved = query(
+                            collection(db, "schools", schoolId, "teacher_ai_saved"),
+                            where("teacherId", "==", teacherData?.id || teacherData?.code || "unknown")
+                          );
+                          const snapSaved = await getDocs(qSaved);
+                          const deleteSavedPromises = snapSaved.docs
+                            .filter(d => d.data().content === deletedItem.content || d.id === deletedItem.id)
+                            .map(d => deleteDoc(doc(db, "schools", schoolId, "teacher_ai_saved", d.id)));
+                          await Promise.all(deleteSavedPromises);
                         }
                       }
                     } catch (error) {
@@ -2794,6 +2977,136 @@ ${baseFormatting}`;
           </div>
         )}
       </AnimatePresence>
-    </div>
+    
+      {/* Homework & Content Publishing Schedule Modal */}
+      <AnimatePresence>
+        {showPublishScheduleModal && (
+          <div 
+            onClick={() => setShowPublishScheduleModal(false)}
+            className="fixed inset-0 z-[12000] flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md overflow-y-auto"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-[#0B132B] border border-amber-500/30 rounded-3xl max-w-lg w-full shadow-2xl relative flex flex-col max-h-[85dvh] sm:max-h-[85vh] overflow-hidden text-right my-auto"
+              dir="rtl"
+            >
+              {/* Header (Fixed at top) */}
+              <div className="shrink-0 flex items-center justify-between p-4 sm:p-5 border-b border-white/10 bg-[#0B132B] z-10">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                    <Clock size={20} />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-white text-base sm:text-lg leading-tight">جدولة موعد نشر الواجب للطلاب</h3>
+                    <p className="text-white/40 text-xs mt-0.5">اختر متى يصبح الواجب مرئياً للطلاب وأولياء الأمور</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowPublishScheduleModal(false)}
+                  className="w-8 h-8 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-white/50 hover:text-white transition-colors cursor-pointer shrink-0"
+                  title="إغلاق"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              {/* Scrollable Options List */}
+              <div className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-5 flex flex-col gap-3 min-h-0">
+                <div className="flex flex-col gap-2.5">
+                  {[
+                    { id: 'now', title: '⚡ نشر فوري الآن', desc: 'يصل الواجب مباشرة وتتم إتاحته للجميع حالاً' },
+                    { id: 'tomorrow_am', title: '🌅 غداً صباحاً (08:00 ص)', desc: 'يظهر للطلاب صباح اليوم التالي مع بدء الدوام' },
+                    { id: 'tomorrow_pm', title: '🌆 غداً عصراً (04:00 م)', desc: 'يظهر للطلاب عصراً للمراجعة وحل الواجبات' },
+                    { id: 'after_tomorrow_am', title: '📅 بعد غد صباحاً (08:00 ص)', desc: 'جدولة مسبقة بعد يومين من الآن' },
+                    { id: 'custom', title: '⏰ تحديد تاريخ ووقت مخصص', desc: 'اختر يدوياً التاريخ والساعة الدقيقة' },
+                  ].map(opt => {
+                    const isSelected = scheduleChoice === opt.id;
+                    return (
+                      <button
+                        key={opt.id}
+                        type="button"
+                        onClick={() => setScheduleChoice(opt.id)}
+                        className={`w-full p-3 sm:p-3.5 rounded-2xl border text-right transition-all flex items-start gap-3 cursor-pointer select-none active:scale-[0.99] ${
+                          isSelected 
+                            ? 'bg-amber-500/15 border-amber-500/60 shadow-lg shadow-amber-500/10' 
+                            : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
+                        }`}
+                      >
+                        <div className={`w-5 h-5 rounded-full border flex items-center justify-center mt-0.5 shrink-0 transition-colors ${
+                          isSelected ? 'border-amber-400 bg-amber-400' : 'border-white/30'
+                        }`}>
+                          {isSelected && <div className="w-2 h-2 rounded-full bg-[#0B132B]" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="font-bold text-sm text-white">{opt.title}</div>
+                          <div className="text-xs text-white/50 mt-0.5">{opt.desc}</div>
+                        </div>
+                      </button>
+                    );
+                  })}
+
+                  {scheduleChoice === 'custom' && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      className="p-3.5 bg-black/40 border border-amber-500/30 rounded-2xl flex flex-col gap-2 mt-1"
+                    >
+                      <label className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                        <Calendar size={14} /> حدد تاريخ ووقت النشر الدقيق:
+                      </label>
+                      <input
+                        type="datetime-local"
+                        value={customScheduleTime}
+                        onChange={(e) => setCustomScheduleTime(e.target.value)}
+                        className="w-full bg-white/5 border border-white/20 rounded-xl px-3 py-2 text-white text-xs outline-none focus:border-amber-400"
+                      />
+                    </motion.div>
+                  )}
+                </div>
+
+                {/* Summary note */}
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-3 text-xs text-white/70 flex items-center gap-2 shrink-0">
+                  <Sparkles size={16} className="text-amber-400 shrink-0" />
+                  <span>
+                    {scheduleChoice === 'now' 
+                      ? 'سيتم النشر فوراً للطلاب وأولياء الأمور مع إشعار بالواجب.' 
+                      : 'سيبقى الواجب محفوظاً في سجلك ويمكنك نشره يدوياً في أي لحظة قبل الموعد.'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Footer (Fixed at bottom) */}
+              <div className="shrink-0 p-4 sm:p-5 border-t border-white/10 bg-[#0B132B] z-10 flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={confirmAndExecutePublish}
+                  disabled={isPublishing}
+                  className="flex-1 py-3 px-4 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-sm rounded-2xl shadow-xl shadow-amber-500/20 flex items-center justify-center gap-2 transition-all cursor-pointer"
+                >
+                  {isPublishing ? (
+                    <Loader2 size={18} className="animate-spin" />
+                  ) : (
+                    <Send size={18} />
+                  )}
+                  <span>{scheduleChoice === 'now' ? 'تأكيد النشر الفوري الآن' : 'تأكيد وحفظ الجدولة'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowPublishScheduleModal(false)}
+                  className="py-3 px-4 bg-white/5 hover:bg-white/10 text-white/70 hover:text-white font-bold text-xs rounded-2xl transition-colors cursor-pointer"
+                >
+                  إلغاء
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+</div>
   );
 };

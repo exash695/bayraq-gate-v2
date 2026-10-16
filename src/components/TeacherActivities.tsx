@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc, writeBatch, where } from '../lib/firebase';
+import { collection, query, orderBy, onSnapshot, doc, updateDoc, deleteDoc, writeBatch, where, serverTimestamp } from '../lib/firebase';
 import { db } from '../lib/firebase';
-import { ClipboardCheck, Search, CheckCircle, XCircle, Trophy, User, Calendar, MessageSquare, Send, Sparkles, Trash2, AlertTriangle, ExternalLink, Image as ImageIcon } from 'lucide-react';
+import { ClipboardCheck, Search, CheckCircle, XCircle, Trophy, User, Calendar, MessageSquare, Send, Sparkles, Trash2, AlertTriangle, ExternalLink, Image as ImageIcon, Clock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
 
@@ -23,6 +23,25 @@ export default function TeacherActivities({
   const [feedback, setFeedback] = useState('');
   const [isSendingFeedback, setIsSendingFeedback] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [publishingTaskId, setPublishingTaskId] = useState<string | null>(null);
+
+  const handlePublishNow = async (taskId: string) => {
+    if (!schoolId || !taskId) return;
+    setPublishingTaskId(taskId);
+    try {
+      await updateDoc(doc(db, "schools", schoolId, "ai_materials", taskId), {
+        status: 'published',
+        scheduledAt: null,
+        scheduledLabel: 'تم النشر فوراً',
+        timestamp: serverTimestamp()
+      });
+    } catch (err) {
+      console.error("Failed to publish task now:", err);
+    } finally {
+      setPublishingTaskId(null);
+    }
+  };
+
   const [deleteTaskConfirmId, setDeleteTaskConfirmId] = useState<string | null>(null);
   const [deleteAllConfirm, setDeleteAllConfirm] = useState<'homework' | 'competition' | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -270,13 +289,47 @@ export default function TeacherActivities({
                         <div key={task.id} className="bg-white/5 border border-white/10 rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 flex flex-col gap-4 w-full">
                           <div className="flex justify-between items-start">
                              <div>
-                               <h4 className="text-base sm:text-lg font-bold text-white">{task.name || 'واجب دراسي'}</h4>
-                               <p className="text-xs sm:text-sm text-white/50 mt-1">تاريخ النشر: {(typeof task.timestamp?.toDate === 'function' ? (typeof task.timestamp?.toDate === 'function' ? task.timestamp.toDate() : new Date(task.timestamp)) : new Date(task.timestamp)).toLocaleDateString('ar-SA')}</p>
+                               <div className="flex items-center gap-2 flex-wrap">
+                                 <h4 className="text-base sm:text-lg font-bold text-white">{task.name || 'واجب دراسي'}</h4>
+                                 {task.status === 'scheduled' && task.scheduledAt && new Date(task.scheduledAt).getTime() > Date.now() ? (
+                                   <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-black flex items-center gap-1">
+                                     <Clock size={11} className="animate-pulse" />
+                                     <span>مجدول</span>
+                                   </span>
+                                 ) : (
+                                   <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold flex items-center gap-1">
+                                     <CheckCircle size={10} />
+                                     <span>منشور للطلاب</span>
+                                   </span>
+                                 )}
+                               </div>
+                               <p className="text-xs sm:text-sm text-white/50 mt-1">تاريخ الإنشاء: {(typeof task.timestamp?.toDate === 'function' ? task.timestamp.toDate() : new Date(task.timestamp)).toLocaleDateString('ar-SA')}</p>
                              </div>
                              <button onClick={() => setDeleteTaskConfirmId(task.id)} className="text-red-400 hover:text-red-300 p-2 hover:bg-red-500/10 rounded-xl transition-colors cursor-pointer" title="حذف الواجب ككل">
                                 <Trash2 size={18} />
                              </button>
                           </div>
+
+                          {task.status === 'scheduled' && task.scheduledAt && new Date(task.scheduledAt).getTime() > Date.now() && (
+                            <div className="bg-amber-500/10 border border-amber-500/25 rounded-2xl p-3 sm:p-3.5 flex items-center justify-between flex-wrap gap-2 text-amber-300">
+                              <div className="flex items-center gap-2 text-xs font-bold">
+                                <Clock size={16} className="text-amber-400 animate-pulse shrink-0" />
+                                <div>
+                                  <div>موعد النشر المجدول: <span className="text-white font-black">{task.scheduledLabel || new Date(task.scheduledAt).toLocaleString('ar-IQ')}</span></div>
+                                  <div className="text-[11px] text-amber-300/70 mt-0.5">لم يظهر للطلاب بعد وسيتم تفعيله تلقائياً في الموعد المذكور</div>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handlePublishNow(task.id)}
+                                disabled={publishingTaskId === task.id}
+                                className="px-3.5 py-1.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 rounded-xl text-emerald-300 text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer shadow-md disabled:opacity-50"
+                              >
+                                <Sparkles size={14} />
+                                <span>{publishingTaskId === task.id ? 'جاري النشر...' : 'نشر للطلاب الآن فوراً 🚀'}</span>
+                              </button>
+                            </div>
+                          )}
                           
                           <div className="bg-[#050A18] rounded-xl sm:rounded-2xl p-3 sm:p-4 border border-white/5 w-full">
                             <h5 className="text-sm font-bold text-amber-400/80 mb-3 sm:mb-4 flex items-center gap-2">

@@ -17,6 +17,8 @@ export interface ParentAccountRow {
   password: string;
   status: 'valid' | 'duplicate' | 'invalid_phone';
   errorMessage?: string;
+  grade?: string;
+  gradeOrder?: number;
 }
 
 export interface ExcelUploadHistoryEntry {
@@ -60,6 +62,87 @@ export const sanitizeIraqiPhoneNumber = (input: string): string => {
   return cleaned;
 };
 
+
+export const normalizeSchoolGrade = (rawText: any): { gradeName: string; gradeOrder: number } | null => {
+  if (!rawText) return null;
+  const str = String(rawText).trim();
+  if (!str) return null;
+
+  const clean = str
+    .replace(/[أإآ]/g, 'ا')
+    .replace(/[ة]/g, 'ه')
+    .replace(/[ى]/g, 'ي')
+    .toLowerCase();
+
+  // 1st Grade
+  if (
+    clean.includes('اول') || 
+    clean.includes('اولي') || 
+    clean === '1' || 
+    clean === '١' || 
+    clean.includes('الاول')
+  ) {
+    return { gradeName: 'الأول الابتدائي', gradeOrder: 1 };
+  }
+
+  // 2nd Grade
+  if (
+    clean.includes('ثاني') || 
+    clean.includes('ثانيه') || 
+    clean === '2' || 
+    clean === '٢' || 
+    clean.includes('الثاني')
+  ) {
+    return { gradeName: 'الثاني الابتدائي', gradeOrder: 2 };
+  }
+
+  // 3rd Grade
+  if (
+    clean.includes('ثالث') || 
+    clean.includes('ثالثه') || 
+    clean === '3' || 
+    clean === '٣' || 
+    clean.includes('الثالث')
+  ) {
+    return { gradeName: 'الثالث الابتدائي', gradeOrder: 3 };
+  }
+
+  // 4th Grade
+  if (
+    clean.includes('رابع') || 
+    clean.includes('رابعه') || 
+    clean === '4' || 
+    clean === '٤' || 
+    clean.includes('الرابع')
+  ) {
+    return { gradeName: 'الرابع الابتدائي', gradeOrder: 4 };
+  }
+
+  // 5th Grade
+  if (
+    clean.includes('خامس') || 
+    clean.includes('خامسه') || 
+    clean === '5' || 
+    clean === '٥' || 
+    clean.includes('الخامس')
+  ) {
+    return { gradeName: 'الخامس الابتدائي', gradeOrder: 5 };
+  }
+
+  // 6th Grade
+  if (
+    clean.includes('سادس') || 
+    clean.includes('سادسه') || 
+    clean === '6' || 
+    clean === '٦' || 
+    clean.includes('السادس')
+  ) {
+    return { gradeName: 'السادس الابتدائي', gradeOrder: 6 };
+  }
+
+  return null;
+};
+
 export const generateDefaultPassword = (): string => {
   return Math.floor(100000 + Math.random() * 900000).toString();
 };
@@ -98,7 +181,7 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
   const [matchingData, setMatchingData] = useState<{
     fileName: string;
     totalParsed: number;
-    matchedUpdates: { phone: string; studentName: string; currentName: string; status: 'matched' | 'new' }[];
+    matchedUpdates: { phone: string; studentName: string; currentName: string; status: 'matched' | 'new'; grade?: string; gradeOrder?: number }[];
   } | null>(null);
   const [isExecutingMatch, setIsExecutingMatch] = useState(false);
   const [isPrintingSlips, setIsPrintingSlips] = useState(false);
@@ -296,7 +379,9 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
     try {
       const updates = matchingData.matchedUpdates.map(u => ({
         phone: u.phone,
-        studentName: u.studentName
+        studentName: u.studentName,
+        grade: u.grade,
+        gradeOrder: u.gradeOrder
       }));
 
       const res = await fetch('/api/auth/parent-update-student-names', {
@@ -600,12 +685,32 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
     if (isPrintingSlips) return;
 
     const validRows = (targetAccounts || rows).filter(r => r.status === 'valid');
-    const targetRows = validRows.length > 0 ? validRows : (targetAccounts || rows);
+    let targetRows = validRows.length > 0 ? [...validRows] : [...(targetAccounts || rows)];
 
     if (targetRows.length === 0) {
       showToast('لا توجد بيانات للطباعة', 'error');
       return;
     }
+
+    // Sort targetRows strictly starting from 1st Grade to 6th Grade
+    const getGradeOrder = (g?: string) => {
+      if (!g) return 99;
+      const c = String(g).replace(/[أإآ]/g, 'ا').toLowerCase();
+      if (c.includes('اول') || c === '1' || c === '١') return 1;
+      if (c.includes('ثاني') || c === '2' || c === '٢') return 2;
+      if (c.includes('ثالث') || c === '3' || c === '٣') return 3;
+      if (c.includes('رابع') || c === '4' || c === '٤') return 4;
+      if (c.includes('خامس') || c === '5' || c === '٥') return 5;
+      if (c.includes('سادس') || c === '6' || c === '٦') return 6;
+      return 99;
+    };
+
+    targetRows.sort((a, b) => {
+      const oA = getGradeOrder(a.grade);
+      const oB = getGradeOrder(b.grade);
+      if (oA !== oB) return oA - oB;
+      return (a.studentName || '').localeCompare(b.studentName || '', 'ar');
+    });
 
     try {
       setIsPrintingSlips(true);
@@ -661,6 +766,11 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
 
                 <div style="text-align: center; font-size: 13px; font-weight: 800; color: #0f172a; margin-bottom: 8px; background: #e0f2fe; padding: 5px 8px; border-radius: 6px; border: 1px solid #bae6fd;">
                   إلى ولي أمر الطالب/ة: <span style="color: #0369a1; font-weight: 900;">${displayStudentName}</span>
+                  ${item.grade ? `
+                    <div style="margin-top: 4px; display: inline-block; background: #0284c7; color: #ffffff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 800;">
+                      الصف: ${item.grade}
+                    </div>
+                  ` : ''}
                 </div>
 
                 <div style="
@@ -1425,9 +1535,14 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
                     <h3 className="text-base sm:text-lg font-black text-white flex items-center gap-2">
                       <span>معاينة نتائج المطابقة الذكية للملف الأصلي ⚡</span>
                     </h3>
-                    <p className="text-xs text-emerald-400/90 font-bold mt-0.5">
-                      الملف المرفوع: <strong className="text-white font-mono">{matchingData.fileName}</strong> ({matchingData.matchedUpdates.length} طالب)
-                    </p>
+                    <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                      <p className="text-xs text-emerald-400/90 font-bold">
+                        الملف المرفوع: <strong className="text-white font-mono">{matchingData.fileName}</strong> ({matchingData.matchedUpdates.length} طالب)
+                      </p>
+                      <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                        مرتب تلقائياً: من الصف الأول إلى السادس 📚
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -1480,6 +1595,7 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
                     <tr>
                       <th className="p-3 text-center w-12">#</th>
                       <th className="p-3 text-center min-w-[140px]">رقم الهاتف</th>
+                      <th className="p-3 text-center min-w-[130px]">الصف الدراسي</th>
                       <th className="p-3 min-w-[170px]">الاسم الحالي بالنظام</th>
                       <th className="p-3 min-w-[180px]">الاسم المستخرج من الملف الأصلي</th>
                       <th className="p-3 text-center min-w-[120px]">حالة الربط</th>
@@ -1493,6 +1609,15 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
                           <td className="p-3 text-center font-mono text-white/40">{idx + 1}</td>
                           <td className="p-3 text-center font-mono text-emerald-400 font-black" style={{ direction: 'ltr' }}>
                             {item.phone}
+                          </td>
+                          <td className="p-3 text-center font-bold">
+                            {item.grade ? (
+                              <span className="px-2.5 py-1 rounded-lg bg-sky-500/15 border border-sky-500/30 text-sky-300 text-[11px] font-black">
+                                {item.grade}
+                              </span>
+                            ) : (
+                              <span className="text-white/30 text-[10px]">—</span>
+                            )}
                           </td>
                           <td className="p-3 text-white/60 font-bold">
                             {item.currentName}
