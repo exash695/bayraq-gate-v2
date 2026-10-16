@@ -271,6 +271,7 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
   };
 
   // Handle smart sync by re-uploading an Excel file in History tab or via Match button
+  // Handle smart sync by re-uploading an Excel file in History tab or via Match button
   const handleHistorySyncFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -306,46 +307,157 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
           });
         });
 
-        const updates: { phone: string; studentName: string; currentName: string; status: 'matched' | 'new' }[] = [];
+        // 1. Detect column indexes from header row (row 0, 1, or 2)
+        let headerRowIdx = -1;
+        let nameColIdx = -1;
+        let gradeColIdx = -1;
+        let phoneColIdx = -1;
 
-        for (let i = 0; i < data.length; i++) {
+        for (let r = 0; r < Math.min(3, data.length); r++) {
+          const row = data[r];
+          if (!Array.isArray(row)) continue;
+          let hasHeaderKeyword = false;
+          row.forEach((cellVal: any, cIdx: number) => {
+            const str = String(cellVal || '').toLowerCase().trim();
+            if (str.includes('هاتف') || str.includes('موبايل') || str.includes('جوال') || str.includes('phone') || str.includes('رقم')) {
+              phoneColIdx = cIdx;
+              hasHeaderKeyword = true;
+            } else if (str.includes('صف') || str.includes('مرحل') || str.includes('grade') || str.includes('class')) {
+              gradeColIdx = cIdx;
+              hasHeaderKeyword = true;
+            } else if (str.includes('اسم') || str.includes('طالب') || str.includes('تلميذ') || str.includes('name')) {
+              nameColIdx = cIdx;
+              hasHeaderKeyword = true;
+            }
+          });
+          if (hasHeaderKeyword) {
+            headerRowIdx = r;
+            break;
+          }
+        }
+
+        const startRowIdx = headerRowIdx !== -1 ? headerRowIdx + 1 : 0;
+        const updates: { phone: string; studentName: string; currentName: string; status: 'matched' | 'new'; grade?: string; gradeOrder?: number }[] = [];
+
+        for (let i = startRowIdx; i < data.length; i++) {
           const rowData = data[i];
           if (!rowData || !Array.isArray(rowData) || rowData.length === 0) continue;
 
           let foundPhone = '';
           let foundName = '';
+          let foundGrade = '';
+          let foundGradeOrder = 99;
 
-          for (const cell of rowData) {
-            const cellStr = String(cell || '').trim();
-            if (!cellStr) continue;
+          // Try header column index first if available:
+          if (phoneColIdx !== -1 && rowData[phoneColIdx] !== undefined) {
+            const pStr = String(rowData[phoneColIdx] || '').trim();
+            if (isPhonePattern(pStr)) {
+              foundPhone = sanitizeIraqiPhoneNumber(pStr);
+            }
+          }
+          if (gradeColIdx !== -1 && rowData[gradeColIdx] !== undefined) {
+            const gStr = String(rowData[gradeColIdx] || '').trim();
+            const detected = normalizeSchoolGrade(gStr);
+            if (detected) {
+              foundGrade = detected.gradeName;
+              foundGradeOrder = detected.gradeOrder;
+            } else if (gStr && !isPhonePattern(gStr)) {
+              foundGrade = gStr;
+            }
+          }
+          if (nameColIdx !== -1 && rowData[nameColIdx] !== undefined) {
+            const nStr = String(rowData[nameColIdx] || '').trim();
+            if (nStr && !isPhonePattern(nStr) && !normalizeSchoolGrade(nStr)) {
+              foundName = nStr;
+            }
+          }
 
-            if (isPhonePattern(cellStr) && !foundPhone) {
-              foundPhone = sanitizeIraqiPhoneNumber(cellStr);
-            } else if (
-              !/^\d+$/.test(cellStr.replace(/\s+/g, '')) &&
-              cellStr.length > 1 &&
-              !cellStr.toLowerCase().includes('هاتف') &&
-              !cellStr.toLowerCase().includes('تلميذ') &&
-              !cellStr.toLowerCase().includes('طالب') &&
-              !cellStr.toLowerCase().includes('موبايل') &&
-              !cellStr.toLowerCase().includes('رقم')
-            ) {
-              if (!foundName) {
-                foundName = cellStr;
+          // Fallback cell scanning across the row:
+          // A) Find phone
+          if (!foundPhone) {
+            for (const cell of rowData) {
+              const cellStr = String(cell || '').trim();
+              if (isPhonePattern(cellStr)) {
+                foundPhone = sanitizeIraqiPhoneNumber(cellStr);
+                break;
               }
             }
           }
 
-          if (foundPhone && foundName) {
+          // B) Find grade
+          if (!foundGrade) {
+            for (const cell of rowData) {
+              const cellStr = String(cell || '').trim();
+              if (!cellStr || isPhonePattern(cellStr)) continue;
+              const detected = normalizeSchoolGrade(cellStr);
+              if (detected) {
+                foundGrade = detected.gradeName;
+                foundGradeOrder = detected.gradeOrder;
+                break;
+              }
+            }
+          }
+
+          // C) Find student name
+          if (!foundName) {
+            for (const cell of rowData) {
+              const cellStr = String(cell || '').trim();
+              if (!cellStr) continue;
+
+              // Skip phone cell
+              if (isPhonePattern(cellStr) || cellStr.replace(/\D/g, '') === foundPhone) continue;
+
+              // Skip grade cell
+              const detectedGrade = normalizeSchoolGrade(cellStr);
+              if (detectedGrade || (foundGrade && cellStr.includes(foundGrade))) continue;
+
+              // Skip numbers or index cells or header labels
+              const lower = cellStr.toLowerCase();
+              if (
+                /^\d+$/.test(cellStr.replace(/\s+/g, '')) ||
+                lower === 'ت' || lower === 'م' || lower === '#' ||
+                lower.includes('هاتف') || lower.includes('موبايل') || lower.includes('رقم') ||
+                lower === 'اسم الطالب' || lower === 'اسم التلميذ' || lower === 'الصف' || lower === 'الصف الدراسي'
+              ) {
+                continue;
+              }
+
+              foundName = cellStr;
+              break;
+            }
+          }
+
+          if (foundPhone) {
             const current = phoneToCurrentName.get(foundPhone) || 'ولي أمر (غير محدد)';
+            let finalName = foundName;
+
+            // If name wasn't found in Excel, fall back to system current name
+            if (!finalName) {
+              if (current && current !== 'ولي أمر (غير محدد)' && !current.includes('طالب (ولي الأمر')) {
+                finalName = current;
+              } else {
+                finalName = `طالب (${foundPhone})`;
+              }
+            }
+
             updates.push({
               phone: foundPhone,
-              studentName: foundName,
+              studentName: finalName,
               currentName: current,
-              status: phoneToCurrentName.has(foundPhone) ? 'matched' : 'new'
+              status: phoneToCurrentName.has(foundPhone) ? 'matched' : 'new',
+              grade: foundGrade || undefined,
+              gradeOrder: foundGradeOrder
             });
           }
         }
+
+        // Sort updates strictly starting from 1st Grade to 6th Grade, then studentName
+        updates.sort((a, b) => {
+          const gA = a.gradeOrder ?? 99;
+          const gB = b.gradeOrder ?? 99;
+          if (gA !== gB) return gA - gB;
+          return (a.studentName || '').localeCompare(b.studentName || '', 'ar');
+        });
 
         if (e.target) e.target.value = '';
 
