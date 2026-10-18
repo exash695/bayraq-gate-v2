@@ -4867,8 +4867,8 @@ export default function App() {
                   <main id="main-content-area"
                     style={{
                       paddingBottom: user && (activeSection === "hub" || activeSection === "hall-of-fame" || activeSection === "mayadeen" || isChoosingSchool)
-                        ? "calc(5.5rem + env(safe-area-inset-bottom, 0px))"
-                        : "calc(1.5rem + env(safe-area-inset-bottom, 0px))"
+                        ? "calc(6rem + max(env(safe-area-inset-bottom, 0px), 18px))"
+                        : "calc(2rem + max(env(safe-area-inset-bottom, 0px), 18px))"
                     }}
                     className={
                       !user ||
@@ -5343,7 +5343,7 @@ export default function App() {
             activeSection !== "admin-hub" &&
             (activeSection === "hub" || activeSection === "hall-of-fame" || activeSection === "mayadeen" || isChoosingSchool) && (
               <div 
-                style={{ paddingBottom: "calc(1.25rem + env(safe-area-inset-bottom, 0px))" }}
+                style={{ paddingBottom: "calc(max(env(safe-area-inset-bottom, 0px), 18px) + 0.75rem)" }}
                 className="fixed bottom-0 left-0 right-0 z-[60] px-6 pt-2 bg-gradient-to-t from-[#02050F] via-[#02050F]/80 to-transparent pointer-events-none flex justify-center"
               >
                 <div className="w-full max-w-[320px] pointer-events-auto bg-[#0A0F1D]/80 backdrop-blur-xl border border-white/5 rounded-[2rem] px-2 py-1.5 flex items-center justify-between shadow-[0_8px_32px_rgba(0,0,0,0.3)] min-h-[64px]">

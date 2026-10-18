@@ -898,9 +898,16 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
       exit={{ opacity: 0, scale: 0.95, y: 20 }}
       transition={{ duration: 0.2, ease: "easeOut" }}
       className="fixed inset-0 bg-[#050A18] z-[9999] flex flex-col overflow-hidden" dir="rtl"
+      style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
     >
-      {/* Header */}
-      <div className="h-16 px-4 flex justify-between items-center bg-[#0D142A]/80 backdrop-blur-xl shrink-0 z-20">
+      {/* Header with Safe Area Notch & Status Bar Clearance */}
+      <div 
+        className="w-full px-4 pb-3 flex justify-between items-center bg-[#0D142A]/95 backdrop-blur-xl shrink-0 z-20 border-b border-white/5 transition-all shadow-md"
+        style={{
+          paddingTop: 'calc(max(env(safe-area-inset-top, 0px), 32px) + 0.6rem)',
+          minHeight: 'calc(4.5rem + max(env(safe-area-inset-top, 0px), 32px))'
+        }}
+      >
         <div className="flex items-center gap-3">
           {activeTab === 'chat' && (selectedChatUser || isGeneralChat) ? (
             <button 
@@ -1568,7 +1575,12 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                 </div>
 
                 {/* Input Area */}
-                <div className="h-auto min-h-[70px] bg-[#0D142A]/90 backdrop-blur-xl border-t border-white/10 px-4 py-3 shrink-0 z-20 flex items-end gap-3 pb-8 md:pb-4 flex-col">
+                <div 
+                  style={{
+                    paddingBottom: 'calc(max(env(safe-area-inset-bottom, 0px), 16px) + 0.6rem)'
+                  }}
+                  className="h-auto min-h-[70px] bg-[#0D142A]/90 backdrop-blur-xl border-t border-white/10 px-4 pt-3 shrink-0 z-20 flex items-end gap-3 flex-col"
+                >
                     {uploadError && (
                         <motion.div 
                             initial={{ opacity: 0, y: 10 }}

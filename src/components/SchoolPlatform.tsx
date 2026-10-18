@@ -8662,12 +8662,12 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
 
       {/* 3. Professional Bottom Navigation Bar (Safe Area & Device Navigation Friendly) */}
       <nav 
-        className="flex-shrink-0 bg-[#050A18]/95 backdrop-blur-md border-t border-white/10 flex items-center gap-1 overflow-x-auto no-scrollbar px-2 pt-1.5 z-[100] relative justify-start md:justify-center transition-all pointer-events-auto" 
+        className="flex-shrink-0 bg-[#050A18]/95 backdrop-blur-xl border-t border-white/10 flex items-start gap-1 overflow-x-auto no-scrollbar px-2 pt-2 z-[100] relative justify-start md:justify-center transition-all pointer-events-auto shadow-[0_-8px_30px_rgba(0,0,0,0.5)]" 
         style={{ 
           scrollbarWidth: 'none', 
           msOverflowStyle: 'none',
-          paddingBottom: 'max(14px, env(safe-area-inset-bottom, 14px))',
-          minHeight: 'calc(68px + env(safe-area-inset-bottom, 0px))'
+          paddingBottom: 'calc(max(env(safe-area-inset-bottom, 0px), 18px) + 8px)',
+          minHeight: 'calc(72px + max(env(safe-area-inset-bottom, 0px), 18px))'
         }}
       >
         {tabs.map((tab) => {
@@ -8676,8 +8676,9 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
           return (
             <button
               key={tab.id}
+              type="button"
               onClick={() => setActiveTab(tab.id as PlatformTab, "Bottom Navigation Bar onClick")}
-              className="relative flex flex-col items-center justify-center gap-0.5 min-w-[72px] h-full py-1 transition-all outline-none group flex-shrink-0 cursor-pointer"
+              className="relative flex flex-col items-center justify-center gap-1 min-w-[72px] py-1 transition-all outline-none group flex-shrink-0 cursor-pointer select-none"
             >
               <motion.div
                 animate={
