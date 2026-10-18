@@ -1922,14 +1922,17 @@ export const CodesSection: React.FC<CodesSectionProps> = ({
                   <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-white/5">
                     <div className="flex items-center gap-1.5">
                       <button
-                        onClick={() => {
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
                           if (!list.students || list.students.length === 0) {
                             showToast('لا توجد بيانات طلاب بالطابعة', 'error');
                             return;
                           }
                           printStudentCards(list.students, schoolName);
                         }}
-                        className="px-2.5 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 rounded-xl text-xs font-black transition-all flex items-center gap-1"
+                        className="px-2.5 py-1.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 rounded-xl text-xs font-black transition-all flex items-center gap-1 cursor-pointer"
                         title="طباعة بطاقات وأكواد هذه القائمة (PDF)"
                       >
                         <Printer size={13} />

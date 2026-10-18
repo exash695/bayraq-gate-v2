@@ -14,6 +14,11 @@ export interface PrimaryUserSession {
   section?: string;
   gender?: string;
   token?: string;
+  teacherId?: string;
+  teacherName?: string;
+  subject?: string;
+  specialization?: string;
+  classes?: string[];
   lastActive: number;
 }
 
@@ -54,12 +59,17 @@ export function getPrimaryUserSession(): PrimaryUserSession | null {
         schoolId: (schoolId && schoolId !== "general" ? schoolId : info.schoolId || "school1").replace(/-(boys|girls)$/i, ''),
         schoolName: info.schoolName,
         code: info.code || info.studentCode || info.parentCode || "",
-        studentName: info.studentName || info.name,
+        studentName: info.studentName || info.teacherName || info.name,
         studentCode: info.studentCode || info.code,
         parentCode: info.parentCode,
         grade: info.grade,
         section: info.section,
         gender: info.gender,
+        teacherId: info.teacherId || info.id,
+        teacherName: info.teacherName || info.name || info.studentName,
+        subject: info.subject || info.specialization,
+        specialization: info.specialization || info.subject,
+        classes: info.classes,
         lastActive: Date.now()
       };
     }
@@ -79,13 +89,18 @@ export function savePrimaryUserSession(session: Partial<PrimaryUserSession> & { 
       schoolId: (session.schoolId && session.schoolId !== "general" ? session.schoolId : "school1").replace(/-(boys|girls)$/i, ''),
       schoolName: session.schoolName,
       code: session.code.trim().toUpperCase(),
-      studentName: session.studentName || session.code,
+      studentName: session.studentName || session.teacherName || session.code,
       studentCode: session.studentCode || session.code,
       parentCode: session.parentCode,
       grade: session.grade,
       section: session.section,
       gender: session.gender,
       token: session.token,
+      teacherId: session.teacherId,
+      teacherName: session.teacherName || session.studentName,
+      subject: session.subject || session.specialization,
+      specialization: session.specialization || session.subject,
+      classes: session.classes,
       lastActive: Date.now()
     };
 
@@ -108,17 +123,21 @@ export function savePrimaryUserSession(session: Partial<PrimaryUserSession> & { 
 
     // حفظ كائن المعلومات المفصل
     const infoPayload = {
-      id: fullSession.code,
+      id: fullSession.teacherId || fullSession.code,
       code: fullSession.code,
       studentCode: fullSession.studentCode,
       parentCode: fullSession.parentCode || fullSession.code,
       name: fullSession.studentName,
       studentName: fullSession.studentName,
+      teacherName: fullSession.teacherName,
+      subject: fullSession.subject,
+      specialization: fullSession.specialization,
       role: fullSession.role,
       schoolId: fullSession.schoolId,
       grade: fullSession.grade,
       section: fullSession.section,
-      gender: fullSession.gender
+      gender: fullSession.gender,
+      classes: fullSession.classes
     };
     localStorage.setItem(VERIFIED_INFO_KEY, JSON.stringify(infoPayload));
 

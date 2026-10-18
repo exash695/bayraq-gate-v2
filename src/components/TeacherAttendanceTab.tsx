@@ -38,6 +38,7 @@ import { ClassroomVideoPlayer } from './ClassroomVideoPlayer';
 import { academicService, SchoolStudent, AcademicList } from '../services/academicService';
 import { staffService } from '../services/staffService';
 import { safeStorage } from '../lib/storage';
+import { getPrimaryUserSession } from '../lib/deviceSessionVault';
 import { realtimeManager } from '../lib/realtimeManager';
 import { printAttendanceReport } from '../utils/attendancePrint';
 import { BerqCharacter } from './BerqCharacterManager';
@@ -67,6 +68,142 @@ const DEFAULT_GRADES = [
   'أول متوسط', 'ثاني متوسط', 'ثالث متوسط',
   'رابع علمي', 'رابع أدبي', 'خامس علمي', 'خامس أدبي', 'سادس علمي', 'سادس أدبي'
 ];
+
+export const POPULAR_SPECIALIZATIONS = [
+  'الرياضيات', 'اللغة العربية', 'اللغة الإنجليزية', 'العلوم',
+  'الفيزياء', 'الكيمياء', 'الأحياء', 'التربية الإسلامية',
+  'الاجتماعيات', 'التاريخ', 'الجغرافيا', 'الحاسوب',
+  'التربية الفنية', 'التربية الرياضية', 'المنهج الوزاري'
+];
+
+export const parseTeacherCodeSpecialization = (codeStr?: string): string => {
+  if (!codeStr) return '';
+  const clean = String(codeStr).trim().toUpperCase();
+  const parts = clean.split('-');
+  if (parts.length >= 2) {
+    const subPart = parts[1] || '';
+    switch (subPart) {
+      case 'ENG': return 'اللغة الإنجليزية';
+      case 'MATH': return 'الرياضيات';
+      case 'ARA': return 'اللغة العربية';
+      case 'SCI': return 'العلوم';
+      case 'ISL': return 'التربية الإسلامية';
+      case 'BIO': return 'الأحياء';
+      case 'CHE': return 'الكيمياء';
+      case 'PHY': return 'الفيزياء';
+      case 'GEO': return 'الجغرافيا';
+      case 'HIS': return 'التاريخ';
+      case 'SOC': return 'الاجتماعيات';
+      case 'COM': case 'CS': return 'الحاسوب';
+      case 'ART': return 'التربية الفنية';
+      case 'PE': return 'التربية الرياضية';
+      case 'STAFF': return 'الكادر التعليمي والإداري';
+      default: break;
+    }
+  }
+  return '';
+};
+
+export const resolveTeacherIdentity = (
+  teacherData?: any,
+  internalTeacherData?: any,
+  schoolId?: string
+) => {
+  let matched: any = { ...(teacherData || {}), ...(internalTeacherData || {}) };
+
+  // 1. Check cached teacher data (persisted across sessions and iOS memory purges)
+  try {
+    const cachedTchRaw = safeStorage.getItem("s6_cached_teacher_data");
+    if (cachedTchRaw) {
+      const parsed = JSON.parse(cachedTchRaw);
+      if (parsed) matched = { ...parsed, ...matched };
+    }
+  } catch {}
+
+  // 2. Check auth cached user
+  try {
+    const authUserRaw = safeStorage.getItem("bayraq_custom_auth_user") || localStorage.getItem("bayraq_custom_auth_user");
+    if (authUserRaw) {
+      const parsed = JSON.parse(authUserRaw);
+      if (parsed && (parsed.role === "teacher" || parsed.role === "TEACHER")) {
+        matched = { ...parsed, ...matched };
+      }
+    }
+  } catch {}
+
+  // 3. Check primary device session vault
+  try {
+    const primary = getPrimaryUserSession();
+    if (primary && primary.role === "teacher") {
+      matched = {
+        name: primary.teacherName || primary.studentName,
+        code: primary.code,
+        id: primary.teacherId || primary.code,
+        subject: primary.subject || primary.specialization,
+        specialization: primary.specialization || primary.subject,
+        ...matched
+      };
+    }
+  } catch {}
+
+  // 4. Check user profile cache
+  try {
+    const profRaw = safeStorage.getItem("bayraq_cached_user_profile");
+    if (profRaw) {
+      const prof = JSON.parse(profRaw);
+      if (prof && (prof.role === "teacher" || prof.role === "TEACHER")) {
+        matched = { ...prof, ...matched };
+      }
+    }
+  } catch {}
+
+  // 5. Look up in staffService cached teachers for this school
+  try {
+    const cachedTeachers = staffService.getCachedTeachers(schoolId);
+    if (Array.isArray(cachedTeachers) && cachedTeachers.length > 0) {
+      const targetId = matched?.id || '';
+      const targetCode = String(matched?.code || '').trim().toUpperCase();
+      const targetName = String(matched?.name || matched?.fullName || '').trim();
+
+      const found = cachedTeachers.find(t => {
+        if (!t) return false;
+        if (targetId && t.id === targetId) return true;
+        if (targetCode && String(t.code || '').trim().toUpperCase() === targetCode) return true;
+        if (targetName && t.name && (t.name.trim() === targetName || targetName.includes(t.name.trim()))) return true;
+        if (targetCode && t.classCodes) {
+          const codes = typeof t.classCodes === 'object' ? Object.values(t.classCodes) : [];
+          if (codes.some((c: any) => String(c).trim().toUpperCase() === targetCode)) return true;
+        }
+        return false;
+      });
+      if (found) {
+        matched = {
+          ...found,
+          ...matched,
+          subject: found.subject || found.specialization || matched.subject,
+          specialization: found.specialization || found.subject || matched.specialization
+        };
+      }
+    }
+  } catch {}
+
+  const resolvedName = (matched?.name || matched?.fullName || matched?.displayName || '').trim();
+  let resolvedSubject = (matched?.subject || matched?.specialization || matched?.material || '').trim();
+
+  // If subject was missing or erroneously defaulted to "الرياضيات", try decoding code
+  if ((!resolvedSubject || resolvedSubject === 'الرياضيات') && matched?.code) {
+    const fromCode = parseTeacherCodeSpecialization(matched.code);
+    if (fromCode) {
+      resolvedSubject = fromCode;
+    }
+  }
+
+  return {
+    teacher: matched,
+    name: resolvedName,
+    subject: resolvedSubject
+  };
+};
 
 export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
   schoolId,
@@ -257,27 +394,44 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
   };
 
   // Real-time teacher data state (keeps teacher classes strictly synchronized with administrative updates)
-  const [internalTeacherData, setInternalTeacherData] = useState<any>(teacherData);
+  const [internalTeacherData, setInternalTeacherData] = useState<any>(() => {
+    const { teacher } = resolveTeacherIdentity(teacherData, null, schoolId);
+    return teacher;
+  });
 
   useEffect(() => {
     if (teacherData) {
-      setInternalTeacherData(teacherData);
+      setInternalTeacherData((prev: any) => ({ ...prev, ...teacherData }));
     }
   }, [teacherData]);
 
   useEffect(() => {
     if (!schoolId) return;
-    const targetTeacherId = internalTeacherData?.id || teacherData?.id;
-    const targetCode = internalTeacherData?.code || teacherData?.code;
 
     const handleSyncTeacher = (teachersList: any[]) => {
-      if (!Array.isArray(teachersList)) return;
-      const fresh = teachersList.find(t => 
-        (targetTeacherId && t.id === targetTeacherId) || 
-        (targetCode && t.code === targetCode)
-      );
+      if (!Array.isArray(teachersList) || teachersList.length === 0) return;
+      const { teacher: currentSnapshot } = resolveTeacherIdentity(teacherData, internalTeacherData, schoolId);
+      const targetTeacherId = currentSnapshot?.id;
+      const targetCode = String(currentSnapshot?.code || '').trim().toUpperCase();
+      const targetName = String(currentSnapshot?.name || currentSnapshot?.fullName || '').trim();
+
+      const fresh = teachersList.find(t => {
+        if (!t) return false;
+        if (targetTeacherId && t.id === targetTeacherId) return true;
+        if (targetCode && String(t.code || '').trim().toUpperCase() === targetCode) return true;
+        if (targetCode && t.classCodes) {
+          const codes = typeof t.classCodes === 'object' ? Object.values(t.classCodes) : [];
+          if (codes.some((c: any) => String(c).trim().toUpperCase() === targetCode)) return true;
+        }
+        if (targetName && t.name && (t.name.trim() === targetName || targetName.includes(t.name.trim()))) return true;
+        return false;
+      });
       if (fresh) {
-        setInternalTeacherData((prev: any) => ({ ...prev, ...fresh, classes: fresh.classes || [] }));
+        setInternalTeacherData((prev: any) => {
+          const merged = { ...prev, ...fresh, classes: fresh.classes || [] };
+          try { safeStorage.setItem("s6_cached_teacher_data", JSON.stringify(merged)); } catch {}
+          return merged;
+        });
       }
     };
 
@@ -475,6 +629,8 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
   const [lensUploadStatus, setLensUploadStatus] = useState<string>('');
   const [isUploadingLens, setIsUploadingLens] = useState<boolean>(false);
   const activeUploadXhrRef = useRef<XMLHttpRequest | null>(null);
+  const lensFileInputRef = useRef<HTMLInputElement | null>(null);
+  const lensCameraInputRef = useRef<HTMLInputElement | null>(null);
 
   // Cancel running upload
   const handleCancelUpload = () => {
@@ -532,20 +688,38 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
       .finally(() => setIsLoadingBroadcastHistory(false));
   };
 
-  // Teacher Subject for Classroom Lens
+  // Teacher Subject and Identity for Classroom Lens (عين على الصف)
   const [lensSubject, setLensSubject] = useState<string>(() => {
-    return teacherData?.subject || teacherData?.specialization || internalTeacherData?.subject || 'الرياضيات';
+    const { subject } = resolveTeacherIdentity(teacherData, internalTeacherData, schoolId);
+    return subject || '';
   });
   const [lensTeacherName, setLensTeacherName] = useState<string>(() => {
-    return teacherData?.name || teacherData?.fullName || internalTeacherData?.name || 'الأستاذ';
+    const { name } = resolveTeacherIdentity(teacherData, internalTeacherData, schoolId);
+    return name || '';
   });
+  const [isCustomSpecializationActive, setIsCustomSpecializationActive] = useState<boolean>(false);
 
+  // Sync Teacher name & specialization automatically whenever fresh data arrives
   useEffect(() => {
-    const name = teacherData?.name || teacherData?.fullName || internalTeacherData?.name || '';
-    if (name && (lensTeacherName === 'الأستاذ' || !lensTeacherName)) setLensTeacherName(name);
-    const sub = teacherData?.subject || teacherData?.specialization || internalTeacherData?.subject || '';
-    if (sub && (lensSubject === 'الرياضيات' || !lensSubject)) setLensSubject(sub);
-  }, [teacherData, internalTeacherData]);
+    const { name, subject } = resolveTeacherIdentity(teacherData, internalTeacherData, schoolId);
+    if (name && (!lensTeacherName || lensTeacherName === 'الأستاذ')) {
+      setLensTeacherName(name);
+    }
+    if (subject && (!lensSubject || lensSubject === 'الرياضيات' || !isCustomSpecializationActive)) {
+      setLensSubject(subject);
+    }
+  }, [teacherData, internalTeacherData, schoolId, isCustomSpecializationActive]);
+
+  // Function to refresh identity on demand when opening lens modal
+  const syncLensFieldsOnModalOpen = () => {
+    const { name, subject } = resolveTeacherIdentity(teacherData, internalTeacherData, schoolId);
+    if (name && (!lensTeacherName || lensTeacherName === 'الأستاذ')) {
+      setLensTeacherName(name);
+    }
+    if (subject && (!lensSubject || lensSubject === 'الرياضيات' || !isCustomSpecializationActive)) {
+      setLensSubject(subject);
+    }
+  };
 
   // Fetch Class Activities for Classroom Lens Tab
   const fetchClassLensActivities = () => {
@@ -2182,6 +2356,7 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
               <button
                 type="button"
                 onClick={() => {
+                  syncLensFieldsOnModalOpen();
                   setSelectedLensStudent({ isAll: true, name: `جميع طلاب شعبة ${activeClass}` });
                   setIsBroadcastToAllMode(true);
                   setLensFile(null);
@@ -2226,6 +2401,7 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
                       <button
                         type="button"
                         onClick={() => {
+                          syncLensFieldsOnModalOpen();
                           setSelectedLensStudent(student);
                           setIsBroadcastToAllMode(false);
                           setLensFile(null);
@@ -2608,34 +2784,43 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
                 </div>
               )}
 
-              {/* Teacher & Subject Selector */}
-              <div className="p-3 rounded-2xl bg-black/40 border border-white/10 space-y-2">
+              {/* Teacher & Subject Display (Auto-Recognized) */}
+              <div className="p-3.5 rounded-2xl bg-[#080d1a] border border-blue-500/20 shadow-inner space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-black text-white/90 flex items-center gap-1.5">
+                  <span className="text-xs font-black text-white/90 flex items-center gap-1.5">
                     <span>👨‍🏫 الأستاذ والمادة الدراسية:</span>
-                  </label>
-                  <span className="text-[10px] text-cyan-300 font-bold">تظهر على اللقطة في لوحة ولي الأمر</span>
+                  </span>
+                  <span className="text-[10px] text-cyan-300 font-bold">تظهر تلقائياً في قناة البث ولدى ولي الأمر</span>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <div className="space-y-1">
-                    <span className="text-[10px] text-white/50 block font-bold">اسم الأستاذ:</span>
-                    <div className="relative group">
-                      <input
-                        type="text"
-                        value={lensTeacherName}
-                        onChange={(e) => setLensTeacherName(e.target.value)}
-                        className="w-full bg-[#080e1c] border border-white/10 focus:border-blue-500/50 rounded-xl pr-9 pl-3 py-2 text-xs font-bold text-white outline-none transition-all"
-                        placeholder="اسم الأستاذ..."
-                      />
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-blue-400">👨‍🏫</span>
+                  <div className="p-2.5 rounded-xl bg-[#0c152e] border border-white/10 flex items-center justify-between">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-blue-400 text-sm shrink-0">👨‍🏫</span>
+                      <div className="min-w-0">
+                        <span className="text-[10px] text-white/50 block font-bold">اسم الأستاذ</span>
+                        <span className="text-xs font-black text-white truncate block">
+                          {lensTeacherName || teacherData?.name || internalTeacherData?.name || 'الأستاذ'}
+                        </span>
+                      </div>
                     </div>
+                    <span className="px-2 py-0.5 rounded-full text-[9.5px] font-black bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
+                      ✓ معتمد
+                    </span>
                   </div>
-                  <div className="space-y-1">
-                    <span className="text-[10px] text-white/50 block font-bold">المادة الدراسية (حسب الاختصاص):</span>
-                    <div className="w-full bg-[#080e1c] border border-cyan-500/40 rounded-xl px-3 py-2 text-xs font-bold text-cyan-300 flex items-center gap-2">
-                      <span className="text-cyan-400">📚</span>
-                      <span className="truncate">{lensSubject || teacherData?.subject || teacherData?.specialization || internalTeacherData?.subject || 'عام'}</span>
+
+                  <div className="p-2.5 rounded-xl bg-[#0c152e] border border-cyan-500/30 flex items-center justify-between">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-cyan-400 text-sm shrink-0">📚</span>
+                      <div className="min-w-0">
+                        <span className="text-[10px] text-white/50 block font-bold">المادة (الاختصاص)</span>
+                        <span className="text-xs font-black text-cyan-300 truncate block">
+                          {lensSubject || teacherData?.subject || teacherData?.specialization || internalTeacherData?.subject || 'عام'}
+                        </span>
+                      </div>
                     </div>
+                    <span className="px-2 py-0.5 rounded-full text-[9.5px] font-black bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 shrink-0">
+                      ✓ الاختصاص
+                    </span>
                   </div>
                 </div>
               </div>
@@ -2652,37 +2837,173 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
 
               {/* File Select */}
               <div className="space-y-2">
-                <label className="text-xs font-black text-white/80 block">⚡ اختر الفيديو أو الصورة (مشاركة التلميذ في الصف):</label>
-                <div className="border-2 border-dashed border-white/10 hover:border-blue-500/50 rounded-2xl p-6 text-center cursor-pointer transition-all relative bg-black/20 group">
-                  <input
-                    type="file"
-                    accept="image/*,video/*"
-                    onChange={(e) => {
-                      if (e.target.files && e.target.files[0]) {
-                        setLensFile(e.target.files[0]);
-                      }
-                    }}
-                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
-                  />
-                  {lensFile ? (
-                    <div className="space-y-2">
-                      <span className="text-3xl block">🎥</span>
-                      <span className="text-xs font-black text-emerald-400 block">{lensFile.name}</span>
-                      <span className="text-[10px] text-white/50 block">({(lensFile.size / 1024 / 1024).toFixed(2)} MB) - انقر لتغيير الملف</span>
-                      {lensFile.size > 48 * 1024 * 1024 && (
-                        <div className="inline-block px-3 py-1 rounded-xl bg-blue-500/20 text-blue-300 text-[10px] font-bold border border-blue-500/30">
-                          ⚡ فيديو فائق الدقة - سيتم بثه بجودة سينمائية وحفظه دون أي اقتطاع
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="space-y-2 group-hover:scale-105 transition-transform duration-300">
-                      <Upload size={28} className="text-white/30 mx-auto group-hover:text-blue-400" />
-                      <span className="text-xs font-black text-white/60 block">انقر هنا لتحديد النشاط (فيديو أو صورة)</span>
-                      <span className="text-[10px] text-white/30 block">يدعم مقاطع الفيديو والصور فائقة الدقة حتى 500 ميغابايت</span>
-                    </div>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-black text-white/90 block">
+                    ⚡ اختر الفيديو أو الصورة (مشاركة التلميذ في الصف):
+                  </label>
+                  {lensFile && (
+                    <span className="text-[10.5px] text-emerald-400 font-bold flex items-center gap-1">
+                      <span>✓</span>
+                      <span>تم اختيار الملف بنجاح</span>
+                    </span>
                   )}
                 </div>
+
+                {/* Hidden Native File Inputs (1 for gallery/files, 1 for direct camera capture) */}
+                <input
+                  ref={lensFileInputRef}
+                  type="file"
+                  accept="image/*,video/*,image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm,video/3gpp"
+                  tabIndex={-1}
+                  className="hidden"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files[0]) {
+                      setLensFile(e.target.files[0]);
+                    }
+                  }}
+                />
+                <input
+                  ref={lensCameraInputRef}
+                  type="file"
+                  accept="image/*,video/*"
+                  capture="environment"
+                  tabIndex={-1}
+                  className="hidden"
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files[0]) {
+                      setLensFile(e.target.files[0]);
+                    }
+                  }}
+                />
+
+                {/* Interactive Selection Box & Buttons */}
+                {lensFile ? (
+                  <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-950/60 to-indigo-950/60 border border-emerald-500/40 shadow-lg space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-11 h-11 rounded-xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 flex items-center justify-center text-xl shrink-0">
+                          {lensFile.type.startsWith('video/') ? '🎥' : '📸'}
+                        </div>
+                        <div className="min-w-0">
+                          <h5 className="text-xs sm:text-sm font-black text-white truncate">{lensFile.name}</h5>
+                          <p className="text-[10.5px] text-white/50 font-bold mt-0.5">
+                            الحجم: {(lensFile.size / 1024 / 1024).toFixed(2)} MB • النوع: {lensFile.type || 'ملف وسائط'}
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setLensFile(null);
+                          if (lensFileInputRef.current) lensFileInputRef.current.value = '';
+                          if (lensCameraInputRef.current) lensCameraInputRef.current.value = '';
+                        }}
+                        className="px-2.5 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shrink-0"
+                        title="إلغاء واختيار ملف آخر"
+                      >
+                        <Trash2 size={13} />
+                        <span>إلغاء</span>
+                      </button>
+                    </div>
+
+                    {lensFile.size > 48 * 1024 * 1024 && (
+                      <div className="p-2 rounded-xl bg-blue-500/20 text-blue-300 text-[10.5px] font-bold border border-blue-500/30 flex items-center gap-1.5">
+                        <Sparkles size={13} className="shrink-0 text-cyan-300" />
+                        <span>فيديو فائق الدقة - سيتم بثه بجودة سينمائية كاملة وحفظه في المنصة</span>
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-2 pt-1 border-t border-white/10">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (lensFileInputRef.current) {
+                            lensFileInputRef.current.value = '';
+                            lensFileInputRef.current.click();
+                          }
+                        }}
+                        className="flex-1 py-2 px-3 rounded-xl bg-white/10 hover:bg-white/15 text-white text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <RefreshCw size={13} />
+                        <span>تغيير الملف من المعرض</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (lensCameraInputRef.current) {
+                            lensCameraInputRef.current.value = '';
+                            lensCameraInputRef.current.click();
+                          }
+                        }}
+                        className="py-2 px-3 rounded-xl bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/30 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <Camera size={13} />
+                        <span>تصوير جديد</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5">
+                    {/* Primary Drop/Click Zone */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (lensFileInputRef.current) {
+                          lensFileInputRef.current.value = '';
+                          lensFileInputRef.current.click();
+                        }
+                      }}
+                      className="w-full border-2 border-dashed border-blue-500/30 hover:border-blue-400 bg-gradient-to-b from-[#0c152e]/80 to-[#070b16]/80 rounded-2xl p-5 sm:p-6 text-center cursor-pointer transition-all group shadow-inner block active:scale-[0.99]"
+                    >
+                      <div className="space-y-2 pointer-events-none">
+                        <div className="w-12 h-12 rounded-2xl bg-blue-500/15 border border-blue-400/30 text-blue-300 flex items-center justify-center mx-auto group-hover:scale-110 group-hover:bg-blue-500/25 transition-all shadow-md">
+                          <Upload size={24} className="text-blue-400" />
+                        </div>
+                        <div>
+                          <span className="text-xs sm:text-sm font-black text-white block">
+                            انقر هنا لتحديد النشاط (فيديو أو صورة)
+                          </span>
+                          <span className="text-[10.5px] text-white/40 block mt-1">
+                            يدعم مقاطع الفيديو والصور فائقة الدقة حتى 500 ميغابايت
+                          </span>
+                        </div>
+                      </div>
+                    </button>
+
+                    {/* Quick Direct Buttons for 100% Mobile Compatibility */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (lensFileInputRef.current) {
+                            lensFileInputRef.current.value = '';
+                            lensFileInputRef.current.click();
+                          }
+                        }}
+                        className="py-2.5 px-3 rounded-xl bg-gradient-to-r from-blue-600/30 to-indigo-600/30 hover:from-blue-600/40 hover:to-indigo-600/40 border border-blue-400/40 text-blue-200 font-black text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm active:scale-95"
+                      >
+                        <Upload size={14} className="text-blue-300 shrink-0" />
+                        <span>📁 اختيار من الملفات</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (lensCameraInputRef.current) {
+                            lensCameraInputRef.current.value = '';
+                            lensCameraInputRef.current.click();
+                          }
+                        }}
+                        className="py-2.5 px-3 rounded-xl bg-gradient-to-r from-purple-600/30 to-pink-600/30 hover:from-purple-600/40 hover:to-pink-600/40 border border-purple-400/40 text-purple-200 font-black text-xs transition-all flex items-center justify-center gap-2 cursor-pointer shadow-sm active:scale-95"
+                      >
+                        <Camera size={14} className="text-purple-300 shrink-0" />
+                        <span>📸 التقاط بالكاميرا</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Comments Selector */}

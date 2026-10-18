@@ -432,7 +432,8 @@ export const TeacherExamPapers: React.FC<TeacherExamPapersProps> = ({ schoolId, 
           onClick={() => setViewImage(null)}
         >
           <button 
-            className="fixed top-6 right-6 w-12 h-12 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center text-white transition-colors z-[160]"
+            style={{ top: 'calc(0.75rem + env(safe-area-inset-top, 0px))' }}
+            className="fixed right-6 w-12 h-12 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center text-white transition-colors z-[160]"
             onClick={(e) => {
               e.stopPropagation();
               setViewImage(null);

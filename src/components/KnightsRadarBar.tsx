@@ -161,7 +161,11 @@ export const KnightsRadarBar: React.FC<KnightsRadarBarProps> = ({ gradeFilter, i
       {/* Stationed Knights Bar */}
       <div 
         onClick={() => setIsModalOpen(true)}
-        className="fixed bottom-0 left-0 right-0 h-14 bg-black/90 backdrop-blur-sm border-t border-theme-primary/30 shadow-[0_-10px_30px_rgba(0,0,0,0.5)] flex items-center px-6 cursor-pointer hover:bg-theme-primary/5 transition-all z-[100]"
+        style={{
+          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
+          minHeight: 'calc(3.5rem + env(safe-area-inset-bottom, 0px))',
+        }}
+        className="fixed bottom-0 left-0 right-0 bg-black/90 backdrop-blur-sm border-t border-theme-primary/30 shadow-[0_-10px_30px_rgba(0,0,0,0.5)] flex items-center px-6 cursor-pointer hover:bg-theme-primary/5 transition-all z-[100]"
       >
         <div className="flex items-center gap-4 text-theme-primary">
           <div className="relative">

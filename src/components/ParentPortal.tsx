@@ -6082,7 +6082,8 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
             initial={{ opacity: 0, y: -20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -20, scale: 0.95 }}
-            className={`fixed top-5 left-1/2 -translate-x-1/2 z-[10000] px-5 py-3 rounded-2xl shadow-2xl border backdrop-blur-xl flex items-center gap-3 text-xs font-black dir-rtl ${
+            style={{ top: 'calc(0.75rem + env(safe-area-inset-top, 0px))' }}
+            className={`fixed left-1/2 -translate-x-1/2 z-[10000] px-5 py-3 rounded-2xl shadow-2xl border backdrop-blur-xl flex items-center gap-3 text-xs font-black dir-rtl ${
               toast.type === 'error'
                 ? 'bg-rose-950/90 text-rose-200 border-rose-500/50 shadow-rose-900/40'
                 : 'bg-emerald-950/90 text-emerald-200 border-emerald-500/50 shadow-emerald-900/40'

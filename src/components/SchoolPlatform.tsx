@@ -1024,11 +1024,26 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
   const [studentLocalMicActive, setStudentLocalMicActive] = useState(false);
   const [studentLocalCamActive, setStudentLocalCamActive] = useState(false);
 
-  const [currentTeacherData, setCurrentTeacherData] = useState<any>(teacherData);
+  const [currentTeacherData, setCurrentTeacherData] = useState<any>(() => {
+    if (teacherData) return teacherData;
+    try {
+      const stored = safeStorage.getItem("s6_cached_teacher_data");
+      if (stored) return JSON.parse(stored);
+      const authUserRaw = safeStorage.getItem("bayraq_custom_auth_user") || localStorage.getItem("bayraq_custom_auth_user");
+      if (authUserRaw) {
+        const u = JSON.parse(authUserRaw);
+        if (u && (u.role === "teacher" || u.role === "TEACHER")) return u;
+      }
+    } catch {}
+    return null;
+  });
 
   useEffect(() => {
     if (teacherData) {
       setCurrentTeacherData(teacherData);
+      try {
+        safeStorage.setItem("s6_cached_teacher_data", JSON.stringify(teacherData));
+      } catch {}
     }
   }, [teacherData]);
 
@@ -1159,13 +1174,28 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
         setSchoolTeachersList(teachersList);
       }
       if (isTeacher) {
-        const teacherId = currentTeacherData?.id || teacherData?.id;
-        if (teacherId) {
-          const fresh = teachersList.find(
-            (t) => t.id === teacherId || (t.code && (t.code === teacherData?.code || t.code === currentTeacherData?.code))
-          );
+        const targetId = currentTeacherData?.id || teacherData?.id || userProfile?.id;
+        const targetCode = (currentTeacherData?.code || teacherData?.code || userProfile?.code || userProfile?.studentCode || (userProfile as any)?.teacherCode || '').trim().toUpperCase();
+        const targetName = (currentTeacherData?.name || teacherData?.name || userProfile?.name || userProfile?.displayName || '').trim();
+
+        if (targetId || targetCode || targetName) {
+          const fresh = teachersList.find((t) => {
+            if (!t) return false;
+            if (targetId && t.id === targetId) return true;
+            if (targetCode && String(t.code || '').trim().toUpperCase() === targetCode) return true;
+            if (targetCode && t.classCodes) {
+              const codes = typeof t.classCodes === 'object' ? Object.values(t.classCodes) : [];
+              if (codes.some((c: any) => String(c).trim().toUpperCase() === targetCode)) return true;
+            }
+            if (targetName && t.name && (t.name.trim() === targetName || targetName.includes(t.name.trim()))) return true;
+            return false;
+          });
           if (fresh) {
-            setCurrentTeacherData((prev: any) => ({ ...prev, ...fresh, classes: fresh.classes || [] }));
+            setCurrentTeacherData((prev: any) => {
+              const merged = { ...prev, ...fresh, classes: fresh.classes || [] };
+              try { safeStorage.setItem("s6_cached_teacher_data", JSON.stringify(merged)); } catch {}
+              return merged;
+            });
           }
         }
       }
@@ -8399,7 +8429,8 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
       {!isPosting && (
         <button
           onClick={handleBack}
-          className={`fixed right-6 z-[110] rounded-full bg-black/40 flex items-center justify-center text-white hover:bg-black/60 transition-all border border-white/10 ${activeTab === "feed" ? "top-8 w-8 h-8" : "top-6 w-10 h-10"}`}
+          style={{ top: 'calc(0.75rem + env(safe-area-inset-top, 0px))' }}
+          className={`fixed right-6 z-[110] rounded-full bg-black/40 flex items-center justify-center text-white hover:bg-black/60 transition-all border border-white/10 ${activeTab === "feed" ? "w-8 h-8" : "w-10 h-10"}`}
         >
           <ArrowRight size={activeTab === "feed" ? 18 : 22} />
         </button>

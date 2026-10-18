@@ -590,7 +590,10 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
       </div>
 
       {/* 1. Header (رأس الصفحة) */}
-      <header className="sticky top-0 z-40 w-full bg-[#030712]/85 backdrop-blur-xl border-b border-white/5 px-4 sm:px-6 py-3 transition-all">
+      <header 
+        style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top, 0.75rem))' }}
+        className="sticky top-0 z-40 w-full bg-[#030712]/85 backdrop-blur-xl border-b border-white/5 px-4 sm:px-6 pb-3 transition-all"
+      >
         <div className="max-w-4xl mx-auto flex items-center justify-between">
           
           {/* Right side: Title & Subtitle + Bairaq Logo */}
@@ -899,7 +902,8 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
 
       {/* 4. Bottom Navigation Bar (الشريط السفلي المتناسق) */}
       <nav 
-        className="fixed bottom-0 left-0 right-0 z-50 px-6 pb-6 pt-2 bg-gradient-to-t from-[#030712] via-[#030712]/90 to-transparent pointer-events-none flex justify-center"
+        style={{ paddingBottom: 'calc(1.25rem + env(safe-area-inset-bottom, 0px))' }}
+        className="fixed bottom-0 left-0 right-0 z-50 px-6 pt-2 bg-gradient-to-t from-[#030712] via-[#030712]/90 to-transparent pointer-events-none flex justify-center"
         id="mayadeen-bottom-nav"
       >
         <div className="w-full max-w-[320px] pointer-events-auto bg-[#0A0F1D]/90 backdrop-blur-2xl border border-white/10 rounded-[2rem] px-3 py-1.5 flex items-center justify-between shadow-[0_8px_32px_rgba(0,0,0,0.5)] min-h-[64px]">

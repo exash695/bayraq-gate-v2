@@ -1482,6 +1482,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   const handleAdminMainBack = (e?: React.MouseEvent) => {
     e?.stopPropagation();
+    if (showDiscountSimulator) {
+      setShowDiscountSimulator(false);
+      return;
+    }
+    if (authModalPayment !== null) {
+      setAuthModalPayment(null);
+      return;
+    }
     if (selectedArchiveList !== null) {
       setSelectedArchiveList(null);
       return;
@@ -1491,23 +1499,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return;
     }
     if (studentsSubView) {
-      setStudentsSubView(null);
+      setStudentsSubView(false);
       return;
     }
     if (financeSubView) {
-      setFinanceSubView(null);
+      setFinanceSubView(false);
       return;
     }
     if (codesSubView) {
-      setCodesSubView(null);
+      setCodesSubView(false);
       return;
     }
     if (supportSubView) {
-      setSupportSubView(null);
+      setSupportSubView(false);
       return;
     }
     if (teachersSubView) {
-      setTeachersSubView(null);
+      setTeachersSubView(false);
       return;
     }
     if (selectedBehaviorStudent !== null) {
@@ -1530,11 +1538,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setIsBusTrackingOpen(false);
       return;
     }
+    if (selectedSection !== null) {
+      setSelectedSection(null);
+      return;
+    }
+    if (selectedGrade !== null) {
+      setSelectedGrade(null);
+      return;
+    }
+    if (selectedStage !== null) {
+      setSelectedStage(null);
+      return;
+    }
     if (activeTab !== 'pulse') {
       setActiveTab('pulse');
       return;
     }
-    onBack();
+    if (typeof onBack === 'function') {
+      onBack();
+    }
   };
 
   const isAnySubViewOpen = 
@@ -1549,7 +1571,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     showDigitalReceipt !== null || 
     attendanceAction !== null || 
     listToEdit !== null ||
-    isBusTrackingOpen;
+    isBusTrackingOpen ||
+    showDiscountSimulator ||
+    authModalPayment !== null ||
+    selectedSection !== null ||
+    selectedGrade !== null ||
+    selectedStage !== null;
 
   const effectiveHeaderTab = (activeTab === 'attendance' && attendanceSubTab === 'uniform') 
     ? 'uniform' 
@@ -1560,12 +1587,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       
       {/* Main Admin Navigation Arrow - Always Visible */}
       <motion.button 
+        type="button"
+        onClick={handleAdminMainBack}
         initial={{ opacity: 0, scale: 0.9 }}
         animate={{ opacity: 1, scale: 1 }}
         whileHover={{ scale: 1.1, y: -2 }}
         whileTap={{ scale: 0.95 }}
-        onClick={handleAdminMainBack}
-        className="fixed top-2.5 right-2.5 md:right-4 z-[600] w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl bg-[#101935]/95 backdrop-blur-3xl border border-amber-500/40 hover:border-amber-400 text-amber-400 hover:text-amber-300 flex items-center justify-center shadow-[0_4px_25px_rgba(212,175,55,0.25)] hover:shadow-[0_6px_35px_rgba(212,175,55,0.45)] transition-all duration-300 group cursor-pointer"
+        style={{ top: 'calc(0.6rem + env(safe-area-inset-top, 0px))' }}
+        className="fixed right-2.5 md:right-4 z-[600] w-10 h-10 md:w-12 md:h-12 rounded-xl md:rounded-2xl bg-[#101935]/95 backdrop-blur-3xl border border-amber-500/40 hover:border-amber-400 text-amber-400 hover:text-amber-300 flex items-center justify-center shadow-[0_4px_25px_rgba(212,175,55,0.25)] hover:shadow-[0_6px_35px_rgba(212,175,55,0.45)] transition-all duration-300 group cursor-pointer pointer-events-auto select-none"
         title={
           selectedArchiveList !== null
             ? "الرجوع لقوائم الوجبات"
@@ -1575,8 +1604,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 ? "الرجوع لنبض البوابة"
                 : "رجوع للرئيسية"
         }
+        aria-label="سهم العودة الرئيسي"
       >
-        <ArrowRight size={22} strokeWidth={2.5} className="transition-transform duration-300 group-hover:-translate-x-1" />
+        <ArrowRight size={22} strokeWidth={2.5} className="transition-transform duration-300 group-hover:translate-x-0.5" />
       </motion.button>
 
       {/* Stable, High-Performance Header */}
@@ -3040,9 +3070,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <BroadcastSection 
                 schoolId={selectedSchoolId || undefined}
                 savedLists={activeSavedLists || savedLists}
-                onSendMessage={(msg, targetGrades, duration, targetSection, targetSections) => {
+                onSendMessage={(msg, targetGrades, duration, targetSection, targetSections, audioUrl, targetRoles) => {
                   if (onSendMessage) {
-                    onSendMessage(msg, targetGrades, duration, targetSection, targetSections);
+                    (onSendMessage as any)(msg, targetGrades, duration, targetSection, targetSections, audioUrl, targetRoles);
                   }
                   const targetText = targetSection && targetSection !== 'ALL'
                     ? `لشعبة (${targetSection})`

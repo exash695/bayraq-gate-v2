@@ -66,6 +66,8 @@ export const broadcastService = {
     targetLocation?: string;
     type?: string;
     isSchoolBroadcast?: boolean;
+    audioUrl?: string;
+    targetRoles?: string[];
   }) => {
     const payload = {
       ...broadcastData,

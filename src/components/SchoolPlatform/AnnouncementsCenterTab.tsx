@@ -15,7 +15,9 @@ import {
   CheckCircle,
   Inbox,
   ChevronRight,
-  ChevronLeft
+  ChevronLeft,
+  Volume2,
+  Mic
 } from "lucide-react";
 import { broadcastService } from "../../services/broadcastService";
 import { matchesBroadcastAudience, isSchoolMatch } from "../../utils/gradeMatcher";
@@ -245,10 +247,26 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
     return false;
   };
 
+  // Helper to detect system errors like 'خطأ في التحقق'
+  const isSystemErrorNotice = (item: any) => {
+    if (!item) return true;
+    const msg = String(item.message || item.body || item.title || item.rawText || "").toLowerCase();
+    const title = String(item.title || item.subject || "").toLowerCase();
+    return (
+      msg.includes("خطأ في التحقق") ||
+      title.includes("خطأ في التحقق") ||
+      msg.includes("فشل التحقق") ||
+      title.includes("فشل التحقق") ||
+      msg.includes("كود غير موجود") ||
+      msg.includes("خطأ في السيرفر") ||
+      msg.includes("خطأ في النظام")
+    );
+  };
+
   // Map notifications
   const mappedNotifications = useMemo(() => {
     return (notifications || []).map((n, idx) => {
-      if (!n) return null;
+      if (!n || isSystemErrorNotice(n)) return null;
       try {
         const isTeacherNotif = isTeacherItem(n);
         const titleStr = typeof n.title === "string" ? n.title : "";
@@ -261,6 +279,9 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
           ? (isTeacherNotif ? "أستاذ المادة 🎓" : isFinance ? "القسم المالي والإداري 🏛️" : "الإدارة المدرسية 🏛️")
           : (typeof nAuthor === "string" ? nAuthor : String(nAuthor || ""));
 
+        // Extract audio URL if available
+        const audioUrl = n.audioUrl || n.audio_url || n.audio || n.soundUrl || n.voiceUrl || n.metadata?.audioUrl || n.metadata?.audio_url;
+
         // Stable ID without Math.random()!
         const stableId = n.id ? String(n.id) : `notif_${n.timestampMs || n.createdAt || ''}_${titleStr.slice(0, 15)}_${idx}`;
 
@@ -270,6 +291,7 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
           title: titleStr,
           author: cleanAuthor,
           subject: isTeacherNotif ? (n.metadata?.subject || "تبليغ صفي") : (isFinance ? "متابعة الأقساط والرسوم" : "تبليغ إداري رسمي"),
+          audioUrl: audioUrl || null,
           createdAt: n.createdAt,
           timestampMs: getSafeTimestamp(n.timestampMs || n.timestamp_ms || n.createdAt) || Date.now(),
           read: Boolean(n.read),
@@ -288,7 +310,7 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
 
     // Process broadcasts
     (broadcasts || []).forEach((b, idx) => {
-      if (!b) return;
+      if (!b || isSystemErrorNotice(b)) return;
       try {
         const isTeacher = isTeacherItem(b);
         const bAuthor = b.author || b.metadata?.senderName || b.metadata?.teacherName || "";
@@ -301,6 +323,8 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
         const messageContent = typeof b.message === "string" ? b.message : (typeof b.body === "string" ? b.body : (typeof b.title === "string" ? b.title : ""));
         const stableId = b.id ? String(b.id) : `broadcast_${b.timestampMs || b.createdAt || ''}_${idx}`;
 
+        const audioUrl = b.audioUrl || b.audio_url || b.audio || b.soundUrl || b.voiceUrl || b.metadata?.audioUrl || b.metadata?.audio_url;
+
         if (isTeacher) {
           staffList.push({
             ...b,
@@ -308,6 +332,7 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
             type: "staff",
             author: cleanAuthor,
             message: messageContent,
+            audioUrl: audioUrl || null,
             subject: b.subject || "تبليغ صفي",
             timestampMs: getSafeTimestamp(b.timestampMs || b.timestamp_ms || b.createdAt) || Date.now()
           });
@@ -318,6 +343,7 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
             type: "admin",
             author: cleanAuthor,
             message: messageContent,
+            audioUrl: audioUrl || null,
             subject: b.subject || "الإذاعة المدرسية 📻",
             timestampMs: getSafeTimestamp(b.timestampMs || b.timestamp_ms || b.createdAt) || Date.now()
           });
@@ -327,7 +353,7 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
 
     // Process notifications
     mappedNotifications.forEach((n: any) => {
-      if (!n) return;
+      if (!n || isSystemErrorNotice(n)) return;
       if (n.type === "staff") {
         staffList.push(n);
       } else {
@@ -422,8 +448,20 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
       });
     }
 
+    // Apply targetRoles filtering if item specifies targeted roles
+    combined = combined.filter(item => {
+      const roles = item.targetRoles;
+      if (!roles || !Array.isArray(roles) || roles.length === 0 || roles.includes('all')) {
+        return true;
+      }
+      if (isTeacher && roles.includes('teachers')) return true;
+      if (isParent && roles.includes('parents')) return true;
+      if (!isTeacher && !isParent && roles.includes('students')) return true;
+      return false;
+    });
+
     return combined;
-  }, [activeSubTab, adminItems, staffItems, searchQuery, isDateFilterActive, selectedDate]);
+  }, [activeSubTab, adminItems, staffItems, searchQuery, isDateFilterActive, selectedDate, isTeacher, isParent]);
 
   // Helper to format date
   const formatTimeAgo = (item: any) => {
@@ -717,18 +755,53 @@ export const AnnouncementsCenterTab: React.FC<AnnouncementsCenterTabProps> = ({
                       </div>
 
                       {/* Announcement Message Content */}
-                      <div className="text-right">
+                      <div className="text-right space-y-2">
                         <p className="text-[11.5px] font-semibold text-white/90 leading-relaxed font-sans whitespace-pre-line break-words">
                           {typeof item.message === 'string' ? item.message : typeof item.body === 'string' ? item.body : String(item.message || item.body || '')}
                         </p>
+
+                        {/* Audio Broadcast Player */}
+                        {(() => {
+                          const cardAudioUrl = item.audioUrl || item.audio_url || item.audio || item.soundUrl || item.voiceUrl || item.metadata?.audioUrl || item.metadata?.audio_url;
+                          if (!cardAudioUrl) return null;
+                          return (
+                            <div className="mt-3 p-3 rounded-2xl bg-black/60 border border-rose-500/30 space-y-2" dir="rtl">
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-black text-rose-300 flex items-center gap-1.5">
+                                  <Volume2 size={13} className="text-rose-400 animate-pulse" />
+                                  <span>إعلان إذاعي صوتي 📻 - انقر للاستماع</span>
+                                </span>
+                                <span className="text-[8px] font-bold text-rose-400/80 bg-rose-500/10 px-2 py-0.5 rounded-full border border-rose-500/20">
+                                  بصمة صوتية الإذاعة
+                                </span>
+                              </div>
+                              <audio src={cardAudioUrl} controls controlsList="nodownload" className="w-full h-8 rounded-xl" />
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
 
                     {/* Footer Info */}
                     <div className="flex items-center justify-between mt-4 pt-3.5 border-t border-white/5 pr-2 select-none">
-                      <div className="flex items-center gap-1 text-[9px] text-white/35 font-bold font-mono">
-                        <Clock size={10} className="text-white/40" />
-                        <span>{formatTimeAgo(item)}</span>
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1 text-[9px] text-white/35 font-bold font-mono">
+                          <Clock size={10} className="text-white/40" />
+                          <span>{formatTimeAgo(item)}</span>
+                        </div>
+                        {Array.isArray(item.targetRoles) && item.targetRoles.length > 0 && (
+                          <div className="flex items-center gap-1">
+                            {item.targetRoles.includes('all') ? (
+                              <span className="text-[8px] bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 px-1.5 py-0.5 rounded-md font-bold">للكل 👥</span>
+                            ) : (
+                              <>
+                                {item.targetRoles.includes('teachers') && <span className="text-[8px] bg-amber-500/10 text-amber-300 border border-amber-500/20 px-1.5 py-0.5 rounded-md font-bold">الأساتذة 🎓</span>}
+                                {item.targetRoles.includes('students') && <span className="text-[8px] bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 px-1.5 py-0.5 rounded-md font-bold">الطلاب 🎒</span>}
+                                {item.targetRoles.includes('parents') && <span className="text-[8px] bg-purple-500/10 text-purple-300 border border-purple-500/20 px-1.5 py-0.5 rounded-md font-bold">أولياء الأمور 👨‍👩‍👧</span>}
+                              </>
+                            )}
+                          </div>
+                        )}
                       </div>
                       
                       <div className="flex items-center gap-1">

@@ -69,7 +69,8 @@ export const NetworkStatusListener: React.FC = () => {
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -40 }}
           transition={{ type: 'spring', damping: 20, stiffness: 300 }}
-          className="fixed top-3 inset-x-3 sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 z-[99999] max-w-md w-auto"
+          style={{ top: 'calc(0.5rem + env(safe-area-inset-top, 0px))' }}
+          className="fixed inset-x-3 sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 z-[99999] max-w-md w-auto"
           dir="rtl"
           id="offline-network-banner"
         >
@@ -106,7 +107,8 @@ export const NetworkStatusListener: React.FC = () => {
           animate={{ opacity: 1, y: 0 }}
           exit={{ opacity: 0, y: -40 }}
           transition={{ type: 'spring', damping: 20, stiffness: 300 }}
-          className="fixed top-3 inset-x-3 sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 z-[99999] max-w-sm w-auto"
+          style={{ top: 'calc(0.5rem + env(safe-area-inset-top, 0px))' }}
+          className="fixed inset-x-3 sm:inset-x-auto sm:left-1/2 sm:-translate-x-1/2 z-[99999] max-w-sm w-auto"
           dir="rtl"
           id="online-restored-banner"
         >

@@ -1168,7 +1168,57 @@ export default function App() {
     }
   }, [userProfile?.id, userProfile?.studentId, user?.uid, selectedSchoolId, portalType]);
 
-  const [loggedInTeacher, setLoggedInTeacher] = useState<any>(null);
+  const [loggedInTeacher, setLoggedInTeacher] = useState<any>(() => {
+    try {
+      const stored = safeStorage.getItem("s6_cached_teacher_data");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (parsed && (parsed.name || parsed.id || parsed.code)) return parsed;
+      }
+      const authUserRaw = safeStorage.getItem("bayraq_custom_auth_user") || localStorage.getItem("bayraq_custom_auth_user");
+      if (authUserRaw) {
+        const authUser = JSON.parse(authUserRaw);
+        if (authUser && (authUser.role === "teacher" || authUser.role === "TEACHER")) {
+          return authUser;
+        }
+      }
+      const cachedProfile = safeStorage.getItem("bayraq_cached_user_profile");
+      if (cachedProfile) {
+        const prof = JSON.parse(cachedProfile);
+        if (prof && (prof.role === "teacher" || prof.role === "TEACHER")) {
+          return prof;
+        }
+      }
+      const primary = getPrimaryUserSession();
+      if (primary && primary.role === "teacher") {
+        return {
+          id: primary.teacherId || primary.code,
+          code: primary.code,
+          name: primary.teacherName || primary.studentName || "الأستاذ",
+          schoolId: primary.schoolId,
+          schoolName: primary.schoolName,
+          subject: primary.subject || primary.specialization || "",
+          specialization: primary.specialization || primary.subject || "",
+          classes: primary.classes || [],
+          role: "teacher"
+        };
+      }
+    } catch {}
+    return null;
+  });
+
+  useEffect(() => {
+    try {
+      if (loggedInTeacher) {
+        safeStorage.setItem("s6_cached_teacher_data", JSON.stringify(loggedInTeacher));
+      } else {
+        const currentRole = safeStorage.getItem("bayraq_user_role");
+        if (currentRole !== "teacher") {
+          safeStorage.removeItem("s6_cached_teacher_data");
+        }
+      }
+    } catch {}
+  }, [loggedInTeacher]);
 
   useEffect(() => {
     if (safeStorage.getItem("s6_force_purge") === "true") {
@@ -1205,6 +1255,8 @@ export default function App() {
     duration: number,
     targetSection?: string,
     targetSections?: string[],
+    audioUrl?: string,
+    targetRoles?: string[],
   ) => {
     if (!user) return;
 
@@ -1220,7 +1272,9 @@ export default function App() {
         subject: 'الإذاعة المدرسية',
         targetLocation: 'ticker',
         type: 'school_broadcast',
-        isSchoolBroadcast: true
+        isSchoolBroadcast: true,
+        audioUrl: audioUrl || undefined,
+        targetRoles: targetRoles || ['all']
       });
     } catch (e) {
       console.error("Failed to send broadcast:", e);
@@ -2524,21 +2578,27 @@ export default function App() {
                 safeStorage.setItem("s6_activeSection", "school-content");
                 setActiveSection("school-content");
 
+                const detectedSpecialization = (user as any).specialization || (user as any).subject || (user as any).material || "";
                 const teacherObj = {
                   id: user.uid || (user as any).id,
-                  code: code, // Add the login code here
+                  code: code.trim().toUpperCase(),
                   name:
                     user.displayName ||
                     (user as any).name ||
+                    (user as any).teacherName ||
                     "الأستاذ المحاضر",
                   schoolId: resolvedSchool,
                   schoolName: resolvedInstitutionName,
-                  subject: (user as any).subject || "المنهج الوزاري",
+                  subject: detectedSpecialization || "المنهج الوزاري",
+                  specialization: detectedSpecialization || "المنهج الوزاري",
                   grade: (user as any).grade || "السادس العلمي",
                   classes: (user as any).classes || [],
                   role: "teacher",
                 };
                 setLoggedInTeacher(teacherObj);
+                try {
+                  safeStorage.setItem("s6_cached_teacher_data", JSON.stringify(teacherObj));
+                } catch {}
                 setUserProfile((prev: any) => ({
                   ...prev,
                   ...user,
@@ -2546,6 +2606,8 @@ export default function App() {
                   name: teacherObj.name,
                   schoolId: resolvedSchool,
                   schoolName: resolvedInstitutionName,
+                  subject: teacherObj.subject,
+                  specialization: teacherObj.specialization,
                 }));
 
                 savePrimaryUserSession({
@@ -2553,7 +2615,12 @@ export default function App() {
                   schoolId: resolvedSchool,
                   schoolName: resolvedInstitutionName,
                   code: code.trim().toUpperCase(),
-                  studentName: teacherObj.name
+                  studentName: teacherObj.name,
+                  teacherName: teacherObj.name,
+                  teacherId: teacherObj.id,
+                  subject: teacherObj.subject,
+                  specialization: teacherObj.specialization,
+                  classes: teacherObj.classes
                 });
               } else if (
                 user.role === "admin" ||
@@ -2773,7 +2840,8 @@ export default function App() {
               <div className="fixed inset-0 bg-[#050A18] flex flex-col items-center justify-center p-6 text-center z-[110]" dir="rtl">
                 <button 
                   onClick={() => setBannedCode(null)}
-                  className="fixed top-8 right-6 w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition-all"
+                  style={{ top: 'calc(0.75rem + env(safe-area-inset-top, 0px))' }}
+                  className="fixed right-6 w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition-all"
                 >
                   <ArrowRight size={20} />
                 </button>
@@ -2883,7 +2951,8 @@ export default function App() {
               selectedSchoolId={targetSchoolId}
               adminBranch={portalType === "admin-boys" ? "boys" : "girls"}
               onBack={() => {
-                setActiveSection("hub");
+                handleHomeNavigation();
+                safeStorage.setItem("s6_activeSection", "hub");
               }}
               onSendMessage={handleBroadcastMessage}
               onUpdateMessage={handleBroadcastUpdate}
@@ -4347,7 +4416,10 @@ export default function App() {
               schoolName={resolvedSchoolName}
               selectedSchoolId={selectedSchoolId || userProfile?.schoolId}
               adminBranch={userProfile?.adminBranch || "boys"}
-              onBack={() => setActiveSection("hub")}
+              onBack={() => {
+                handleHomeNavigation();
+                safeStorage.setItem("s6_activeSection", "hub");
+              }}
               onSendMessage={handleBroadcastMessage}
               onUpdateMessage={handleBroadcastUpdate}
             />
@@ -4793,6 +4865,11 @@ export default function App() {
                   {/* Seasonal Cloud Theme Banner & Ambiance */}
                   {user && portalType !== "driver" && activeSection !== "school-content" && <SeasonalThemeBanner />}
                   <main id="main-content-area"
+                    style={{
+                      paddingBottom: user && (activeSection === "hub" || activeSection === "hall-of-fame" || activeSection === "mayadeen" || isChoosingSchool)
+                        ? "calc(5.5rem + env(safe-area-inset-bottom, 0px))"
+                        : "calc(1.5rem + env(safe-area-inset-bottom, 0px))"
+                    }}
                     className={
                       !user ||
                       activeSection === "hub" ||
@@ -4864,8 +4941,8 @@ export default function App() {
               <motion.div
                 initial={{ opacity: 0, scale: 0.95, y: -40 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: -40 }}
-                className="fixed top-6 left-4 right-4 z-[10000] max-w-xs mx-auto animate-in fade-in"
+                style={{ top: 'calc(0.75rem + env(safe-area-inset-top, 0px))' }}
+                className="fixed left-4 right-4 z-[10000] max-w-xs mx-auto animate-in fade-in"
                 dir={settings.language === "ar" ? "rtl" : "ltr"}
               >
                 <SwipeDismissContainer
@@ -5265,7 +5342,10 @@ export default function App() {
           {user &&
             activeSection !== "admin-hub" &&
             (activeSection === "hub" || activeSection === "hall-of-fame" || activeSection === "mayadeen" || isChoosingSchool) && (
-              <div className="fixed bottom-0 left-0 right-0 z-[60] px-6 pb-6 pt-2 bg-gradient-to-t from-[#02050F] via-[#02050F]/80 to-transparent pointer-events-none flex justify-center">
+              <div 
+                style={{ paddingBottom: "calc(1.25rem + env(safe-area-inset-bottom, 0px))" }}
+                className="fixed bottom-0 left-0 right-0 z-[60] px-6 pt-2 bg-gradient-to-t from-[#02050F] via-[#02050F]/80 to-transparent pointer-events-none flex justify-center"
+              >
                 <div className="w-full max-w-[320px] pointer-events-auto bg-[#0A0F1D]/80 backdrop-blur-xl border border-white/5 rounded-[2rem] px-2 py-1.5 flex items-center justify-between shadow-[0_8px_32px_rgba(0,0,0,0.3)] min-h-[64px]">
                   {/* Nav: Home (Right) */}
                   <button

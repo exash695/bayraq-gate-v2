@@ -93,7 +93,8 @@ interface ToastContainerProps {
 export const ToastContainer = ({ toasts, onClose, language }: ToastContainerProps) => {
   return (
     <div 
-      className={`fixed top-6 ${language === 'ar' ? 'left-6' : 'right-6'} z-[10001] flex flex-col gap-3 pointer-events-none w-full max-w-sm`}
+      style={{ top: 'calc(0.75rem + env(safe-area-inset-top, 0px))' }}
+      className={`fixed ${language === 'ar' ? 'left-6' : 'right-6'} z-[10001] flex flex-col gap-3 pointer-events-none w-full max-w-sm`}
     >
       <AnimatePresence mode="popLayout">
         {toasts

@@ -347,7 +347,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {!isOpen && !shouldHideHandle && (
         <button
           onClick={() => setIsOpen(true)}
-          className={`fixed top-[120px] ${isRtl ? 'right-3' : 'left-3'} z-50 p-2.5 bg-[#0d1533]/90 hover:bg-[#14214d]/95 hover:border-cyan-500/50 text-cyan-400 transition-all rounded-full shadow-[0_0_15px_rgba(34,211,238,0.2)] border border-white/10 flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95`}
+          style={{ top: 'calc(100px + env(safe-area-inset-top, 0px))' }}
+          className={`fixed ${isRtl ? 'right-3' : 'left-3'} z-50 p-2.5 bg-[#0d1533]/90 hover:bg-[#14214d]/95 hover:border-cyan-500/50 text-cyan-400 transition-all rounded-full shadow-[0_0_15px_rgba(34,211,238,0.2)] border border-white/10 flex items-center justify-center cursor-pointer hover:scale-105 active:scale-95`}
           title="إظهار القائمة الجانبية"
         >
           {isRtl ? <ChevronLeft size={16} strokeWidth={3} /> : <ChevronRight size={16} strokeWidth={3} />}
@@ -371,7 +372,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
         {isOpen && (
           <button
             onClick={() => setIsOpen(false)}
-            className={`absolute ${isRtl ? 'left-4' : 'right-4'} top-[130px] p-2 rounded-full bg-white/10 hover:bg-white/20 border border-white/10 text-white transition-all z-[100] cursor-pointer shadow-xl`}
+            style={{ top: 'calc(105px + env(safe-area-inset-top, 0px))' }}
+            className={`absolute ${isRtl ? 'left-4' : 'right-4'} p-2 rounded-full bg-white/10 hover:bg-white/20 border border-white/10 text-white transition-all z-[100] cursor-pointer shadow-xl`}
             title="طي القائمة الجانبية"
           >
             {isRtl ? <ChevronRight size={18} strokeWidth={3} /> : <ChevronLeft size={18} strokeWidth={3} />}
@@ -379,7 +381,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         )}
 
         {/* Header Section */}
-        <div className="relative flex flex-col items-center w-full z-10 shrink-0">
+        <div 
+          style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}
+          className="relative flex flex-col items-center w-full z-10 shrink-0"
+        >
           {/* Berq Character - Visible and prominent */}
           <div className="relative w-full h-[180px] overflow-hidden bg-[#070D22] border-b border-white/5 flex items-center justify-center">
             <div className="absolute inset-0 bg-gradient-to-t from-[#020510] via-transparent to-transparent z-10 pointer-events-none"></div>
@@ -422,7 +427,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
 
           {/* Navigation Menus */}
-          <div className="flex-1 overflow-y-auto px-5 space-y-3 custom-scrollbar relative z-10 pb-6 pt-2">
+          <div 
+            style={{ paddingBottom: 'calc(2.5rem + env(safe-area-inset-bottom, 0px))' }}
+            className="flex-1 overflow-y-auto px-5 space-y-3 custom-scrollbar relative z-10 pt-2"
+          >
             <MenuItem 
               label={language === 'ar' ? 'الرئيسية' : 'Home'}
               icon={Home}

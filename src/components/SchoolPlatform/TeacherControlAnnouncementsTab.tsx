@@ -98,6 +98,8 @@ import { useSchoolPlatform } from "./SchoolPlatformContext";
 import { broadcastService } from "../../services/broadcastService";
 import { extractGradeBase, matchesBroadcastAudience } from "../../utils/gradeMatcher";
 
+import { uploadFileToR2 } from "../../services/uploadService";
+
 export const TeacherControlAnnouncementsTab: React.FC = () => {
   const { 
     announcementDays, 
@@ -117,6 +119,65 @@ export const TeacherControlAnnouncementsTab: React.FC = () => {
     setTeacherBroadcasts,
     teacherData 
   } = useSchoolPlatform();
+
+  // Voice Note Recording State for Teacher
+  const [isRecording, setIsRecording] = useState(false);
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null);
+  const [audioPreviewUrl, setAudioPreviewUrl] = useState<string | null>(null);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [isUploadingAudio, setIsUploadingAudio] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<any>(null);
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        setAudioBlob(blob);
+        const url = URL.createObjectURL(blob);
+        setAudioPreviewUrl(url);
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingTime(0);
+
+      timerRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+    } catch (err) {
+      showToast("تعذر فتح الميكروفون لتسجيل البصمة الصوتية", "error");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      if (timerRef.current) clearInterval(timerRef.current);
+    }
+  };
+
+  const resetRecording = () => {
+    if (isRecording) stopRecording();
+    setAudioBlob(null);
+    if (audioPreviewUrl) URL.revokeObjectURL(audioPreviewUrl);
+    setAudioPreviewUrl(null);
+    setRecordingTime(0);
+  };
 
   const isAllSections = !selectedTeacherClass || selectedTeacherClass === 'ALL' || selectedTeacherClass === 'كافة الشُعب';
   const targetLabel = isAllSections ? "كافة الشُعب الموكلة" : selectedTeacherClass;
@@ -230,6 +291,67 @@ export const TeacherControlAnnouncementsTab: React.FC = () => {
                         />
                       </div>
 
+                      {/* Voice Note Recorder for Teachers */}
+                      <div className="bg-purple-950/20 border border-purple-500/20 rounded-xl p-3 space-y-2 text-right" dir="rtl">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-black text-purple-300 flex items-center gap-1.5">
+                            <Mic size={14} className="text-purple-400" />
+                            <span>إضافة بصمة صوتية أو تسجيل صوتی 🎙️ (اختياري)</span>
+                          </span>
+                          {audioBlob && (
+                            <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                              تم التسجيل 🎧
+                            </span>
+                          )}
+                        </div>
+
+                        {!isRecording && !audioBlob && (
+                          <button
+                            type="button"
+                            onClick={startRecording}
+                            className="w-full py-2 px-3 bg-purple-600/20 hover:bg-purple-600/30 text-purple-200 border border-purple-500/30 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-2 cursor-pointer"
+                          >
+                            <Mic size={14} className="text-purple-400" />
+                            <span>انقر لتسجيل بصمة صوتية للأستاذ</span>
+                          </button>
+                        )}
+
+                        {isRecording && (
+                          <div className="flex items-center justify-between bg-red-950/40 border border-red-500/30 p-2.5 rounded-lg">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full bg-red-500 animate-ping" />
+                              <span className="text-xs font-mono font-bold text-red-300">
+                                جاري التسجيل: {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={stopRecording}
+                              className="px-3 py-1 bg-red-600 text-white rounded-md text-xs font-bold flex items-center gap-1 cursor-pointer hover:bg-red-500"
+                            >
+                              <Square size={12} />
+                              <span>إيقاف التسجيل</span>
+                            </button>
+                          </div>
+                        )}
+
+                        {audioBlob && audioPreviewUrl && (
+                          <div className="space-y-1.5 bg-black/40 p-2.5 rounded-lg border border-purple-500/20">
+                            <audio src={audioPreviewUrl} controls className="w-full h-8 rounded-md" />
+                            <div className="flex justify-end">
+                              <button
+                                type="button"
+                                onClick={resetRecording}
+                                className="text-[10px] text-red-400 hover:text-red-300 font-bold flex items-center gap-1 cursor-pointer"
+                              >
+                                <RotateCcw size={11} />
+                                <span>حذف وإعادة التسجيل</span>
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
                       <div className="space-y-1.5 p-3 bg-white/[0.02] border border-white/5 rounded-2xl">
                         <label className="text-[10px] text-purple-300 font-extrabold block text-center">
                           تحديد مـدة بقاء الإعـلان وتوقيت الاختفاء الـتلقائي ⏱️
@@ -281,104 +403,122 @@ export const TeacherControlAnnouncementsTab: React.FC = () => {
                         </div>
 
                         <button
-                          onClick={() => {
-                            if (!announcementText.trim()) {
+                          disabled={isUploadingAudio || (!announcementText.trim() && !audioBlob)}
+                          onClick={async () => {
+                            if (!announcementText.trim() && !audioBlob) {
                               showToast(
-                                "يرجى كتابة نص الإعلان أولاً قبل البث",
+                                "يرجى كتابة نص الإعلان أو تسجيل بصمة صوتية أولاً",
                                 "error",
                               );
                               return;
                             }
                             const tName = teacherData?.name || "أستاذ المادة";
                             const tSubject = teacherData?.subject || "مادة عامة";
-                            const formattedMessage = `📢 [الأستاذ ${tName} - مادة ${tSubject}]: ${announcementText}`;
+                            const baseText = announcementText.trim() || "بصمة صوتية مسجلة من أستاذ المادة 🎙️";
+                            const formattedMessage = `📢 [الأستاذ ${tName} - مادة ${tSubject}]: ${baseText}`;
 
                             const durationHours = (announcementDays * 24) + announcementHours || 1;
                             const expiryDateMs = Date.now() + durationHours * 3600 * 1000;
 
-                            // Find the section object if teacher selected a specific section from the top switcher
                             const secObj = (teacherAssignedSections || []).find((s: any) => s.name === selectedTeacherClass);
 
                             const targetSectionsList = isAllSections
                               ? (teacherAssignedSections || []).map((s: any) => s.name).filter(Boolean)
                               : [selectedTeacherClass];
 
-                            const specificGrade = isAllSections
-                              ? null
-                              : (secObj?.grade || extractGradeBase(selectedTeacherClass) || targetBroadcastGrade || selectedTeacherClass);
-
                             const targetGradesList = isAllSections
                               ? Array.from(new Set((teacherAssignedSections || []).map((s: any) => s.name).filter(Boolean)))
                               : [selectedTeacherClass];
 
-                            const handlePost = async () => {
+                            try {
+                              let finalAudioUrl: string | undefined = undefined;
+                              if (audioBlob) {
+                                setIsUploadingAudio(true);
+                                try {
+                                  const audioFile = new File([audioBlob], `teacher_voice_${Date.now()}.webm`, { type: audioBlob.type || 'audio/webm' });
+                                  finalAudioUrl = await uploadFileToR2(audioFile);
+                                } catch (uploadErr) {
+                                  console.warn("Upload file notice, converting to base64 fallback:", uploadErr);
+                                }
+
+                                if (!finalAudioUrl || (!finalAudioUrl.startsWith('http') && !finalAudioUrl.startsWith('/'))) {
+                                  finalAudioUrl = await new Promise<string>((res) => {
+                                    const reader = new FileReader();
+                                    reader.onloadend = () => res((reader.result as string) || '');
+                                    reader.onerror = () => res('');
+                                    reader.readAsDataURL(audioBlob);
+                                  });
+                                }
+                                setIsUploadingAudio(false);
+                              }
+
+                              const broadcastId = `br_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+                              const broadcastPayload = {
+                                id: broadcastId,
+                                message: formattedMessage,
+                                rawText: announcementText,
+                                author: tName,
+                                subject: tSubject,
+                                targetSection: isAllSections ? "ALL" : selectedTeacherClass,
+                                targetSections: targetSectionsList,
+                                targetSectionLabel: targetLabel,
+                                targetGrades: targetGradesList.length > 0 ? targetGradesList : [targetBroadcastGrade || "الجميع"],
+                                schoolId: resolvedSchoolId,
+                                type: 'school_broadcast',
+                                isSchoolBroadcast: true,
+                                targetLocation: 'ticker',
+                                isCentralPlatform: false,
+                                audioUrl: finalAudioUrl || null,
+                                expiryDate: expiryDateMs,
+                                timestamp: serverTimestamp(),
+                                timestampMs: Date.now()
+                              };
+
+                              // 1. Save to Firestore
+                              await setDoc(doc(db, "broadcasts", broadcastId), broadcastPayload);
+
+                              // 2. REST API & PostgreSQL
                               try {
-                                const broadcastId = `br_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-                                const broadcastPayload = {
+                                await broadcastService.sendBroadcast({
                                   id: broadcastId,
+                                  schoolId: resolvedSchoolId,
                                   message: formattedMessage,
-                                  rawText: announcementText,
-                                  author: tName,
-                                  subject: tSubject,
+                                  targetGrades: targetGradesList,
                                   targetSection: isAllSections ? "ALL" : selectedTeacherClass,
                                   targetSections: targetSectionsList,
-                                  targetSectionLabel: targetLabel,
-                                  targetGrades: targetGradesList.length > 0 ? targetGradesList : [targetBroadcastGrade || "الجميع"],
-                                  schoolId: resolvedSchoolId,
-                                  type: 'school_broadcast',
-                                  isSchoolBroadcast: true,
-                                  targetLocation: 'ticker',
-                                  isCentralPlatform: false,
+                                  author: tName,
+                                  subject: tSubject,
+                                  durationHours: durationHours,
                                   expiryDate: expiryDateMs,
-                                  timestamp: serverTimestamp(),
-                                  timestampMs: Date.now()
-                                };
-
-                                // 1. Save to Firestore broadcasts collection with shared unique ID
-                                await setDoc(doc(db, "broadcasts", broadcastId), broadcastPayload);
-
-                                // 2. Also send via REST API and PostgreSQL with the same unique ID and expiryDate
-                                try {
-                                  await broadcastService.sendBroadcast({
-                                    id: broadcastId,
-                                    schoolId: resolvedSchoolId,
-                                    message: formattedMessage,
-                                    targetGrades: targetGradesList,
-                                    targetSection: isAllSections ? "ALL" : selectedTeacherClass,
-                                    targetSections: targetSectionsList,
-                                    author: tName,
-                                    subject: tSubject,
-                                    durationHours: durationHours,
-                                    expiryDate: expiryDateMs,
-                                    targetLocation: 'ticker'
-                                  } as any);
-                                } catch (apiErr) {
-                                  console.warn("broadcastService send fallback notice:", apiErr);
-                                }
-
-                                // 3. Optimistic local update to guarantee instant single entry
-                                if (setTeacherBroadcasts) {
-                                  setTeacherBroadcasts(prev => [
-                                    broadcastPayload,
-                                    ...(prev || []).filter(b => b.id !== broadcastId && b.message !== formattedMessage)
-                                  ]);
-                                }
-
-                                showToast(
-                                  `تم بث ونشر الإعلان فوراً إلى (${targetLabel})! 📡`,
-                                  "success",
-                                );
-                                setAnnouncementText("");
-                              } catch (e) {
-                                console.error("Error creating broadcast:", e);
-                                showToast("حدث خطأ أثناء بث الإعلان", "error");
+                                  audioUrl: finalAudioUrl,
+                                  targetLocation: 'ticker'
+                                } as any);
+                              } catch (apiErr) {
+                                console.warn("broadcastService send fallback notice:", apiErr);
                               }
-                            };
-                            handlePost();
+
+                              // 3. Optimistic local update
+                              if (setTeacherBroadcasts) {
+                                setTeacherBroadcasts(prev => [
+                                  broadcastPayload,
+                                  ...(prev || []).filter(b => b.id !== broadcastId && b.message !== formattedMessage)
+                                ]);
+                              }
+
+                              showToast(
+                                `تم بث ونشر الإعلان ${finalAudioUrl ? "مع البصمة الصوتية" : ""} فوراً إلى (${targetLabel})! 📡`,
+                                "success",
+                              );
+                              setAnnouncementText("");
+                              resetRecording();
+                            } catch (e) {
+                              console.error("Error creating broadcast:", e);
+                              showToast("حدث خطأ أثناء بث الإعلان", "error");
+                            }
                           }}
-                          className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-black text-xs rounded-xl transition-all shadow-[0_0_15px_rgba(147,51,234,0.1)] cursor-pointer"
+                          className="px-5 py-2.5 bg-purple-600 hover:bg-purple-500 text-white font-black text-xs rounded-xl transition-all shadow-[0_0_15px_rgba(147,51,234,0.1)] cursor-pointer disabled:opacity-40"
                         >
-                          إرسال وبث الآن
+                          {isUploadingAudio ? "جاري معالجة الصوت والرفع..." : "إرسال وبث الآن 📡"}
                         </button>
                       </div>
                     </div>
@@ -400,7 +540,6 @@ export const TeacherControlAnnouncementsTab: React.FC = () => {
                           </div>
                         ) : (
                           displayedBroadcasts.map((item) => {
-                            // Calculate remaining time with accurate parsing of number or ISO string
                             const expiryMs = typeof item.expiryDate === 'number'
                               ? item.expiryDate
                               : (item.expiryDate ? new Date(item.expiryDate).getTime() : (item.timestampMs ? item.timestampMs + 24 * 3600 * 1000 : 0));
@@ -423,6 +562,8 @@ export const TeacherControlAnnouncementsTab: React.FC = () => {
                               }
                             }
 
+                            const itemAudioUrl = item.audioUrl || item.audio_url || item.audio;
+
                             return (
                               <div
                                 key={item.id}
@@ -437,6 +578,20 @@ export const TeacherControlAnnouncementsTab: React.FC = () => {
                                   <span className="text-[11px] font-black text-rose-300 block leading-relaxed">
                                     {item.message}
                                   </span>
+
+                                  {/* Audio Player in Teacher Broadcast Log */}
+                                  {itemAudioUrl && (
+                                    <div className="mt-2 p-2 rounded-xl bg-black/60 border border-purple-500/30 space-y-1" dir="rtl">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-[10px] font-black text-purple-300 flex items-center gap-1.5">
+                                          <Volume2 size={12} className="text-purple-400 animate-pulse" />
+                                          <span>بصمة صوتية مرفقة 🎙️ (استماع)</span>
+                                        </span>
+                                      </div>
+                                      <audio src={itemAudioUrl} controls controlsList="nodownload" className="w-full h-8 rounded-lg" />
+                                    </div>
+                                  )}
+
                                   <div className="flex flex-wrap items-center gap-2 mt-1.5 text-[9px] font-bold">
                                     <span className="text-white/30">
                                       الكاتب: {item.author || "أستاذ"} • مادة {item.subject || "عامة"}

@@ -6471,10 +6471,10 @@ async function startServer() {
   // إضافة إعلان جديد
   app.post('/api/broadcasts', async (req, res) => {
     try {
-      const { id, schoolId, message, targetGrades, targetSection, targetSections, author, subject, targetLocation, durationHours, expiryDate: customExpiry } = req.body;
+      const { id, schoolId, message, targetGrades, targetSection, targetSections, author, subject, targetLocation, durationHours, expiryDate: customExpiry, audioUrl, targetRoles } = req.body;
       
-      if (!message || (typeof message === 'string' && !message.trim())) {
-        return res.status(400).json({ success: false, message: "محتوى الرسالة مطلوب" });
+      if ((!message || (typeof message === 'string' && !message.trim())) && !audioUrl) {
+        return res.status(400).json({ success: false, message: "محتوى الرسالة النصية أو التسجيل الصوتي مطلوب" });
       }
 
       let expiryDate: Date;
@@ -6512,14 +6512,23 @@ async function startServer() {
         });
       }
 
+      let cleanTargetRoles: string[] = ['all'];
+      if (Array.isArray(targetRoles) && targetRoles.length > 0) {
+        cleanTargetRoles = targetRoles;
+      } else if (typeof targetRoles === 'string') {
+        cleanTargetRoles = [targetRoles];
+      }
+
       const result = await db.insert(school_announcements).values({
         id: broadcastId,
         schoolId: effectiveSchoolId,
-        message: typeof message === 'string' ? message.trim() : String(message),
+        message: typeof message === 'string' ? message.trim() : (message ? String(message) : 'تسجيل صوتی من الإذاعة المدرسية 📻'),
         targetGrades: cleanTargetGrades,
         author: author || 'الإدارة المدرسية',
         subject: subject || 'الإذاعة المدرسية',
         targetLocation: targetLocation || 'ticker',
+        audioUrl: audioUrl || null,
+        targetRoles: cleanTargetRoles,
         expiryDate: expiryDate,
         timestampMs: Date.now(),
         createdAt: new Date()
@@ -15608,11 +15617,13 @@ app.post('/api/admin/maintenance/purge-cache', async (req, res) => {
     console.error("Failed to execute school startup migrations:", schemaErr);
   }
 
-  // Ensure school_announcements table allows global/system-wide broadcasts ('all', 'general', etc.)
+  // Ensure school_announcements table has audio_url and target_roles columns and allows global broadcasts
   try {
     await sqlRaw`ALTER TABLE school_announcements DROP CONSTRAINT IF EXISTS school_announcements_school_id_fkey;`;
+    await sqlRaw`ALTER TABLE school_announcements ADD COLUMN IF NOT EXISTS "audio_url" text;`;
+    await sqlRaw`ALTER TABLE school_announcements ADD COLUMN IF NOT EXISTS "target_roles" jsonb DEFAULT '[]'::jsonb;`;
   } catch (schemaErr) {
-    // Non-blocking fallback if constraint already dropped or database unavailable
+    console.warn("[school_announcements schema update warning]", schemaErr);
   }
 
   // Ensure security_bans table exists

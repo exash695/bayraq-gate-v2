@@ -272,6 +272,8 @@ export const school_announcements = pgTable("school_announcements", {
   author: varchar("author", { length: 128 }),
   subject: varchar("subject", { length: 100 }),
   targetLocation: varchar("target_location", { length: 50 }).default('both'), // ticker, post, both
+  audioUrl: text("audio_url"),
+  targetRoles: jsonb("target_roles").default([]),
   expiryDate: timestamp("expiry_date"),
   timestampMs: bigint("timestamp_ms", { mode: 'number' }),
   createdAt: timestamp("created_at").defaultNow(),

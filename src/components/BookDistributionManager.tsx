@@ -456,11 +456,9 @@ export const BookDistributionManager: React.FC<BookDistributionManagerProps> = (
 
                     {/* Full-width Responsive Progress Bar */}
                     <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
-                      <motion.div 
-                        initial={{ width: 0 }}
-                        animate={{ width: `${percent}%` }}
-                        transition={{ duration: 0.4 }}
-                        className={`h-full rounded-full transition-all ${
+                      <div 
+                        style={{ width: `${percent}%` }}
+                        className={`h-full rounded-full transition-all duration-300 ease-out ${
                           isComplete 
                             ? 'bg-gradient-to-r from-emerald-500 via-teal-400 to-emerald-400 shadow-[0_0_10px_rgba(16,185,129,0.5)]' 
                             : 'bg-gradient-to-r from-amber-500 to-amber-400'

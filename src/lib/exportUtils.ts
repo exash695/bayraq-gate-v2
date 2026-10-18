@@ -37,90 +37,17 @@ const toBase64 = (data: Blob | ArrayBuffer): Promise<string> => {
 };
 
 /**
- * Universal print helper.
- * Strictly generates a genuine, high-quality .PDF document file without freezing the UI thread,
- * then opens the native App Sharing Window (Share Sheet) on mobile/app, or downloads on web.
+/**
+ * Helper to generate a PDF Blob from an HTML string using jsPDF and canvas
  */
-export const printHTML = async (
-  html: string,
-  customFileName?: string
-) => {
-  const fileName = customFileName
-    ? (customFileName.toLowerCase().endsWith('.pdf') ? customFileName : `${customFileName}.pdf`)
-    : `Bairaq_Parent_Slips_${Date.now()}.pdf`;
-
-  // Parse HTML string into DOM structure
+export const generatePDFBlobFromHTML = async (html: string): Promise<Blob> => {
   const parser = new DOMParser();
   const parsedDoc = parser.parseFromString(html, 'text/html');
   const pageNodes = Array.from(parsedDoc.querySelectorAll('.a4-page'));
 
-  // Create full-screen centered progress indicator overlay with progress bar
-  const progressOverlay = document.createElement('div');
-  progressOverlay.id = 'bairaq-pdf-progress-overlay';
-  progressOverlay.style.cssText = `
-    position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
-    z-index: 9999999;
-    background: rgba(15, 23, 42, 0.85);
-    backdrop-filter: blur(10px);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
-    direction: rtl;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  `;
-
-  progressOverlay.innerHTML = `
-    <div style="
-      background: #0f172a;
-      border: 1px solid rgba(255, 255, 255, 0.15);
-      border-radius: 24px;
-      padding: 28px 24px;
-      max-width: 400px;
-      width: 100%;
-      text-align: center;
-      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
-      color: #ffffff;
-    ">
-      <div style="
-        width: 52px;
-        height: 52px;
-        border-radius: 18px;
-        background: rgba(56, 189, 248, 0.15);
-        border: 1px solid rgba(56, 189, 248, 0.3);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        margin: 0 auto 16px auto;
-        color: #38bdf8;
-      ">
-        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>
-      </div>
-
-      <h3 style="font-size: 16px; font-weight: 900; margin-bottom: 6px; color: #f8fafc;">جاري إعداد وتحضير ملف PDF</h3>
-      <p id="bairaq-pdf-progress-text" style="font-size: 13px; color: #94a3b8; font-weight: 700; margin-bottom: 16px;">جاري تجهيز الصفحة 1 من ${pageNodes.length || 1}...</p>
-
-      <!-- Progress Bar Track -->
-      <div style="width: 100%; height: 10px; background: rgba(255, 255, 255, 0.1); border-radius: 999px; overflow: hidden; position: relative;">
-        <div id="bairaq-pdf-progress-bar" style="width: 2%; height: 100%; background: linear-gradient(90deg, #0284c7, #38bdf8); border-radius: 999px; transition: width 0.15s linear;"></div>
-      </div>
-
-      <div id="bairaq-pdf-progress-percent" style="font-size: 12px; font-weight: 800; color: #38bdf8; margin-top: 10px; font-family: monospace;">2%</div>
-    </div>
-  `;
-  document.body.appendChild(progressOverlay);
-
-  // Create isolated single-page render container in offscreen space
   const container = document.createElement('div');
-  container.id = 'bairaq-pdf-render-container';
-  container.style.position = 'absolute';
-  container.style.left = '-9999px';
-  container.style.top = '0';
-  container.style.width = '794px'; // Standard A4 width at 96 DPI
-  container.style.background = '#ffffff';
-  container.style.zIndex = '-99999';
-  container.style.overflow = 'hidden';
+  container.id = 'bairaq-pdf-silent-container';
+  container.style.cssText = 'position: fixed; left: -9999px; top: 0; width: 794px; background: #ffffff; z-index: -99999; overflow: hidden;';
   document.body.appendChild(container);
 
   try {
@@ -136,19 +63,8 @@ export const printHTML = async (
 
     if (pageNodes.length > 0) {
       for (let i = 0; i < pageNodes.length; i++) {
-        const percent = Math.min(100, Math.max(1, Math.round(((i + 1) / pageNodes.length) * 100)));
-        const progressTxt = document.getElementById('bairaq-pdf-progress-text');
-        const progressBar = document.getElementById('bairaq-pdf-progress-bar');
-        const progressPercent = document.getElementById('bairaq-pdf-progress-percent');
-
-        if (progressTxt) progressTxt.innerText = `جاري تجهيز الصفحة ${i + 1} من ${pageNodes.length}`;
-        if (progressBar) progressBar.style.width = `${percent}%`;
-        if (progressPercent) progressPercent.innerText = `${percent}%`;
-
         container.innerHTML = '';
         container.appendChild(document.importNode(pageNodes[i], true));
-
-        // Brief delay for inline layout & fonts calculation
         await new Promise((r) => setTimeout(r, 15));
 
         const canvas = await html2canvas(container, {
@@ -156,7 +72,6 @@ export const printHTML = async (
           useCORS: true,
           logging: false,
           backgroundColor: '#ffffff',
-          allowTaint: true,
           windowWidth: 794,
           windowHeight: 1123,
         });
@@ -165,66 +80,127 @@ export const printHTML = async (
         if (i > 0) pdf.addPage();
         pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
 
-        // Free memory immediately
         container.innerHTML = '';
         canvas.width = 0;
         canvas.height = 0;
-
-        // Yield to event loop
-        await new Promise((r) => setTimeout(r, 5));
       }
     } else {
-      // Fallback for single raw HTML string
       container.innerHTML = html;
-      await new Promise((r) => setTimeout(r, 50));
+      await new Promise((r) => setTimeout(r, 30));
 
       const canvas = await html2canvas(container, {
         scale: 1.25,
         useCORS: true,
         logging: false,
         backgroundColor: '#ffffff',
-        allowTaint: true,
         windowWidth: 794,
       });
 
       const imgData = canvas.toDataURL('image/jpeg', 0.85);
       const imgHeight = (canvas.height * pdfWidth) / canvas.width;
-      let heightLeft = imgHeight;
-      let position = 0;
-
       pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, Math.min(imgHeight, pdfHeight), undefined, 'FAST');
-      heightLeft -= pdfHeight;
-
-      while (heightLeft > 0) {
-        position = heightLeft - imgHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, 'JPEG', 0, position, pdfWidth, imgHeight, undefined, 'FAST');
-        heightLeft -= pdfHeight;
-      }
     }
 
-    if (document.body.contains(container)) {
-      document.body.removeChild(container);
-    }
-    if (document.body.contains(progressOverlay)) {
-      document.body.removeChild(progressOverlay);
-    }
-
-    await saveOrSharePDF(pdf, fileName);
+    if (document.body.contains(container)) container.remove();
+    return pdf.output('blob');
   } catch (err) {
-    console.error('PDF generation error:', err);
-    if (document.body.contains(container)) {
-      document.body.removeChild(container);
-    }
-    if (document.body.contains(progressOverlay)) {
-      document.body.removeChild(progressOverlay);
-    }
+    if (document.body.contains(container)) container.remove();
+    throw err;
+  }
+};
+
+/**
+ * Universal Print Function.
+ * Triggers native system printing directly (0ms, zero visual modals, zero flickering).
+ * - On Mobile Native (Capacitor iOS/Android): Generates PDF and opens native system share/print sheet.
+ * - On Web / Mobile Browsers (Chrome, Safari, Edge): Prints silently via off-screen hidden iframe,
+ *   directly launching the browser's native print dialog without any screen flicker or blue overlays.
+ */
+export const printHTML = async (
+  html: string,
+  customFileName?: string
+) => {
+  const fileName = customFileName
+    ? (customFileName.toLowerCase().endsWith('.pdf') ? customFileName : `${customFileName}.pdf`)
+    : `Bairaq_Document_${Date.now()}.pdf`;
+
+  // 1. Mobile Native App (Capacitor Android APK / iOS)
+  if (Capacitor.isNativePlatform()) {
     try {
-      window.print();
-    } catch (fallbackErr) {
-      console.error('Native print fallback failed:', fallbackErr);
+      const pdfBlob = await generatePDFBlobFromHTML(html);
+      await saveOrSharePDF({ output: () => pdfBlob } as any, fileName);
+      return;
+    } catch (nativeErr) {
+      console.warn('Native Capacitor direct PDF export failed, falling back to silent iframe:', nativeErr);
     }
   }
+
+  // 2. Web & Mobile Browsers: Completely Silent Offscreen IFrame (Zero UI, No Blue Modals, No Progress Shifts)
+  try {
+    const existing = document.getElementById('bairaq-silent-print-frame');
+    if (existing) {
+      existing.remove();
+    }
+
+    const iframe = document.createElement('iframe');
+    iframe.id = 'bairaq-silent-print-frame';
+    iframe.setAttribute('aria-hidden', 'true');
+    iframe.style.cssText = 'position: fixed; top: -10000px; left: -10000px; width: 10px; height: 10px; border: none; opacity: 0; pointer-events: none; z-index: -9999;';
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow?.document || iframe.contentDocument;
+    if (doc) {
+      doc.open();
+      doc.write(html);
+      doc.close();
+    }
+
+    let hasPrinted = false;
+    const triggerPrint = () => {
+      if (hasPrinted) return;
+      hasPrinted = true;
+      try {
+        if (iframe.contentWindow) {
+          iframe.contentWindow.focus();
+          iframe.contentWindow.print();
+        } else {
+          window.print();
+        }
+      } catch (err) {
+        console.warn('IFrame print restricted by browser, using window.print:', err);
+        try {
+          window.print();
+        } catch (e) {}
+      } finally {
+        setTimeout(() => {
+          if (document.body.contains(iframe)) {
+            iframe.remove();
+          }
+        }, 3000);
+      }
+    };
+
+    if (iframe.contentDocument?.readyState === 'complete') {
+      setTimeout(triggerPrint, 150);
+    } else {
+      iframe.onload = () => setTimeout(triggerPrint, 150);
+      // Safety timeout in case onload event was missed
+      setTimeout(triggerPrint, 600);
+    }
+  } catch (err) {
+    console.error('printHTML error, falling back to window.print():', err);
+    try {
+      window.print();
+    } catch (e) {}
+  }
+};
+
+/**
+ * Backward compatibility export
+ */
+export const printViaDOM = (html: string): boolean => {
+  printHTML(html);
+  return true;
 };
 
 /**

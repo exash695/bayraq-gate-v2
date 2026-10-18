@@ -156,7 +156,8 @@ export const SchoolAccessGate: React.FC<SchoolAccessGateProps> = ({
       {/* Floating Back Button */}
       <button 
         onClick={onBack}
-        className="fixed top-8 right-6 w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition-all z-20 cursor-pointer"
+        style={{ top: 'calc(0.75rem + env(safe-area-inset-top, 0px))' }}
+        className="fixed right-6 w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white/50 hover:text-white hover:bg-white/10 transition-all z-20 cursor-pointer"
       >
         <ArrowRight size={20} />
       </button>
