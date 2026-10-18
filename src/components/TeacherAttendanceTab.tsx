@@ -2524,15 +2524,22 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
       {/* 6. Live Classroom Activity Evaluation Modal */}
       <AnimatePresence>
         {showEvalModal && selectedEvalStudent && (
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md" dir="rtl">
+          <div 
+            className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md overflow-hidden" 
+            dir="rtl"
+            style={{
+              paddingTop: 'max(env(safe-area-inset-top, 0px), 16px)',
+              paddingBottom: 'calc(max(env(safe-area-inset-bottom, 0px), 18px) + 8px)'
+            }}
+          >
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="w-full max-w-lg bg-gradient-to-b from-[#0e172e] via-[#091022] to-[#050812] rounded-3xl border border-cyan-500/30 p-5 sm:p-6 shadow-2xl space-y-5 text-right relative overflow-hidden max-h-[90vh] overflow-y-auto no-scrollbar"
+              className="w-full max-w-lg bg-gradient-to-b from-[#0e172e] via-[#091022] to-[#050812] rounded-3xl border border-cyan-500/30 shadow-2xl text-right relative overflow-hidden max-h-[85dvh] flex flex-col"
             >
-              {/* Header */}
-              <div className="flex items-center justify-between border-b border-white/10 pb-4">
+              {/* Header - Fixed & Always Visible */}
+              <div className="flex items-center justify-between border-b border-white/10 p-4 sm:p-5 shrink-0 bg-[#0e172e]/90 backdrop-blur-md z-10">
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-cyan-500/20 to-blue-500/20 border border-cyan-400/40 text-cyan-300 flex items-center justify-center shadow-lg shadow-cyan-500/10 shrink-0">
                     <Sparkles size={24} className="animate-pulse" />
@@ -2557,130 +2564,133 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
                 </button>
               </div>
 
-              {/* Subtitle Banner */}
-              <div className="p-3 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-200 text-xs font-bold flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <Info size={16} className="text-cyan-400 shrink-0" />
-                  <span>يمكنك اختيار <strong>أكثر من نشاط وتقييم معاً</strong> وبثها فوراً لسجل الطالب وولي أمره 📱</span>
+              {/* Modal Body - Scrollable */}
+              <div className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1 no-scrollbar">
+                {/* Subtitle Banner */}
+                <div className="p-3 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 text-cyan-200 text-xs font-bold flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Info size={16} className="text-cyan-400 shrink-0" />
+                    <span>يمكنك اختيار <strong>أكثر من نشاط وتقييم معاً</strong> وبثها فوراً لسجل الطالب وولي أمره 📱</span>
+                  </div>
+                  {selectedEvalOptions.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedEvalOptions([])}
+                      className="text-[11px] text-rose-300 hover:text-rose-200 underline font-black shrink-0 cursor-pointer"
+                    >
+                      مسح التحديد ({selectedEvalOptions.length})
+                    </button>
+                  )}
                 </div>
+
+                {/* Section 1: Positive Badges (Multi-Select) */}
+                <div className="space-y-2">
+                  <label className="text-xs font-black text-emerald-300 block flex items-center justify-between">
+                    <span>🌟 المشاركات والأوسمة الإيجابية (متعدد الخيارات):</span>
+                    <span className="text-[10px] text-emerald-400/70 font-bold">انقر لتحديد/إلغاء الخيارات</span>
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      "🌟 شارك بنشاط مميز",
+                      "💡 إجابة نموذجية ورائعة",
+                      "📝 ملتزم ومستعد للحصة",
+                      "👑 نجم/فارس الحصة اليوم",
+                      "🤝 متعاون ومساعد لزملائه",
+                      "🎯 تركيز وفهم عالي",
+                      "🏆 إنجاز الواجب بإتقان"
+                    ].map((option) => {
+                      const isSelected = selectedEvalOptions.includes(option);
+                      return (
+                        <button
+                          key={option}
+                          type="button"
+                          onClick={() => toggleEvalOption(option)}
+                          className={`px-3 py-2 rounded-xl text-xs font-black transition-all cursor-pointer border flex items-center gap-1.5 ${
+                            isSelected
+                              ? "bg-emerald-500 text-black border-emerald-400 shadow-lg shadow-emerald-500/20 scale-[1.02] ring-2 ring-emerald-300/40"
+                              : "bg-emerald-500/10 text-emerald-300 border-emerald-500/20 hover:bg-emerald-500/20 hover:text-white"
+                          }`}
+                        >
+                          <span>{option}</span>
+                          {isSelected ? (
+                            <Check size={14} className="text-black stroke-[3]" />
+                          ) : (
+                            <span className="text-emerald-400/40 text-xs">+</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Section 2: Alerts & Behavioral Notes (Multi-Select) */}
+                <div className="space-y-2">
+                  <label className="text-xs font-black text-rose-300 block flex items-center justify-between">
+                    <span>⚠️ التنبيهات والملاحظات السلوكية:</span>
+                    <span className="text-[10px] text-rose-400/70 font-bold">انقر لتحديد/إلغاء الخيارات</span>
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      "😴 مشتت الذهن / غير مركز",
+                      "🗣️ كثرة الكلام وغير منضبط",
+                      "📚 لم يحضر الواجب / الدفتر",
+                      "⏳ تأخر عن دخول القاعة",
+                      "📱 الانشغال بغير الدرس",
+                      "⚠️ يحتاج لمتابعة منزلية مكثفة"
+                    ].map((option) => {
+                      const isSelected = selectedEvalOptions.includes(option);
+                      return (
+                        <button
+                          key={option}
+                          type="button"
+                          onClick={() => toggleEvalOption(option)}
+                          className={`px-3 py-2 rounded-xl text-xs font-black transition-all cursor-pointer border flex items-center gap-1.5 ${
+                            isSelected
+                              ? "bg-amber-500 text-black border-amber-400 shadow-lg shadow-amber-500/20 scale-[1.02] ring-2 ring-amber-300/40"
+                              : "bg-amber-500/10 text-amber-300 border-amber-500/20 hover:bg-amber-500/20 hover:text-white"
+                          }`}
+                        >
+                          <span>{option}</span>
+                          {isSelected ? (
+                            <Check size={14} className="text-black stroke-[3]" />
+                          ) : (
+                            <span className="text-amber-400/40 text-xs">+</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Custom Note Input */}
+                <div className="space-y-2 pt-1">
+                  <label className="text-xs font-black text-white/80 block flex items-center gap-1.5">
+                    <FileText size={14} className="text-cyan-400" />
+                    <span>تفاصيل وملاحظة إضافية مخصصة للأستاذ (اختياري / مخصص):</span>
+                  </label>
+                  <textarea
+                    value={customEvalText}
+                    onChange={(e) => setCustomEvalText(e.target.value)}
+                    placeholder="اكتب تفاصيل إضافية مخصصة (مثل: تم تميزه في حل التمرين الختامي، أو ملاحظة خاصة للوالدين)..."
+                    className="w-full bg-[#080e1c] border border-cyan-500/30 rounded-2xl p-3 text-xs font-bold text-white placeholder-white/30 focus:border-cyan-400 outline-none transition-all resize-none h-20 leading-relaxed"
+                  />
+                </div>
+
+                {/* Selected Badges Summary */}
                 {selectedEvalOptions.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedEvalOptions([])}
-                    className="text-[11px] text-rose-300 hover:text-rose-200 underline font-black shrink-0 cursor-pointer"
-                  >
-                    مسح التحديد ({selectedEvalOptions.length})
-                  </button>
+                  <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-xs text-cyan-200 flex items-center justify-between">
+                    <span className="font-bold">
+                      تم تحديد <strong>{selectedEvalOptions.length}</strong> تقييم ونشاط:
+                    </span>
+                    <span className="font-black text-white truncate max-w-[240px]">
+                      {selectedEvalOptions.join(' • ')}
+                    </span>
+                  </div>
                 )}
               </div>
 
-              {/* Section 1: Positive Badges (Multi-Select) */}
-              <div className="space-y-2">
-                <label className="text-xs font-black text-emerald-300 block flex items-center justify-between">
-                  <span>🌟 المشاركات والأوسمة الإيجابية (متعدد الخيارات):</span>
-                  <span className="text-[10px] text-emerald-400/70 font-bold">انقر لتحديد/إلغاء الخيارات</span>
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    "🌟 شارك بنشاط مميز",
-                    "💡 إجابة نموذجية ورائعة",
-                    "📝 ملتزم ومستعد للحصة",
-                    "👑 نجم/فارس الحصة اليوم",
-                    "🤝 متعاون ومساعد لزملائه",
-                    "🎯 تركيز وفهم عالي",
-                    "🏆 إنجاز الواجب بإتقان"
-                  ].map((option) => {
-                    const isSelected = selectedEvalOptions.includes(option);
-                    return (
-                      <button
-                        key={option}
-                        type="button"
-                        onClick={() => toggleEvalOption(option)}
-                        className={`px-3 py-2 rounded-xl text-xs font-black transition-all cursor-pointer border flex items-center gap-1.5 ${
-                          isSelected
-                            ? "bg-emerald-500 text-black border-emerald-400 shadow-lg shadow-emerald-500/20 scale-[1.02] ring-2 ring-emerald-300/40"
-                            : "bg-emerald-500/10 text-emerald-300 border-emerald-500/20 hover:bg-emerald-500/20 hover:text-white"
-                        }`}
-                      >
-                        <span>{option}</span>
-                        {isSelected ? (
-                          <Check size={14} className="text-black stroke-[3]" />
-                        ) : (
-                          <span className="text-emerald-400/40 text-xs">+</span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Section 2: Alerts & Behavioral Notes (Multi-Select) */}
-              <div className="space-y-2">
-                <label className="text-xs font-black text-rose-300 block flex items-center justify-between">
-                  <span>⚠️ التنبيهات والملاحظات السلوكية:</span>
-                  <span className="text-[10px] text-rose-400/70 font-bold">انقر لتحديد/إلغاء الخيارات</span>
-                </label>
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    "😴 مشتت الذهن / غير مركز",
-                    "🗣️ كثرة الكلام وغير منضبط",
-                    "📚 لم يحضر الواجب / الدفتر",
-                    "⏳ تأخر عن دخول القاعة",
-                    "📱 الانشغال بغير الدرس",
-                    "⚠️ يحتاج لمتابعة منزلية مكثفة"
-                  ].map((option) => {
-                    const isSelected = selectedEvalOptions.includes(option);
-                    return (
-                      <button
-                        key={option}
-                        type="button"
-                        onClick={() => toggleEvalOption(option)}
-                        className={`px-3 py-2 rounded-xl text-xs font-black transition-all cursor-pointer border flex items-center gap-1.5 ${
-                          isSelected
-                            ? "bg-amber-500 text-black border-amber-400 shadow-lg shadow-amber-500/20 scale-[1.02] ring-2 ring-amber-300/40"
-                            : "bg-amber-500/10 text-amber-300 border-amber-500/20 hover:bg-amber-500/20 hover:text-white"
-                        }`}
-                      >
-                        <span>{option}</span>
-                        {isSelected ? (
-                          <Check size={14} className="text-black stroke-[3]" />
-                        ) : (
-                          <span className="text-amber-400/40 text-xs">+</span>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Custom Note Input */}
-              <div className="space-y-2 pt-1">
-                <label className="text-xs font-black text-white/80 block flex items-center gap-1.5">
-                  <FileText size={14} className="text-cyan-400" />
-                  <span>تفاصيل وملاحظة إضافية مخصصة للأستاذ (اختياري / مخصص):</span>
-                </label>
-                <textarea
-                  value={customEvalText}
-                  onChange={(e) => setCustomEvalText(e.target.value)}
-                  placeholder="اكتب تفاصيل إضافية مخصصة (مثل: تم تميزه في حل التمرين الختامي، أو ملاحظة خاصة للوالدين)..."
-                  className="w-full bg-[#080e1c] border border-cyan-500/30 rounded-2xl p-3 text-xs font-bold text-white placeholder-white/30 focus:border-cyan-400 outline-none transition-all resize-none h-20 leading-relaxed"
-                />
-              </div>
-
-              {/* Selected Badges Summary */}
-              {selectedEvalOptions.length > 0 && (
-                <div className="p-2.5 rounded-xl bg-cyan-500/10 border border-cyan-500/20 text-xs text-cyan-200 flex items-center justify-between">
-                  <span className="font-bold">
-                    تم تحديد <strong>{selectedEvalOptions.length}</strong> تقييم ونشاط:
-                  </span>
-                  <span className="font-black text-white truncate max-w-[240px]">
-                    {selectedEvalOptions.join(' • ')}
-                  </span>
-                </div>
-              )}
-
-              {/* Modal Footer Actions */}
-              <div className="pt-3 border-t border-white/10 flex items-center justify-end gap-2.5">
+              {/* Modal Footer Actions - Sticky Bottom */}
+              <div className="p-4 border-t border-white/10 bg-[#080e1c]/98 backdrop-blur-md flex items-center justify-end gap-2.5 shrink-0 sticky bottom-0 z-20 pb-[calc(1rem+env(safe-area-inset-bottom,0px))]">
                 <button
                   type="button"
                   onClick={() => {
@@ -2715,15 +2725,22 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
       {/* 7. Classroom Lens ("عين على الصف") Modal */}
       <AnimatePresence>
         {showLensModal && (selectedLensStudent || isBroadcastToAllMode) && (
-          <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/85 backdrop-blur-md" dir="rtl">
+          <div 
+            className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-4 bg-black/85 backdrop-blur-md overflow-hidden" 
+            dir="rtl"
+            style={{
+              paddingTop: 'max(env(safe-area-inset-top, 0px), 16px)',
+              paddingBottom: 'calc(max(env(safe-area-inset-bottom, 0px), 18px) + 8px)'
+            }}
+          >
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="w-full max-w-lg bg-gradient-to-b from-[#0e172e] via-[#091022] to-[#050812] rounded-3xl border border-blue-500/30 p-5 sm:p-6 shadow-2xl space-y-5 text-right relative overflow-hidden max-h-[90vh] overflow-y-auto no-scrollbar"
+              className="w-full max-w-lg bg-gradient-to-b from-[#0e172e] via-[#091022] to-[#050812] rounded-3xl border border-blue-500/30 shadow-2xl text-right relative overflow-hidden max-h-[88dvh] flex flex-col"
             >
               {/* Header */}
-              <div className="flex items-center justify-between border-b border-white/10 pb-4">
+              <div className="flex items-center justify-between border-b border-white/10 p-4 sm:p-5 shrink-0 bg-[#0e172e]/90 backdrop-blur-md z-10">
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-500/20 to-indigo-500/20 border border-blue-400/40 text-blue-300 flex items-center justify-center shadow-lg shadow-blue-500/10 shrink-0">
                     <Camera size={24} className="animate-pulse" />
@@ -2751,8 +2768,10 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
                 </button>
               </div>
 
-              {/* Target Mode Banner: Strictly Locked to Selected Mode without Confusing Switcher */}
-              {isBroadcastToAllMode ? (
+              {/* Modal Scrollable Body */}
+              <div className="p-4 sm:p-5 space-y-4 overflow-y-auto flex-1 no-scrollbar">
+                {/* Target Mode Banner: Strictly Locked to Selected Mode without Confusing Switcher */}
+                {isBroadcastToAllMode ? (
                 <div className="p-3.5 rounded-2xl bg-gradient-to-r from-blue-900/40 via-indigo-900/40 to-purple-900/40 border border-blue-500/30 flex items-center justify-between gap-3 shadow-md">
                   <div className="flex items-center gap-2.5">
                     <div className="w-8 h-8 rounded-xl bg-blue-500/20 text-blue-300 flex items-center justify-center font-bold text-sm shrink-0">
@@ -3046,8 +3065,10 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
                 />
               </div>
 
-              {/* Actions */}
-              <div className="pt-3 border-t border-white/10 flex items-center justify-end gap-2.5">
+              </div>
+
+              {/* Actions - Sticky Footer */}
+              <div className="p-4 border-t border-white/10 bg-[#080e1c]/98 backdrop-blur-md flex items-center justify-end gap-2.5 shrink-0 sticky bottom-0 z-20 pb-[calc(1rem+env(safe-area-inset-bottom,0px))]">
                 <button
                   type="button"
                   onClick={handleCancelUpload}

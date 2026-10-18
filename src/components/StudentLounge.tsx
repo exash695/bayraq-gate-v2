@@ -904,8 +904,8 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
       <div 
         className="w-full px-4 pb-3 flex justify-between items-center bg-[#0D142A]/95 backdrop-blur-xl shrink-0 z-20 border-b border-white/5 transition-all shadow-md"
         style={{
-          paddingTop: 'calc(max(env(safe-area-inset-top, 0px), 32px) + 0.6rem)',
-          minHeight: 'calc(4.5rem + max(env(safe-area-inset-top, 0px), 32px))'
+          paddingTop: 'calc(max(env(safe-area-inset-top, 0px), 50px) + 0.8rem)',
+          minHeight: 'calc(5.2rem + max(env(safe-area-inset-top, 0px), 50px))'
         }}
       >
         <div className="flex items-center gap-3">

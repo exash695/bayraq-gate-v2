@@ -8666,8 +8666,8 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
         style={{ 
           scrollbarWidth: 'none', 
           msOverflowStyle: 'none',
-          paddingBottom: 'calc(max(env(safe-area-inset-bottom, 0px), 18px) + 8px)',
-          minHeight: 'calc(72px + max(env(safe-area-inset-bottom, 0px), 18px))'
+          paddingBottom: 'calc(max(env(safe-area-inset-bottom, 0px), 24px) + 12px)',
+          minHeight: 'calc(80px + max(env(safe-area-inset-bottom, 0px), 24px))'
         }}
       >
         {tabs.map((tab) => {
