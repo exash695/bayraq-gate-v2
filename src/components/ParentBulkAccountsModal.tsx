@@ -19,6 +19,7 @@ export interface ParentAccountRow {
   errorMessage?: string;
   grade?: string;
   gradeOrder?: number;
+  section?: string;
 }
 
 export interface ExcelUploadHistoryEntry {
@@ -165,6 +166,8 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
 
   // Manual Row State
   const [manualStudentName, setManualStudentName] = useState('');
+  const [manualGrade, setManualGrade] = useState('');
+  const [manualSection, setManualSection] = useState('');
   const [manualPhone, setManualPhone] = useState('');
 
   // History State
@@ -181,7 +184,7 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
   const [matchingData, setMatchingData] = useState<{
     fileName: string;
     totalParsed: number;
-    matchedUpdates: { phone: string; studentName: string; currentName: string; status: 'matched' | 'new'; grade?: string; gradeOrder?: number }[];
+    matchedUpdates: { phone: string; studentName: string; currentName: string; status: 'matched' | 'new'; grade?: string; gradeOrder?: number; section?: string }[];
   } | null>(null);
   const [isExecutingMatch, setIsExecutingMatch] = useState(false);
   const [isPrintingSlips, setIsPrintingSlips] = useState(false);
@@ -317,10 +320,14 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
           const row = data[r];
           if (!Array.isArray(row)) continue;
           let hasHeaderKeyword = false;
+          let sectionColIdx = -1;
           row.forEach((cellVal: any, cIdx: number) => {
             const str = String(cellVal || '').toLowerCase().trim();
             if (str.includes('هاتف') || str.includes('موبايل') || str.includes('جوال') || str.includes('phone') || str.includes('رقم')) {
               phoneColIdx = cIdx;
+              hasHeaderKeyword = true;
+            } else if (str.includes('شعب') || str.includes('section') || str.includes('قاعة')) {
+              sectionColIdx = cIdx;
               hasHeaderKeyword = true;
             } else if (str.includes('صف') || str.includes('مرحل') || str.includes('grade') || str.includes('class')) {
               gradeColIdx = cIdx;
@@ -337,7 +344,7 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
         }
 
         const startRowIdx = headerRowIdx !== -1 ? headerRowIdx + 1 : 0;
-        const updates: { phone: string; studentName: string; currentName: string; status: 'matched' | 'new'; grade?: string; gradeOrder?: number }[] = [];
+        const updates: { phone: string; studentName: string; currentName: string; status: 'matched' | 'new'; grade?: string; gradeOrder?: number; section?: string }[] = [];
 
         for (let i = startRowIdx; i < data.length; i++) {
           const rowData = data[i];
@@ -347,6 +354,7 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
           let foundName = '';
           let foundGrade = '';
           let foundGradeOrder = 99;
+          let foundSection = '';
 
           // Try header column index first if available:
           if (phoneColIdx !== -1 && rowData[phoneColIdx] !== undefined) {
@@ -363,6 +371,12 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
               foundGradeOrder = detected.gradeOrder;
             } else if (gStr && !isPhonePattern(gStr)) {
               foundGrade = gStr;
+            }
+          }
+          if (sectionColIdx !== -1 && rowData[sectionColIdx] !== undefined) {
+            const sStr = String(rowData[sectionColIdx] || '').trim();
+            if (sStr && !isPhonePattern(sStr) && !normalizeSchoolGrade(sStr)) {
+              foundSection = sStr.replace(/^شعبة\s*/, '');
             }
           }
           if (nameColIdx !== -1 && rowData[nameColIdx] !== undefined) {
@@ -417,13 +431,28 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
                 /^\d+$/.test(cellStr.replace(/\s+/g, '')) ||
                 lower === 'ت' || lower === 'م' || lower === '#' ||
                 lower.includes('هاتف') || lower.includes('موبايل') || lower.includes('رقم') ||
-                lower === 'اسم الطالب' || lower === 'اسم التلميذ' || lower === 'الصف' || lower === 'الصف الدراسي'
+                lower === 'اسم الطالب' || lower === 'اسم التلميذ' || lower === 'الصف' || lower === 'الصف الدراسي' ||
+                lower === 'الشعبة' || lower === 'شعبة'
               ) {
                 continue;
               }
 
               foundName = cellStr;
               break;
+            }
+          }
+
+          // D) Find section if still not found
+          if (!foundSection) {
+            for (const cell of rowData) {
+              const cellStr = String(cell || '').trim();
+              if (!cellStr || cellStr === foundName || cellStr === foundGrade) continue;
+              if (isPhonePattern(cellStr)) continue;
+              const cleanSec = cellStr.replace(/^شعبة\s*/, '').trim();
+              if (['أ', 'ب', 'ج', 'د', 'هـ', 'و', 'ز', 'A', 'B', 'C', 'D', 'E', '1', '2', '3', '4'].includes(cleanSec)) {
+                foundSection = cleanSec;
+                break;
+              }
             }
           }
 
@@ -446,7 +475,8 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
               currentName: current,
               status: phoneToCurrentName.has(foundPhone) ? 'matched' : 'new',
               grade: foundGrade || undefined,
-              gradeOrder: foundGradeOrder
+              gradeOrder: foundGradeOrder,
+              section: foundSection || undefined
             });
           }
         }
@@ -493,7 +523,8 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
         phone: u.phone,
         studentName: u.studentName,
         grade: u.grade,
-        gradeOrder: u.gradeOrder
+        gradeOrder: u.gradeOrder,
+        section: u.section
       }));
 
       const res = await fetch('/api/auth/parent-update-student-names', {
@@ -520,7 +551,12 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
 
   if (!isOpen) return null;
 
-  const processPhoneRow = (studentName: string, phoneRaw: string): ParentAccountRow => {
+  const processPhoneRow = (
+    studentName: string, 
+    phoneRaw: string, 
+    gradeRaw?: string, 
+    sectionRaw?: string
+  ): ParentAccountRow => {
     let cleanStudent = studentName ? studentName.trim() : '';
     const cleanPhone = sanitizeIraqiPhoneNumber(phoneRaw);
     let status: 'valid' | 'duplicate' | 'invalid_phone' = 'valid';
@@ -537,6 +573,11 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
       errorMessage = 'الرقم يجب أن يبدأ بـ 7 ويتكون من 10 أرقام';
     }
 
+    const normGrade = normalizeSchoolGrade(gradeRaw);
+    const cleanGrade = normGrade ? normGrade.gradeName : (gradeRaw ? String(gradeRaw).trim() : undefined);
+    const gradeOrder = normGrade ? normGrade.gradeOrder : 99;
+    const cleanSection = sectionRaw ? String(sectionRaw).trim().replace(/^شعبة\s*/, '') : undefined;
+
     return {
       id: crypto.randomUUID(),
       studentName: cleanStudent,
@@ -545,6 +586,9 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
       password: generateDefaultPassword(),
       status,
       errorMessage,
+      grade: cleanGrade,
+      gradeOrder,
+      section: cleanSection,
     };
   };
 
@@ -592,6 +636,8 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
 
         let nameColIdx = 0;
         let phoneColIdx = 1;
+        let gradeColIdx = -1;
+        let sectionColIdx = -1;
 
         if (data.length > 0) {
           const headerRow = data[0] || [];
@@ -599,6 +645,10 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
             const str = String(cellVal || '').toLowerCase().trim();
             if (str.includes('هاتف') || str.includes('رقم') || str.includes('phone') || str.includes('موبايل') || str.includes('جوال')) {
               phoneColIdx = idx;
+            } else if (str.includes('شعب') || str.includes('section') || str.includes('قاعة')) {
+              sectionColIdx = idx;
+            } else if (str.includes('صف') || str.includes('مرحل') || str.includes('grade') || str.includes('class')) {
+              gradeColIdx = idx;
             } else if (str.includes('اسم') || str.includes('طالب') || str.includes('name') || str.includes('تلميذ')) {
               nameColIdx = idx;
             }
@@ -613,9 +663,22 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
           firstRowStr.includes('هاتف') ||
           firstRowStr.includes('رقم') ||
           firstRowStr.includes('phone') ||
-          firstRowStr.includes('name')
+          firstRowStr.includes('name') ||
+          firstRowStr.includes('صف') ||
+          firstRowStr.includes('شعب')
         ) {
           startRowIdx = 1;
+        }
+
+        // If no explicit headers were detected, but file matches standard 4-column template (Name, Grade, Section, Phone)
+        if (gradeColIdx === -1 && sectionColIdx === -1 && data.length > 1) {
+          const sampleRow = data[startRowIdx] || [];
+          if (sampleRow.length >= 4) {
+            nameColIdx = 0;
+            gradeColIdx = 1;
+            sectionColIdx = 2;
+            phoneColIdx = 3;
+          }
         }
 
         const isPhonePattern = (str: string) => {
@@ -630,9 +693,11 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
 
           let valA = rowData[nameColIdx] !== undefined ? String(rowData[nameColIdx]).trim() : '';
           let valB = rowData[phoneColIdx] !== undefined ? String(rowData[phoneColIdx]).trim() : '';
+          let valGrade = gradeColIdx >= 0 && rowData[gradeColIdx] !== undefined ? String(rowData[gradeColIdx]).trim() : '';
+          let valSection = sectionColIdx >= 0 && rowData[sectionColIdx] !== undefined ? String(rowData[sectionColIdx]).trim() : '';
 
           if (!valB && rowData.length > 1) {
-            valB = String(rowData.find((v: any, idx: number) => idx !== nameColIdx && v !== undefined && v !== null && String(v).trim() !== '') || '').trim();
+            valB = String(rowData.find((v: any, idx: number) => idx !== nameColIdx && idx !== gradeColIdx && idx !== sectionColIdx && isPhonePattern(String(v || ''))) || '').trim();
           }
 
           let finalStudentName = '';
@@ -650,9 +715,33 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
             finalPhoneRaw = valB;
           }
 
+          // Scan for grade/section in remaining cells if not found
+          if (!valGrade) {
+            for (let c = 0; c < rowData.length; c++) {
+              if (c === nameColIdx || c === phoneColIdx) continue;
+              const cellStr = String(rowData[c] || '').trim();
+              if (normalizeSchoolGrade(cellStr)) {
+                valGrade = cellStr;
+                break;
+              }
+            }
+          }
+          if (!valSection) {
+            for (let c = 0; c < rowData.length; c++) {
+              if (c === nameColIdx || c === phoneColIdx) continue;
+              const cellStr = String(rowData[c] || '').trim();
+              if (cellStr === valGrade) continue;
+              const cleanSec = cellStr.replace(/^شعبة\s*/, '').trim();
+              if (['أ', 'ب', 'ج', 'د', 'هـ', 'و', 'ز', 'A', 'B', 'C', 'D', 'E', '1', '2', '3', '4'].includes(cleanSec)) {
+                valSection = cleanSec;
+                break;
+              }
+            }
+          }
+
           if (!finalStudentName && !finalPhoneRaw) continue;
 
-          const parsed = processPhoneRow(finalStudentName, finalPhoneRaw);
+          const parsed = processPhoneRow(finalStudentName, finalPhoneRaw, valGrade, valSection);
 
           if (parsed.status === 'valid' && phoneSet.has(parsed.formattedPhone)) {
             parsed.status = 'duplicate';
@@ -681,9 +770,11 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
       return;
     }
 
-    const newRow = processPhoneRow(manualStudentName, manualPhone);
+    const newRow = processPhoneRow(manualStudentName, manualPhone, manualGrade, manualSection);
     setRows(prev => [newRow, ...prev]);
     setManualStudentName('');
+    setManualGrade('');
+    setManualSection('');
     setManualPhone('');
     showToast('تم إضافة السجل بنجاح', 'success');
   };
@@ -692,14 +783,19 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
     setRows(prev => prev.filter(r => r.id !== id));
   };
 
-  const handleUpdateRow = (id: string, field: 'studentName' | 'formattedPhone' | 'password', val: string) => {
+  const handleUpdateRow = (id: string, field: 'studentName' | 'formattedPhone' | 'password' | 'grade' | 'section', val: string) => {
     setRows(prev =>
       prev.map(r => {
         if (r.id !== id) return r;
         const updated = { ...r, [field]: val };
         if (field === 'formattedPhone') {
-          const reprocessed = processPhoneRow(updated.studentName, val);
+          const reprocessed = processPhoneRow(updated.studentName, val, updated.grade, updated.section);
           return { ...updated, formattedPhone: reprocessed.formattedPhone, status: reprocessed.status, errorMessage: reprocessed.errorMessage };
+        }
+        if (field === 'grade') {
+          const norm = normalizeSchoolGrade(val);
+          updated.grade = norm ? norm.gradeName : val;
+          updated.gradeOrder = norm ? norm.gradeOrder : 99;
         }
         return updated;
       })
@@ -724,7 +820,9 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
         branch: adminBranch,
         role: 'parent',
         createdAt: new Date().toISOString(),
-        isActive: true
+        isActive: true,
+        grade: row.grade || '',
+        section: row.section || ''
       }));
 
       // 1. Save directly to server
@@ -821,6 +919,9 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
       const oA = getGradeOrder(a.grade);
       const oB = getGradeOrder(b.grade);
       if (oA !== oB) return oA - oB;
+      const sA = (a.section || '').trim();
+      const sB = (b.section || '').trim();
+      if (sA !== sB) return sA.localeCompare(sB, 'ar');
       return (a.studentName || '').localeCompare(b.studentName || '', 'ar');
     });
 
@@ -851,13 +952,14 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
               box-sizing: border-box;
               border: 1.5px dashed #475569;
               border-radius: 10px;
-              padding: 10px 12px;
+              padding: 9px 12px;
               background: #ffffff;
               display: flex;
               flex-direction: column;
               justify-content: space-between;
               position: relative;
-              height: 220px;
+              height: 100%;
+              min-height: 220px;
               font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             ">
               <span style="position: absolute; top: -10px; right: 14px; background: #ffffff; padding: 0 6px; font-size: 10px; color: #64748b; font-weight: 700;">✂ قص من هنا</span>
@@ -866,46 +968,50 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
                 <div style="
                   background: #0f172a;
                   color: #facc15;
-                  padding: 6px 10px;
+                  padding: 5px 10px;
                   border-radius: 6px;
                   text-align: center;
                   font-weight: 800;
-                  font-size: 13px;
-                  margin-bottom: 8px;
+                  font-size: 12.5px;
+                  margin-bottom: 6px;
                 ">
                   بَوّابة بيرق - مدرسة ${schoolName}
                 </div>
 
-                ${item.grade ? `
-                  <span style="position: absolute; top: -10px; left: 14px; background: #0284c7; color: #ffffff; padding: 1px 8px; border-radius: 4px; font-size: 10.5px; font-weight: 800;">
-                    ${item.grade}
+                ${(item.grade || item.section) ? `
+                  <span style="position: absolute; top: -10px; left: 14px; background: #0284c7; color: #ffffff; padding: 2px 9px; border-radius: 5px; font-size: 11px; font-weight: 800;">
+                    ${[item.grade, item.section ? `شعبة ${item.section}` : ''].filter(Boolean).join(' • ')}
                   </span>
                 ` : ''}
 
-                <div style="text-align: center; font-size: 13px; font-weight: 800; color: #0f172a; margin-bottom: 6px; background: #e0f2fe; padding: 6px 8px; border-radius: 6px; border: 1px solid #bae6fd;">
+                <div style="text-align: center; font-size: 13px; font-weight: 800; color: #0f172a; margin-bottom: 6px; background: #e0f2fe; padding: 5px 8px; border-radius: 6px; border: 1px solid #bae6fd;">
                   إلى ولي أمر الطالب/ة: <span style="color: #0369a1; font-weight: 900;">${displayStudentName}</span>
                 </div>
 
-                ${item.grade ? `
-                  <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; background: #f1f5f9; padding: 4px 8px; border-radius: 5px; margin-bottom: 6px; border: 1px solid #e2e8f0;">
+                <div style="display: flex; justify-content: space-between; align-items: center; gap: 6px; margin-bottom: 6px;">
+                  <div style="flex: 1; display: flex; justify-content: space-between; align-items: center; font-size: 11px; background: #f1f5f9; padding: 4px 8px; border-radius: 5px; border: 1px solid #e2e8f0;">
                     <span style="color: #475569; font-weight: 700;">الصف الدراسي:</span>
-                    <span style="color: #0284c7; font-weight: 900;">${item.grade}</span>
+                    <span style="color: #0284c7; font-weight: 900;">${item.grade || 'غير محدد'}</span>
                   </div>
-                ` : ''}
+                  <div style="width: 38%; display: flex; justify-content: space-between; align-items: center; font-size: 11px; background: #f1f5f9; padding: 4px 8px; border-radius: 5px; border: 1px solid #e2e8f0;">
+                    <span style="color: #475569; font-weight: 700;">الشعبة:</span>
+                    <span style="color: #b45309; font-weight: 900;">${item.section || '—'}</span>
+                  </div>
+                </div>
 
                 <div style="
                   background: #f8fafc;
                   border: 1px solid #cbd5e1;
                   border-radius: 6px;
-                  padding: 8px 10px;
+                  padding: 6px 10px;
                 ">
-                  <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px; margin-bottom: 5px; border-bottom: 1px dashed #cbd5e1; padding-bottom: 4px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; margin-bottom: 4px; border-bottom: 1px dashed #cbd5e1; padding-bottom: 3px;">
                     <span style="color: #475569; font-weight: 700;">اسم المستخدم (الهاتف):</span>
-                    <span style="font-family: monospace; font-weight: 800; font-size: 14px; color: #047857; direction: ltr;">${item.formattedPhone}</span>
+                    <span style="font-family: monospace; font-weight: 800; font-size: 13.5px; color: #047857; direction: ltr;">${item.formattedPhone}</span>
                   </div>
-                  <div style="display: flex; justify-content: space-between; align-items: center; font-size: 12px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11.5px;">
                     <span style="color: #475569; font-weight: 700;">كلمة المرور الابتدائية:</span>
-                    <span style="font-family: monospace; font-weight: 800; font-size: 14px; color: #b45309; letter-spacing: 1px;">${item.password}</span>
+                    <span style="font-family: monospace; font-weight: 800; font-size: 13.5px; color: #b45309; letter-spacing: 1px;">${item.password}</span>
                   </div>
                 </div>
               </div>
@@ -1094,13 +1200,16 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
   const handleDownloadSampleTemplate = async () => {
     try {
       const sampleData = [
-        { 'اسم الطالب': 'علي محمد حسين', 'رقم هاتف ولي الأمر': '07701234567' },
-        { 'اسم الطالب': 'فاطمة أحمد كاظم', 'رقم هاتف ولي الأمر': '07809876543' },
-        { 'اسم الطالب': 'حسين علي عباس', 'رقم هاتف ولي الأمر': '07501122334' },
+        { 'اسم الطالب': 'علي محمد حسين', 'الصف': 'الأول الابتدائي', 'الشعبة': 'أ', 'رقم هاتف ولي الأمر': '07701234567' },
+        { 'اسم الطالب': 'فاطمة أحمد كاظم', 'الصف': 'الأول الابتدائي', 'الشعبة': 'ب', 'رقم هاتف ولي الأمر': '07809876543' },
+        { 'اسم الطالب': 'حسين علي عباس', 'الصف': 'الثاني الابتدائي', 'الشعبة': 'أ', 'رقم هاتف ولي الأمر': '07501122334' },
+        { 'اسم الطالب': 'زينب كرار هادي', 'الصف': 'الثاني الابتدائي', 'الشعبة': 'ب', 'رقم هاتف ولي الأمر': '07712345678' },
+        { 'اسم الطالب': 'يوسف مصطفى عادل', 'الصف': 'الثالث الابتدائي', 'الشعبة': 'أ', 'رقم هاتف ولي الأمر': '07812345678' },
+        { 'اسم الطالب': 'مريم حيدر جواد', 'الصف': 'الرابع الابتدائي', 'الشعبة': 'ج', 'رقم هاتف ولي الأمر': '07512345678' },
       ];
 
-      await exportToExcel(sampleData, 'نموذج_إكسل_حسابات_أولياء_الأمور.xlsx', 'نموذج_الحسابات');
-      showToast('تم تحميل نموذج ملف الإكسل بنجاح 📊', 'success');
+      await exportToExcel(sampleData, 'نموذج_إكسل_حسابات_أولياء_الأمور_مع_الصف_والشعبة.xlsx', 'نموذج_الحسابات');
+      showToast('تم تحميل نموذج ملف الإكسل متضمناً أعمدة الصف والشعبة بنجاح 📊', 'success');
     } catch (err: any) {
       console.error(err);
       showToast('خطأ في تحضير ملف النموذج: ' + (err?.message || ''), 'error');
@@ -1421,12 +1530,12 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
                 <div className="space-y-1">
                   <span className="text-xs font-black text-emerald-400 flex items-center gap-1.5">
                     <ShieldCheck size={16} />
-                    <span>شروط ومعالجة الملف السريعة:</span>
+                    <span>تعليمات وضوابط نموذج الإكسل المعتمد:</span>
                   </span>
                   <p className="text-xs text-white/70 leading-relaxed">
-                    1. الملف يحتوي على عمودين: <strong className="text-white">اسم الطالب</strong> و <strong className="text-white">رقم هاتف ولي الأمر</strong>.<br />
-                    2. النظام يقبل الأرقام بكل الصيغ ويحولها تلقائياً لتبدأ بـ <strong className="text-emerald-300">7 (بدون صفر أولي أو كود دولة)</strong>.<br />
-                    3. كلمة المرور تولّد عشوائياً وتُسجل مع أرشفة اسم الملف لمنع الخطأ والتكرار.
+                    1. النموذج يحتوي على 4 أعمدة رئيسية: <strong className="text-white">اسم الطالب</strong>، <strong className="text-sky-300">الصف</strong>، <strong className="text-amber-300">الشعبة</strong>، و <strong className="text-emerald-300">رقم هاتف ولي الأمر</strong>.<br />
+                    2. تُطبع بيانات <strong className="text-white">الصف والشعبة</strong> بوضوح أعلى وداخل كل بطاقة وقصاصة لتسهيل توزيعها داخل الصفوف دون أي فوضى أو تداخل.<br />
+                    3. يتم فرز القصاصات آلياً بالتسلسل من الصف الأول إلى السادس مع ترتيب الشعب لتسليم منظم للمعلمين وأولياء الأمور.
                   </p>
                 </div>
 
@@ -1469,25 +1578,39 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
               {/* Quick Manual Entry row */}
               <div className="bg-black/30 p-4 rounded-2xl border border-white/5 space-y-3">
                 <span className="text-xs font-black text-white/80 block">إضافة سجل يدوي أو تجريبي:</span>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-5 gap-2.5">
                   <input
                     type="text"
                     placeholder="اسم الطالب / التلميذ..."
                     value={manualStudentName}
                     onChange={e => setManualStudentName(e.target.value)}
-                    className="h-10 px-4 bg-[#0d1428] border border-white/10 rounded-xl text-xs text-white placeholder-white/30 outline-none focus:border-emerald-500"
+                    className="h-10 px-3 bg-[#0d1428] border border-white/10 rounded-xl text-xs text-white placeholder-white/30 outline-none focus:border-emerald-500 font-bold"
                   />
                   <input
                     type="text"
-                    placeholder="رقم الهاتف (مثال: 7701234567)..."
+                    placeholder="الصف (مثال: الأول الابتدائي)..."
+                    value={manualGrade}
+                    onChange={e => setManualGrade(e.target.value)}
+                    className="h-10 px-3 bg-[#0d1428] border border-white/10 rounded-xl text-xs text-sky-300 placeholder-white/30 outline-none focus:border-emerald-500 font-bold"
+                  />
+                  <input
+                    type="text"
+                    placeholder="الشعبة (مثال: أ أو ب)..."
+                    value={manualSection}
+                    onChange={e => setManualSection(e.target.value)}
+                    className="h-10 px-3 bg-[#0d1428] border border-white/10 rounded-xl text-xs text-amber-300 placeholder-white/30 outline-none focus:border-emerald-500 font-bold text-center"
+                  />
+                  <input
+                    type="text"
+                    placeholder="رقم الهاتف (7701234567)..."
                     value={manualPhone}
                     onChange={e => setManualPhone(e.target.value)}
-                    className="h-10 px-4 bg-[#0d1428] border border-white/10 rounded-xl text-xs text-white placeholder-white/30 outline-none focus:border-emerald-500 text-left"
+                    className="h-10 px-3 bg-[#0d1428] border border-white/10 rounded-xl text-xs text-white placeholder-white/30 outline-none focus:border-emerald-500 text-left font-mono"
                     style={{ direction: 'ltr' }}
                   />
                   <button
                     onClick={handleAddManualRow}
-                    className="h-10 px-4 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                    className="h-10 px-3 bg-white/10 hover:bg-white/20 text-white font-bold text-xs rounded-xl flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
                   >
                     <Plus size={16} />
                     <span>إضافة للجدول</span>
@@ -1520,14 +1643,16 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
                   </div>
 
                   <div className="border border-white/10 rounded-2xl overflow-x-auto overflow-y-auto bg-black/20 max-h-[50vh] sm:max-h-[420px] overscroll-contain touch-auto">
-                    <table className="w-full min-w-[720px] text-right text-xs">
+                    <table className="w-full min-w-[850px] text-right text-xs">
                       <thead className="bg-[#101935] text-white/60 sticky top-0 font-black border-b border-white/10 z-10">
                         <tr>
                           <th className="p-3 text-center w-12">#</th>
-                          <th className="p-3 min-w-[180px]">اسم الطالب (القصاصة)</th>
-                          <th className="p-3 text-center min-w-[170px]">رقم هاتف ولي الأمر (يبدأ بـ 7)</th>
-                          <th className="p-3 text-center min-w-[120px]">كلمة المرور الابتدائية</th>
-                          <th className="p-3 text-center min-w-[140px]">الحالة</th>
+                          <th className="p-3 min-w-[170px]">اسم الطالب (القصاصة)</th>
+                          <th className="p-3 text-center min-w-[130px]">الصف الدراسي</th>
+                          <th className="p-3 text-center min-w-[70px] w-20">الشعبة</th>
+                          <th className="p-3 text-center min-w-[150px]">رقم هاتف ولي الأمر (يبدأ بـ 7)</th>
+                          <th className="p-3 text-center min-w-[110px]">كلمة المرور الابتدائية</th>
+                          <th className="p-3 text-center min-w-[120px]">الحالة</th>
                           <th className="p-3 text-center w-16">إجراء</th>
                         </tr>
                       </thead>
@@ -1541,6 +1666,24 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
                                 value={r.studentName}
                                 onChange={e => handleUpdateRow(r.id, 'studentName', e.target.value)}
                                 className="bg-transparent border-b border-transparent hover:border-white/20 focus:border-emerald-500 outline-none w-full font-bold"
+                              />
+                            </td>
+                            <td className="p-3 text-center">
+                              <input
+                                type="text"
+                                value={r.grade || ''}
+                                placeholder="الصف..."
+                                onChange={e => handleUpdateRow(r.id, 'grade', e.target.value)}
+                                className="bg-transparent text-center border-b border-transparent hover:border-white/20 focus:border-sky-400 outline-none w-full text-xs text-sky-300 font-bold"
+                              />
+                            </td>
+                            <td className="p-3 text-center">
+                              <input
+                                type="text"
+                                value={r.section || ''}
+                                placeholder="الشعبة..."
+                                onChange={e => handleUpdateRow(r.id, 'section', e.target.value)}
+                                className="bg-transparent text-center border-b border-transparent hover:border-white/20 focus:border-amber-400 outline-none w-full text-xs text-amber-300 font-black"
                               />
                             </td>
                             <td className="p-3 text-center font-mono dir-ltr font-bold text-emerald-400">

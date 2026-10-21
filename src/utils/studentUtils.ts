@@ -544,6 +544,8 @@ export const generateStudentCodes = (
 export const exportStudentsToCSV = (generatedCodes: any[]) => {
   const excelData = generatedCodes.map(code => ({
     'اسم الطالب': code.name,
+    'الصف': code.grade || '',
+    'الشعبة': code.section || '',
     'كود الطالب': code.student,
     'كود ولي الأمر': code.parent,
     'الخصم': `${code.discountAmount} د.ع`,
@@ -571,6 +573,7 @@ export const printStudentCards = (generatedCodes: any[], schoolName: string) => 
     const cardsHtml = pageCodes.map((code) => {
       const sName = code.school || code.schoolName || resolvedSchool || 'المدرسة';
       const gName = code.grade || code.stage || code.gradeName || 'غير محدد';
+      const secName = code.section || code.className || code.division || '';
       const stName = code.name || code.studentName || code.fullName || 'طالب';
       const stCode = code.student || code.code || code.studentCode || '—';
       const pCode = code.parent || code.parentCode || '—';
@@ -587,6 +590,7 @@ export const printStudentCards = (generatedCodes: any[], schoolName: string) => 
           justify-content: space-between;
           height: 100%;
           direction: rtl;
+          position: relative;
         ">
           <div>
             <div style="
@@ -601,6 +605,12 @@ export const printStudentCards = (generatedCodes: any[], schoolName: string) => 
             ">
               بَوّابة بيرق - ${sName}
             </div>
+
+            ${(gName !== 'غير محدد' || secName) ? `
+              <span style="position: absolute; top: -10px; left: 14px; background: #0284c7; color: #ffffff; padding: 2px 9px; border-radius: 5px; font-size: 11px; font-weight: 800;">
+                ${[gName !== 'غير محدد' ? gName : '', secName ? `شعبة ${secName}` : ''].filter(Boolean).join(' • ')}
+              </span>
+            ` : ''}
 
             <div style="
               text-align: center;
@@ -625,10 +635,18 @@ export const printStudentCards = (generatedCodes: any[], schoolName: string) => 
             ">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; border-bottom: 1px dashed #cbd5e1; padding-bottom: 4px;">
                 <span style="color: #475569; font-weight: 700;">الصف / المرحلة:</span>
-                <span style="font-weight: 800; color: #1e293b;">${gName}</span>
+                <span style="font-weight: 800; color: #0284c7;">${gName}</span>
               </div>
+              ${secName ? `
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; border-bottom: 1px dashed #cbd5e1; padding-bottom: 4px;">
+                <span style="color: #475569; font-weight: 700;">الشعبة:</span>
+                <span style="font-weight: 800; color: #b45309;">${secName}</span>
+              </div>
+              ` : ''}
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; border-bottom: 1px dashed #cbd5e1; padding-bottom: 4px;">
                 <span style="color: #475569; font-weight: 700;">كود الطالب:</span>
+                <span style="font-family: monospace; font-weight: 900; font-size: 13px; color: #dc2626; direction: ltr;">${stCode}</span>
+              </div>
                 <span style="font-family: monospace; font-weight: 900; font-size: 13px; color: #dc2626; direction: ltr;">${stCode}</span>
               </div>
               <div style="display: flex; justify-content: space-between; align-items: center;">
