@@ -44,10 +44,14 @@ export const generatePDFBlobFromHTML = async (html: string): Promise<Blob> => {
   const parser = new DOMParser();
   const parsedDoc = parser.parseFromString(html, 'text/html');
   const pageNodes = Array.from(parsedDoc.querySelectorAll('.a4-page'));
+  const styleNodes = Array.from(parsedDoc.querySelectorAll('style'));
 
   const container = document.createElement('div');
   container.id = 'bairaq-pdf-silent-container';
-  container.style.cssText = 'position: fixed; left: -9999px; top: 0; width: 794px; background: #ffffff; z-index: -99999; overflow: hidden;';
+  container.style.cssText = 'position: fixed; left: 0; top: 0; width: 794px; background: #ffffff; z-index: -99999; opacity: 0.01; pointer-events: none; overflow: visible;';
+  
+  // Clone style nodes into container
+  styleNodes.forEach(st => container.appendChild(st.cloneNode(true)));
   document.body.appendChild(container);
 
   try {
@@ -63,42 +67,50 @@ export const generatePDFBlobFromHTML = async (html: string): Promise<Blob> => {
 
     if (pageNodes.length > 0) {
       for (let i = 0; i < pageNodes.length; i++) {
-        container.innerHTML = '';
-        container.appendChild(document.importNode(pageNodes[i], true));
-        await new Promise((r) => setTimeout(r, 15));
+        const contentDiv = document.createElement('div');
+        contentDiv.appendChild(document.importNode(pageNodes[i], true));
+        container.appendChild(contentDiv);
+        await new Promise((r) => setTimeout(r, 25));
 
-        const canvas = await html2canvas(container, {
-          scale: 1.25,
+        const canvas = await html2canvas(contentDiv, {
+          scale: 1.3,
           useCORS: true,
           logging: false,
           backgroundColor: '#ffffff',
           windowWidth: 794,
           windowHeight: 1123,
+          scrollX: 0,
+          scrollY: 0,
         });
 
-        const imgData = canvas.toDataURL('image/jpeg', 0.85);
+        const imgData = canvas.toDataURL('image/jpeg', 0.88);
         if (i > 0) pdf.addPage();
         pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
 
-        container.innerHTML = '';
+        contentDiv.remove();
         canvas.width = 0;
         canvas.height = 0;
       }
     } else {
-      container.innerHTML = html;
-      await new Promise((r) => setTimeout(r, 30));
+      const contentDiv = document.createElement('div');
+      contentDiv.innerHTML = html;
+      container.appendChild(contentDiv);
+      await new Promise((r) => setTimeout(r, 35));
 
-      const canvas = await html2canvas(container, {
-        scale: 1.25,
+      const canvas = await html2canvas(contentDiv, {
+        scale: 1.3,
         useCORS: true,
         logging: false,
         backgroundColor: '#ffffff',
         windowWidth: 794,
+        scrollX: 0,
+        scrollY: 0,
       });
 
-      const imgData = canvas.toDataURL('image/jpeg', 0.85);
+      const imgData = canvas.toDataURL('image/jpeg', 0.88);
       const imgHeight = (canvas.height * pdfWidth) / canvas.width;
       pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, Math.min(imgHeight, pdfHeight), undefined, 'FAST');
+      contentDiv.remove();
     }
 
     if (document.body.contains(container)) container.remove();
@@ -112,9 +124,10 @@ export const generatePDFBlobFromHTML = async (html: string): Promise<Blob> => {
 /**
  * Universal Print Function.
  * Triggers native system printing directly (0ms, zero visual modals, zero flickering).
- * - On Mobile Native (Capacitor iOS/Android): Generates PDF and opens native system share/print sheet.
- * - On Web / Mobile Browsers (Chrome, Safari, Edge): Prints silently via off-screen hidden iframe,
- *   directly launching the browser's native print dialog without any screen flicker or blue overlays.
+ * - On Mobile Native (Capacitor iOS/Android) and Mobile Browsers (Chrome, Safari) or Iframes:
+ *   Generates high-fidelity PDF and opens interactive download & native share sheet.
+ * - On Desktop Web (Chrome, Safari, Edge outside iframe):
+ *   Prints silently via off-screen iframe while offering backup PDF download.
  */
 export const printHTML = async (
   html: string,
@@ -124,18 +137,31 @@ export const printHTML = async (
     ? (customFileName.toLowerCase().endsWith('.pdf') ? customFileName : `${customFileName}.pdf`)
     : `Bairaq_Document_${Date.now()}.pdf`;
 
-  // 1. Mobile Native App (Capacitor Android APK / iOS)
-  if (Capacitor.isNativePlatform()) {
+  const isMobile = typeof navigator !== 'undefined' && (
+    /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+    (navigator.maxTouchPoints && navigator.maxTouchPoints > 1)
+  );
+  const isInIframe = typeof window !== 'undefined' && (window.self !== window.top);
+
+  // 1. Mobile Native, Mobile Browsers, or Embedded Iframe (AI Studio preview):
+  // Since hidden iframe print fails silently on mobile and inside iframes, generate PDF & download/share
+  if (Capacitor.isNativePlatform() || isMobile || isInIframe) {
     try {
       const pdfBlob = await generatePDFBlobFromHTML(html);
       await saveOrSharePDF({ output: () => pdfBlob } as any, fileName);
       return;
-    } catch (nativeErr) {
-      console.warn('Native Capacitor direct PDF export failed, falling back to silent iframe:', nativeErr);
+    } catch (err) {
+      console.warn('PDF blob generation failed, falling back to direct HTML file download/share:', err);
+      try {
+        const htmlBlob = new Blob([html], { type: 'text/html;charset=utf-8' });
+        const htmlFileName = fileName.replace(/\.pdf$/i, '.html');
+        await saveAndShareFile(htmlBlob, htmlFileName, 'text/html');
+        return;
+      } catch (e2) {}
     }
   }
 
-  // 2. Web & Mobile Browsers: Completely Silent Offscreen IFrame (Zero UI, No Blue Modals, No Progress Shifts)
+  // 2. Desktop Web (non-mobile, top-level window): Offscreen Hidden IFrame Print
   try {
     const existing = document.getElementById('bairaq-silent-print-frame');
     if (existing) {
@@ -184,7 +210,6 @@ export const printHTML = async (
       setTimeout(triggerPrint, 150);
     } else {
       iframe.onload = () => setTimeout(triggerPrint, 150);
-      // Safety timeout in case onload event was missed
       setTimeout(triggerPrint, 600);
     }
   } catch (err) {

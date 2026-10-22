@@ -5,6 +5,7 @@ import { db, auth } from '../lib/firebase';
 import { collection, query, where, orderBy, getDocs, addDoc, updateDoc, doc, serverTimestamp, onSnapshot, limit } from '../lib/firebase';
 import { realtimeManager } from '../lib/realtimeManager';
 import { staffService } from '../services/staffService';
+import { academicService } from '../services/academicService';
 
 interface StudentLoungeProps {
   onClose: () => void;
@@ -17,6 +18,8 @@ interface StudentLoungeProps {
   teacherAssignedSections?: { name: string; grade: string; studentCount: number; listId?: string }[];
   initialSelectedUser?: any;
   isLocked?: boolean;
+  loungeLockMode?: 'all' | 'students_only';
+  parentTeacherChatLock?: boolean;
 }
 
 interface LoungeMessage {
@@ -44,7 +47,9 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
   teacherData,
   teacherAssignedSections,
   initialSelectedUser,
-  isLocked
+  isLocked,
+  loungeLockMode,
+  parentTeacherChatLock
 }, ref) => {
   const [messages, setMessages] = useState<LoungeMessage[]>([]);
   const [newMessage, setNewMessage] = useState('');
@@ -73,6 +78,134 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
   const sectionDropdownRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const currentUserUid = auth.currentUser?.uid;
+
+  // Real-time Council and Parent-Teacher Chat Locks State
+  const [activeLocks, setActiveLocks] = useState({
+    isLocked: !!isLocked,
+    loungeLockMode: (loungeLockMode || 'all') as 'all' | 'students_only',
+    parentTeacherChatLock: !!parentTeacherChatLock,
+  });
+
+  useEffect(() => {
+    setActiveLocks({
+      isLocked: !!isLocked,
+      loungeLockMode: (loungeLockMode || 'all') as 'all' | 'students_only',
+      parentTeacherChatLock: !!parentTeacherChatLock,
+    });
+  }, [isLocked, loungeLockMode, parentTeacherChatLock]);
+
+  useEffect(() => {
+    if (!schoolId) return;
+    const unsub = academicService.subscribeToSchoolSettings(schoolId, (data) => {
+      if (data) {
+        setActiveLocks({
+          isLocked: !!data.loungeLock,
+          loungeLockMode: (data.loungeLockMode || 'all') as 'all' | 'students_only',
+          parentTeacherChatLock: !!data.parentTeacherChatLock,
+        });
+      }
+    });
+    return () => unsub();
+  }, [schoolId]);
+
+  // Comprehensive lock evaluation
+  const checkChatLockStatus = (): { isBlocked: boolean; reason: string } => {
+    // Admins, managers, super admins always retain communication sovereignty
+    const isAdminUser = 
+      userProfile?.role === 'admin' || 
+      userProfile?.role === 'manager' || 
+      userProfile?.role === 'super_admin' || 
+      userProfile?.isAdmin === true;
+    if (isAdminUser) {
+      return { isBlocked: false, reason: '' };
+    }
+
+    // 1. Parent-Teacher Chat Lock (both directions)
+    if (activeLocks.parentTeacherChatLock) {
+      const targetRole = selectedChatUser?.role || (selectedChatUser?.isTeacher ? 'teacher' : (selectedChatUser?.isParent ? 'parent' : 'student'));
+      const isTargetTeacher = targetRole === 'teacher' || selectedChatUser?.role === 'cadre' || !!selectedChatUser?.isTeacher;
+      const isTargetParent = targetRole === 'parent' || !!selectedChatUser?.isParent;
+
+      if (isParent && isTargetTeacher) {
+        return {
+          isBlocked: true,
+          reason: 'مراسلة أولياء الأمور للأساتذة مقفلة حالياً بتوجيه من الإدارة.'
+        };
+      }
+      if (isTeacher && isTargetParent) {
+        return {
+          isBlocked: true,
+          reason: 'مراسلة الأساتذة لأولياء الأمور مقفلة حالياً بتوجيه من الإدارة.'
+        };
+      }
+    }
+
+    // 2. Council (Lounge) Lock
+    if (activeLocks.isLocked) {
+      // For Students
+      if (!isTeacher && !isParent) {
+        // General Chat Room
+        if (isGeneralChat) {
+          if (activeLocks.loungeLockMode === 'students_only') {
+            return {
+              isBlocked: true,
+              reason: 'غرفة المجلس العامة مقفلة حالياً. يُسمح لك بمراسلة الأساتذة فقط عبر تبويب أساتذتي.'
+            };
+          }
+          return {
+            isBlocked: true,
+            reason: 'المجلس (الدردشة) مغلق حالياً بتوجيه من الإدارة.'
+          };
+        }
+
+        // Direct Conversation
+        if (selectedChatUser) {
+          const targetRole = selectedChatUser?.role || (selectedChatUser?.isTeacher ? 'teacher' : 'student');
+          const isTargetTeacher = targetRole === 'teacher' || selectedChatUser?.role === 'cadre' || !!selectedChatUser?.isTeacher;
+
+          if (!isTargetTeacher) {
+            // Student with Student
+            return {
+              isBlocked: true,
+              reason: 'المحادثة بين الطلاب مقفلة حالياً. يُسمح لك بمراسلة الأساتذة فقط.'
+            };
+          } else {
+            // Student with Teacher
+            if (activeLocks.loungeLockMode === 'all') {
+              return {
+                isBlocked: true,
+                reason: 'المجلس مقفل كلياً حالياً من قبل الإدارة (الطلاب والأساتذة معاً).'
+              };
+            }
+            // If mode is 'students_only', student-to-teacher is ALLOWED
+            return { isBlocked: false, reason: '' };
+          }
+        }
+      }
+
+      // For Teachers messaging students
+      if (isTeacher && !isGeneralChat && selectedChatUser) {
+        const targetRole = selectedChatUser?.role || 'student';
+        const isTargetStudent = targetRole === 'student' && !selectedChatUser?.isTeacher && !selectedChatUser?.isParent;
+        if (isTargetStudent && activeLocks.loungeLockMode === 'all') {
+          return {
+            isBlocked: true,
+            reason: 'المجلس مقفل كلياً حالياً من قبل الإدارة.'
+          };
+        }
+      }
+
+      // For General Chat when mode is 'all'
+      if (isGeneralChat && activeLocks.loungeLockMode === 'all' && !isAdminUser) {
+        return {
+          isBlocked: true,
+          reason: 'المجلس (الدردشة العامة) مغلق حالياً بالكامل من قبل الإدارة.'
+        };
+      }
+    }
+
+    return { isBlocked: false, reason: '' };
+  };
 
   // Grade Normalizer: Matches grades across all sections (e.g., "أول ابتدائي", "اول ابتدائي ب", "اول ابتدائي - أ")
   const getGradeCore = (g?: string | null): string => {
@@ -652,6 +785,13 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
 
 
   const startRecording = async () => {
+    const lockStatus = checkChatLockStatus();
+    if (lockStatus.isBlocked) {
+      setUploadError(lockStatus.reason);
+      setTimeout(() => setUploadError(null), 5000);
+      return;
+    }
+
     try {
       if (typeof navigator === 'undefined' || !navigator.mediaDevices || typeof navigator.mediaDevices.getUserMedia !== 'function') {
         setUploadError('المتصفح لا يدعم تسجيل الصوت أو يتطلب اتصالاً آمناً.');
@@ -725,6 +865,14 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
 
   const uploadVoiceMessage = async (file: File) => {
     if (!auth.currentUser || !currentChatRoomId) return;
+
+    const lockStatus = checkChatLockStatus();
+    if (lockStatus.isBlocked) {
+      setUploadError(lockStatus.reason);
+      setTimeout(() => setUploadError(null), 5000);
+      return;
+    }
+
     setIsUploading(true);
     try {
       const formData = new FormData();
@@ -769,8 +917,9 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (isLocked && !isTeacher && userProfile?.role !== 'admin' && userProfile?.role !== 'manager' && userProfile?.role !== 'super_admin') {
-      setUploadError("الدردشة مقفلة حالياً من قبل الإدارة.");
+    const lockStatus = checkChatLockStatus();
+    if (lockStatus.isBlocked) {
+      setUploadError(lockStatus.reason);
       setTimeout(() => setUploadError(null), 5000);
       return;
     }
@@ -803,8 +952,9 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
     e?.preventDefault();
     if ((!newMessage.trim() && !pendingFile) || !auth.currentUser || !currentChatRoomId) return;
 
-    if (isLocked && !isTeacher && userProfile?.role !== 'admin' && userProfile?.role !== 'manager' && userProfile?.role !== 'super_admin') {
-      setUploadError("الدردشة مقفلة حالياً من قبل الإدارة.");
+    const lockStatus = checkChatLockStatus();
+    if (lockStatus.isBlocked) {
+      setUploadError(lockStatus.reason);
       setTimeout(() => setUploadError(null), 5000);
       return;
     }
@@ -1143,6 +1293,35 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                  <Search size={18} className="absolute right-3 top-3.5 text-white/40" />
               </div>
 
+              {/* Council Lock Banner for Students */}
+              {activeLocks.isLocked && !isTeacher && !isParent && (
+                <div className="p-3.5 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-between gap-3 text-xs mb-2 shadow-md animate-in fade-in duration-200">
+                  <div className="flex items-center gap-2.5 text-amber-200">
+                    <Lock size={16} className="text-amber-400 shrink-0" />
+                    <div>
+                      <p className="font-black text-amber-300">
+                        {activeLocks.loungeLockMode === 'students_only'
+                          ? 'المحادثة بين الطلاب مقفلة حالياً'
+                          : 'المجلس مقفل بالكامل حالياً'}
+                      </p>
+                      <p className="text-[11px] text-white/70">
+                        {activeLocks.loungeLockMode === 'students_only'
+                          ? 'بإمكانك مراسلة الأساتذة فقط، المحادثة بين الطلاب معطلة مؤقتاً.'
+                          : 'تم قفل المجلس بتوجيه من الإدارة.'}
+                      </p>
+                    </div>
+                  </div>
+                  {activeLocks.loungeLockMode === 'students_only' && (
+                    <button
+                      onClick={() => setActiveTab('teachers')}
+                      className="px-3 py-1.5 rounded-xl bg-amber-500 text-black font-black text-xs hover:bg-amber-400 transition-all shrink-0 cursor-pointer shadow-sm"
+                    >
+                      أساتذتي 👨‍🏫
+                    </button>
+                  )}
+                </div>
+              )}
+
               {/* Active Section Filter Notice */}
               {selectedSection !== 'all' && (
                 <div className="flex items-center justify-between px-3 py-2 bg-amber-500/10 border border-amber-500/20 rounded-xl mb-1 text-xs animate-in fade-in duration-200">
@@ -1195,6 +1374,7 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                         key={user.id} 
                       onClick={() => {
                         setSelectedChatUser(user);
+                        setIsGeneralChat(false);
                         setActiveTab('chat');
                       }}
                       className="flex items-center justify-between p-3 bg-white/[0.02] hover:bg-white/5 border border-white/5 rounded-2xl cursor-pointer transition-colors group"
@@ -1255,6 +1435,17 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                  <Search size={18} className="absolute right-3 top-3.5 text-white/40" />
               </div>
 
+              {/* Parent-Teacher Chat Lock Banner for Teachers/Admin */}
+              {activeLocks.parentTeacherChatLock && (
+                <div className="p-3.5 rounded-2xl bg-rose-500/15 border border-rose-500/30 flex items-center gap-2.5 text-xs mb-2 text-rose-200 shadow-md animate-in fade-in duration-200">
+                  <Lock size={16} className="text-rose-400 shrink-0" />
+                  <div>
+                    <p className="font-black text-rose-300">مراسلة أولياء الأمور مقفلة حالياً</p>
+                    <p className="text-[11px] text-white/70">تم تعطيل المراسلة بين أولياء الأمور والأساتذة بتوجيه من الإدارة.</p>
+                  </div>
+                </div>
+              )}
+
               {/* Active Section Filter Notice */}
               {selectedSection !== 'all' && (
                 <div className="flex items-center justify-between px-3 py-2 bg-blue-500/10 border border-blue-500/20 rounded-xl mb-1 text-xs animate-in fade-in duration-200">
@@ -1284,6 +1475,7 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                         key={parent.id} 
                         onClick={() => {
                           setSelectedChatUser({...parent, role: 'parent'});
+                          setIsGeneralChat(false);
                           setActiveTab('chat');
                         }}
                         className="flex items-center justify-between p-3 bg-white/[0.02] hover:bg-white/5 border border-white/5 rounded-2xl cursor-pointer transition-colors group"
@@ -1340,6 +1532,17 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                  />
                  <Search size={18} className="absolute right-3 top-3.5 text-white/40" />
               </div>
+
+              {/* Parent-Teacher Chat Lock Banner for Parents */}
+              {isParent && activeLocks.parentTeacherChatLock && (
+                <div className="p-3.5 rounded-2xl bg-rose-500/15 border border-rose-500/30 flex items-center gap-2.5 text-xs mb-3 text-rose-200 shadow-md animate-in fade-in duration-200">
+                  <Lock size={16} className="text-rose-400 shrink-0" />
+                  <div>
+                    <p className="font-black text-rose-300">مراسلة الكادر التدريسي مقفلة حالياً</p>
+                    <p className="text-[11px] text-white/70">تم تعطيل المراسلة المباشرة مع الأساتذة بتوجيه من إدارة المدرسة.</p>
+                  </div>
+                </div>
+              )}
               
               {(() => {
                 const teacherMatch = (t: any) => {
@@ -1401,6 +1604,7 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                           key={teacher.id} 
                         onClick={() => {
                           setSelectedChatUser({...teacher, role: 'teacher'});
+                          setIsGeneralChat(false);
                           setActiveTab('chat');
                         }}
                         className="flex items-center justify-between p-3 bg-white/[0.02] hover:bg-white/5 border border-white/5 rounded-2xl cursor-pointer transition-colors group"
@@ -1444,7 +1648,7 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
 
       {activeTab === 'chat' && (
         <>
-          {selectedChatUser ? (
+          {(selectedChatUser || isGeneralChat) ? (
              <>
                 <div 
                   ref={scrollRef}
@@ -1596,13 +1800,18 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                             </button>
                         </motion.div>
                     )}
-                    {(isLocked && !isTeacher && userProfile?.role !== 'admin' && userProfile?.role !== 'manager' && userProfile?.role !== 'super_admin') ? (
-                        <div className="w-full flex items-center justify-center bg-red-500/10 rounded-3xl border border-red-500/20 p-3 text-red-400 text-sm font-bold gap-2">
-                            <Lock size={16} />
-                            المجلس (الدردشة) مغلق حالياً من قبل الإدارة
-                        </div>
-                    ) : (
-                    <>
+                    {(() => {
+                        const lockStatus = checkChatLockStatus();
+                        if (lockStatus.isBlocked) {
+                          return (
+                            <div className="w-full flex items-center justify-center bg-red-500/15 rounded-2xl border border-red-500/30 p-3.5 text-red-300 text-xs sm:text-sm font-bold gap-2 text-center shadow-inner">
+                              <Lock size={16} className="text-red-400 shrink-0" />
+                              <span>{lockStatus.reason}</span>
+                            </div>
+                          );
+                        }
+                        return (
+                          <>
                     {/* Pending file preview */}
                     {pendingFile && (
                         <div className="w-full bg-[#1A233A] border border-blue-500/30 rounded-2xl p-2.5 flex items-center justify-between gap-3 shadow-lg">
@@ -1701,7 +1910,8 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
                         )}
                     </form>
                     </>
-                    )}
+                    );
+                    })()}
                 </div>
              </>
           ) : (

@@ -10076,19 +10076,58 @@ async function startServer() {
     }
   });
 
-  // GET /api/auth/parent-upload-history - Retrieve previously uploaded parent Excel logs
+  // GET /api/auth/parent-upload-history - Retrieve previously uploaded parent Excel logs (Strictly School-Isolated)
   app.get('/api/auth/parent-upload-history', async (req, res) => {
     try {
-      const { schoolId } = req.query;
+      const { schoolId, schoolName, branch } = req.query;
+
+      // CRITICAL SECURITY ENFORCEMENT:
+      // If neither schoolId nor schoolName is provided, return empty list immediately to prevent any cross-school data leak!
+      if (!schoolId && !schoolName) {
+        return res.json({ success: true, history: [] });
+      }
+
       const docs = await db
         .select()
         .from(firestore_docs)
         .where(ilike(firestore_docs.path, 'parent_excel_uploads/%'));
 
       let history = docs.map((doc: any) => doc.data).filter(Boolean);
-      if (schoolId) {
-        history = history.filter((h: any) => !h.schoolId || h.schoolId === schoolId);
-      }
+
+      const cleanReqName = schoolName 
+        ? String(schoolName).trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/[ة]/g, 'ه') 
+        : '';
+      const cleanReqId = schoolId 
+        ? String(schoolId).trim().toLowerCase() 
+        : '';
+
+      history = history.filter((h: any) => {
+        const docSchoolId = h.schoolId ? String(h.schoolId).trim().toLowerCase() : '';
+        const docSchoolName = h.schoolName 
+          ? String(h.schoolName).trim().toLowerCase().replace(/[أإآ]/g, 'ا').replace(/[ة]/g, 'ه') 
+          : '';
+
+        let isMatch = false;
+
+        // 1. Match by schoolId
+        if (cleanReqId && docSchoolId && cleanReqId !== 'school1' && docSchoolId !== 'school1') {
+          isMatch = cleanReqId === docSchoolId;
+        }
+
+        // 2. Match by schoolName (normalized)
+        if (!isMatch && cleanReqName && docSchoolName) {
+          isMatch = cleanReqName === docSchoolName || cleanReqName.includes(docSchoolName) || docSchoolName.includes(cleanReqName);
+        }
+
+        if (!isMatch) return false;
+
+        // 3. Match branch if specified (boys / girls)
+        if (branch && h.branch && h.branch !== branch) {
+          return false;
+        }
+
+        return true;
+      });
 
       history.sort((a: any, b: any) => new Date(b.uploadDate || 0).getTime() - new Date(a.uploadDate || 0).getTime());
       res.json({ success: true, history });
@@ -15573,9 +15612,11 @@ app.post('/api/admin/maintenance/purge-cache', async (req, res) => {
     await sqlRaw`ALTER TABLE schools ADD COLUMN IF NOT EXISTS "location" text;`;
     await sqlRaw`ALTER TABLE schools ADD COLUMN IF NOT EXISTS "type" varchar(100);`;
     
-    // Add telegram config columns to school_configs
+    // Add telegram and chat lock config columns to school_configs
     await sqlRaw`ALTER TABLE school_configs ADD COLUMN IF NOT EXISTS "telegram_bot_token" text;`;
     await sqlRaw`ALTER TABLE school_configs ADD COLUMN IF NOT EXISTS "telegram_channels_mapping" jsonb DEFAULT '{}'::jsonb;`;
+    await sqlRaw`ALTER TABLE school_configs ADD COLUMN IF NOT EXISTS "lounge_lock_mode" varchar(50) DEFAULT 'all';`;
+    await sqlRaw`ALTER TABLE school_configs ADD COLUMN IF NOT EXISTS "parent_teacher_chat_lock" boolean DEFAULT false;`;
 
     // Create bairaq_activities table
     await sqlRaw`

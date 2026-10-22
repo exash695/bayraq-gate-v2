@@ -3556,9 +3556,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             initial={{ y: 50, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 50, opacity: 0 }}
-            className="fixed bottom-10 left-6 right-6 z-[200] flex justify-center"
+            className="fixed bottom-10 left-6 right-6 z-[100000] flex justify-center pointer-events-none"
           >
-            <div className={`px-6 py-4 rounded-full shadow-2xl flex items-center gap-3 ${
+            <div className={`px-6 py-4 rounded-full shadow-2xl flex items-center gap-3 pointer-events-auto ${
               toast.type === 'success' ? 'bg-emerald-500 text-white' : 
               toast.type === 'error' ? 'bg-rose-500 text-white' : 
               'bg-blue-500 text-white'

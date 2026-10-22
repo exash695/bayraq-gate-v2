@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   FileSpreadsheet, Upload, UserCheck, Printer, Trash2, Plus, 
@@ -188,23 +188,77 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
   } | null>(null);
   const [isExecutingMatch, setIsExecutingMatch] = useState(false);
   const [isPrintingSlips, setIsPrintingSlips] = useState(false);
+  const [slipsPreview, setSlipsPreview] = useState<{
+    isOpen: boolean;
+    title: string;
+    accounts: ParentAccountRow[];
+  } | null>(null);
 
-  // Load history logs from server and cache
+  // Helper: School-scoped cache key to prevent any cross-school data leak
+  const getSchoolScopedCacheKey = useCallback(() => {
+    const rawSchool = (schoolName || schoolId || 'general_school').trim().toLowerCase().replace(/\s+/g, '_');
+    const branch = adminBranch || 'boys';
+    return `berq_parent_excel_uploads_${rawSchool}_${branch}`;
+  }, [schoolName, schoolId, adminBranch]);
+
+  // Load history logs from server and cache (Strictly School-Isolated)
   const fetchUploadHistory = async () => {
     try {
-      // 1. Try local cache first for instant UI response
-      const cached = localStorage.getItem('berq_parent_excel_uploads_history');
+      const cacheKey = getSchoolScopedCacheKey();
+
+      // 1. Purge legacy global cache that leaked other schools' files
+      try {
+        localStorage.removeItem('berq_parent_excel_uploads_history');
+      } catch {}
+
+      // 2. Try school-scoped local cache first for instant UI response
+      const cached = localStorage.getItem(cacheKey);
       if (cached) {
-        setHistoryLogs(JSON.parse(cached));
+        try {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed)) {
+            // Strictly guarantee every record in cache belongs to this school
+            const filtered = parsed.filter(item => {
+              if (!schoolName) return true;
+              const itemSchool = (item.schoolName || '').trim().toLowerCase();
+              const mySchool = schoolName.trim().toLowerCase();
+              return itemSchool.includes(mySchool) || mySchool.includes(itemSchool);
+            });
+            setHistoryLogs(filtered);
+          }
+        } catch {
+          setHistoryLogs([]);
+        }
+      } else {
+        setHistoryLogs([]);
       }
 
-      // 2. Fetch from backend API
-      const res = await fetch('/api/auth/parent-upload-history');
+      // 3. Fetch from backend API strictly filtered for this school
+      const queryParams = new URLSearchParams();
+      if (schoolId) queryParams.set('schoolId', schoolId);
+      if (schoolName) queryParams.set('schoolName', schoolName);
+      if (adminBranch) queryParams.set('branch', adminBranch);
+
+      const res = await fetch(`/api/auth/parent-upload-history?${queryParams.toString()}`);
       if (res.ok) {
         const data = await res.json();
         if (data.success && Array.isArray(data.history)) {
-          setHistoryLogs(data.history);
-          localStorage.setItem('berq_parent_excel_uploads_history', JSON.stringify(data.history));
+          // Double verify on client side that every entry matches this school
+          const strictlyFiltered = data.history.filter((h: any) => {
+            if (!schoolName && !schoolId) return false;
+            const hSchool = (h.schoolName || '').trim().toLowerCase();
+            const mySchool = (schoolName || '').trim().toLowerCase();
+            if (mySchool && hSchool) {
+              return hSchool.includes(mySchool) || mySchool.includes(hSchool);
+            }
+            if (schoolId && h.schoolId) {
+              return h.schoolId === schoolId;
+            }
+            return false;
+          });
+
+          setHistoryLogs(strictlyFiltered);
+          localStorage.setItem(cacheKey, JSON.stringify(strictlyFiltered));
         }
       }
     } catch (err) {
@@ -216,7 +270,7 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
     if (isOpen) {
       fetchUploadHistory();
     }
-  }, [isOpen]);
+  }, [isOpen, schoolName, schoolId, adminBranch]);
 
   // Handle editing student name inside an expanded history entry
   const handleHistoryNameEdit = (entryId: string, accId: string, newName: string) => {
@@ -261,8 +315,9 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
         body: JSON.stringify(entry)
       });
 
-      // 3. Update local cache
-      localStorage.setItem('berq_parent_excel_uploads_history', JSON.stringify(historyLogs));
+      // 3. Update school-scoped local cache
+      const cacheKey = getSchoolScopedCacheKey();
+      localStorage.setItem(cacheKey, JSON.stringify(historyLogs));
 
       showToast('تم حفظ وتحديث أسماء الطلاب في السجل وجميع الحسابات بنجاح ⚡', 'success');
     } catch (err: any) {
@@ -850,7 +905,8 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
       const historyEntry: ExcelUploadHistoryEntry = {
         id: `upl_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         fileName: uploadedFileName || `ملف_إكسل_${new Date().toLocaleDateString('ar-IQ').replace(/\//g, '-')}.xlsx`,
-        schoolName,
+        schoolName: schoolName || 'مؤسسة بيرق',
+        schoolId: schoolId || 'school1',
         branch: adminBranch,
         totalRowsCount: rows.length,
         validAccountsCount: validRows.length,
@@ -872,7 +928,8 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
 
       const updatedHistory = [historyEntry, ...historyLogs];
       setHistoryLogs(updatedHistory);
-      localStorage.setItem('berq_parent_excel_uploads_history', JSON.stringify(updatedHistory));
+      const cacheKey = getSchoolScopedCacheKey();
+      localStorage.setItem(cacheKey, JSON.stringify(updatedHistory));
 
       logActivity({
         action: 'إنشاء حسابات أولياء أمور إكسل',
@@ -891,14 +948,12 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
     }
   };
 
-  const handlePrintSlips = async (targetAccounts?: ParentAccountRow[]) => {
-    if (isPrintingSlips) return;
-
+  const handlePrintSlips = async (targetAccounts?: ParentAccountRow[], customTitle?: string) => {
     const validRows = (targetAccounts || rows).filter(r => r.status === 'valid');
     let targetRows = validRows.length > 0 ? [...validRows] : [...(targetAccounts || rows)];
 
     if (targetRows.length === 0) {
-      showToast('لا توجد بيانات للطباعة', 'error');
+      showToast('لم يتم العثور على حسابات صالحة للطباعة في هذا الملف', 'error');
       return;
     }
 
@@ -925,10 +980,21 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
       return (a.studentName || '').localeCompare(b.studentName || '', 'ar');
     });
 
+    const resolvedTitle = customTitle || uploadedFileName || 'قصاصات_حسابات_أولياء_الأمور';
+
+    // 1. Immediately launch visual Slips Preview Modal so user gets instant 0ms visual feedback
+    setSlipsPreview({
+      isOpen: true,
+      title: resolvedTitle,
+      accounts: targetRows
+    });
+
+    if (isPrintingSlips) return;
+
     try {
       setIsPrintingSlips(true);
       showToast('جاري تحضير ملف PDF بدقة عالية وشديدة الوضوح...', 'info');
-      await new Promise(r => setTimeout(r, 50));
+      await new Promise(r => setTimeout(r, 60));
 
       // Chunk cards into groups of 8 cards per A4 page for perfect printing
       const cardsPerPage = 8;
@@ -1115,7 +1181,7 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
         </html>
       `;
 
-      await printHTML(fullHtml, `Bairaq_Parent_Slips_${Date.now()}.pdf`);
+      await printHTML(fullHtml, `${resolvedTitle}.pdf`);
       showToast('تم استخراج واستحداث ملف PDF بنجاح! 📄🎉', 'success');
     } catch (err: any) {
       console.error(err);
@@ -1190,7 +1256,8 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
       await fetch(`/api/auth/parent-upload-history/${id}`, { method: 'DELETE' });
       const updated = historyLogs.filter(h => h.id !== id);
       setHistoryLogs(updated);
-      localStorage.setItem('berq_parent_excel_uploads_history', JSON.stringify(updated));
+      const cacheKey = getSchoolScopedCacheKey();
+      localStorage.setItem(cacheKey, JSON.stringify(updated));
       showToast('تم حذف السجل بنجاح', 'success');
     } catch (err) {
       showToast('تعذر حذف السجل من السيرفر', 'error');
@@ -1424,17 +1491,17 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
 
                         <div className="flex items-center gap-1.5 self-end sm:self-auto shrink-0 flex-wrap">
                           <button
-                            onClick={() => handlePrintSlips(entry.accounts)}
+                            onClick={() => handlePrintSlips(entry.accounts, entry.fileName)}
                             disabled={isPrintingSlips}
                             className="px-3 py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer transition-colors disabled:opacity-50"
-                            title="إعادة طباعة قصاصات هذا الملف"
+                            title="معاينة وتحميل وطباعة قصاصات هذا الملف"
                           >
                             {isPrintingSlips ? (
                               <RefreshCw size={14} className="animate-spin text-amber-300" />
                             ) : (
                               <Printer size={14} />
                             )}
-                            <span>طباعة PDF</span>
+                            <span>معاينة وطباعة PDF</span>
                           </button>
 
                           <button
@@ -1932,6 +1999,140 @@ export const ParentBulkAccountsModal: React.FC<ParentBulkAccountsModalProps> = (
                     )}
                   </button>
                 </div>
+              </div>
+
+            </div>
+          </div>
+        )}
+
+        {/* Slips Preview & Instant Print/Download Modal */}
+        {slipsPreview && slipsPreview.isOpen && (
+          <div className="fixed inset-0 z-[10000] flex items-center justify-center p-2 sm:p-4 bg-black/90 backdrop-blur-md animate-in fade-in" dir="rtl">
+            <div className="relative w-full h-full sm:h-[95vh] max-w-5xl bg-[#0c1329] border border-amber-500/30 rounded-2xl sm:rounded-3xl shadow-2xl overflow-hidden flex flex-col text-white">
+              
+              {/* Header */}
+              <div className="p-4 sm:p-5 bg-gradient-to-r from-[#141e3d] to-[#0c1329] border-b border-white/10 flex flex-wrap items-center justify-between gap-3 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                    <Printer size={22} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm sm:text-base font-black text-white flex items-center gap-2">
+                      <span>معاينة وطباعة قصاصات أولياء الأمور</span>
+                      <span className="text-[11px] bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2.5 py-0.5 rounded-full font-bold">
+                        {slipsPreview.accounts.length} قصاصة
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-white/50 font-bold mt-0.5">
+                      مدرسة: {schoolName} • مفرزة حسب الصف والشعبة وجاهزة للطباعة والتوزيع
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  <button
+                    onClick={() => handlePrintSlips(slipsPreview.accounts, slipsPreview.title)}
+                    disabled={isPrintingSlips}
+                    className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs rounded-xl flex items-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer transition-all disabled:opacity-50"
+                  >
+                    {isPrintingSlips ? <RefreshCw size={14} className="animate-spin" /> : <Printer size={14} />}
+                    <span>{isPrintingSlips ? 'جاري التوليد...' : 'تحميل PDF / طباعة 🖨️'}</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleShareWhatsApp(slipsPreview.accounts)}
+                    className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-xl flex items-center gap-1.5 shadow-md cursor-pointer transition-all"
+                    title="مشاركة الكشوف عبر واتساب"
+                  >
+                    <MessageCircle size={14} />
+                    <span className="hidden sm:inline">واتساب</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleShareTelegram(slipsPreview.accounts)}
+                    className="px-3.5 py-2 bg-sky-600 hover:bg-sky-500 text-white font-black text-xs rounded-xl flex items-center gap-1.5 shadow-md cursor-pointer transition-all"
+                    title="مشاركة الكشوف عبر تليجرام"
+                  >
+                    <Send size={14} />
+                    <span className="hidden sm:inline">تليجرام</span>
+                  </button>
+
+                  <button
+                    onClick={() => setSlipsPreview(null)}
+                    className="w-9 h-9 rounded-xl bg-white/10 hover:bg-white/20 text-white flex items-center justify-center cursor-pointer transition-colors"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Slips Cards Preview Grid */}
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6 bg-slate-900/40 space-y-4">
+                <div className="bg-sky-950/30 border border-sky-500/20 p-3 rounded-xl flex items-center gap-2 text-xs text-sky-200 font-bold">
+                  <span>✂️ كل قصاصة مصممة بمقاس دقيق للمطبوعات مع شريط الصف والشعبة وبيانات الدخول كاملة.</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-4">
+                  {slipsPreview.accounts.map((item, idx) => (
+                    <div 
+                      key={item.id || idx}
+                      className="bg-white text-slate-900 rounded-xl p-4 border-2 border-dashed border-slate-400 shadow-md relative flex flex-col justify-between min-h-[200px]"
+                    >
+                      <span className="absolute -top-3 right-4 bg-white px-2 text-[10px] text-slate-500 font-bold border border-slate-300 rounded">
+                        ✂ قص من هنا
+                      </span>
+
+                      <div>
+                        <div className="bg-slate-900 text-amber-400 text-center font-black text-xs py-1 px-2 rounded-md mb-2">
+                          بَوّابة بيرق - مدرسة {schoolName}
+                        </div>
+
+                        {(item.grade || item.section) && (
+                          <div className="flex items-center justify-between gap-2 mb-2">
+                            <span className="bg-sky-600 text-white text-[11px] font-black px-2.5 py-0.5 rounded">
+                              {item.grade || 'الصف غير محدد'}
+                            </span>
+                            <span className="bg-amber-100 text-amber-900 border border-amber-300 text-[11px] font-black px-2.5 py-0.5 rounded">
+                              {item.section ? `شعبة ${item.section}` : 'شعبة —'}
+                            </span>
+                          </div>
+                        )}
+
+                        <div className="text-center text-xs font-black text-slate-900 bg-sky-50 border border-sky-200 py-1.5 px-2 rounded-md mb-2">
+                          إلى ولي أمر الطالب/ة: <span className="text-sky-700 font-black">{item.studentName || 'طالب بدون اسم'}</span>
+                        </div>
+
+                        <div className="bg-slate-50 border border-slate-200 rounded-lg p-2.5 space-y-1.5 text-xs">
+                          <div className="flex justify-between items-center border-b border-dashed border-slate-300 pb-1 font-bold">
+                            <span className="text-slate-600">اسم المستخدم (الهاتف):</span>
+                            <span className="font-mono text-emerald-700 font-black text-sm" style={{ direction: 'ltr' }}>{item.formattedPhone || item.rawPhone}</span>
+                          </div>
+                          <div className="flex justify-between items-center font-bold">
+                            <span className="text-slate-600">كلمة المرور الابتدائية:</span>
+                            <span className="font-mono text-amber-700 font-black tracking-wider text-sm">{item.password}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="text-center text-[10px] text-slate-500 border-t border-slate-200 pt-1.5 mt-2 font-bold">
+                        📱 يرجى تحميل تطبيق (بَوّابة بيرق) وتسجيل الدخول بهذه البيانات.
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="p-3 sm:p-4 bg-[#0d1428] border-t border-white/10 flex items-center justify-between gap-3 shrink-0">
+                <span className="text-xs text-white/50 font-bold">
+                  إجمالي: {slipsPreview.accounts.length} قصاصة جاهزة للتوزيع
+                </span>
+                <button
+                  onClick={() => setSlipsPreview(null)}
+                  className="px-5 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs cursor-pointer transition-colors"
+                >
+                  إغلاق المعاينة
+                </button>
               </div>
 
             </div>

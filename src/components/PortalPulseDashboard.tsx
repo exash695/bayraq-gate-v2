@@ -289,7 +289,14 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
     }
   };
 
-  const handleSaveLocks = async (updates: Partial<{communityLockAll: boolean, communityLockGrades: string[], storiesLock: boolean, loungeLock: boolean}>) => {
+  const handleSaveLocks = async (updates: Partial<{
+    communityLockAll: boolean, 
+    communityLockGrades: string[], 
+    storiesLock: boolean, 
+    loungeLock: boolean,
+    loungeLockMode: 'all' | 'students_only',
+    parentTeacherChatLock: boolean
+  }>) => {
     if (!selectedSchoolId) return;
     
     // Optimistic UI updates
@@ -297,10 +304,12 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
     if (updates.communityLockGrades !== undefined) setCommunityLockGrades(updates.communityLockGrades);
     if (updates.storiesLock !== undefined) setStoriesLock(updates.storiesLock);
     if (updates.loungeLock !== undefined) setLoungeLock(updates.loungeLock);
+    if (updates.loungeLockMode !== undefined) setLoungeLockMode(updates.loungeLockMode);
+    if (updates.parentTeacherChatLock !== undefined) setParentTeacherChatLock(updates.parentTeacherChatLock);
     
     try {
       await academicService.updateSchoolSettings(selectedSchoolId, updates);
-      showToast('تم تحديث إعدادات النشر بنجاح', 'success');
+      showToast('تم تحديث إعدادات القيود والمحادثات بنجاح', 'success');
     } catch (e) {
       console.error("Error saving locks:", e);
       showToast('حدث خطأ أثناء التحديث', 'error');
@@ -381,6 +390,8 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
   const [communityLockGrades, setCommunityLockGrades] = useState<string[]>([]);
   const [storiesLock, setStoriesLock] = useState(false);
   const [loungeLock, setLoungeLock] = useState(false);
+  const [loungeLockMode, setLoungeLockMode] = useState<'all' | 'students_only'>('all');
+  const [parentTeacherChatLock, setParentTeacherChatLock] = useState(false);
 
   useEffect(() => {
     const checkAdmin = async () => {
@@ -617,6 +628,8 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
           setCommunityLockGrades(data.communityLockGrades || []);
           setStoriesLock(data.storiesLock || false);
           setLoungeLock(data.loungeLock || false);
+          setLoungeLockMode(data.loungeLockMode || 'all');
+          setParentTeacherChatLock(data.parentTeacherChatLock || false);
         });
       }
 
@@ -2528,27 +2541,132 @@ export const PortalPulseDashboard: React.FC<PortalPulseDashboardProps> = ({ show
             <div className="glass-card p-6 border-white/5 space-y-6 sticky top-6">
               <h3 className="text-lg font-black text-white flex items-center gap-2 mb-4 border-b border-white/5 pb-4">
                 <Lock className="text-red-400" size={20} />
-                قيود النشر للمنصات (للطلاب)
+                قيود النشر والمحادثات
               </h3>
 
               {/* Sytem Locks */}
-              <div className="space-y-5">
-                {/* 1. Lounge Lock */}
+              <div className="space-y-4">
+                {/* 1. Lounge Lock (المجلس / الدردشة) */}
+                <div className="p-4 bg-black/20 rounded-xl border border-white/5 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-purple-500/20 flex items-center justify-center">
+                        <MessageSquareText className="text-purple-400" size={18} />
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-black text-white">قفل المجلس (الدردشة)</h4>
+                        <p className="text-[10px] text-white/40">
+                          {loungeLock 
+                            ? (loungeLockMode === 'students_only' ? 'محادثة الطلاب مقفلة (مسموح مع الأساتذة فقط)' : 'قفل شامل لجميع محادثات المجلس') 
+                            : 'المجلس مفتوح للجميع'}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleSaveLocks({ loungeLock: !loungeLock })}
+                      className={`relative w-12 h-6 rounded-full transition-colors cursor-pointer ${loungeLock ? 'bg-red-500' : 'bg-white/10'}`}
+                      title={loungeLock ? "إلغاء قفل المجلس" : "تفعيل قفل المجلس"}
+                    >
+                      <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${loungeLock ? 'left-1' : 'left-7'}`} />
+                    </button>
+                  </div>
+
+                  {/* Mode Selector when Lounge is Locked */}
+                  <AnimatePresence>
+                    {loungeLock && (
+                      <motion.div
+                        initial={{ opacity: 0, height: 0 }}
+                        animate={{ opacity: 1, height: 'auto' }}
+                        exit={{ opacity: 0, height: 0 }}
+                        className="pt-3 border-t border-white/10 space-y-2 overflow-hidden"
+                      >
+                        <p className="text-[11px] font-black text-white/70">خيارات قفل المجلس المتاحة:</p>
+                        
+                        <div className="space-y-2">
+                          {/* Option A: Students Only */}
+                          <div
+                            onClick={() => {
+                              setLoungeLockMode('students_only');
+                              handleSaveLocks({ loungeLockMode: 'students_only' });
+                            }}
+                            className={`p-3 rounded-xl border text-right transition-all flex items-start gap-3 cursor-pointer ${
+                              loungeLockMode === 'students_only'
+                                ? 'bg-amber-500/15 border-amber-500/50 text-amber-200 shadow-md shadow-amber-500/10'
+                                : 'bg-black/30 border-white/5 text-white/60 hover:bg-white/5'
+                            }`}
+                          >
+                            <div className={`w-4 h-4 rounded-full mt-0.5 border flex items-center justify-center shrink-0 ${
+                              loungeLockMode === 'students_only' ? 'border-amber-400 bg-amber-400' : 'border-white/30'
+                            }`}>
+                              {loungeLockMode === 'students_only' && <div className="w-1.5 h-1.5 rounded-full bg-black" />}
+                            </div>
+                            <div className="flex-1">
+                              <div className="text-xs font-black flex items-center justify-between">
+                                <span>منع التراسل بين الطلاب فقط</span>
+                                <span className="text-[10px] bg-amber-400/20 text-amber-300 px-2 py-0.5 rounded-full font-bold">
+                                  بين الطلاب والأساتذة فقط
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-white/50 mt-1 leading-relaxed">
+                                قفل الدردشة بين الطلاب وبعضهم البعض، والسماح للطلاب بمحادثة الأساتذة وطرح الأسئلة بحرية.
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Option B: Lock All */}
+                          <div
+                            onClick={() => {
+                              setLoungeLockMode('all');
+                              handleSaveLocks({ loungeLockMode: 'all' });
+                            }}
+                            className={`p-3 rounded-xl border text-right transition-all flex items-start gap-3 cursor-pointer ${
+                              loungeLockMode === 'all'
+                                ? 'bg-red-500/15 border-red-500/50 text-red-200 shadow-md shadow-red-500/10'
+                                : 'bg-black/30 border-white/5 text-white/60 hover:bg-white/5'
+                            }`}
+                          >
+                            <div className={`w-4 h-4 rounded-full mt-0.5 border flex items-center justify-center shrink-0 ${
+                              loungeLockMode === 'all' ? 'border-red-400 bg-red-400' : 'border-white/30'
+                            }`}>
+                              {loungeLockMode === 'all' && <div className="w-1.5 h-1.5 rounded-full bg-black" />}
+                            </div>
+                            <div className="flex-1">
+                              <div className="text-xs font-black flex items-center justify-between">
+                                <span>قفل شامل للمجلس (الاثنين معاً)</span>
+                                <span className="text-[10px] bg-red-500/20 text-red-300 px-2 py-0.5 rounded-full font-bold">
+                                  قفل كلي تام
+                                </span>
+                              </div>
+                              <p className="text-[10px] text-white/50 mt-1 leading-relaxed">
+                                إغلاق المجلس كلياً ومنع الطلاب من إرسال رسائل سواء لزملائهم الطلاب أو للأساتذة.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+                {/* 2. Parent-Teacher Chat Lock (قفل مراسلة أولياء الأمور للأساتذة) */}
                 <div className="flex items-center justify-between p-4 bg-black/20 rounded-xl border border-white/5">
                   <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-xl bg-purple-500/20 flex items-center justify-center">
-                      <MessageSquareText className="text-purple-400" size={18} />
+                    <div className="w-10 h-10 rounded-xl bg-pink-500/20 flex items-center justify-center">
+                      <Heart className="text-pink-400" size={18} />
                     </div>
                     <div>
-                      <h4 className="text-sm font-black text-white">قفل المجلس (الدردشة)</h4>
-                      <p className="text-[10px] text-white/40">منع الطلاب من إرسال رسائل في المجلس</p>
+                      <h4 className="text-sm font-black text-white">قفل مراسلة أولياء الأمور للأساتذة</h4>
+                      <p className="text-[10px] text-white/40">منع أولياء الأمور من محادثة الأساتذة في الدردشة أو العكس</p>
                     </div>
                   </div>
                   <button
-                    onClick={() => handleSaveLocks({ loungeLock: !loungeLock })}
-                    className={`relative w-12 h-6 rounded-full transition-colors ${loungeLock ? 'bg-red-500' : 'bg-white/10'}`}
+                    type="button"
+                    onClick={() => handleSaveLocks({ parentTeacherChatLock: !parentTeacherChatLock })}
+                    className={`relative w-12 h-6 rounded-full transition-colors cursor-pointer ${parentTeacherChatLock ? 'bg-red-500' : 'bg-white/10'}`}
+                    title={parentTeacherChatLock ? "إلغاء قفل مراسلة أولياء الأمور" : "تفعيل قفل مراسلة أولياء الأمور"}
                   >
-                    <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${loungeLock ? 'left-1' : 'left-7'}`} />
+                    <div className={`absolute top-1 w-4 h-4 rounded-full bg-white transition-all ${parentTeacherChatLock ? 'left-1' : 'left-7'}`} />
                   </button>
                 </div>
 

@@ -1802,6 +1802,8 @@ export const PlatformOverlays: React.FC = () => {
             teacherData={teacherData}
             teacherAssignedSections={teacherAssignedSections}
             isLocked={platformLocks.loungeLock}
+            loungeLockMode={platformLocks.loungeLockMode}
+            parentTeacherChatLock={platformLocks.parentTeacherChatLock}
           />
         )}
       </AnimatePresence>

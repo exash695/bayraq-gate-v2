@@ -4744,9 +4744,7 @@ export default function App() {
                 className="fixed inset-0 z-[9999]"
               >
                 <LoadingScreen
-                  videoSrc={
-                    hasSeenOnboarding ? "/short-intro.webm" : "/mascot/sliced_bairaq_sheet5_greeting_hello.mp4"
-                  }
+                  videoSrc="/short-intro.mp4"
                   onFinish={handleSplashFinished}
                 />
               </motion.div>

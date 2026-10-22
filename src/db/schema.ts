@@ -131,6 +131,8 @@ export const school_configs = pgTable("school_configs", {
   communityLockGrades: jsonb("community_lock_grades").default([]),
   storiesLock: boolean("stories_lock").default(false),
   loungeLock: boolean("lounge_lock").default(false),
+  loungeLockMode: varchar("lounge_lock_mode", { length: 50 }).default("all"), // 'all' (قفل شامل) | 'students_only' (منع بين الطلاب فقط مع إتاحة الأساتذة)
+  parentTeacherChatLock: boolean("parent_teacher_chat_lock").default(false), // قفل مراسلة أولياء الأمور للأساتذة أو العكس
   tuitionFee: integer("tuition_fee").default(0),
   discountRates: jsonb("discount_rates").default({}),
   subjects: jsonb("subjects").default({}),

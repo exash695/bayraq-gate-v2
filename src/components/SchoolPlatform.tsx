@@ -249,7 +249,9 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
     communityLockAll: false,
     communityLockGrades: [] as string[],
     storiesLock: false,
-    loungeLock: false
+    loungeLock: false,
+    loungeLockMode: 'all' as 'all' | 'students_only',
+    parentTeacherChatLock: false
   });
 
   const [subjectMapping, setSubjectMapping] = useState<any>(() => {
@@ -269,7 +271,9 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
           communityLockAll: data.communityLockAll || false,
           communityLockGrades: data.communityLockGrades || [],
           storiesLock: data.storiesLock || false,
-          loungeLock: data.loungeLock || false
+          loungeLock: data.loungeLock || false,
+          loungeLockMode: data.loungeLockMode || 'all',
+          parentTeacherChatLock: data.parentTeacherChatLock || false
         });
       }
     });
@@ -8390,10 +8394,10 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
             initial={{ opacity: 0, y: 50 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 50 }}
-            className="fixed bottom-24 left-6 right-6 z-[200] flex justify-center"
+            className="fixed bottom-24 left-6 right-6 z-[100000] flex justify-center pointer-events-none"
           >
             <div
-              className={`px-6 py-4 rounded-full shadow-2xl flex items-center gap-3 ${
+              className={`px-6 py-4 rounded-full shadow-2xl flex items-center gap-3 pointer-events-auto ${
                 toast.type === "success"
                   ? "bg-emerald-500 text-white"
                   : toast.type === "error"
