@@ -153,8 +153,21 @@ export const ProfileDashboard = ({ userProfile, progress, language }: { userProf
                 animate={{ opacity: 1, scale: 1 }}
                 className={`absolute -bottom-4 left-1/2 -translate-x-1/2 px-8 py-2 rounded-full border-2 ${theme.border} ${theme.bg} backdrop-blur-sm z-20 shadow-2xl`}
               >
-                <span className={`text-lg font-black tracking-widest uppercase ${theme.color}`}>
-                  {rankDisplay[currentRank as keyof typeof rankDisplay] || currentRank}
+                <span className={`text-base sm:text-lg font-black tracking-wide uppercase ${theme.color}`}>
+                  {(() => {
+                    const isTeacherRole = userProfile?.role === "teacher" || Boolean(userProfile?.teacherId) || Boolean(userProfile?.specialization) || Boolean(userProfile?.subject);
+                    const isAdminRole = userProfile?.role === "admin" || Boolean(userProfile?.isAdmin);
+                    const isParentRole = userProfile?.role === "parent";
+                    const isDriverRole = userProfile?.role === "driver";
+
+                    if (isTeacherRole) {
+                      return userProfile?.subject ? `أستاذ ${userProfile.subject}` : (userProfile?.specialization ? `أستاذ ${userProfile.specialization}` : 'أستاذ محاضر');
+                    }
+                    if (isAdminRole) return 'إدارة المدرسة';
+                    if (isParentRole) return 'ولي أمر';
+                    if (isDriverRole) return 'سائق حافلة';
+                    return rankDisplay[currentRank as keyof typeof rankDisplay] || currentRank;
+                  })()}
                 </span>
               </motion.div>
             </div>

@@ -166,12 +166,16 @@ export function savePrimaryUserSession(session: Partial<PrimaryUserSession> & { 
 export function clearPrimaryUserSession(): void {
   try {
     localStorage.setItem(LOGGED_OUT_KEY, "true");
+    localStorage.setItem(ACTIVE_SECTION_KEY, "mayadeen");
     localStorage.removeItem(VAULT_KEY);
     localStorage.removeItem(USER_ROLE_KEY);
     localStorage.removeItem(VERIFIED_INFO_KEY);
     localStorage.removeItem(IS_VERIFIED_KEY);
     localStorage.removeItem(SELECTED_SCHOOL_KEY);
-    localStorage.removeItem(ACTIVE_SECTION_KEY);
+    localStorage.removeItem("bayraq_cached_user_profile");
+    localStorage.removeItem("bairaq_cached_auth_user");
+    localStorage.removeItem("bairaq_jwt_token");
+    localStorage.removeItem("s6_selected_student_grade");
   } catch (e) {
     console.warn("[DeviceSessionVault] Error clearing session:", e);
   }

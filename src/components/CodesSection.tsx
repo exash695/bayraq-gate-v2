@@ -21,6 +21,7 @@ import { copyToClipboard } from '../utils/clipboard';
 import { activationCodesService } from '../services/activationCodesService';
 import { ArchiveSection } from './ArchiveSection';
 import { ParentBulkAccountsModal } from './ParentBulkAccountsModal';
+import { ExcelBatchImportModal } from './ExcelBatchImportModal';
 
 interface CodesSectionProps {
   schoolName: string;
@@ -117,6 +118,38 @@ export const CodesSection: React.FC<CodesSectionProps> = ({
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [adminObserverCode, setAdminObserverCode] = useState('');
   const [isParentBulkModalOpen, setIsParentBulkModalOpen] = useState(false);
+  const [isExcelImportModalOpen, setIsExcelImportModalOpen] = useState(false);
+
+  const handleImportBatchToEditor = (batchName: string, grade: string, parsedStudents: any[]) => {
+    setIsAddingStudent(true);
+    setCurrentListName(batchName);
+    if (availableGrades.includes(grade)) {
+      setSelectedGrade(grade);
+    }
+    setBulkStudents(parsedStudents.map(s => ({
+      id: s.id || crypto.randomUUID(),
+      name: s.name,
+      address: s.address || '',
+      gender: s.gender || (adminBranch === 'girls' ? 'female' : 'male'),
+      grade: s.grade || grade,
+      discountType: s.discountType || 'NONE'
+    })));
+    setGeneratedCodes([]);
+  };
+
+  const handleSaveBatchesDirectly = async (newBatches: any[]) => {
+    for (const batch of newBatches) {
+      await onSaveList(batch);
+    }
+    if (setSavedLists) {
+      setSavedLists(prev => {
+        const map = new Map<string, any>();
+        prev.forEach(l => { if (l?.id) map.set(l.id, l); });
+        newBatches.forEach(b => { if (b?.id) map.set(b.id, b); });
+        return Array.from(map.values());
+      });
+    }
+  };
 
   useEffect(() => {
     if (onSubViewChange) {
@@ -816,20 +849,30 @@ export const CodesSection: React.FC<CodesSectionProps> = ({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 w-full lg:w-auto">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 w-full lg:w-auto">
             <button
-              onClick={() => setIsParentBulkModalOpen(true)}
-              className="flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl bg-[#0A0F1D] hover:bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-xs sm:text-sm font-black shadow-lg shadow-emerald-500/5 active:scale-95 transition-all cursor-pointer group"
+              onClick={() => setIsExcelImportModalOpen(true)}
+              className="flex items-center justify-center gap-2 px-3.5 py-3 rounded-xl bg-[#0A0F1D] hover:bg-purple-500/10 text-purple-400 border border-purple-500/30 text-xs sm:text-sm font-black shadow-lg shadow-purple-500/5 active:scale-95 transition-all cursor-pointer group"
             >
-              <div className="w-7 h-7 rounded-lg bg-emerald-500/20 flex items-center justify-center text-emerald-400 group-hover:scale-110 transition-transform shrink-0">
+              <div className="w-7 h-7 rounded-lg bg-purple-500/20 flex items-center justify-center text-purple-400 group-hover:scale-110 transition-transform shrink-0">
                 <FileSpreadsheet size={16} />
               </div>
-              <span className="truncate">إنشاء حسابات أولياء الأمور</span>
+              <span className="truncate">رفع ملف Excel وجبات</span>
+            </button>
+
+            <button
+              onClick={() => setIsParentBulkModalOpen(true)}
+              className="flex items-center justify-center gap-2 px-3.5 py-3 rounded-xl bg-[#0A0F1D] hover:bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 text-xs sm:text-sm font-black shadow-lg shadow-emerald-500/5 active:scale-95 transition-all cursor-pointer group"
+            >
+              <div className="w-7 h-7 rounded-lg bg-emerald-500/20 flex items-center justify-center text-emerald-400 group-hover:scale-110 transition-transform shrink-0">
+                <Users size={16} />
+              </div>
+              <span className="truncate">حسابات أولياء الأمور</span>
             </button>
 
             <button
               onClick={handleGenerateAdminCode}
-              className="flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl bg-[#0A0F1D] hover:bg-[#FFD600]/10 text-[#FFD600] border border-[#FFD600]/30 text-xs sm:text-sm font-black shadow-lg shadow-[#FFD600]/5 active:scale-95 transition-all cursor-pointer group"
+              className="flex items-center justify-center gap-2 px-3.5 py-3 rounded-xl bg-[#0A0F1D] hover:bg-[#FFD600]/10 text-[#FFD600] border border-[#FFD600]/30 text-xs sm:text-sm font-black shadow-lg shadow-[#FFD600]/5 active:scale-95 transition-all cursor-pointer group"
             >
               <div className="w-7 h-7 rounded-lg bg-[#FFD600]/20 flex items-center justify-center text-[#FFD600] group-hover:scale-110 transition-transform shrink-0">
                 <ShieldCheck size={16} />
@@ -847,7 +890,7 @@ export const CodesSection: React.FC<CodesSectionProps> = ({
                 setBulkStudents([{ id: crypto.randomUUID(), name: '', address: '', gender: adminBranch === 'girls' ? 'female' : 'male', grade: selectedGrade }]);
                 setCurrentListName('');
               }}
-              className={`flex items-center justify-center gap-2.5 px-4 py-3 rounded-xl text-xs sm:text-sm font-black shadow-lg active:scale-95 transition-all cursor-pointer group ${
+              className={`flex items-center justify-center gap-2 px-3.5 py-3 rounded-xl text-xs sm:text-sm font-black shadow-lg active:scale-95 transition-all cursor-pointer group ${
                 isAddingStudent 
                   ? 'bg-rose-500/15 text-rose-400 border border-rose-500/40 hover:bg-rose-500/25' 
                   : 'bg-[#0A0F1D] hover:bg-blue-500/10 text-blue-400 border border-blue-500/30 shadow-blue-500/5'
@@ -921,6 +964,28 @@ export const CodesSection: React.FC<CodesSectionProps> = ({
             {!generatedCodes.length ? (
               /* Step 1: Inputting bulk students */
               <>
+                {/* Quick Excel Import Banner */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 bg-gradient-to-r from-purple-500/10 via-blue-500/10 to-transparent border border-purple-500/20 rounded-2xl">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-purple-500/20 flex items-center justify-center text-purple-300 shrink-0">
+                      <FileSpreadsheet size={18} />
+                    </div>
+                    <div>
+                      <span className="text-white text-xs font-black block">لديك ملف إكسل يحتوي الأسماء والوجبات؟</span>
+                      <span className="text-white/40 text-[10px] font-bold">يمكنك الرفع المباشر وتوليد الأكواد لجميع الصفوف والشعب تلقائياً.</span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setIsExcelImportModalOpen(true)}
+                    className="px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-black text-xs shadow-md transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer shrink-0"
+                  >
+                    <FileSpreadsheet size={15} />
+                    <span>رفع ملف Excel وجبات</span>
+                  </button>
+                </div>
+
                 {/* Batch Meta inputs */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3 bg-white/[0.02] p-4 rounded-2xl border border-white/5">
                   <div className="space-y-1.5">
@@ -2082,6 +2147,22 @@ export const CodesSection: React.FC<CodesSectionProps> = ({
         schoolId={schoolId}
         adminBranch={adminBranch}
         showToast={showToast}
+      />
+
+      {/* Excel Batch Import Modal */}
+      <ExcelBatchImportModal
+        isOpen={isExcelImportModalOpen}
+        onClose={() => setIsExcelImportModalOpen(false)}
+        schoolName={schoolName}
+        adminBranch={adminBranch}
+        availableGrades={availableGrades}
+        tuitionFee={tuitionFee}
+        discountRates={discountRates}
+        installmentPlan={installmentPlan}
+        schoolSettings={schoolSettings}
+        showToast={showToast}
+        onImportToEditor={handleImportBatchToEditor}
+        onSaveBatchesDirectly={handleSaveBatchesDirectly}
       />
     </div>
   );

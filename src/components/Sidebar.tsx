@@ -411,10 +411,50 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 )}
               </div>
               <div className="flex flex-col gap-0.5 overflow-hidden">
-                <h2 className="text-white font-bold text-[13px] truncate">{userProfile?.fullName || auth.currentUser?.displayName || (language === 'ar' ? 'فارس منصة بيرق' : 'Knight')}</h2>
-                <div className="px-2 py-[2px] bg-blue-500/10 border border-blue-500/20 rounded-full text-blue-300 text-[9px] font-bold w-fit">
-                  {isDev ? "مطور النظام" : (userProfile?.rank ? rankDisplay[userProfile?.rank as keyof typeof rankDisplay] : t.squire)}
-                </div>
+                <h2 className="text-white font-bold text-[13px] truncate">{userProfile?.fullName || userProfile?.name || auth.currentUser?.displayName || (language === 'ar' ? 'فارس منصة بيرق' : 'Knight')}</h2>
+                {(() => {
+                  const userName = String(userProfile?.fullName || userProfile?.name || auth.currentUser?.displayName || "");
+                  const isTeacherName = /أستاذ|استاذ|معلم|المعلم|دكتور|المحاضر/i.test(userName);
+                  const isTeacherRole = 
+                    userProfile?.role === "teacher" || 
+                    portalType === "teacher" || 
+                    Boolean(userProfile?.teacherId) || 
+                    Boolean(userProfile?.specialization) || 
+                    Boolean(userProfile?.subject) ||
+                    isTeacherName;
+
+                  const isAdminRole = userProfile?.role === "admin" || portalType?.startsWith("admin") || Boolean(userProfile?.isAdmin);
+                  const isParentRole = userProfile?.role === "parent" || portalType === "parent";
+                  const isDriverRole = userProfile?.role === "driver" || portalType === "driver";
+
+                  let badgeText = "طالب فارس";
+                  let badgeStyle = "bg-blue-500/15 border-blue-500/30 text-blue-300";
+
+                  if (isDev) {
+                    badgeText = "مطور المنظومة ⚙️";
+                    badgeStyle = "bg-purple-500/15 border-purple-500/30 text-purple-300";
+                  } else if (isTeacherRole) {
+                    badgeText = userProfile?.subject ? `أستاذ ${userProfile.subject}` : (userProfile?.specialization ? `أستاذ ${userProfile.specialization}` : "أستاذ محاضر 👨‍🏫");
+                    badgeStyle = "bg-amber-500/15 border-amber-500/30 text-amber-300";
+                  } else if (isAdminRole) {
+                    badgeText = "إدارة المدرسة 🏫";
+                    badgeStyle = "bg-[#FFD600]/15 border-[#FFD600]/30 text-[#FFD600]";
+                  } else if (isParentRole) {
+                    badgeText = "ولي أمر 👨‍👩‍👧‍👦";
+                    badgeStyle = "bg-emerald-500/15 border-emerald-500/30 text-emerald-300";
+                  } else if (isDriverRole) {
+                    badgeText = "سائق حافلة 🚌";
+                    badgeStyle = "bg-cyan-500/15 border-cyan-500/30 text-cyan-300";
+                  } else {
+                    badgeText = userProfile?.rank ? (rankDisplay[userProfile?.rank as keyof typeof rankDisplay] || userProfile.rank) : (language === 'ar' ? 'طالب فارس' : t.squire);
+                  }
+
+                  return (
+                    <div className={`px-2.5 py-[2px] border rounded-full text-[9.5px] font-black w-fit ${badgeStyle}`}>
+                      {badgeText}
+                    </div>
+                  );
+                })()}
               </div>
             </div>
           </div>

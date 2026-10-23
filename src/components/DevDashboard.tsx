@@ -52,6 +52,7 @@ interface DevDashboardProps {
   schoolId: string;
   userProfile: any;
   showToast?: (msg: string, type: "success" | "error" | "info") => void;
+  onBack?: () => void;
 }
 
 interface SchoolRecord {
@@ -99,7 +100,7 @@ const iraqRegions: Record<string, string[]> = {
   "السليمانية": ["ثانوية السليمانية النموذجية", "أخرى"]
 };
 
-export default function DevDashboard({ schoolId, userProfile, showToast }: DevDashboardProps) {
+export default function DevDashboard({ schoolId, userProfile, showToast, onBack }: DevDashboardProps) {
   const [schools, setSchools] = useState<SchoolRecord[]>([]);
   const [loadingSchools, setLoadingSchools] = useState(true);
   const [configuringSchoolModules, setConfiguringSchoolModules] = useState<SchoolRecord | null>(null);
@@ -2501,6 +2502,16 @@ export default function DevDashboard({ schoolId, userProfile, showToast }: DevDa
         </div>
         
         <div className="flex items-center gap-2">
+          {onBack && (
+            <button
+              onClick={onBack}
+              className="px-3 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white font-bold text-xs flex items-center gap-1.5 transition-all border border-white/10 cursor-pointer active:scale-95 ml-1"
+              title="العودة للرئيسية"
+            >
+              <ChevronRight size={16} />
+              <span>الرئيسية</span>
+            </button>
+          )}
           <button 
             onClick={async () => {
               triggerToast("جاري إطلاق المزامنة الشاملة وبث التحديثات لكافة الأجهزة...", "info");

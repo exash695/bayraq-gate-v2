@@ -1595,15 +1595,10 @@ export default function App() {
 
   const initializedProfile = useRef(false);
 
-  // Clear the logout flag on clean page entry (new session/tab) to ensure review auto-bypasses login
+  // Session initialization
   useEffect(() => {
-    if (!safeSessionStorage.getItem("s6_session_active")) {
-      safeSessionStorage.setItem("s6_session_active", "true");
-      safeStorage.removeItem("s6_user_logged_out");
-    }
+    safeSessionStorage.setItem("s6_session_active", "true");
   }, []);
-
-  // Auto login removed
 
   // 1. Auth Listener: Solely responsible for user state and instant local hydration
   useEffect(() => {
@@ -1647,6 +1642,13 @@ export default function App() {
 
         setIsSchoolVerified(true);
         safeStorage.setItem("s6_isSchoolVerified", "true");
+      } else {
+        const token = safeStorage.getItem("bairaq_jwt_token");
+        if (!token) {
+          safeStorage.setItem("s6_user_logged_out", "true");
+          setIsSchoolVerified(false);
+          safeStorage.setItem("s6_isSchoolVerified", "false");
+        }
       }
     });
 
@@ -4645,6 +4647,10 @@ export default function App() {
           <DevDashboard 
             schoolId={selectedSchoolId || "global"} 
             userProfile={userProfile} 
+            onBack={() => {
+              setIsSidebarOpen(false);
+              setActiveSection("hub");
+            }}
             showToast={(msg, type) => {
               const toastNotif: AppNotification = {
                 id: Math.random().toString(36).substr(2, 9),
@@ -4892,10 +4898,11 @@ export default function App() {
                   <div className="absolute inset-0 opacity-[0.03] mix-blend-screen bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyMDAiIGhlaWdodD0iMjAwIj48ZmlsdGVyIGlkPSJub2lzZSI+PGZlVHVyYnVsZW5jZSB0eXBlPSJmcmFjdGFsTm9pc2UiIGJhc2VGcmVxdWVuY3k9IjAuODUiIG51bU9jdGF2ZXM9IjMiIHN0aXRjaFRpbGVzPSJzdGl0Y2giLz48L2ZpbHRlcj48cmVjdCB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIiBmaWx0ZXI9InVybCgibm9pc2UpIiBvcGFjaXR5PSIwLjE1Ii8+PC9zdmc+')]"></div>
                 </div>
 
-                {user && portalType !== "driver" && activeSection !== "gate-6" && !isChoosingSchool && (
+                {user && portalType !== "driver" && activeSection !== "gate-6" && activeSection !== "dev-dashboard" && !isChoosingSchool && (
                   <Sidebar
                     activeSection={activeSection}
                     onSelectSection={(section) => {
+                      setIsSidebarOpen(false);
                       if (section === "hub") {
                         handleHomeNavigation();
                       } else {
@@ -4919,7 +4926,7 @@ export default function App() {
                 )}
 
                 <div
-                  className={`relative z-10 flex-1 flex flex-col min-h-screen transition-all duration-300 w-full overflow-x-hidden safe-area-pt ${user && portalType !== "driver" && activeSection !== "school-content" && !isChoosingSchool && isSidebarOpen ? (settings.language === "ar" ? "lg:pr-72" : "lg:pl-72") : ""}`}
+                  className={`relative z-10 flex-1 flex flex-col min-h-screen transition-all duration-300 w-full overflow-x-hidden safe-area-pt ${user && portalType !== "driver" && activeSection !== "school-content" && activeSection !== "dev-dashboard" && !isChoosingSchool && isSidebarOpen ? (settings.language === "ar" ? "lg:pr-72" : "lg:pl-72") : ""}`}
                 >
                   {/* Seasonal Cloud Theme Banner & Ambiance */}
                   {user && portalType !== "driver" && activeSection !== "school-content" && <SeasonalThemeBanner />}

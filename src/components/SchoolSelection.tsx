@@ -351,22 +351,50 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
   const [sheetCode, setSheetCode] = useState<string>('');
   const [sheetError, setSheetError] = useState<string>('');
   const [showNotificationModal, setShowNotificationModal] = useState<boolean>(false);
-  const [isGuidanceDismissed, setIsGuidanceDismissed] = useState<boolean>(false);
+  const [isGuidanceDismissed, setIsGuidanceDismissed] = useState<boolean>(() => {
+    try {
+      return (
+        safeStorage.getItem('s6_mayadeen_guidance_dismissed') === 'true' ||
+        localStorage.getItem('s6_mayadeen_guidance_dismissed') === 'true'
+      );
+    } catch {
+      return false;
+    }
+  });
   const [blockedSchoolNotice, setBlockedSchoolNotice] = useState<{
     name: string;
     type: 'suspended' | 'coming_soon';
     message: string;
   } | null>(null);
 
+  const dismissGuidanceBanner = () => {
+    setIsGuidanceDismissed(true);
+    try {
+      safeStorage.setItem('s6_mayadeen_guidance_dismissed', 'true');
+      localStorage.setItem('s6_mayadeen_guidance_dismissed', 'true');
+    } catch {}
+  };
+
   // Determine if the user's role is already recognized & verified
   const isIdentifiedRole = isRoleRecognized ?? Boolean(
-    isSchoolVerified &&
-    userProfile?.schoolId &&
-    userProfile?.schoolId !== 'general' &&
-    userProfile?.role &&
-    userProfile.role !== 'guest' &&
-    (userProfile?.studentCode || userProfile?.code || userProfile?.teacherId || userProfile?.role === 'admin' || userProfile?.role === 'developer' || userProfile?.isDeveloper)
+    isSchoolVerified ||
+    (userProfile?.role &&
+      userProfile.role !== 'guest' &&
+      userProfile.role !== 'unknown' &&
+      userProfile.role !== 'null') ||
+    userProfile?.schoolId ||
+    isGuidanceDismissed
   );
+
+  useEffect(() => {
+    if (isIdentifiedRole || userProfile?.schoolId || userProfile?.role) {
+      setIsGuidanceDismissed(true);
+      try {
+        safeStorage.setItem('s6_mayadeen_guidance_dismissed', 'true');
+        localStorage.setItem('s6_mayadeen_guidance_dismissed', 'true');
+      } catch {}
+    }
+  }, [isIdentifiedRole, userProfile]);
 
   // Fetch active and suspended schools directly from PostgreSQL internal API
   useEffect(() => {
@@ -698,9 +726,9 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
                       </h3>
                     </div>
                     <button
-                      onClick={() => setIsGuidanceDismissed(true)}
+                      onClick={dismissGuidanceBanner}
                       className="text-white/40 hover:text-white/80 p-0.5 rounded-lg hover:bg-white/5 transition-colors shrink-0"
-                      title="إخفاء مؤقت"
+                      title="إخفاء التوجيه"
                     >
                       <X size={14} />
                     </button>

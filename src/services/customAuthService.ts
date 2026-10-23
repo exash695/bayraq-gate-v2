@@ -373,6 +373,15 @@ class CustomAuthService {
   public async logout() {
     localStorage.removeItem(this.tokenKey);
     localStorage.removeItem(this.cachedUserKey);
+    localStorage.removeItem('bayraq_cached_user_profile');
+    localStorage.removeItem('bairaq_primary_user_session');
+    localStorage.removeItem('s6_verified_student_info');
+    localStorage.removeItem('s6_isSchoolVerified');
+    localStorage.removeItem('s6_selectedSchoolId');
+    localStorage.removeItem('bayraq_user_role');
+    localStorage.removeItem('s6_selected_student_grade');
+    localStorage.setItem('s6_user_logged_out', 'true');
+    localStorage.setItem('s6_activeSection', 'mayadeen');
     this.currentUser = null;
     this.notifyListeners();
   }
