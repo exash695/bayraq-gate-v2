@@ -7783,12 +7783,27 @@ async function startServer() {
 
   // --- سجل النشاطات (Audit Logs) ---
   
-  // جلب سجلات النشاطات
+  // جلب سجلات النشاطات (مفلترة بحسب المدرسة)
   app.get('/api/audit-logs', async (req, res) => {
     try {
-      const { limit: limitVal = 30, offset = 0 } = req.query;
-      const rawLogs = await db.select()
-        .from(audit_logs)
+      const { limit: limitVal = 30, offset = 0, schoolId } = req.query;
+      let query = db.select().from(audit_logs);
+
+      if (schoolId && schoolId !== 'all' && schoolId !== 'undefined' && schoolId !== 'null') {
+        const targetSchool = String(schoolId).trim();
+        const cleanSchool = targetSchool.replace(/-boys$|-girls$/i, '');
+        query = query.where(
+          or(
+            eq(audit_logs.schoolId, targetSchool),
+            eq(audit_logs.schoolId, cleanSchool),
+            ilike(audit_logs.schoolId, `${cleanSchool}%`),
+            eq(audit_logs.targetId, targetSchool),
+            eq(audit_logs.targetId, cleanSchool)
+          )
+        ) as any;
+      }
+
+      const rawLogs = await query
         .orderBy(desc(audit_logs.timestamp))
         .limit(Number(limitVal))
         .offset(Number(offset));
@@ -7842,10 +7857,10 @@ async function startServer() {
 
       const action = logData.action || 'إجراء نظام';
       const details = logData.details || logData.action || '';
-      const targetId = logData.targetId || logData.schoolId || null;
+      const schoolId = logData.schoolId || (req.headers['x-school-id'] as string) || null;
+      const targetId = logData.targetId || schoolId || null;
       const targetName = logData.targetName || null;
-      const targetType = logData.targetType || (logData.schoolId ? 'school' : null);
-      const schoolId = logData.schoolId || null;
+      const targetType = logData.targetType || (schoolId ? 'school' : null);
 
       await db.insert(audit_logs).values({
         id,
@@ -7867,29 +7882,50 @@ async function startServer() {
     }
   });
 
-  // حذف السجلات (مسح شامل أو بحسب الأيام) - يجب أن يسبق :id
+  // حذف السجلات (مسح شامل أو بحسب الأيام) مع عزل المدرسة
   app.delete('/api/audit-logs/old', async (req, res) => {
     try {
       const isAll = req.query.all === 'true' || req.query.scope === 'all' || req.body?.all === true;
       const daysRaw = req.query.days ?? req.body?.days;
       const days = daysRaw !== undefined ? Number(daysRaw) : 30;
+      const schoolId = (req.query.schoolId || req.body?.schoolId) as string | undefined;
+
+      let schoolCondition = undefined;
+      if (schoolId && schoolId !== 'all' && schoolId !== 'undefined' && schoolId !== 'null') {
+        const targetSchool = String(schoolId).trim();
+        const cleanSchool = targetSchool.replace(/-boys$|-girls$/i, '');
+        schoolCondition = or(
+          eq(audit_logs.schoolId, targetSchool),
+          eq(audit_logs.schoolId, cleanSchool),
+          ilike(audit_logs.schoolId, `${cleanSchool}%`),
+          eq(audit_logs.targetId, targetSchool),
+          eq(audit_logs.targetId, cleanSchool)
+        );
+      }
       
       let deleted;
       if (isAll || days <= 0) {
-        // مسح كافة السجلات بالكامل
-        deleted = await db.delete(audit_logs).returning({ id: audit_logs.id });
+        if (schoolCondition) {
+          deleted = await db.delete(audit_logs)
+            .where(schoolCondition)
+            .returning({ id: audit_logs.id });
+        } else {
+          deleted = await db.delete(audit_logs).returning({ id: audit_logs.id });
+        }
         return res.json({ 
           success: true, 
           count: deleted.length, 
-          message: deleted.length > 0 ? `تم مسح كافة السجلات بنجاح (${deleted.length} سجل)` : 'قاعدة السجلات فارغة بالفعل' 
+          message: deleted.length > 0 ? `تم مسح السجلات بنجاح (${deleted.length} سجل)` : 'قاعدة السجلات فارغة بالفعل' 
         });
       } else {
-        // حذف السجلات الأقدم من عدد الأيام المحدد
         const cutoffDate = new Date();
         cutoffDate.setDate(cutoffDate.getDate() - days);
         
+        const dateCondition = lt(audit_logs.timestamp, cutoffDate);
+        const whereCondition = schoolCondition ? and(dateCondition, schoolCondition) : dateCondition;
+
         deleted = await db.delete(audit_logs)
-          .where(lt(audit_logs.timestamp, cutoffDate))
+          .where(whereCondition)
           .returning({ id: audit_logs.id });
         
         return res.json({ 
@@ -7906,14 +7942,32 @@ async function startServer() {
     }
   });
 
-  // نقطة نهاية إضافية لحذف كافة السجلات
+  // نقطة نهاية إضافية لحذف كافة السجلات مع عزل المدرسة
   app.delete('/api/audit-logs', async (req, res) => {
     try {
-      const deleted = await db.delete(audit_logs).returning({ id: audit_logs.id });
+      const schoolId = (req.query.schoolId || req.body?.schoolId) as string | undefined;
+      let deleted;
+      if (schoolId && schoolId !== 'all' && schoolId !== 'undefined' && schoolId !== 'null') {
+        const targetSchool = String(schoolId).trim();
+        const cleanSchool = targetSchool.replace(/-boys$|-girls$/i, '');
+        deleted = await db.delete(audit_logs)
+          .where(
+            or(
+              eq(audit_logs.schoolId, targetSchool),
+              eq(audit_logs.schoolId, cleanSchool),
+              ilike(audit_logs.schoolId, `${cleanSchool}%`),
+              eq(audit_logs.targetId, targetSchool),
+              eq(audit_logs.targetId, cleanSchool)
+            )
+          )
+          .returning({ id: audit_logs.id });
+      } else {
+        deleted = await db.delete(audit_logs).returning({ id: audit_logs.id });
+      }
       res.json({ 
         success: true, 
         count: deleted.length, 
-        message: deleted.length > 0 ? `تم مسح كافة السجلات بنجاح (${deleted.length} سجل)` : 'قاعدة السجلات فارغة بالفعل' 
+        message: deleted.length > 0 ? `تم مسح السجلات بنجاح (${deleted.length} سجل)` : 'قاعدة السجلات فارغة بالفعل' 
       });
     } catch (error: any) {
       console.error('Error clearing all audit logs:', error);

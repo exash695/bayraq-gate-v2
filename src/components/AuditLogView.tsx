@@ -24,9 +24,10 @@ import { printHTML, exportToExcel } from '../lib/exportUtils';
 
 interface AuditLogViewProps {
   showToast: (message: string, type: 'success' | 'error' | 'info') => void;
+  schoolId?: string | null;
 }
 
-export const AuditLogView: React.FC<AuditLogViewProps> = ({ showToast }) => {
+export const AuditLogView: React.FC<AuditLogViewProps> = ({ showToast, schoolId }) => {
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -50,7 +51,7 @@ export const AuditLogView: React.FC<AuditLogViewProps> = ({ showToast }) => {
   const loadLogs = async (limitVal: number) => {
     try {
       setLoading(true);
-      const data = await auditService.fetchLogs(limitVal);
+      const data = await auditService.fetchLogs(limitVal, 0, schoolId);
       setLogs(data);
     } catch (error) {
       console.error("Error loading audit logs:", error);
@@ -61,18 +62,18 @@ export const AuditLogView: React.FC<AuditLogViewProps> = ({ showToast }) => {
 
   useEffect(() => {
     loadLogs(logLimit);
-  }, [logLimit]);
+  }, [logLimit, schoolId]);
 
   const handleExecuteClear = async () => {
     setIsClearing(true);
     try {
       let res: { success: boolean; count?: number; message?: string };
       if (clearScope === 'all') {
-        res = await auditService.clearAllLogs();
+        res = await auditService.clearAllLogs(schoolId);
       } else if (clearScope === '7days') {
-        res = await auditService.clearOldLogs(7);
+        res = await auditService.clearOldLogs(7, schoolId);
       } else {
-        res = await auditService.clearOldLogs(30);
+        res = await auditService.clearOldLogs(30, schoolId);
       }
 
       const deletedCount = res.count ?? 0;

@@ -10,6 +10,34 @@ import { academicService } from "../../services/academicService";
 import { getSubjectsForGrade } from "../../utils/studentUtils";
 import { printHTML, downloadFileFromUrl } from "../../lib/exportUtils";
 
+export const isOralSubject = (subjectName?: string, subjectId?: string): boolean => {
+  if (!subjectName && !subjectId) return false;
+  const str = `${subjectName || ''} ${subjectId || ''}`.toLowerCase();
+  const norm = str
+    .replace(/[\u064B-\u065F\u0640]/g, '')
+    .replace(/[أإآٱ]/g, 'ا')
+    .replace(/ة/g, 'ه')
+    .replace(/ى/g, 'ي')
+    .replace(/\s+/g, '');
+
+  return (
+    norm.includes('عربي') ||
+    norm.includes('عربيه') ||
+    norm.includes('قراءه') ||
+    norm.includes('ادب') ||
+    norm.includes('نصوص') ||
+    norm.includes('مطالعه') ||
+    norm.includes('انكليز') ||
+    norm.includes('انجليز') ||
+    norm.includes('english') ||
+    norm.includes('اسلامي') ||
+    norm.includes('قران') ||
+    norm.includes('فرنس') ||
+    norm.includes('french') ||
+    norm.includes('كردي')
+  );
+};
+
 export const TeacherControlGradesTab: React.FC = () => {
   const { 
     academicLists, 
@@ -52,6 +80,8 @@ export const TeacherControlGradesTab: React.FC = () => {
   
   // Local state for instant and batch grade changes before/during sync
   const [localGradesMap, setLocalGradesMap] = useState<Record<string, Record<string, any>>>({});
+  const [localOralGradesMap, setLocalOralGradesMap] = useState<Record<string, Record<string, any>>>({});
+  const [localWrittenGradesMap, setLocalWrittenGradesMap] = useState<Record<string, Record<string, any>>>({});
   const [dirtyStudents, setDirtyStudents] = useState<Set<string>>(new Set());
 
   // Teacher identification
@@ -154,6 +184,10 @@ export const TeacherControlGradesTab: React.FC = () => {
   }, [allSubjects, teacherRawSubject, selectedSubjectId]);
 
   const activeSubjectObj = allSubjects.find(s => s.id === selectedSubjectId) || allSubjects[0];
+  const periodObj = periods.find(p => p.id === selectedPeriod);
+  const periodTitle = periodObj ? periodObj.name : selectedPeriod;
+  const isCurrentSubjectOral = isOralSubject(activeSubjectObj?.name || teacherRawSubject, activeSubjectObj?.id || selectedSubjectId);
+  const showOralColumns = isCurrentSubjectOral && !periodObj?.isAvg;
 
   // List of students from the academic list
   const rawStudents = useMemo(() => {
@@ -228,14 +262,13 @@ export const TeacherControlGradesTab: React.FC = () => {
     return { text: "راسب", status: "راسب", color: "text-rose-400" };
   };
 
-  // Real-time update handler for a single student grade
+  // Real-time update handler for a single student grade (non-oral subjects or direct total)
   const handleGradeChange = (studentId: string, value: string) => {
     let cleanVal: any = value.trim();
     if (cleanVal !== "") {
       const num = Number(cleanVal);
-      if (isNaN(num)) return;
-      if (num < 0) cleanVal = 0;
-      if (num > 100) cleanVal = 100;
+      if (isNaN(num) || num < 0) return;
+      cleanVal = num;
     } else {
       cleanVal = "";
     }
@@ -258,8 +291,86 @@ export const TeacherControlGradesTab: React.FC = () => {
     setDirtyStudents(prev => new Set(prev).add(studentId));
   };
 
+  // Real-time update handler for oral and written sub-grades with live sum calculation
+  const handleOralWrittenChange = (studentId: string, type: 'oral' | 'written', value: string) => {
+    let cleanVal: any = value.trim();
+    if (cleanVal !== "") {
+      const num = Number(cleanVal);
+      if (isNaN(num) || num < 0) return;
+      cleanVal = num;
+    } else {
+      cleanVal = "";
+    }
+
+    const student = displayedStudents.find((s: any) => (s.id || s.student || s.code || s.name) === studentId);
+
+    const curLocalOral = localOralGradesMap[studentId]?.[selectedPeriod]?.[selectedSubjectId];
+    const curRemoteOral = student?.oralGrades?.[selectedPeriod]?.[selectedSubjectId];
+    const curOral = curLocalOral !== undefined ? curLocalOral : (curRemoteOral !== undefined ? curRemoteOral : "");
+
+    const curLocalWritten = localWrittenGradesMap[studentId]?.[selectedPeriod]?.[selectedSubjectId];
+    const curRemoteWritten = student?.writtenGrades?.[selectedPeriod]?.[selectedSubjectId];
+    const curWritten = curLocalWritten !== undefined ? curLocalWritten : (curRemoteWritten !== undefined ? curRemoteWritten : "");
+
+    const newOral = type === 'oral' ? cleanVal : curOral;
+    const newWritten = type === 'written' ? cleanVal : curWritten;
+
+    let newTotal: any = "";
+    const hasOral = newOral !== "" && !isNaN(Number(newOral));
+    const hasWritten = newWritten !== "" && !isNaN(Number(newWritten));
+
+    if (hasOral && hasWritten) {
+      newTotal = Number(newOral) + Number(newWritten);
+    } else if (hasOral) {
+      newTotal = Number(newOral);
+    } else if (hasWritten) {
+      newTotal = Number(newWritten);
+    } else {
+      newTotal = "";
+    }
+
+    if (type === 'oral') {
+      setLocalOralGradesMap(prev => ({
+        ...prev,
+        [studentId]: {
+          ...(prev[studentId] || {}),
+          [selectedPeriod]: {
+            ...((prev[studentId] || {})[selectedPeriod] || {}),
+            [selectedSubjectId]: cleanVal
+          }
+        }
+      }));
+    } else {
+      setLocalWrittenGradesMap(prev => ({
+        ...prev,
+        [studentId]: {
+          ...(prev[studentId] || {}),
+          [selectedPeriod]: {
+            ...((prev[studentId] || {})[selectedPeriod] || {}),
+            [selectedSubjectId]: cleanVal
+          }
+        }
+      }));
+    }
+
+    setLocalGradesMap(prev => ({
+      ...prev,
+      [studentId]: {
+        ...(prev[studentId] || {}),
+        [selectedPeriod]: {
+          ...((prev[studentId] || {})[selectedPeriod] || {}),
+          [selectedSubjectId]: newTotal
+        }
+      }
+    }));
+
+    setDirtyStudents(prev => new Set(prev).add(studentId));
+  };
+
   // Keyboard navigation refs
   const inputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const oralInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const writtenInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const handleKeyDown = (e: React.KeyboardEvent, index: number) => {
     if (e.key === "Enter" || e.key === "ArrowDown") {
@@ -279,6 +390,48 @@ export const TeacherControlGradesTab: React.FC = () => {
     }
   };
 
+  const handleOralKeyDown = (e: React.KeyboardEvent, index: number, studentId: string) => {
+    if (e.key === "Enter" || e.key === "ArrowDown") {
+      e.preventDefault();
+      const nextStudent = displayedStudents[index + 1];
+      if (nextStudent) {
+        const nextId = nextStudent.id || nextStudent.student || nextStudent.code || nextStudent.name;
+        oralInputRefs.current[nextId]?.focus();
+      }
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      const prevStudent = displayedStudents[index - 1];
+      if (prevStudent) {
+        const prevId = prevStudent.id || prevStudent.student || prevStudent.code || prevStudent.name;
+        oralInputRefs.current[prevId]?.focus();
+      }
+    } else if (e.key === "ArrowLeft") {
+      // In RTL table, ArrowLeft moves forward to the written column
+      writtenInputRefs.current[studentId]?.focus();
+    }
+  };
+
+  const handleWrittenKeyDown = (e: React.KeyboardEvent, index: number, studentId: string) => {
+    if (e.key === "Enter" || e.key === "ArrowDown") {
+      e.preventDefault();
+      const nextStudent = displayedStudents[index + 1];
+      if (nextStudent) {
+        const nextId = nextStudent.id || nextStudent.student || nextStudent.code || nextStudent.name;
+        writtenInputRefs.current[nextId]?.focus();
+      }
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      const prevStudent = displayedStudents[index - 1];
+      if (prevStudent) {
+        const prevId = prevStudent.id || prevStudent.student || prevStudent.code || prevStudent.name;
+        writtenInputRefs.current[prevId]?.focus();
+      }
+    } else if (e.key === "ArrowRight") {
+      // In RTL table, ArrowRight moves back to the oral column
+      oralInputRefs.current[studentId]?.focus();
+    }
+  };
+
   // Central save routine that syncs with Firestore and Admin Panel
   const saveAllGrades = async (showSuccessToast: boolean = true) => {
     if (!currentAcademicList || !selectedSubjectId) return;
@@ -289,8 +442,12 @@ export const TeacherControlGradesTab: React.FC = () => {
       const updatedStudents = (currentAcademicList.students || []).map((s: any) => {
         const stKey = s.id || s.student || s.code || s.name;
         const studentLocal = localGradesMap[stKey];
+        const studentOralLocal = localOralGradesMap[stKey];
+        const studentWrittenLocal = localWrittenGradesMap[stKey];
 
         const existingGrades = { ...(s.grades || {}) };
+        const existingOralGrades = { ...(s.oralGrades || {}) };
+        const existingWrittenGrades = { ...(s.writtenGrades || {}) };
         
         if (studentLocal) {
           Object.keys(studentLocal).forEach(periodKey => {
@@ -303,6 +460,34 @@ export const TeacherControlGradesTab: React.FC = () => {
               periodObj[selectedSubjectId] = Number(subVal);
             }
             existingGrades[periodKey] = periodObj;
+          });
+        }
+
+        if (studentOralLocal) {
+          Object.keys(studentOralLocal).forEach(periodKey => {
+            const periodObj = { ...(existingOralGrades[periodKey] || {}) };
+            const subVal = studentOralLocal[periodKey]?.[selectedSubjectId];
+
+            if (subVal === "" || subVal === undefined || subVal === null) {
+              delete periodObj[selectedSubjectId];
+            } else {
+              periodObj[selectedSubjectId] = Number(subVal);
+            }
+            existingOralGrades[periodKey] = periodObj;
+          });
+        }
+
+        if (studentWrittenLocal) {
+          Object.keys(studentWrittenLocal).forEach(periodKey => {
+            const periodObj = { ...(existingWrittenGrades[periodKey] || {}) };
+            const subVal = studentWrittenLocal[periodKey]?.[selectedSubjectId];
+
+            if (subVal === "" || subVal === undefined || subVal === null) {
+              delete periodObj[selectedSubjectId];
+            } else {
+              periodObj[selectedSubjectId] = Number(subVal);
+            }
+            existingWrittenGrades[periodKey] = periodObj;
           });
         }
 
@@ -347,7 +532,9 @@ export const TeacherControlGradesTab: React.FC = () => {
 
         return {
           ...s,
-          grades: existingGrades
+          grades: existingGrades,
+          oralGrades: existingOralGrades,
+          writtenGrades: existingWrittenGrades
         };
       });
 
@@ -382,7 +569,7 @@ export const TeacherControlGradesTab: React.FC = () => {
       saveAllGrades(false);
     }, 2000);
     return () => clearTimeout(timer);
-  }, [localGradesMap, dirtyStudents]);
+  }, [localGradesMap, localOralGradesMap, localWrittenGradesMap, dirtyStudents]);
 
   // Generator for standalone high-quality official printable HTML
   const generateOfficialPrintHTML = () => {
@@ -391,7 +578,7 @@ export const TeacherControlGradesTab: React.FC = () => {
     const dateStr = new Date().toLocaleDateString('ar-IQ');
 
     const rowsHtml = listStudents.length === 0
-      ? `<tr><td colspan="6" style="text-align: center; padding: 25px; color: #64748b; font-weight: bold;">لا توجد أسماء مسجلة في هذه الشعبة.</td></tr>`
+      ? `<tr><td colspan="${showOralColumns ? '8' : '6'}" style="text-align: center; padding: 25px; color: #64748b; font-weight: bold;">لا توجد أسماء مسجلة في هذه الشعبة.</td></tr>`
       : listStudents.map((st: any, idx: number) => {
           const stId = st.id || st.student || st.code || st.name;
           const localVal = localGradesMap[stId]?.[selectedPeriod]?.[selectedSubjectId];
@@ -402,11 +589,29 @@ export const TeacherControlGradesTab: React.FC = () => {
           const numDisplay = isNum ? val : "-";
           const passColor = isNum && Number(val) >= 50 ? "#059669" : (isNum ? "#dc2626" : "#475569");
 
+          const localOral = localOralGradesMap[stId]?.[selectedPeriod]?.[selectedSubjectId];
+          const remoteOral = st.oralGrades?.[selectedPeriod]?.[selectedSubjectId];
+          const oralVal = localOral !== undefined ? localOral : (remoteOral !== undefined ? remoteOral : "");
+
+          const localWritten = localWrittenGradesMap[stId]?.[selectedPeriod]?.[selectedSubjectId];
+          const remoteWritten = st.writtenGrades?.[selectedPeriod]?.[selectedSubjectId];
+          const writtenVal = localWritten !== undefined ? localWritten : (remoteWritten !== undefined ? remoteWritten : "");
+
+          const gradeColsHtml = showOralColumns
+            ? `
+              <td style="border: 1px solid #1e293b; padding: 7px 6px; text-align: center; font-weight: bold; font-family: monospace; font-size: 13px;">${oralVal !== "" ? oralVal : "-"}</td>
+              <td style="border: 1px solid #1e293b; padding: 7px 6px; text-align: center; font-weight: bold; font-family: monospace; font-size: 13px;">${writtenVal !== "" ? writtenVal : "-"}</td>
+              <td style="border: 1px solid #1e293b; padding: 7px 6px; text-align: center; font-weight: 900; font-family: monospace; font-size: 14px; color: ${passColor};">${numDisplay}</td>
+            `
+            : `
+              <td style="border: 1px solid #1e293b; padding: 7px 6px; text-align: center; font-weight: 900; font-family: monospace; font-size: 14px; color: ${passColor};">${numDisplay}</td>
+            `;
+
           return `
             <tr style="border-bottom: 1px solid #94a3b8;">
               <td style="border: 1px solid #1e293b; padding: 7px 6px; text-align: center; font-weight: bold; font-family: monospace; font-size: 12px;">${idx + 1}</td>
               <td style="border: 1px solid #1e293b; padding: 7px 10px; font-weight: bold; color: #0f172a; text-align: right; font-size: 13px;">${st.name || "طالب"}</td>
-              <td style="border: 1px solid #1e293b; padding: 7px 6px; text-align: center; font-weight: 900; font-family: monospace; font-size: 14px; color: ${passColor};">${numDisplay}</td>
+              ${gradeColsHtml}
               <td style="border: 1px solid #1e293b; padding: 7px 6px; text-align: center; font-weight: bold; color: #1e293b; font-size: 12px;">${rating.text}</td>
               <td style="border: 1px solid #1e293b; padding: 7px 6px; text-align: center; font-weight: bold; color: ${passColor}; font-size: 12px;">${rating.status}</td>
               <td style="border: 1px solid #1e293b; padding: 7px 6px; text-align: center; color: #64748b; font-size: 11px;">${st.notes || ""}</td>
@@ -539,29 +744,6 @@ export const TeacherControlGradesTab: React.FC = () => {
     .sig-space {
       height: 45px;
     }
-    .floating-bar {
-      position: fixed;
-      top: 15px;
-      left: 15px;
-      display: flex;
-      gap: 10px;
-      z-index: 99999;
-    }
-    .floating-btn {
-      background: #0284c7;
-      color: white;
-      border: none;
-      padding: 10px 20px;
-      border-radius: 10px;
-      font-weight: bold;
-      font-size: 13px;
-      cursor: pointer;
-      box-shadow: 0 4px 14px rgba(0,0,0,0.25);
-      font-family: inherit;
-    }
-    .floating-btn:hover {
-      background: #0369a1;
-    }
     @media print {
       body {
         background: white !important;
@@ -573,9 +755,6 @@ export const TeacherControlGradesTab: React.FC = () => {
         padding: 0 !important;
         max-width: 100% !important;
       }
-      .floating-bar {
-        display: none !important;
-      }
       @page {
         size: A4 portrait;
         margin: 10mm;
@@ -584,11 +763,7 @@ export const TeacherControlGradesTab: React.FC = () => {
   </style>
 </head>
 <body>
-  <div class="floating-bar">
-    <button class="floating-btn" onclick="window.print()">📄 تحميل بصيغة PDF</button>
-  </div>
-
-  <div class="print-container">
+  <div class="print-container a4-page">
     <div class="header-box">
       <div class="header-grid">
         <div style="font-size: 11px; font-weight: bold; line-height: 1.5;">
@@ -627,8 +802,14 @@ export const TeacherControlGradesTab: React.FC = () => {
       <thead>
         <tr>
           <th style="width: 35px;">ت</th>
-          <th style="min-width: 190px; text-align: right; padding-right: 10px;">اسم الطالب الرباعي</th>
+          <th style="min-width: 180px; text-align: right; padding-right: 10px;">اسم الطالب الرباعي</th>
+          ${showOralColumns ? `
+          <th style="width: 65px;">الشفوي</th>
+          <th style="width: 65px;">التحريري</th>
+          <th style="width: 75px;">المجموع</th>
+          ` : `
           <th style="width: 80px;">الدرجة (رقماً)</th>
+          `}
           <th style="width: 95px;">التقدير</th>
           <th style="width: 80px;">النتيجة</th>
           <th>الملاحظات</th>
@@ -712,9 +893,6 @@ export const TeacherControlGradesTab: React.FC = () => {
     await downloadFileFromUrl(dataUrl, fileName);
     showToast("تم بدء تحميل ملف الكشف بنجاح! 📄", "success");
   };
-
-  const periodObj = periods.find(p => p.id === selectedPeriod);
-  const periodTitle = periodObj ? periodObj.name : selectedPeriod;
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
@@ -948,6 +1126,31 @@ export const TeacherControlGradesTab: React.FC = () => {
         })}
       </div>
 
+      {/* Informational banner when Oral+Written mode is active */}
+      {showOralColumns && (
+        <div className="bg-gradient-to-r from-cyan-950/60 via-blue-950/40 to-slate-900 border border-cyan-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-cyan-500/20 text-cyan-300 flex items-center justify-center shrink-0 border border-cyan-500/30">
+              <Award className="w-5 h-5 text-cyan-400" />
+            </div>
+            <div>
+              <p className="text-xs sm:text-sm font-bold text-white flex items-center gap-2">
+                <span>رصد درجات مادة {activeSubjectObj?.name || teacherRawSubject} (تقييم شفوي + تحريري)</span>
+                <span className="text-[10px] bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 px-2 py-0.5 rounded-full font-mono">
+                  جمع تلقائي
+                </span>
+              </p>
+              <p className="text-[11px] text-slate-300 mt-0.5">
+                قم بإدخال درجة الشفوي ودرجة التحريري، ويقوم النظام باحتساب وتحديث المجموع النهائي فورياً وحفظه مع السجل الرسمي.
+              </p>
+            </div>
+          </div>
+          <div className="text-[11px] text-cyan-300/80 bg-cyan-950/50 border border-cyan-500/20 px-3 py-1 rounded-xl self-stretch sm:self-auto text-center shrink-0">
+            مفتاح التنقل: استخدم الأسهم للتنقل السريع بين الحقول
+          </div>
+        </div>
+      )}
+
       {/* 5. Main Grades Spreadsheet Table */}
       <div className="bg-[#0A1020]/95 border border-white/10 rounded-3xl overflow-hidden shadow-2xl">
         <div className="overflow-x-auto">
@@ -958,12 +1161,35 @@ export const TeacherControlGradesTab: React.FC = () => {
                 <th className="py-4 px-4 min-w-[220px]">اسم الطالب</th>
                 
                 {/* Active Subject (Editable for Teacher) */}
-                <th className="py-4 px-4 text-center bg-cyan-500/10 text-cyan-300 border-x border-cyan-500/30 min-w-[160px]">
-                  <div className="flex items-center justify-center gap-1.5">
-                    <span>{activeSubjectObj?.name || teacherRawSubject}</span>
-                    <span className="text-[10px] bg-cyan-500/30 text-white px-1.5 py-0.5 rounded font-mono">مادتك</span>
-                  </div>
-                </th>
+                {showOralColumns ? (
+                  <>
+                    <th className="py-4 px-3 text-center bg-cyan-500/10 text-cyan-200 border-r border-cyan-500/30 min-w-[100px]">
+                      <div className="flex flex-col items-center justify-center gap-0.5">
+                        <span className="font-bold text-xs">الشفوي</span>
+                        <span className="text-[10px] text-cyan-300/70 font-normal">رصد مباشر</span>
+                      </div>
+                    </th>
+                    <th className="py-4 px-3 text-center bg-cyan-500/10 text-cyan-200 min-w-[100px]">
+                      <div className="flex flex-col items-center justify-center gap-0.5">
+                        <span className="font-bold text-xs">التحريري</span>
+                        <span className="text-[10px] text-cyan-300/70 font-normal">رصد مباشر</span>
+                      </div>
+                    </th>
+                    <th className="py-4 px-3 text-center bg-cyan-600/20 text-cyan-100 border-l border-cyan-500/30 min-w-[110px]">
+                      <div className="flex flex-col items-center justify-center gap-0.5">
+                        <span className="font-black text-xs">المجموع</span>
+                        <span className="text-[9px] bg-cyan-400/25 text-cyan-200 px-1.5 py-0.2 rounded-full font-bold">حساب تلقائي</span>
+                      </div>
+                    </th>
+                  </>
+                ) : (
+                  <th className="py-4 px-4 text-center bg-cyan-500/10 text-cyan-300 border-x border-cyan-500/30 min-w-[160px]">
+                    <div className="flex items-center justify-center gap-1.5">
+                      <span>{activeSubjectObj?.name || teacherRawSubject}</span>
+                      <span className="text-[10px] bg-cyan-500/30 text-white px-1.5 py-0.5 rounded font-mono">مادتك</span>
+                    </div>
+                  </th>
+                )}
 
                 {/* Other Subjects for Reference (Read-Only) */}
                 {allSubjects
@@ -984,7 +1210,7 @@ export const TeacherControlGradesTab: React.FC = () => {
             <tbody className="divide-y divide-white/5 text-xs sm:text-sm">
               {displayedStudents.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-400">
+                  <td colSpan={showOralColumns ? 9 : 7} className="py-12 text-center text-slate-400">
                     <AlertCircle className="w-8 h-8 text-slate-500 mx-auto mb-2" />
                     <span>لا توجد بيانات طلاب مطابقة للشعبة المحددة.</span>
                   </td>
@@ -997,6 +1223,15 @@ export const TeacherControlGradesTab: React.FC = () => {
                   const localVal = localGradesMap[stId]?.[selectedPeriod]?.[selectedSubjectId];
                   const remoteVal = stu.grades?.[selectedPeriod]?.[selectedSubjectId];
                   const activeGradeVal = localVal !== undefined ? localVal : (remoteVal !== undefined ? remoteVal : "");
+
+                  // Oral and Written sub-values
+                  const localOral = localOralGradesMap[stId]?.[selectedPeriod]?.[selectedSubjectId];
+                  const remoteOral = stu.oralGrades?.[selectedPeriod]?.[selectedSubjectId];
+                  const activeOralVal = localOral !== undefined ? localOral : (remoteOral !== undefined ? remoteOral : "");
+
+                  const localWritten = localWrittenGradesMap[stId]?.[selectedPeriod]?.[selectedSubjectId];
+                  const remoteWritten = stu.writtenGrades?.[selectedPeriod]?.[selectedSubjectId];
+                  const activeWrittenVal = localWritten !== undefined ? localWritten : (remoteWritten !== undefined ? remoteWritten : "");
                   
                   const numVal = activeGradeVal !== "" ? Number(activeGradeVal) : null;
                   const isPassed = numVal !== null && numVal >= 50;
@@ -1028,28 +1263,72 @@ export const TeacherControlGradesTab: React.FC = () => {
                         </div>
                       </td>
 
-                      {/* Primary Grade Input (Teacher's Subject) */}
-                      <td className="py-2.5 px-4 text-center bg-cyan-500/[0.03] border-x border-cyan-500/20">
-                        <div className="flex items-center justify-center gap-2">
-                          <input
-                            ref={(el) => (inputRefs.current[stId] = el)}
-                            type="number"
-                            min="0"
-                            max="100"
-                            value={activeGradeVal}
-                            placeholder="-"
-                            onChange={(e) => handleGradeChange(stId, e.target.value)}
-                            onKeyDown={(e) => handleKeyDown(e, idx)}
-                            className={`w-20 text-center font-mono font-black text-sm sm:text-base py-2 rounded-xl outline-none transition-all border ${
+                      {/* Primary Grade Input(s) (Teacher's Subject) */}
+                      {showOralColumns ? (
+                        <>
+                          {/* Oral Input */}
+                          <td className="py-2.5 px-2 text-center bg-cyan-500/[0.02] border-r border-cyan-500/20">
+                            <input
+                              ref={(el) => (oralInputRefs.current[stId] = el)}
+                              type="number"
+                              min="0"
+                              value={activeOralVal}
+                              placeholder="شفوي"
+                              onChange={(e) => handleOralWrittenChange(stId, 'oral', e.target.value)}
+                              onKeyDown={(e) => handleOralKeyDown(e, idx, stId)}
+                              className="w-18 text-center font-mono font-bold text-xs sm:text-sm py-2 rounded-xl outline-none transition-all border bg-[#0E172E] border-white/20 text-cyan-200 placeholder:text-slate-500 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20"
+                            />
+                          </td>
+
+                          {/* Written Input */}
+                          <td className="py-2.5 px-2 text-center bg-cyan-500/[0.02]">
+                            <input
+                              ref={(el) => (writtenInputRefs.current[stId] = el)}
+                              type="number"
+                              min="0"
+                              value={activeWrittenVal}
+                              placeholder="تحريري"
+                              onChange={(e) => handleOralWrittenChange(stId, 'written', e.target.value)}
+                              onKeyDown={(e) => handleWrittenKeyDown(e, idx, stId)}
+                              className="w-18 text-center font-mono font-bold text-xs sm:text-sm py-2 rounded-xl outline-none transition-all border bg-[#0E172E] border-white/20 text-cyan-200 placeholder:text-slate-500 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20"
+                            />
+                          </td>
+
+                          {/* Auto-summed Total */}
+                          <td className="py-2.5 px-3 text-center bg-cyan-500/[0.05] border-l border-cyan-500/20">
+                            <div className={`inline-flex items-center justify-center min-w-[4rem] py-1.5 px-2.5 rounded-xl font-mono font-black text-xs sm:text-sm border transition-all ${
                               numVal === null
-                                ? "bg-[#0E172E] border-white/20 text-white focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20"
+                                ? "bg-[#0E172E]/60 border-white/10 text-slate-500"
                                 : isPassed
-                                ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-300 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/20"
-                                : "bg-rose-500/10 border-rose-500/40 text-rose-300 focus:border-rose-400 focus:ring-2 focus:ring-rose-400/20"
-                            }`}
-                          />
-                        </div>
-                      </td>
+                                ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-sm shadow-emerald-500/10"
+                                : "bg-rose-500/15 border-rose-500/40 text-rose-300 shadow-sm shadow-rose-500/10"
+                            }`}>
+                              {activeGradeVal !== "" ? activeGradeVal : "-"}
+                            </div>
+                          </td>
+                        </>
+                      ) : (
+                        <td className="py-2.5 px-4 text-center bg-cyan-500/[0.03] border-x border-cyan-500/20">
+                          <div className="flex items-center justify-center gap-2">
+                            <input
+                              ref={(el) => (inputRefs.current[stId] = el)}
+                              type="number"
+                              min="0"
+                              value={activeGradeVal}
+                              placeholder="-"
+                              onChange={(e) => handleGradeChange(stId, e.target.value)}
+                              onKeyDown={(e) => handleKeyDown(e, idx)}
+                              className={`w-20 text-center font-mono font-black text-sm sm:text-base py-2 rounded-xl outline-none transition-all border ${
+                                numVal === null
+                                  ? "bg-[#0E172E] border-white/20 text-white focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/20"
+                                  : isPassed
+                                  ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-300 focus:border-emerald-400 focus:ring-2 focus:ring-emerald-400/20"
+                                  : "bg-rose-500/10 border-rose-500/40 text-rose-300 focus:border-rose-400 focus:ring-2 focus:ring-rose-400/20"
+                              }`}
+                            />
+                          </div>
+                        </td>
+                      )}
 
                       {/* Other subjects in read-only mode */}
                       {allSubjects
@@ -1233,17 +1512,25 @@ export const TeacherControlGradesTab: React.FC = () => {
                   <thead>
                     <tr className="bg-slate-200 border-b border-slate-800 text-slate-950 font-black">
                       <th className="border border-slate-800 p-2 text-center w-10">ت</th>
-                      <th className="border border-slate-800 p-2 min-w-[200px]">اسم الطالب الرباعي</th>
-                      <th className="border border-slate-800 p-2 text-center w-24">الدرجة (رقماً)</th>
-                      <th className="border border-slate-800 p-2 text-center w-28">الدرجة (كتابة)</th>
-                      <th className="border border-slate-800 p-2 text-center w-24">النتيجة</th>
+                      <th className="border border-slate-800 p-2 min-w-[180px]">اسم الطالب الرباعي</th>
+                      {showOralColumns ? (
+                        <>
+                          <th className="border border-slate-800 p-2 text-center w-16">الشفوي</th>
+                          <th className="border border-slate-800 p-2 text-center w-16">التحريري</th>
+                          <th className="border border-slate-800 p-2 text-center w-20">المجموع</th>
+                        </>
+                      ) : (
+                        <th className="border border-slate-800 p-2 text-center w-24">الدرجة (رقماً)</th>
+                      )}
+                      <th className="border border-slate-800 p-2 text-center w-24">التقدير</th>
+                      <th className="border border-slate-800 p-2 text-center w-20">النتيجة</th>
                       <th className="border border-slate-800 p-2 text-center">الملاحظات</th>
                     </tr>
                   </thead>
                   <tbody>
                     {rawStudents.length === 0 ? (
                       <tr>
-                        <td colSpan={6} className="text-center p-6 text-slate-500 font-bold">
+                        <td colSpan={showOralColumns ? 8 : 6} className="text-center p-6 text-slate-500 font-bold">
                           لا توجد أسماء مسجلة في هذه الشعبة.
                         </td>
                       </tr>
@@ -1253,6 +1540,15 @@ export const TeacherControlGradesTab: React.FC = () => {
                         const localVal = localGradesMap[stId]?.[selectedPeriod]?.[selectedSubjectId];
                         const remoteVal = st.grades?.[selectedPeriod]?.[selectedSubjectId];
                         const val = localVal !== undefined ? localVal : (remoteVal !== undefined ? remoteVal : "");
+
+                        const localOral = localOralGradesMap[stId]?.[selectedPeriod]?.[selectedSubjectId];
+                        const remoteOral = st.oralGrades?.[selectedPeriod]?.[selectedSubjectId];
+                        const oralVal = localOral !== undefined ? localOral : (remoteOral !== undefined ? remoteOral : "");
+
+                        const localWritten = localWrittenGradesMap[stId]?.[selectedPeriod]?.[selectedSubjectId];
+                        const remoteWritten = st.writtenGrades?.[selectedPeriod]?.[selectedSubjectId];
+                        const writtenVal = localWritten !== undefined ? localWritten : (remoteWritten !== undefined ? remoteWritten : "");
+
                         const rating = getGradeRating(val);
                         const isNum = val !== "" && !isNaN(Number(val));
 
@@ -1260,9 +1556,23 @@ export const TeacherControlGradesTab: React.FC = () => {
                           <tr key={stId} className="border-b border-slate-400">
                             <td className="border border-slate-800 p-2 text-center font-bold font-mono">{idx + 1}</td>
                             <td className="border border-slate-800 p-2 font-bold text-slate-900">{st.name}</td>
-                            <td className="border border-slate-800 p-2 text-center font-black font-mono text-sm">
-                              {isNum ? val : "-"}
-                            </td>
+                            {showOralColumns ? (
+                              <>
+                                <td className="border border-slate-800 p-2 text-center font-bold font-mono">
+                                  {oralVal !== "" ? oralVal : "-"}
+                                </td>
+                                <td className="border border-slate-800 p-2 text-center font-bold font-mono">
+                                  {writtenVal !== "" ? writtenVal : "-"}
+                                </td>
+                                <td className="border border-slate-800 p-2 text-center font-black font-mono text-sm">
+                                  {isNum ? val : "-"}
+                                </td>
+                              </>
+                            ) : (
+                              <td className="border border-slate-800 p-2 text-center font-black font-mono text-sm">
+                                {isNum ? val : "-"}
+                              </td>
+                            )}
                             <td className="border border-slate-800 p-2 text-center font-bold text-slate-800">
                               {rating.text}
                             </td>

@@ -5838,13 +5838,13 @@ export const ParentPortal: React.FC<ParentPortalProps> = ({
               {/* 1. من اليمين: اسم المدرسة بخط مخصص ليظهر كاملاً بدون اقتطاع */}
               <div className="flex items-center gap-1 text-[#FFD600] font-bold text-[9px] sm:text-[10.5px] md:text-xs tracking-tight drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)] shrink-0 max-w-[42%] min-w-0">
                 <span className="shrink-0 text-[10px]">🏛️</span>
-                <span className="whitespace-nowrap overflow-hidden text-ellipsis">{schoolName || schoolInfo?.schoolName || schoolInfo?.name || "مدرسة اليمامة الابتدائية"}</span>
+                <span className="whitespace-nowrap overflow-hidden text-ellipsis">{schoolName || schoolInfo?.schoolName || schoolInfo?.name || "المدرسة"}</span>
               </div>
 
               {/* 2. في المنتصف: اسم المرحلة بخط مباشر وبدون شارة دائرية */}
               <div className="flex items-center justify-center gap-1 text-emerald-400 font-extrabold text-[9px] sm:text-[10.5px] md:text-xs tracking-tight drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)] shrink-0 whitespace-nowrap">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse shadow-[0_0_6px_rgba(52,211,153,0.8)] shrink-0" />
-                <span>المرحلة: {studentData?.grade || grade || 'سادس علمي'}</span>
+                <span>المرحلة: {studentData?.grade || grade || 'غير محدد'}</span>
               </div>
 
               {/* 3. من اليسار: وسم مجتهد / رتبة الطالب بخط مباشر وبدون شارة دائرية */}

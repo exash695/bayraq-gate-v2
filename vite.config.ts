@@ -108,8 +108,7 @@ export default defineConfig(({ mode }) => {
           ],
         },
         devOptions: {
-          enabled: true,
-          type: 'module',
+          enabled: false,
         },
       }),
     ],
@@ -117,6 +116,7 @@ export default defineConfig(({ mode }) => {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
     },
     resolve: {
+      dedupe: ['react', 'react-dom'],
       alias: {
         '@': path.resolve('.'),
         'firebase/app': path.resolve('src/lib/firebase.ts'),
@@ -124,6 +124,9 @@ export default defineConfig(({ mode }) => {
         'firebase/firestore': path.resolve('src/lib/firebase.ts'),
         'firebase/storage': path.resolve('src/lib/firebase.ts'),
       },
+    },
+    optimizeDeps: {
+      include: ['react', 'react-dom', 'motion/react', 'lucide-react'],
     },
     build: {
       chunkSizeWarningLimit: 1200,

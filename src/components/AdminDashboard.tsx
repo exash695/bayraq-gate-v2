@@ -3154,7 +3154,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           {!isTabDisabled('audit') && resolvedActiveTab === 'audit' && (
             <motion.div key="audit-tab-fixed" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <AuditLogView showToast={showToast} />
+              <AuditLogView showToast={showToast} schoolId={selectedSchoolId} />
             </motion.div>
           )}
 

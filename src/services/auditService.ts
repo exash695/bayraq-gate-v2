@@ -8,12 +8,17 @@ export interface AuditLog {
   targetId?: string;
   targetName?: string;
   targetType?: string;
+  schoolId?: string | null;
   timestamp: any;
 }
 
 export const auditService = {
-  fetchLogs: async (limit: number = 30, offset: number = 0) => {
-    const response = await fetch(`/api/audit-logs?limit=${limit}&offset=${offset}`);
+  fetchLogs: async (limit: number = 30, offset: number = 0, schoolId?: string | null) => {
+    let url = `/api/audit-logs?limit=${limit}&offset=${offset}`;
+    if (schoolId && schoolId !== 'all') {
+      url += `&schoolId=${encodeURIComponent(schoolId)}`;
+    }
+    const response = await fetch(url);
     if (!response.ok) throw new Error('Failed to fetch audit logs');
     const data = await response.json();
     return data.logs as AuditLog[];
@@ -40,8 +45,12 @@ export const auditService = {
     return await response.json();
   },
 
-  clearOldLogs: async (days: number = 30) => {
-    const response = await fetch(`/api/audit-logs/old?days=${days}`, {
+  clearOldLogs: async (days: number = 30, schoolId?: string | null) => {
+    let url = `/api/audit-logs/old?days=${days}`;
+    if (schoolId && schoolId !== 'all') {
+      url += `&schoolId=${encodeURIComponent(schoolId)}`;
+    }
+    const response = await fetch(url, {
       method: 'DELETE'
     });
     if (!response.ok) {
@@ -51,8 +60,12 @@ export const auditService = {
     return await response.json() as { success: boolean; count?: number; message?: string };
   },
 
-  clearAllLogs: async () => {
-    const response = await fetch('/api/audit-logs/old?all=true', {
+  clearAllLogs: async (schoolId?: string | null) => {
+    let url = `/api/audit-logs/old?all=true`;
+    if (schoolId && schoolId !== 'all') {
+      url += `&schoolId=${encodeURIComponent(schoolId)}`;
+    }
+    const response = await fetch(url, {
       method: 'DELETE'
     });
     if (!response.ok) {

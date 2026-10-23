@@ -1211,3 +1211,5 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
     </div>
   );
 };
+
+export default SchoolSelection;

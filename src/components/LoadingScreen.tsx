@@ -22,19 +22,32 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
   // Fallback loader state if video fails or is disabled
   const [progress, setProgress] = useState(15);
   const [showDirectButton, setShowDirectButton] = useState(false);
-  
-  const hasFinishedRef = useRef(false);
+
+  const finishedRef = useRef(false);
 
   const handleFinish = useCallback(() => {
-    if (hasFinishedRef.current) return;
-    hasFinishedRef.current = true;
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    if (videoRef.current) {
+      try {
+        videoRef.current.pause();
+      } catch (err) {}
+    }
     if (onFinish) {
       onFinish();
     }
   }, [onFinish]);
 
+  const handleSkip = useCallback((e?: React.SyntheticEvent) => {
+    if (e) {
+      e.stopPropagation();
+    }
+    handleFinish();
+  }, [handleFinish]);
+
   // Attempt to play video on mount
   useEffect(() => {
+    finishedRef.current = false;
     if (videoSrc === 'none') {
       setVideoFailed(true);
       return;
@@ -43,10 +56,10 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
     const videoEl = videoRef.current;
     if (!videoEl) return;
 
-    // Failsafe timer: the user requested a 5-second video, so failsafe at 5.5s
+    // Failsafe timer: video duration is 4 seconds, so failsafe at 4.2s max
     const failsafeTimer = setTimeout(() => {
       handleFinish();
-    }, 5500);
+    }, 4200);
 
     const playPromise = videoEl.play();
     if (playPromise !== undefined) {
@@ -117,7 +130,10 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
     >
       {/* 1. Fullscreen Video Splash (Replaces blue screen) */}
       {!videoFailed && (
-        <div className="relative w-full h-full flex items-center justify-center bg-black">
+        <div 
+          onClick={handleSkip}
+          className="relative w-full h-full flex items-center justify-center bg-black cursor-pointer"
+        >
           <video
             ref={videoRef}
             playsInline
@@ -127,10 +143,16 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
             className="w-full h-full object-cover sm:object-contain bg-black"
             onLoadedData={() => setIsVideoLoaded(true)}
             onPlaying={() => setHasStartedPlaying(true)}
+            onTimeUpdate={() => {
+              if (videoRef.current && videoRef.current.currentTime >= 3.8) {
+                handleFinish();
+              }
+            }}
             onEnded={handleFinish}
             onError={() => {
               console.warn('Video failed to load, falling back to logo loader');
               setVideoFailed(true);
+              setTimeout(handleFinish, 600);
             }}
           >
             <source src={videoSrc} type="video/mp4" />
@@ -145,30 +167,34 @@ export const LoadingScreen: React.FC<LoadingScreenProps> = ({
             {/* Skip Button (تخطي) */}
             <button
               type="button"
-              onClick={handleFinish}
-              className="pointer-events-auto absolute start-4 top-4 z-40 px-3.5 py-1.5 rounded-full bg-black/60 hover:bg-black/80 text-white/90 hover:text-white text-xs font-bold backdrop-blur-md border border-white/20 transition-all flex items-center gap-1 cursor-pointer shadow-lg active:scale-95"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleFinish();
+              }}
+              className="pointer-events-auto absolute start-4 top-4 z-50 px-4 py-2 rounded-full bg-black/75 hover:bg-black/90 active:bg-black text-white text-xs font-black backdrop-blur-md border border-white/30 transition-all flex items-center gap-1.5 cursor-pointer shadow-xl active:scale-95"
               style={{ top: 'calc(max(env(safe-area-inset-top, 0px), 16px) + 8px)' }}
               title="تخطي الفيديو والدخول فوراً"
             >
               <span>تخطي</span>
-              <ChevronLeft size={14} />
+              <ChevronLeft size={16} />
             </button>
 
             {/* Mute / Unmute Toggle */}
             <button
               type="button"
-              onClick={() => {
+              onClick={(e) => {
+                e.stopPropagation();
                 const videoEl = videoRef.current;
                 if (videoEl) {
                   videoEl.muted = !isMuted;
                   setIsMuted(!isMuted);
                 }
               }}
-              className="pointer-events-auto absolute end-4 top-4 z-40 w-8 h-8 rounded-full bg-black/60 hover:bg-black/80 text-white/90 hover:text-white backdrop-blur-md border border-white/20 transition-all flex items-center justify-center cursor-pointer shadow-lg active:scale-95"
+              className="pointer-events-auto absolute end-4 top-4 z-50 w-9 h-9 rounded-full bg-black/75 hover:bg-black/90 active:bg-black text-white backdrop-blur-md border border-white/30 transition-all flex items-center justify-center cursor-pointer shadow-xl active:scale-95"
               style={{ top: 'calc(max(env(safe-area-inset-top, 0px), 16px) + 8px)' }}
               title={isMuted ? "تشغيل الصوت" : "كتم الصوت"}
             >
-              {isMuted ? <VolumeX size={15} /> : <Volume2 size={15} />}
+              {isMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
             </button>
           </div>
         </div>

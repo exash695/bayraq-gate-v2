@@ -157,7 +157,8 @@ import {
   Award,
   Megaphone,
   LayoutGrid,
-  GraduationCap
+  GraduationCap,
+  Key
 } from "lucide-react";
 import { LoadingScreen } from "./components/LoadingScreen";
 import { saveAccessCode } from "./lib/savedAccessCodes";
@@ -168,30 +169,31 @@ import { schoolService, SchoolRecord } from "./services/schoolService";
 import { STUDENT_REGISTRY } from "./lib/studentRegistry";
 import { NetworkStatusListener } from "./components/NetworkStatusListener";
 import { PWAInstallButton } from "./components/PWAInstallButton";
+import { lazyWithRetry } from "./utils/lazyWithRetry";
 
-// Fast on-demand chunking for large dashboard modules
-const WelcomeIntroScreen = React.lazy(() => import("./components/WelcomeIntroScreen").then(m => ({ default: m.WelcomeIntroScreen })));
-const ProfileSetup = React.lazy(() => import("./components/ProfileSetup").then(m => ({ default: m.ProfileSetup })));
-const DualArena = React.lazy(() => import("./components/DualArena").then(m => ({ default: m.DualArena })));
-const BayraqGateway = React.lazy(() => import("./components/BayraqGateway").then(m => ({ default: m.BayraqGateway })));
-const SixthAcademyPro = React.lazy(() => import("./components/SixthAcademyPro").then(m => ({ default: m.SixthAcademyPro })));
-const SchoolSelection = React.lazy(() => import("./components/SchoolSelection").then(m => ({ default: m.SchoolSelection })));
-const SchoolPlatform = React.lazy(() => import("./components/SchoolPlatform").then(m => ({ default: m.SchoolPlatform })));
-const AIEnhancedRadar = React.lazy(() => import("./components/AIEnhancedRadar").then(m => ({ default: m.AIEnhancedRadar })));
-const StudentLounge = React.lazy(() => import("./components/StudentLounge").then(m => ({ default: m.StudentLounge })));
-const SchoolContent = React.lazy(() => import("./components/SchoolContent").then(m => ({ default: m.SchoolContent })));
-const SchoolAccessGate = React.lazy(() => import("./components/SchoolAccessGate").then(m => ({ default: m.SchoolAccessGate })));
-const BayraqAcademyHub = React.lazy(() => import("./components/BayraqAcademyHub").then(m => ({ default: m.BayraqAcademyHub })));
-const ParentPortal = React.lazy(() => import("./components/ParentPortal").then(m => ({ default: m.ParentPortal })));
-const AdminDashboard = React.lazy(() => import("./components/AdminDashboard").then(m => ({ default: m.AdminDashboard })));
-const AdminHomeDashboard = React.lazy(() => import("./components/AdminHomeDashboard").then(m => ({ default: m.AdminHomeDashboard })));
-const DriverDashboard = React.lazy(() => import("./components/Transport/DriverDashboard").then(m => ({ default: m.DriverDashboard })));
-const DriverPortal = React.lazy(() => import("./components/Transport/DriverPortal").then(m => ({ default: m.DriverPortal })));
-const OnboardingCarousel = React.lazy(() => import("./components/OnboardingCarousel").then(m => ({ default: m.OnboardingCarousel })));
-const RoleSelectionModal = React.lazy(() => import("./components/RoleSelectionModal").then(m => ({ default: m.RoleSelectionModal })));
-const ReceiptVerification = React.lazy(() => import("./components/ReceiptVerification").then(m => ({ default: m.ReceiptVerification })));
-const GlobalAnnouncementsPopup = React.lazy(() => import("./components/GlobalAnnouncementsPopup").then(m => ({ default: m.GlobalAnnouncementsPopup })));
-const SystemDialogsModal = React.lazy(() => import("./components/SystemDialogsModal").then(m => ({ default: m.SystemDialogsModal })));
+// Fast resilient on-demand chunking for large dashboard modules
+const WelcomeIntroScreen = lazyWithRetry(() => import("./components/WelcomeIntroScreen"), "WelcomeIntroScreen");
+const ProfileSetup = lazyWithRetry(() => import("./components/ProfileSetup"), "ProfileSetup");
+const DualArena = lazyWithRetry(() => import("./components/DualArena"), "DualArena");
+const BayraqGateway = lazyWithRetry(() => import("./components/BayraqGateway"), "BayraqGateway");
+const SixthAcademyPro = lazyWithRetry(() => import("./components/SixthAcademyPro"), "SixthAcademyPro");
+import SchoolSelection from "./components/SchoolSelection";
+const SchoolPlatform = lazyWithRetry(() => import("./components/SchoolPlatform"), "SchoolPlatform");
+const AIEnhancedRadar = lazyWithRetry(() => import("./components/AIEnhancedRadar"), "AIEnhancedRadar");
+const StudentLounge = lazyWithRetry(() => import("./components/StudentLounge"), "StudentLounge");
+const SchoolContent = lazyWithRetry(() => import("./components/SchoolContent"), "SchoolContent");
+const SchoolAccessGate = lazyWithRetry(() => import("./components/SchoolAccessGate"), "SchoolAccessGate");
+const BayraqAcademyHub = lazyWithRetry(() => import("./components/BayraqAcademyHub"), "BayraqAcademyHub");
+const ParentPortal = lazyWithRetry(() => import("./components/ParentPortal"), "ParentPortal");
+const AdminDashboard = lazyWithRetry(() => import("./components/AdminDashboard"), "AdminDashboard");
+const AdminHomeDashboard = lazyWithRetry(() => import("./components/AdminHomeDashboard"), "AdminHomeDashboard");
+const DriverDashboard = lazyWithRetry(() => import("./components/Transport/DriverDashboard"), "DriverDashboard");
+const DriverPortal = lazyWithRetry(() => import("./components/Transport/DriverPortal"), "DriverPortal");
+const OnboardingCarousel = lazyWithRetry(() => import("./components/OnboardingCarousel"), "OnboardingCarousel");
+const RoleSelectionModal = lazyWithRetry(() => import("./components/RoleSelectionModal"), "RoleSelectionModal");
+const ReceiptVerification = lazyWithRetry(() => import("./components/ReceiptVerification"), "ReceiptVerification");
+const GlobalAnnouncementsPopup = lazyWithRetry(() => import("./components/GlobalAnnouncementsPopup"), "GlobalAnnouncementsPopup");
+const SystemDialogsModal = lazyWithRetry(() => import("./components/SystemDialogsModal"), "SystemDialogsModal");
 
 const FastRouteFallback: React.FC = () => (
   <div className="flex-1 flex flex-col items-center justify-center p-12 min-h-[50vh] text-center" dir="rtl">
@@ -369,16 +371,34 @@ export default function App() {
 
   const [authReady, setAuthReady] = useState(true);
 
-  const [splashFinished, setSplashFinished] = useState(true);
+  // Unified controller for 4-second short-intro video (initial open + returning from other apps)
+  const [showIntroVideo, setShowIntroVideo] = useState(true);
+  const lastHiddenTimeRef = useRef<number | null>(null);
 
-  // Failsafe: ensure splash and auth readiness complete within 350ms max
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setAuthReady(true);
-      setSplashFinished(true);
-    }, 350);
-    return () => clearTimeout(timer);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        // Record timestamp when leaving to Facebook or other apps
+        lastHiddenTimeRef.current = Date.now();
+      } else if (document.visibilityState === 'visible') {
+        if (lastHiddenTimeRef.current !== null) {
+          const timeAway = Date.now() - lastHiddenTimeRef.current;
+          lastHiddenTimeRef.current = null;
+          // If away for more than 2 seconds (actually switched apps)
+          if (timeAway > 2000) {
+            setShowIntroVideo(true);
+          }
+        }
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
+
   const [hasSeenOnboarding, setHasSeenOnboarding] = useState(() => {
     try {
       return safeStorage.getItem("app_has_seen_onboarding") === "true";
@@ -409,10 +429,8 @@ export default function App() {
   }, []);
 
   const handleSplashFinished = React.useCallback(() => {
-    setSplashFinished(true);
+    setShowIntroVideo(false);
   }, []);
-
-  const loading = !authReady || !splashFinished;
 
   const [user, setUser] = useState<any>(null);
   const [userProfile, setUserProfile] = useState<any>(() => {
@@ -849,6 +867,7 @@ export default function App() {
   const [todayTasksCount, setTodayTasksCount] = useState<number | null>(null);
   const [highlightTasksSection, setHighlightTasksSection] = useState<boolean>(false);
   const [apiSchools, setApiSchools] = useState<SchoolRecord[]>([]);
+  const [roleGuidanceModal, setRoleGuidanceModal] = useState<{ role: 'admin' | 'teacher' | 'parent' | 'student'; roleTitle: string } | null>(null);
 
   // Real-time sync for active schools from internal PostgreSQL API
   useEffect(() => {
@@ -971,11 +990,11 @@ export default function App() {
 
   // Fetch active homework and competitions count for "Today's Tasks" card
   useEffect(() => {
-    if (!selectedSchoolId && !userProfile?.schoolId) {
+    const targetSchoolId = selectedSchoolId || userProfile?.schoolId;
+    if (!targetSchoolId) {
       setTodayTasksCount(0);
       return;
     }
-    const targetSchoolId = selectedSchoolId || userProfile?.schoolId || "school1";
     try {
       const q = query(collection(db, "schools", targetSchoolId, "ai_materials"));
       const unsubscribe = onSnapshot(
@@ -997,7 +1016,7 @@ export default function App() {
       console.error(e);
       setTodayTasksCount(0);
     }
-  }, [selectedSchoolId]);
+  }, [selectedSchoolId, userProfile?.schoolId]);
 
   // Fetch active knights count for student's grade
   useEffect(() => {
@@ -1043,7 +1062,12 @@ export default function App() {
       verifiedStudentInfo?.schoolId ||
       safeStorage.getItem("s6_selectedSchoolId") ||
       safeStorage.getItem("s6_preferred_school") ||
-      "school1";
+      "";
+
+    if (!currentSchool) {
+      setGradeBroadcasts([]);
+      return;
+    }
 
     // Query broadcasts without strict orderBy so missing fields don't cause Firestore to exclude docs
     const q = query(collection(db, "broadcasts"));
@@ -1262,7 +1286,7 @@ export default function App() {
 
     try {
       await broadcastService.sendBroadcast({
-        schoolId: userProfile?.schoolId || selectedSchoolId || "school1",
+        schoolId: userProfile?.schoolId || selectedSchoolId || "",
         message,
         targetGrades,
         targetSection: targetSection || (targetGrades.length === 1 && targetGrades[0] !== 'الجميع' ? targetGrades[0] : 'ALL'),
@@ -2547,7 +2571,7 @@ export default function App() {
               safeStorage.setItem("s6_isSchoolVerified", "true");
               safeStorage.setItem("s6_user_logged_out", "false");
 
-              const rawSchool = user.schoolId || selectedSchoolId || "school1";
+              const rawSchool = user.schoolId || selectedSchoolId || "";
               const resolvedSchool = rawSchool.replace(/-(boys|girls)$/i, '');
               setSelectedSchoolId(resolvedSchool);
               safeStorage.setItem("s6_selectedSchoolId", resolvedSchool);
@@ -2787,7 +2811,7 @@ export default function App() {
                     (user as any).name ||
                     "طالب الأكاديمية",
                   role: "student",
-                  grade: studentGrade || "سادس علمي",
+                  grade: studentGrade || "",
                   section: (user as any).section || (user as any).studentSection || (user as any).class || "",
                   class: (user as any).class || (user as any).className || (user as any).section || "",
                   schoolId: resolvedSchool,
@@ -3088,21 +3112,13 @@ export default function App() {
           userProfile?.role === "parent";
 
         const navigateToParentPlatform = (targetTab: string) => {
+          if (!isSchoolVerified || !selectedSchoolId) {
+            setRoleGuidanceModal({ role: 'parent', roleTitle: 'لوحة ولي الأمر' });
+            return;
+          }
           setPortalType("parent");
           safeStorage.setItem("bayraq_user_role", "parent");
           safeStorage.setItem("s6_target_parent_tab", targetTab);
-
-          let targetSchool = selectedSchoolId;
-          if (!targetSchool) {
-            targetSchool =
-              safeStorage.getItem("s6_selectedSchoolId") ||
-              safeStorage.getItem("s6_preferred_school") ||
-              userProfile?.schoolId ||
-              "school1";
-            setSelectedSchoolId(targetSchool);
-            safeStorage.setItem("s6_selectedSchoolId", targetSchool);
-          }
-
           setIsChoosingSchool(false);
           setActiveSection("school-content");
         };
@@ -3112,6 +3128,10 @@ export default function App() {
           subControlTab?: string,
           aiTool?: string
         ) => {
+          if (!isSchoolVerified || !selectedSchoolId) {
+            setRoleGuidanceModal({ role: 'teacher', roleTitle: 'لوحة الأستاذ' });
+            return;
+          }
           setPortalType("teacher");
           safeStorage.setItem("bayraq_user_role", "teacher");
           safeStorage.setItem("s6_target_tab", targetTab);
@@ -3121,18 +3141,6 @@ export default function App() {
           if (aiTool) {
             safeStorage.setItem("s6_target_ai_tool", aiTool);
           }
-
-          let targetSchool = selectedSchoolId;
-          if (!targetSchool) {
-            targetSchool =
-              safeStorage.getItem("s6_selectedSchoolId") ||
-              safeStorage.getItem("s6_preferred_school") ||
-              userProfile?.schoolId ||
-              "school1";
-            setSelectedSchoolId(targetSchool);
-            safeStorage.setItem("s6_selectedSchoolId", targetSchool);
-          }
-
           setIsChoosingSchool(false);
           setActiveSection("school-content");
         };
@@ -3348,7 +3356,7 @@ export default function App() {
                       <span className="text-[10px] font-bold text-amber-300 truncate">
                         {institutionName && institutionName !== "مدرسة غير محددة"
                           ? institutionName
-                          : "مدرسة الأوائل"}
+                          : "مدرسة غير محددة"}
                       </span>
                     </div>
                   </div>
@@ -3786,18 +3794,12 @@ export default function App() {
               {/* 1. Daily Homework / الواجبات اليومية */}
               <div
                 onClick={() => {
+                  if (!isSchoolVerified || !selectedSchoolId) {
+                    setRoleGuidanceModal({ role: 'student', roleTitle: 'لوحة الطالب' });
+                    return;
+                  }
                   safeStorage.setItem("s6_target_tab", "files");
                   safeStorage.setItem("s6_target_library_tab", "homework");
-                  let targetSchool = selectedSchoolId;
-                  if (!targetSchool) {
-                    targetSchool = safeStorage.getItem("s6_selectedSchoolId") || safeStorage.getItem("s6_preferred_school") || userProfile?.schoolId || null;
-                    if (!targetSchool) {
-                      targetSchool = "school1";
-                    }
-                    setSelectedSchoolId(targetSchool);
-                    safeStorage.setItem("s6_selectedSchoolId", targetSchool);
-                  }
-
                   setHighlightTasksSection(true);
                   setIsChoosingSchool(false);
                   setActiveSection("school-content");
@@ -3902,14 +3904,12 @@ export default function App() {
               {/* 6. Last Read Lesson / آخر درس قرأته */}
               <div 
                 onClick={() => {
+                  if (!isSchoolVerified || !selectedSchoolId) {
+                    setRoleGuidanceModal({ role: 'student', roleTitle: 'لوحة الطالب' });
+                    return;
+                  }
                   safeStorage.setItem("s6_target_tab", "files");
                   safeStorage.setItem("s6_target_library_tab", "document");
-                  let targetSchool = selectedSchoolId;
-                  if (!targetSchool) {
-                    targetSchool = safeStorage.getItem("s6_selectedSchoolId") || safeStorage.getItem("s6_preferred_school") || userProfile?.schoolId || "school1";
-                    setSelectedSchoolId(targetSchool);
-                    safeStorage.setItem("s6_selectedSchoolId", targetSchool);
-                  }
                   setHighlightTasksSection(false);
                   setIsChoosingSchool(false);
                   setActiveSection("school-content");
@@ -3933,17 +3933,11 @@ export default function App() {
               {/* Sleek Horizontal Class Announcements Ticker Box */}
               <div
                 onClick={() => {
-                  safeStorage.setItem("s6_target_tab", "feed");
-                  let targetSchool = selectedSchoolId;
-                  if (!targetSchool) {
-                    targetSchool =
-                      safeStorage.getItem("s6_selectedSchoolId") ||
-                      safeStorage.getItem("s6_preferred_school") ||
-                      userProfile?.schoolId ||
-                      "school1";
-                    setSelectedSchoolId(targetSchool);
-                    safeStorage.setItem("s6_selectedSchoolId", targetSchool);
+                  if (!isSchoolVerified || !selectedSchoolId) {
+                    setRoleGuidanceModal({ role: 'student', roleTitle: 'لوحة الطالب' });
+                    return;
                   }
+                  safeStorage.setItem("s6_target_tab", "feed");
                   setIsChoosingSchool(false);
                   setActiveSection("school-content");
                 }}
@@ -4734,21 +4728,26 @@ export default function App() {
         <ReceiptVerification receiptId={verifyReceiptId} />
       ) : (
         <>
+          {/* Universal 4-second short-intro video (on initial open and when returning from other apps) */}
           <AnimatePresence>
-            {loading ? (
+            {showIntroVideo && (
               <motion.div
-                key="loading"
+                key="intro-video-overlay"
                 initial={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
-                transition={{ duration: 0.5 }}
-                className="fixed inset-0 z-[9999]"
+                transition={{ duration: 0.3 }}
+                className="fixed inset-0 z-[99999]"
               >
                 <LoadingScreen
                   videoSrc="/short-intro.mp4"
-                  onFinish={handleSplashFinished}
+                  onFinish={() => setShowIntroVideo(false)}
                 />
               </motion.div>
-            ) : !hasSeenOnboarding ? (
+            )}
+          </AnimatePresence>
+
+          <AnimatePresence mode="wait">
+            {!hasSeenOnboarding ? (
               <OnboardingCarousel
                 key="onboarding"
                 onComplete={() => {
@@ -5383,6 +5382,10 @@ export default function App() {
                   {userProfile?.role === "admin" || userProfile?.role === "dev" || portalType === "admin-boys" || portalType === "admin-girls" ? (
                     <button
                       onClick={() => {
+                        if (!isSchoolVerified || !selectedSchoolId) {
+                          setRoleGuidanceModal({ role: 'admin', roleTitle: 'لوحة الإدارة' });
+                          return;
+                        }
                         setActiveSection("admin-hub");
                       }}
                       className={`flex-1 flex flex-col justify-center items-center h-full transition-all duration-300 ${activeSection === "admin-hub" && !isChoosingSchool ? "text-rose-400" : "text-white/30 hover:text-white/60"}`}
@@ -5400,6 +5403,10 @@ export default function App() {
                   ) : userProfile?.role === "parent" ? (
                     <button
                       onClick={() => {
+                        if (!isSchoolVerified || !selectedSchoolId) {
+                          setRoleGuidanceModal({ role: 'parent', roleTitle: 'لوحة ولي الأمر' });
+                          return;
+                        }
                         if (activeSection === "school-content" && portalType === "parent") {
                           handleHomeNavigation();
                         } else {
@@ -5422,6 +5429,10 @@ export default function App() {
                   ) : (loggedInTeacher || portalType === "teacher" || userProfile?.role === "teacher" || safeStorage.getItem("bayraq_user_role") === "teacher") ? (
                     <button
                       onClick={() => {
+                        if (!isSchoolVerified || !selectedSchoolId) {
+                          setRoleGuidanceModal({ role: 'teacher', roleTitle: 'لوحة الأستاذ' });
+                          return;
+                        }
                         setPortalType("teacher");
                         setActiveSection("school-content");
                         setIsChoosingSchool(false);
@@ -5442,9 +5453,14 @@ export default function App() {
                   ) : (
                     <button
                       onClick={() => {
+                        if (!isSchoolVerified || !selectedSchoolId) {
+                          setRoleGuidanceModal({ role: 'student', roleTitle: 'لوحة الطالب' });
+                          return;
+                        }
                         let targetSchool = selectedSchoolId || verifiedStudentInfo?.schoolId || userProfile?.schoolId;
                         if (!targetSchool) {
-                          targetSchool = safeStorage.getItem("s6_selectedSchoolId") || safeStorage.getItem("s6_preferred_school") || "school1";
+                          setRoleGuidanceModal({ role: 'student', roleTitle: 'لوحة الطالب' });
+                          return;
                         }
                         setSelectedSchoolId(targetSchool);
                         safeStorage.setItem("s6_selectedSchoolId", targetSchool);
@@ -5501,11 +5517,92 @@ export default function App() {
                 key="global-student-lounge-modal"
                 onClose={() => setIsLoungeOpen(false)}
                 userProfile={userProfile}
-                schoolId={selectedSchoolId || verifiedStudentInfo?.schoolId || userProfile?.schoolId || "school1"}
+                schoolId={selectedSchoolId || verifiedStudentInfo?.schoolId || userProfile?.schoolId || ""}
                 grade={selectedStudentGrade || verifiedStudentInfo?.grade || userProfile?.grade || "عام"}
                 isTeacher={portalType === "teacher" || userProfile?.role === "teacher"}
                 teacherData={loggedInTeacher}
               />
+            )}
+          </AnimatePresence>
+
+          {/* نافذة التوجيه لاختيار المدرسة وإدخال الكود لفتح اللوحة */}
+          <AnimatePresence>
+            {roleGuidanceModal && (
+              <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md" dir="rtl">
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.92, y: 20 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.92, y: 20 }}
+                  transition={{ type: "spring", damping: 25, stiffness: 300 }}
+                  className="bg-[#0A0F1D] border border-cyan-500/30 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-[0_10px_50px_rgba(0,229,255,0.15)] relative overflow-hidden text-right"
+                >
+                  {/* Aura Glows */}
+                  <div className="absolute top-0 right-0 w-64 h-64 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none -translate-y-24 -translate-x-24" />
+                  <div className="absolute bottom-0 left-0 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none translate-y-20 translate-x-20" />
+
+                  {/* Header */}
+                  <div className="flex items-start justify-between relative z-10 mb-5">
+                    <div className="flex items-center gap-3">
+                      <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-cyan-500/20 to-blue-600/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shrink-0 shadow-lg shadow-cyan-950/50">
+                        <Key size={26} className="animate-pulse" />
+                      </div>
+                      <div>
+                        <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-300 text-[10px] font-black mb-1">
+                          <span>{roleGuidanceModal.roleTitle}</span>
+                        </div>
+                        <h3 className="text-xl font-black text-white tracking-tight">
+                          يرجى اختيار المدرسة أولاً
+                        </h3>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setRoleGuidanceModal(null)}
+                      className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 text-white/40 hover:text-white flex items-center justify-center transition-all shrink-0"
+                    >
+                      <X size={18} />
+                    </button>
+                  </div>
+
+                  {/* Guidance Body */}
+                  <div className="space-y-3 relative z-10 mb-6 text-sm">
+                    <p className="text-white/80 leading-relaxed font-medium">
+                      لفتح <strong className="text-cyan-300 font-bold">{roleGuidanceModal.roleTitle}</strong> الخاصة بك وتفادي البيانات الافتراضية، يتوجب عليك تحديد مدرستك من قسم <strong className="text-amber-300 font-bold">(الميادين)</strong> وإدخال كود الدخول الخاص بك لتحديد دورك بدقة.
+                    </p>
+
+                    <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-2.5">
+                      <div className="flex items-center gap-2.5 text-xs text-white/90 font-bold">
+                        <span className="w-5 h-5 rounded-full bg-cyan-500/20 text-cyan-300 flex items-center justify-center text-[11px] font-mono shrink-0">1</span>
+                        <span>اختر مدرستك من قائمة مدارس العراق في الميادين.</span>
+                      </div>
+                      <div className="flex items-center gap-2.5 text-xs text-white/90 font-bold">
+                        <span className="w-5 h-5 rounded-full bg-amber-500/20 text-amber-300 flex items-center justify-center text-[11px] font-mono shrink-0">2</span>
+                        <span>أدخل الكود الممنوح لك لتأكيد هويتك وتحديد دورك تلقائياً.</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Action Buttons */}
+                  <div className="flex flex-col sm:flex-row items-center gap-3 relative z-10">
+                    <button
+                      onClick={() => {
+                        setRoleGuidanceModal(null);
+                        setIsChoosingSchool(true);
+                        setActiveSection("mayadeen");
+                      }}
+                      className="w-full sm:flex-1 py-3.5 px-5 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-black text-xs sm:text-sm transition-all shadow-lg shadow-cyan-950/50 flex items-center justify-center gap-2 active:scale-95"
+                    >
+                      <BookOpen size={18} />
+                      <span>الانتقال للميادين واختيار المدرسة ⚡</span>
+                    </button>
+                    <button
+                      onClick={() => setRoleGuidanceModal(null)}
+                      className="w-full sm:w-auto py-3.5 px-5 rounded-2xl bg-white/5 hover:bg-white/10 text-white/60 hover:text-white font-bold text-xs transition-all border border-white/5"
+                    >
+                      إلغاء
+                    </button>
+                  </div>
+                </motion.div>
+              </div>
             )}
           </AnimatePresence>
 

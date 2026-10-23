@@ -65,10 +65,15 @@ export const generatePDFBlobFromHTML = async (html: string): Promise<Blob> => {
     const pdfWidth = pdf.internal.pageSize.getWidth();
     const pdfHeight = pdf.internal.pageSize.getHeight();
 
+    const cleanPrintElements = (el: HTMLElement) => {
+      el.querySelectorAll('.floating-bar, .floating-btn, button, .no-print, .no-print-bar, [class*="no-print"], [class*="print-btn"], [class*="download-btn"], [onclick*="print"], [onclick*="download"], a[download]').forEach(b => b.remove());
+    };
+
     if (pageNodes.length > 0) {
       for (let i = 0; i < pageNodes.length; i++) {
         const contentDiv = document.createElement('div');
         contentDiv.appendChild(document.importNode(pageNodes[i], true));
+        cleanPrintElements(contentDiv);
         container.appendChild(contentDiv);
         await new Promise((r) => setTimeout(r, 25));
 
@@ -94,6 +99,7 @@ export const generatePDFBlobFromHTML = async (html: string): Promise<Blob> => {
     } else {
       const contentDiv = document.createElement('div');
       contentDiv.innerHTML = html;
+      cleanPrintElements(contentDiv);
       container.appendChild(contentDiv);
       await new Promise((r) => setTimeout(r, 35));
 
