@@ -387,6 +387,7 @@ export const AcademyManagementSection: React.FC = () => {
                 <option value="الأحياء">الأحياء</option>
                 <option value="التربية الإسلامية">التربية الإسلامية</option>
                 <option value="الاجتماعيات">الاجتماعيات</option>
+                <option value="الإرشاد التربوي">الإرشاد التربوي</option>
               </select>
             </div>
 

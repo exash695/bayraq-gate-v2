@@ -73,7 +73,7 @@ export const POPULAR_SPECIALIZATIONS = [
   'الرياضيات', 'اللغة العربية', 'اللغة الإنجليزية', 'العلوم',
   'الفيزياء', 'الكيمياء', 'الأحياء', 'التربية الإسلامية',
   'الاجتماعيات', 'التاريخ', 'الجغرافيا', 'الحاسوب',
-  'التربية الفنية', 'التربية الرياضية', 'المنهج الوزاري'
+  'التربية الفنية', 'التربية الرياضية', 'الإرشاد التربوي', 'المنهج الوزاري'
 ];
 
 export const parseTeacherCodeSpecialization = (codeStr?: string): string => {
@@ -97,6 +97,7 @@ export const parseTeacherCodeSpecialization = (codeStr?: string): string => {
       case 'COM': case 'CS': return 'الحاسوب';
       case 'ART': return 'التربية الفنية';
       case 'PE': return 'التربية الرياضية';
+      case 'GUI': return 'الإرشاد التربوي';
       case 'STAFF': return 'الكادر التعليمي والإداري';
       default: break;
     }

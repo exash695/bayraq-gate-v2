@@ -169,7 +169,7 @@ export const TeachersSection: React.FC<TeachersSectionProps> = ({ showToast, sch
     'الرياضيات', 'اللغة العربية', 'اللغة الإنجليزية', 'العلوم', 
     'الفيزياء', 'الكيمياء', 'الأحياء', 'الاجتماعيات', 
     'التربية الإسلامية', 'الحاسوب', 'اللغة الفرنسية', 'التربية الفنية', 
-    'التربية الرياضية', 'الجغرافية', 'التاريخ', 'الاقتصاد'
+    'التربية الرياضية', 'الجغرافية', 'التاريخ', 'الاقتصاد', 'الإرشاد التربوي'
   ];
   const SUBJECTS = Array.from(new Set([...CORE_SUBJECTS, ...getAllSubjects()])).filter(Boolean);
   const STAFF_ROLES = [

@@ -29,7 +29,7 @@ export const useSubjectDistributor = () => {
 
   const getAllSubjects = () => {
     if (!subjectMapping) {
-      return ['الفيزياء', 'الرياضيات', 'اللغة الإنجليزية', 'الكيمياء', 'الأحياء', 'اللغة العربية', 'التربية الإسلامية', 'العلوم', 'الاجتماعيات', 'أخرى'];
+      return ['الفيزياء', 'الرياضيات', 'اللغة الإنجليزية', 'الكيمياء', 'الأحياء', 'اللغة العربية', 'التربية الإسلامية', 'العلوم', 'الاجتماعيات', 'الإرشاد التربوي', 'أخرى'];
     }
     const all = new Set<string>();
     Object.values(subjectMapping).forEach((stageSubjects: any) => {

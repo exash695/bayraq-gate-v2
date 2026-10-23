@@ -40,7 +40,8 @@ const DEFAULT_SUBJECTS: Record<string, Subject[]> = {
     { id: 'science', name: 'العلوم' },
     { id: 'social', name: 'الاجتماعيات' },
     { id: 'art', name: 'التربية الفنية' },
-    { id: 'sports', name: 'الرياضة' }
+    { id: 'sports', name: 'الرياضة' },
+    { id: 'guidance', name: 'الإرشاد التربوي' }
   ],
   intermediate: [
     { id: 'islamic', name: 'التربية الإسلامية' },
@@ -49,7 +50,8 @@ const DEFAULT_SUBJECTS: Record<string, Subject[]> = {
     { id: 'math', name: 'الرياضيات' },
     { id: 'chemistry', name: 'الكيمياء' },
     { id: 'physics', name: 'الفيزياء' },
-    { id: 'biology', name: 'الأحياء' }
+    { id: 'biology', name: 'الأحياء' },
+    { id: 'guidance', name: 'الإرشاد التربوي' }
   ],
   scientific: [
     { id: 'islamic', name: 'التربية الإسلامية' },
@@ -60,7 +62,8 @@ const DEFAULT_SUBJECTS: Record<string, Subject[]> = {
     { id: 'physics', name: 'فيزياء' },
     { id: 'biology', name: 'احياء' },
     { id: 'computer', name: 'حاسوب' },
-    { id: 'french', name: 'لغة فرنسية' }
+    { id: 'french', name: 'لغة فرنسية' },
+    { id: 'guidance', name: 'الإرشاد التربوي' }
   ],
   literary: [
     { id: 'islamic', name: 'التربية الإسلامية' },
@@ -71,7 +74,8 @@ const DEFAULT_SUBJECTS: Record<string, Subject[]> = {
     { id: 'history', name: 'التاريخ' },
     { id: 'economics', name: 'الاقتصاد' },
     { id: 'computer', name: 'الحاسوب' },
-    { id: 'french', name: 'اللغة الفرنسية' }
+    { id: 'french', name: 'اللغة الفرنسية' },
+    { id: 'guidance', name: 'الإرشاد التربوي' }
   ]
 };
 

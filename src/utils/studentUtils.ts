@@ -87,6 +87,8 @@ export const SUBJECT_KEYWORDS: [string, string][] = [
   ['حاسوب', 'COM'],
   ['computer', 'COM'],
   ['فرنس', 'FRE'],
+  ['ارشاد', 'GUI'],
+  ['إرشاد', 'GUI'],
 ];
 
 export const getSanitizedSubCode = (subject: string) => {
@@ -365,6 +367,7 @@ export const getSubjectCode = (subject: string): string => {
   if (s.includes('فنية')) return 'ART';
   if (s.includes('رياضة')) return 'SPO';
   if (s.includes('فرنسي')) return 'FRE';
+  if (s.includes('إرشاد') || s.includes('ارشاد') || s.includes('ارشاد تربوي')) return 'GUI';
   return 'GEN';
 };
 
@@ -835,6 +838,7 @@ export const getSubjectsForGrade = (grade: string, removedIds: string[] = [], cu
   const math = { id: 'math', name: 'الرياضيات' };
   const computer = { id: 'computer', name: 'الحاسوب' };
   const french = { id: 'french', name: 'اللغة الفرنسية' };
+  const guidance = { id: 'guidance', name: 'الإرشاد التربوي' };
 
   const primary = [
     islamic, 
@@ -844,7 +848,8 @@ export const getSubjectsForGrade = (grade: string, removedIds: string[] = [], cu
     { id: 'science', name: 'العلوم' },
     { id: 'social', name: 'الاجتماعيات' },
     { id: 'art', name: 'التربية الفنية' },
-    { id: 'sports', name: 'الرياضة' }
+    { id: 'sports', name: 'الرياضة' },
+    guidance
   ];
 
   const intermediate = [
@@ -854,7 +859,8 @@ export const getSubjectsForGrade = (grade: string, removedIds: string[] = [], cu
     math,
     { id: 'chemistry', name: 'الكيمياء' },
     { id: 'physics', name: 'الفيزياء' },
-    { id: 'biology', name: 'الأحياء' }
+    { id: 'biology', name: 'الأحياء' },
+    guidance
   ];
 
   const secondaryScientific = [
@@ -866,7 +872,8 @@ export const getSubjectsForGrade = (grade: string, removedIds: string[] = [], cu
     { id: 'physics_sci', name: 'فيزياء' },
     { id: 'biology_sci', name: 'احياء' },
     computer, 
-    french
+    french,
+    guidance
   ];
 
   const secondaryLiterary = [
@@ -878,7 +885,8 @@ export const getSubjectsForGrade = (grade: string, removedIds: string[] = [], cu
     { id: 'history', name: 'التاريخ' },
     { id: 'economics', name: 'الاقتصاد' },
     computer, 
-    french
+    french,
+    guidance
   ];
 
   let baseSubjects = [];
