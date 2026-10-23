@@ -371,33 +371,8 @@ export default function App() {
 
   const [authReady, setAuthReady] = useState(true);
 
-  // Unified controller for 4-second short-intro video (initial open + returning from other apps)
+  // Intro video controller (plays once on app initial launch/open)
   const [showIntroVideo, setShowIntroVideo] = useState(true);
-  const lastHiddenTimeRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        // Record timestamp when leaving to Facebook or other apps
-        lastHiddenTimeRef.current = Date.now();
-      } else if (document.visibilityState === 'visible') {
-        if (lastHiddenTimeRef.current !== null) {
-          const timeAway = Date.now() - lastHiddenTimeRef.current;
-          lastHiddenTimeRef.current = null;
-          // If away for more than 2 seconds (actually switched apps)
-          if (timeAway > 2000) {
-            setShowIntroVideo(true);
-          }
-        }
-      }
-    };
-
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, []);
 
   const [hasSeenOnboarding, setHasSeenOnboarding] = useState(() => {
     try {
@@ -897,28 +872,7 @@ export default function App() {
   const [highlightTasksSection, setHighlightTasksSection] = useState<boolean>(false);
   const [apiSchools, setApiSchools] = useState<SchoolRecord[]>([]);
 
-  // Determine if the current session has an identified, verified school and role
-  const isRoleRecognized = useMemo(() => {
-    if (!isSchoolVerified) return false;
-    if (!selectedSchoolId || selectedSchoolId === "general" || selectedSchoolId === "null") return false;
-    
-    const role = userProfile?.role || portalType;
-    if (!role || role === "guest") return false;
 
-    const hasIdent = Boolean(
-      userProfile?.studentCode ||
-      userProfile?.code ||
-      userProfile?.teacherId ||
-      loggedInTeacher ||
-      verifiedStudentInfo?.code ||
-      role === "admin" ||
-      role === "admin-boys" ||
-      role === "admin-girls" ||
-      role === "developer" ||
-      userProfile?.isDeveloper
-    );
-    return Boolean(hasIdent);
-  }, [isSchoolVerified, selectedSchoolId, userProfile, portalType, loggedInTeacher, verifiedStudentInfo]);
 
   // Real-time sync for active schools from internal PostgreSQL API
   useEffect(() => {
@@ -1294,6 +1248,29 @@ export default function App() {
       }
     } catch {}
   }, [loggedInTeacher]);
+
+  // Determine if the current session has an identified, verified school and role
+  const isRoleRecognized = useMemo(() => {
+    if (!isSchoolVerified) return false;
+    if (!selectedSchoolId || selectedSchoolId === "general" || selectedSchoolId === "null") return false;
+    
+    const role = userProfile?.role || portalType;
+    if (!role || role === "guest") return false;
+
+    const hasIdent = Boolean(
+      userProfile?.studentCode ||
+      userProfile?.code ||
+      userProfile?.teacherId ||
+      loggedInTeacher ||
+      verifiedStudentInfo?.code ||
+      role === "admin" ||
+      role === "admin-boys" ||
+      role === "admin-girls" ||
+      role === "developer" ||
+      userProfile?.isDeveloper
+    );
+    return Boolean(hasIdent);
+  }, [isSchoolVerified, selectedSchoolId, userProfile, portalType, loggedInTeacher, verifiedStudentInfo]);
 
   useEffect(() => {
     if (safeStorage.getItem("s6_force_purge") === "true") {
