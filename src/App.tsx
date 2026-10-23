@@ -626,11 +626,34 @@ export default function App() {
   const [activeSectionState, setActiveSectionState] = useState<AppSection>(
     () => {
       try {
+        const hasLoggedOut = safeStorage.getItem("s6_user_logged_out") === "true";
+        if (hasLoggedOut) return "mayadeen";
+
         const primary = getPrimaryUserSession();
+        const savedSchool = safeStorage.getItem("s6_selectedSchoolId");
+        const isVerifiedSaved = safeStorage.getItem("s6_isSchoolVerified") === "true";
+        const hasValidSchool = Boolean(
+          (primary?.schoolId && primary.schoolId !== "general" && primary.schoolId !== "null") ||
+          (savedSchool && savedSchool !== "general" && savedSchool !== "null")
+        );
+        const hasCodeOrRole = Boolean(
+          primary?.code ||
+          primary?.role === "teacher" ||
+          primary?.role === "admin-boys" ||
+          primary?.role === "admin-girls" ||
+          primary?.role === "admin" ||
+          primary?.role === "developer"
+        );
+
+        // Upon entering the app, unverified users must be directed directly to mayadeen
+        if (!isVerifiedSaved || !hasValidSchool || !hasCodeOrRole) {
+          return "mayadeen";
+        }
+
         const role = primary?.role || safeStorage.getItem("bayraq_user_role");
         const saved = safeStorage.getItem("s6_activeSection");
 
-        // Role-based smart auto-landing for returning users:
+        // Role-based smart auto-landing for returning verified users:
         if (role === "parent" || role === "teacher") {
           return "hub";
         }
@@ -670,9 +693,9 @@ export default function App() {
         ];
         return validSections.includes(saved as AppSection)
           ? (saved as AppSection)
-          : "hub";
+          : "mayadeen";
       } catch {
-        return "hub";
+        return "mayadeen";
       }
     },
   );
@@ -777,14 +800,20 @@ export default function App() {
       if (hasLoggedOut) return false;
 
       const primary = getPrimaryUserSession();
-      if (primary && primary.code) return true;
+      if (primary && primary.code && primary.schoolId && primary.schoolId !== "general" && primary.schoolId !== "null") {
+        return true;
+      }
 
       const saved = safeStorage.getItem("s6_isSchoolVerified");
-      if (saved === "true") return true;
-
-      const cachedProfile = safeStorage.getItem("bayraq_cached_user_profile") || safeStorage.getItem("bairaq_cached_auth_user");
-      if (cachedProfile) {
-        return true;
+      const savedSchool = safeStorage.getItem("s6_selectedSchoolId");
+      if (saved === "true" && savedSchool && savedSchool !== "general" && savedSchool !== "null") {
+        const cachedProfileStr = safeStorage.getItem("bayraq_cached_user_profile") || safeStorage.getItem("bairaq_cached_auth_user");
+        if (cachedProfileStr) {
+          const cached = typeof cachedProfileStr === "string" ? JSON.parse(cachedProfileStr) : cachedProfileStr;
+          if (cached && (cached.studentCode || cached.code || cached.teacherId || cached.role === "admin" || cached.role === "developer")) {
+            return true;
+          }
+        }
       }
     } catch {}
     return false;
@@ -867,7 +896,29 @@ export default function App() {
   const [todayTasksCount, setTodayTasksCount] = useState<number | null>(null);
   const [highlightTasksSection, setHighlightTasksSection] = useState<boolean>(false);
   const [apiSchools, setApiSchools] = useState<SchoolRecord[]>([]);
-  const [roleGuidanceModal, setRoleGuidanceModal] = useState<{ role: 'admin' | 'teacher' | 'parent' | 'student'; roleTitle: string } | null>(null);
+
+  // Determine if the current session has an identified, verified school and role
+  const isRoleRecognized = useMemo(() => {
+    if (!isSchoolVerified) return false;
+    if (!selectedSchoolId || selectedSchoolId === "general" || selectedSchoolId === "null") return false;
+    
+    const role = userProfile?.role || portalType;
+    if (!role || role === "guest") return false;
+
+    const hasIdent = Boolean(
+      userProfile?.studentCode ||
+      userProfile?.code ||
+      userProfile?.teacherId ||
+      loggedInTeacher ||
+      verifiedStudentInfo?.code ||
+      role === "admin" ||
+      role === "admin-boys" ||
+      role === "admin-girls" ||
+      role === "developer" ||
+      userProfile?.isDeveloper
+    );
+    return Boolean(hasIdent);
+  }, [isSchoolVerified, selectedSchoolId, userProfile, portalType, loggedInTeacher, verifiedStudentInfo]);
 
   // Real-time sync for active schools from internal PostgreSQL API
   useEffect(() => {
@@ -2407,7 +2458,39 @@ export default function App() {
     setHubResetKey(prev => prev + 1);
   }, []);
 
-  const [isChoosingSchool, setIsChoosingSchool] = useState(false);
+  const [isChoosingSchool, setIsChoosingSchool] = useState<boolean>(() => {
+    try {
+      const hasLoggedOut = safeStorage.getItem("s6_user_logged_out") === "true";
+      if (hasLoggedOut) return true;
+
+      const primary = getPrimaryUserSession();
+      const savedSchool = safeStorage.getItem("s6_selectedSchoolId");
+      const isVerifiedSaved = safeStorage.getItem("s6_isSchoolVerified") === "true";
+      const hasValidSchool = Boolean(
+        (primary?.schoolId && primary.schoolId !== "general" && primary.schoolId !== "null") ||
+        (savedSchool && savedSchool !== "general" && savedSchool !== "null")
+      );
+      const hasCodeOrRole = Boolean(
+        primary?.code ||
+        primary?.role === "teacher" ||
+        primary?.role === "admin-boys" ||
+        primary?.role === "admin-girls" ||
+        primary?.role === "admin" ||
+        primary?.role === "developer"
+      );
+
+      // Direct unverified users immediately to choosing a school in mayadeen
+      if (!isVerifiedSaved || !hasValidSchool || !hasCodeOrRole) {
+        return true;
+      }
+
+      const savedSection = safeStorage.getItem("s6_activeSection");
+      if (savedSection === "mayadeen") return true;
+      return false;
+    } catch {
+      return true;
+    }
+  });
 
 
 
@@ -2504,6 +2587,8 @@ export default function App() {
           language={settings.language}
           user={user}
           userProfile={userProfile}
+          isSchoolVerified={isSchoolVerified}
+          isRoleRecognized={isRoleRecognized}
           notifications={memoizedNotifications}
           onBack={() => {
             setIsChoosingSchool(false);
@@ -5382,8 +5467,9 @@ export default function App() {
                   {userProfile?.role === "admin" || userProfile?.role === "dev" || portalType === "admin-boys" || portalType === "admin-girls" ? (
                     <button
                       onClick={() => {
-                        if (!isSchoolVerified || !selectedSchoolId) {
-                          setRoleGuidanceModal({ role: 'admin', roleTitle: 'لوحة الإدارة' });
+                        if (!isRoleRecognized) {
+                          setActiveSection("mayadeen");
+                          setIsChoosingSchool(true);
                           return;
                         }
                         setActiveSection("admin-hub");
@@ -5403,8 +5489,9 @@ export default function App() {
                   ) : userProfile?.role === "parent" ? (
                     <button
                       onClick={() => {
-                        if (!isSchoolVerified || !selectedSchoolId) {
-                          setRoleGuidanceModal({ role: 'parent', roleTitle: 'لوحة ولي الأمر' });
+                        if (!isRoleRecognized) {
+                          setActiveSection("mayadeen");
+                          setIsChoosingSchool(true);
                           return;
                         }
                         if (activeSection === "school-content" && portalType === "parent") {
@@ -5429,8 +5516,9 @@ export default function App() {
                   ) : (loggedInTeacher || portalType === "teacher" || userProfile?.role === "teacher" || safeStorage.getItem("bayraq_user_role") === "teacher") ? (
                     <button
                       onClick={() => {
-                        if (!isSchoolVerified || !selectedSchoolId) {
-                          setRoleGuidanceModal({ role: 'teacher', roleTitle: 'لوحة الأستاذ' });
+                        if (!isRoleRecognized) {
+                          setActiveSection("mayadeen");
+                          setIsChoosingSchool(true);
                           return;
                         }
                         setPortalType("teacher");
@@ -5453,13 +5541,15 @@ export default function App() {
                   ) : (
                     <button
                       onClick={() => {
-                        if (!isSchoolVerified || !selectedSchoolId) {
-                          setRoleGuidanceModal({ role: 'student', roleTitle: 'لوحة الطالب' });
+                        if (!isRoleRecognized) {
+                          setActiveSection("mayadeen");
+                          setIsChoosingSchool(true);
                           return;
                         }
                         let targetSchool = selectedSchoolId || verifiedStudentInfo?.schoolId || userProfile?.schoolId;
                         if (!targetSchool) {
-                          setRoleGuidanceModal({ role: 'student', roleTitle: 'لوحة الطالب' });
+                          setActiveSection("mayadeen");
+                          setIsChoosingSchool(true);
                           return;
                         }
                         setSelectedSchoolId(targetSchool);
@@ -5525,86 +5615,7 @@ export default function App() {
             )}
           </AnimatePresence>
 
-          {/* نافذة التوجيه لاختيار المدرسة وإدخال الكود لفتح اللوحة */}
-          <AnimatePresence>
-            {roleGuidanceModal && (
-              <div className="fixed inset-0 z-[1000] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md" dir="rtl">
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.92, y: 20 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  exit={{ opacity: 0, scale: 0.92, y: 20 }}
-                  transition={{ type: "spring", damping: 25, stiffness: 300 }}
-                  className="bg-[#0A0F1D] border border-cyan-500/30 rounded-3xl p-6 sm:p-8 max-w-md w-full shadow-[0_10px_50px_rgba(0,229,255,0.15)] relative overflow-hidden text-right"
-                >
-                  {/* Aura Glows */}
-                  <div className="absolute top-0 right-0 w-64 h-64 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none -translate-y-24 -translate-x-24" />
-                  <div className="absolute bottom-0 left-0 w-48 h-48 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none translate-y-20 translate-x-20" />
 
-                  {/* Header */}
-                  <div className="flex items-start justify-between relative z-10 mb-5">
-                    <div className="flex items-center gap-3">
-                      <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-cyan-500/20 to-blue-600/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shrink-0 shadow-lg shadow-cyan-950/50">
-                        <Key size={26} className="animate-pulse" />
-                      </div>
-                      <div>
-                        <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-cyan-500/10 border border-cyan-500/20 text-cyan-300 text-[10px] font-black mb-1">
-                          <span>{roleGuidanceModal.roleTitle}</span>
-                        </div>
-                        <h3 className="text-xl font-black text-white tracking-tight">
-                          يرجى اختيار المدرسة أولاً
-                        </h3>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => setRoleGuidanceModal(null)}
-                      className="w-8 h-8 rounded-xl bg-white/5 hover:bg-white/10 text-white/40 hover:text-white flex items-center justify-center transition-all shrink-0"
-                    >
-                      <X size={18} />
-                    </button>
-                  </div>
-
-                  {/* Guidance Body */}
-                  <div className="space-y-3 relative z-10 mb-6 text-sm">
-                    <p className="text-white/80 leading-relaxed font-medium">
-                      لفتح <strong className="text-cyan-300 font-bold">{roleGuidanceModal.roleTitle}</strong> الخاصة بك وتفادي البيانات الافتراضية، يتوجب عليك تحديد مدرستك من قسم <strong className="text-amber-300 font-bold">(الميادين)</strong> وإدخال كود الدخول الخاص بك لتحديد دورك بدقة.
-                    </p>
-
-                    <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-2.5">
-                      <div className="flex items-center gap-2.5 text-xs text-white/90 font-bold">
-                        <span className="w-5 h-5 rounded-full bg-cyan-500/20 text-cyan-300 flex items-center justify-center text-[11px] font-mono shrink-0">1</span>
-                        <span>اختر مدرستك من قائمة مدارس العراق في الميادين.</span>
-                      </div>
-                      <div className="flex items-center gap-2.5 text-xs text-white/90 font-bold">
-                        <span className="w-5 h-5 rounded-full bg-amber-500/20 text-amber-300 flex items-center justify-center text-[11px] font-mono shrink-0">2</span>
-                        <span>أدخل الكود الممنوح لك لتأكيد هويتك وتحديد دورك تلقائياً.</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Action Buttons */}
-                  <div className="flex flex-col sm:flex-row items-center gap-3 relative z-10">
-                    <button
-                      onClick={() => {
-                        setRoleGuidanceModal(null);
-                        setIsChoosingSchool(true);
-                        setActiveSection("mayadeen");
-                      }}
-                      className="w-full sm:flex-1 py-3.5 px-5 rounded-2xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-black text-xs sm:text-sm transition-all shadow-lg shadow-cyan-950/50 flex items-center justify-center gap-2 active:scale-95"
-                    >
-                      <BookOpen size={18} />
-                      <span>الانتقال للميادين واختيار المدرسة ⚡</span>
-                    </button>
-                    <button
-                      onClick={() => setRoleGuidanceModal(null)}
-                      className="w-full sm:w-auto py-3.5 px-5 rounded-2xl bg-white/5 hover:bg-white/10 text-white/60 hover:text-white font-bold text-xs transition-all border border-white/5"
-                    >
-                      إلغاء
-                    </button>
-                  </div>
-                </motion.div>
-              </div>
-            )}
-          </AnimatePresence>
 
 
           {/* Global Network Connectivity Status Listener */}

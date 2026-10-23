@@ -45,6 +45,8 @@ interface SchoolSelectionProps {
   onNavigateHallOfFame?: () => void;
   onOpenNotifications?: () => void;
   notifications?: any[];
+  isSchoolVerified?: boolean;
+  isRoleRecognized?: boolean;
 }
 
 interface SchoolThemeConfig {
@@ -336,7 +338,9 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
   onNavigateHome,
   onNavigateHallOfFame,
   onOpenNotifications,
-  notifications = []
+  notifications = [],
+  isSchoolVerified = false,
+  isRoleRecognized
 }) => {
   const appLogo = useAppLogo();
   const [apiSchools, setApiSchools] = useState<SchoolRecord[]>([]);
@@ -347,11 +351,22 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
   const [sheetCode, setSheetCode] = useState<string>('');
   const [sheetError, setSheetError] = useState<string>('');
   const [showNotificationModal, setShowNotificationModal] = useState<boolean>(false);
+  const [isGuidanceDismissed, setIsGuidanceDismissed] = useState<boolean>(false);
   const [blockedSchoolNotice, setBlockedSchoolNotice] = useState<{
     name: string;
     type: 'suspended' | 'coming_soon';
     message: string;
   } | null>(null);
+
+  // Determine if the user's role is already recognized & verified
+  const isIdentifiedRole = isRoleRecognized ?? Boolean(
+    isSchoolVerified &&
+    userProfile?.schoolId &&
+    userProfile?.schoolId !== 'general' &&
+    userProfile?.role &&
+    userProfile.role !== 'guest' &&
+    (userProfile?.studentCode || userProfile?.code || userProfile?.teacherId || userProfile?.role === 'admin' || userProfile?.role === 'developer' || userProfile?.isDeveloper)
+  );
 
   // Fetch active and suspended schools directly from PostgreSQL internal API
   useEffect(() => {
@@ -650,6 +665,71 @@ export const SchoolSelection: React.FC<SchoolSelectionProps> = ({
       {/* Main Content Area */}
       <main className="flex-1 w-full max-w-4xl mx-auto px-4 sm:px-6 pt-4 pb-28 relative z-10 flex flex-col">
         
+        {/* 1. توجيه أنيق وصغير لتحديد الدور (يختفي فور التعرف على دور المستخدم) */}
+        <AnimatePresence>
+          {!isIdentifiedRole && !isGuidanceDismissed && (
+            <motion.div
+              key="role-selection-guidance-card"
+              initial={{ opacity: 0, y: -8, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, height: 0, marginBottom: 0, overflow: 'hidden' }}
+              transition={{ duration: 0.25 }}
+              className="w-full mb-3.5 relative overflow-hidden rounded-2xl bg-gradient-to-r from-cyan-950/70 via-[#0A1628]/95 to-indigo-950/70 border border-cyan-500/35 p-3 sm:p-3.5 shadow-[0_4px_25px_rgba(0,229,255,0.08)] backdrop-blur-md"
+              dir="rtl"
+            >
+              {/* Subtle background glow */}
+              <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none -translate-y-12 -translate-x-12" />
+              <div className="absolute bottom-0 left-0 w-32 h-32 bg-indigo-500/10 rounded-full blur-2xl pointer-events-none translate-y-12 translate-x-12" />
+
+              <div className="relative z-10 flex items-start gap-3">
+                <div className="w-10 h-10 sm:w-11 sm:h-11 rounded-xl bg-gradient-to-br from-cyan-500/20 to-blue-600/20 border border-cyan-400/30 flex items-center justify-center text-cyan-300 shrink-0 shadow-[0_0_15px_rgba(0,229,255,0.2)] mt-0.5">
+                  <KeyRound size={20} className="animate-pulse" />
+                </div>
+
+                <div className="flex-1 text-right min-w-0">
+                  <div className="flex items-center justify-between gap-2 mb-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-500"></span>
+                      </span>
+                      <h3 className="text-xs sm:text-[13px] font-black text-cyan-300 tracking-tight">
+                        توجيه لتحديد دورك في المنصة
+                      </h3>
+                    </div>
+                    <button
+                      onClick={() => setIsGuidanceDismissed(true)}
+                      className="text-white/40 hover:text-white/80 p-0.5 rounded-lg hover:bg-white/5 transition-colors shrink-0"
+                      title="إخفاء مؤقت"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+
+                  <p className="text-[11px] sm:text-xs text-white/85 leading-relaxed font-medium">
+                    يرجى اختيار مدرستك من القائمة أدناه ثم إدخال رمز المرور (الكود) المخصص لك، ليتعرف النظام تلقائياً على دورك (إدارة، أستاذ، طالب، ولي أمر) وتفتح لوحتك الخاصة بدقة.
+                  </p>
+
+                  <div className="flex flex-wrap items-center gap-1.5 mt-2 pt-2 border-t border-white/5">
+                    <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-cyan-500/10 border border-cyan-500/20 text-cyan-300 text-[10px] font-bold">
+                      <span className="w-3.5 h-3.5 rounded-full bg-cyan-500/30 text-cyan-200 flex items-center justify-center text-[9px] font-mono">1</span>
+                      <span>اختر مدرستك</span>
+                    </div>
+                    <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-500/10 border border-amber-500/20 text-amber-300 text-[10px] font-bold">
+                      <span className="w-3.5 h-3.5 rounded-full bg-amber-500/30 text-amber-200 flex items-center justify-center text-[9px] font-mono">2</span>
+                      <span>أدخل الكود</span>
+                    </div>
+                    <div className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-[10px] font-bold">
+                      <CheckCircle2 size={11} className="text-emerald-400" />
+                      <span>تفتح لوحتك فوراً</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         {/* 2. Search & Filter Bar (البحث والتصفية) */}
         <section className="w-full mb-4 space-y-3" id="mayadeen-search-filter">
           <div className="flex items-center gap-2.5 w-full">
