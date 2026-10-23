@@ -9321,7 +9321,19 @@ async function startServer() {
         }
 
         if (tchs.length > 0) {
-          teacherDirectList = tchs;
+          if (targetSchoolId && targetSchoolId !== 'all') {
+            const compatible = tchs.filter(t => areSchoolsCompatible(t.schoolId, targetSchoolId));
+            if (compatible.length > 0) {
+              teacherDirectList = compatible;
+            } else {
+              return res.status(400).json({
+                success: false,
+                message: 'هذا الكود غير مسجل في هذه المدرسة، حيث تم توليده حصراً لمدرسة أخرى. يرجى اختيار مدرستك الصحيحة من الميادين.'
+              });
+            }
+          } else {
+            teacherDirectList = tchs;
+          }
         }
       } 
       
@@ -9830,6 +9842,21 @@ async function startServer() {
 
       console.log('Login failed for code:', code);
       await recordFailedAuthAttempt(req, code);
+
+      if (targetSchoolId && targetSchoolId !== 'all') {
+        try {
+          const tchOther = await db.select({ id: teachers.id, schoolId: teachers.schoolId }).from(teachers).where(or(eq(teachers.code, code), eq(teachers.id, code), eq(teachers.code, cleanCode))).limit(1);
+          const actOther = await db.select({ id: activation_codes.id, schoolId: activation_codes.schoolId }).from(activation_codes).where(or(eq(activation_codes.code, code), eq(activation_codes.code, cleanCode))).limit(1);
+          const stuOther = await db.select({ id: students.id, schoolId: students.schoolId }).from(students).where(or(eq(students.code, cleanCode), eq(students.parentCode, cleanCode), eq(students.id, cleanCode))).limit(1);
+          
+          if (tchOther.length > 0 || actOther.length > 0 || stuOther.length > 0) {
+            return res.status(400).json({ 
+              success: false, 
+              message: 'هذا الكود غير مسجل في هذه المدرسة، حيث تم إصداره وتوليده لمدرسة أخرى. يرجى اختيار مدرستك الصحيحة من قسم الميادين.' 
+            });
+          }
+        } catch (e) {}
+      }
 
       return res.status(401).json({ 
         success: false, 

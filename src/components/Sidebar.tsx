@@ -238,7 +238,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
   };
 
   const isRtl = language === 'ar';
-  const isDev = auth.currentUser?.email === "mntzralghanm527@gmail.com" || userProfile?.email === "mntzralghanm527@gmail.com";
+  const DEV_EMAILS = [
+    'mntzralghanm527@gmail.com',
+    'mntzr.alghanm527@gmail.com',
+    'mntzralghanm527@googlemail.com',
+    'mntzr.alghanm527@googlemail.com',
+    'abdulradhaalmayali@gmail.com'
+  ];
+  const isDev = Boolean(
+    userProfile?.role === "developer" ||
+    userProfile?.role === "dev" ||
+    userProfile?.role === "superadmin" ||
+    userProfile?.isDeveloper ||
+    (userProfile?.email && DEV_EMAILS.includes(userProfile.email.toLowerCase().trim())) ||
+    (auth.currentUser?.email && DEV_EMAILS.includes(auth.currentUser.email.toLowerCase().trim()))
+  );
 
   const unreadCount = notifications.filter(n => !n.read).length;
 

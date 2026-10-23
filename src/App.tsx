@@ -1694,9 +1694,29 @@ export default function App() {
 
         const profileData = docSnap.data();
         
+        const devEmails = [
+          'mntzralghanm527@gmail.com',
+          'mntzr.alghanm527@gmail.com',
+          'mntzralghanm527@googlemail.com',
+          'mntzr.alghanm527@googlemail.com',
+          'abdulradhaalmayali@gmail.com'
+        ];
+        const isDevUserEmail = Boolean(
+          (user.email && devEmails.includes(user.email.toLowerCase().trim())) ||
+          (profileData.email && devEmails.includes(profileData.email.toLowerCase().trim()))
+        );
+
+        if (isDevUserEmail) {
+          profileData.role = "developer";
+          profileData.fullName = "المهندس منتظر (المطور العام)";
+          profileData.name = "المهندس منتظر (المطور العام)";
+          profileData.isDeveloper = true;
+          profileData.isAdmin = true;
+        }
+
         // Fix for users who were accidentally named 'الحساب الحالي' during the previous broken login state
         if (profileData.fullName === 'الحساب الحالي' || profileData.name === 'الحساب الحالي') {
-          const betterName = user.displayName || user.email?.split('@')[0] || 'فارس بيرق';
+          const betterName = isDevUserEmail ? "المهندس منتظر (المطور العام)" : (user.displayName || user.email?.split('@')[0] || 'فارس بيرق');
           updateDoc(docRef, { 
             fullName: betterName,
             name: betterName 
@@ -2630,6 +2650,13 @@ export default function App() {
                 code,
                 selectedSchoolId || undefined,
               );
+
+              const normSel = (selectedSchoolId || "").replace(/-(boys|girls)$/i, "").trim().toLowerCase();
+              const normUser = (user.schoolId || "").replace(/-(boys|girls)$/i, "").trim().toLowerCase();
+              if (normSel && normUser && normSel !== "all" && normSel !== "general" && normUser !== "all" && normUser !== "general" && normSel !== normUser) {
+                throw new Error("هذا الكود غير مسجل في هذه المدرسة، حيث تم توليده حصراً لمدرسة أخرى. يرجى اختيار مدرستك الصحيحة من قسم الميادين.");
+              }
+
               setIsSchoolVerified(true);
               initializedProfile.current = true;
               safeStorage.setItem("s6_isSchoolVerified", "true");
