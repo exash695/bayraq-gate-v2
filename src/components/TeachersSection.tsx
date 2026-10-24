@@ -47,8 +47,8 @@ import { useSubjectDistributor } from '../hooks/useSubjectDistributor';
 import { staffService } from '../services/staffService';
 import { logActivity } from '../utils/auditLogger';
 import { compressImage } from '../utils/imageCompressor';
-
 import { getPrefixForGrade, getStageFromGrade, getSanitizedSubCode, SUBJECT_KEYWORDS, normalizeArabicText, normalizeGradeName, isArchivedList } from '../utils/studentUtils';
+import { extractSectionLetter } from '../utils/gradeMatcher';
 import { ScheduleManager } from './ScheduleManager';
 import { copyToClipboard } from '../utils/clipboard';
 import { subscribeMultiQuery } from '../utils/firestoreSubscriptions';
