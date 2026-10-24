@@ -236,7 +236,7 @@ export const TeachersSection: React.FC<TeachersSectionProps> = ({ showToast, sch
       const result: string[] = [];
       rawClasses.forEach((c: string) => {
         if (!c || isArchivedList(c)) return;
-        const specificList = (savedLists || []).find(l => (l.name === c || l.name === c.split(' - ').pop()) && !isArchivedList(l));
+        const specificList = (savedLists || []).find(l => (l.name === c || normalizeArabicText(l.name) === normalizeArabicText(c)) && !isArchivedList(l));
         const nameToUse = specificList ? specificList.name : c;
         if (!result.includes(nameToUse)) {
           result.push(nameToUse);
@@ -431,8 +431,7 @@ export const TeachersSection: React.FC<TeachersSectionProps> = ({ showToast, sch
       if (!trimmed) return;
       const specificList = (savedLists || []).find(l => 
         l.name === trimmed || 
-        normalizeArabicText(l.name) === normalizeArabicText(trimmed) ||
-        l.name === trimmed.split(' - ').pop()
+        normalizeArabicText(l.name) === normalizeArabicText(trimmed)
       );
       const resolvedName = specificList ? specificList.name : trimmed;
       if (!finalClasses.includes(resolvedName)) {

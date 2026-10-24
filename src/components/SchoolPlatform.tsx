@@ -1272,8 +1272,20 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
       const aTrim = assigned.trim();
       if (lTrim === aTrim) return true;
       if (normArabic(lTrim) === normArabic(aTrim)) return true;
-      if (lTrim.endsWith(aTrim) || aTrim.endsWith(lTrim)) return true;
-      if (lTrim.split(' - ').pop()?.trim() === aTrim.split(' - ').pop()?.trim()) return true;
+
+      // Grade MUST match strictly between assigned section and academic list name
+      const gList = normGrade(lTrim);
+      const gAssigned = normGrade(aTrim);
+      if (gList && gAssigned && gList !== gAssigned) return false;
+
+      const normL = normArabic(lTrim);
+      const normA = normArabic(aTrim);
+      if (normL === normA) return true;
+
+      if (gList && gAssigned && gList === gAssigned) {
+        if (normL.includes(normA) || normA.includes(normL)) return true;
+      }
+
       return false;
     };
 
