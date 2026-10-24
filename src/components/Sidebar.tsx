@@ -425,7 +425,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 )}
               </div>
               <div className="flex flex-col gap-0.5 overflow-hidden">
-                <h2 className="text-white font-bold text-[13px] truncate">{userProfile?.fullName || userProfile?.name || auth.currentUser?.displayName || (language === 'ar' ? 'فارس منصة بيرق' : 'Knight')}</h2>
+                <h2 className="text-white font-bold text-[13px] truncate">
+                  {isDev 
+                    ? "المهندس منتظر (المطور العام)" 
+                    : (userProfile?.fullName || userProfile?.name || auth.currentUser?.displayName || (language === 'ar' ? 'فارس منصة بيرق' : 'Knight'))
+                  }
+                </h2>
                 {(() => {
                   const userName = String(userProfile?.fullName || userProfile?.name || auth.currentUser?.displayName || "");
                   const isTeacherName = /أستاذ|استاذ|معلم|المعلم|دكتور|المحاضر/i.test(userName);

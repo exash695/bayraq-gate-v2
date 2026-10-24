@@ -428,6 +428,72 @@ export default function App() {
       }
     } catch {}
   }, [userProfile]);
+
+  // Automatic Developer Profile Lock-in Effect: Protects main developer account from stale testing session overrides
+  useEffect(() => {
+    const activeEmail = (
+      user?.email || 
+      auth.currentUser?.email || 
+      userProfile?.email || 
+      customAuth.getCurrentUser()?.email || 
+      ""
+    ).toLowerCase().trim();
+
+    const devMails = [
+      'mntzralghanm527@gmail.com',
+      'mntzr.alghanm527@gmail.com',
+      'mntzralghanm527@googlemail.com',
+      'mntzr.alghanm527@googlemail.com',
+      'abdulradhaalmayali@gmail.com'
+    ];
+
+    const isDevMail = devMails.includes(activeEmail);
+
+    if (isDevMail) {
+      if (
+        userProfile?.role !== 'developer' || 
+        userProfile?.fullName !== 'المهندس منتظر (المطور العام)' || 
+        userProfile?.email !== 'mntzralghanm527@gmail.com'
+      ) {
+        setUserProfile((prev: any) => ({
+          ...prev,
+          uid: user?.uid || prev?.uid || 'dev_mntzr_main',
+          email: 'mntzralghanm527@gmail.com',
+          fullName: 'المهندس منتظر (المطور العام)',
+          name: 'المهندس منتظر (المطور العام)',
+          role: 'developer',
+          isDeveloper: true,
+          isAdmin: true
+        }));
+      }
+    }
+  }, [user, userProfile?.email, userProfile?.role, userProfile?.fullName]);
+
+  const isDevUserActive = useMemo(() => {
+    const activeEmail = (
+      user?.email || 
+      auth.currentUser?.email || 
+      userProfile?.email || 
+      customAuth.getCurrentUser()?.email || 
+      ""
+    ).toLowerCase().trim();
+
+    const devMails = [
+      'mntzralghanm527@gmail.com',
+      'mntzr.alghanm527@gmail.com',
+      'mntzralghanm527@googlemail.com',
+      'mntzr.alghanm527@googlemail.com',
+      'abdulradhaalmayali@gmail.com'
+    ];
+
+    return (
+      devMails.includes(activeEmail) ||
+      userProfile?.role === "developer" ||
+      userProfile?.role === "dev" ||
+      userProfile?.role === "superadmin" ||
+      Boolean(userProfile?.isDeveloper)
+    );
+  }, [user, userProfile]);
   const [portalType, setPortalType] = useState<
     "student" | "parent" | "admin-boys" | "admin-girls" | "teacher" | "admin-observer" | "driver" | "developer" | "superadmin"
   >(() => {
@@ -1710,6 +1776,7 @@ export default function App() {
           profileData.role = "developer";
           profileData.fullName = "المهندس منتظر (المطور العام)";
           profileData.name = "المهندس منتظر (المطور العام)";
+          profileData.email = "mntzralghanm527@gmail.com";
           profileData.isDeveloper = true;
           profileData.isAdmin = true;
         }
@@ -2631,12 +2698,13 @@ export default function App() {
         const currentSchool = allSchoolsList.find(
           (s) => s.id === activeTargetSchoolId || s.id === cleanActiveSchoolId,
         );
-        const institutionName =
-          currentSchool?.name ||
-          verifiedStudentInfo?.schoolName ||
-          loggedInTeacher?.schoolName ||
-          (userProfile?.schoolName && userProfile?.schoolName !== "أكاديمية بيرق الرقمية" ? userProfile.schoolName : "") ||
-          (activeTargetSchoolId ? getOfficialSchoolName(activeTargetSchoolId) : "");
+        const institutionName = isDevUserActive
+          ? (currentSchool?.name || (selectedSchoolId ? getOfficialSchoolName(selectedSchoolId) : "منظومة بيرق التعليمية (الإدارة العامة)"))
+          : (currentSchool?.name ||
+             verifiedStudentInfo?.schoolName ||
+             loggedInTeacher?.schoolName ||
+             (userProfile?.schoolName && userProfile?.schoolName !== "أكاديمية بيرق الرقمية" ? userProfile.schoolName : "") ||
+             (activeTargetSchoolId ? getOfficialSchoolName(activeTargetSchoolId) : ""));
 
         if (!isSchoolVerified) {
           const isAcademy =
@@ -3312,12 +3380,13 @@ export default function App() {
         const currentSchool = allSchoolsList.find(
           (s) => s.id === activeHubSchoolId || s.id === cleanHubSchoolId,
         );
-        const institutionName =
-          currentSchool?.name ||
-          verifiedStudentInfo?.schoolName ||
-          loggedInTeacher?.schoolName ||
-          (userProfile?.schoolName && userProfile?.schoolName !== "أكاديمية بيرق الرقمية" ? userProfile.schoolName : "") ||
-          (activeHubSchoolId ? getOfficialSchoolName(activeHubSchoolId) : "مدرسة غير محددة");
+        const institutionName = isDevUserActive
+          ? (currentSchool?.name || (selectedSchoolId ? getOfficialSchoolName(selectedSchoolId) : "منظومة بيرق التعليمية (الإدارة العامة)"))
+          : (currentSchool?.name ||
+             verifiedStudentInfo?.schoolName ||
+             loggedInTeacher?.schoolName ||
+             (userProfile?.schoolName && userProfile?.schoolName !== "أكاديمية بيرق الرقمية" ? userProfile.schoolName : "") ||
+             (activeHubSchoolId ? getOfficialSchoolName(activeHubSchoolId) : "مدرسة غير محددة"));
         return (
           <motion.div
             key={`student-hub-${hubResetKey}`}
@@ -3392,7 +3461,7 @@ export default function App() {
                       أهلاً وسهلاً بك،
                     </h2>
                     <h1 className="text-xl sm:text-2xl font-black text-white truncate w-full text-right drop-shadow-sm">
-                      {loggedInTeacher?.name || userProfile?.fullName || userProfile?.name || auth.currentUser?.displayName || "الأستاذ الفاضل"}
+                      {isDevUserActive ? "المهندس منتظر (المطور العام)" : (loggedInTeacher?.name || userProfile?.fullName || userProfile?.name || auth.currentUser?.displayName || "الأستاذ الفاضل")}
                     </h1>
                     <div className="mt-1 flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-full backdrop-blur-sm">
                       <span className="text-[10px] font-bold text-amber-300 truncate">
@@ -3441,7 +3510,7 @@ export default function App() {
                       أهلاً وسهلاً بك،
                     </h2>
                     <h1 className="text-xl sm:text-2xl font-black text-white truncate w-full text-right drop-shadow-sm">
-                      {formatParentGreetingTitle(verifiedStudentInfo?.fullName || verifiedStudentInfo?.name || userProfile?.studentName || userProfile?.fullName || userProfile?.name || auth.currentUser?.displayName)}
+                      {isDevUserActive ? "المهندس منتظر (المطور العام)" : formatParentGreetingTitle(verifiedStudentInfo?.fullName || verifiedStudentInfo?.name || userProfile?.studentName || userProfile?.fullName || userProfile?.name || auth.currentUser?.displayName)}
                     </h1>
                     <div className="mt-1 flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1 rounded-full backdrop-blur-sm">
                       <span className="text-[10px] font-bold text-amber-300 truncate">
@@ -4657,11 +4726,26 @@ export default function App() {
           />
         );
 
-      case "dev-dashboard":
-        if (
-          auth.currentUser?.email !== "mntzralghanm527@gmail.com" &&
-          userProfile?.email !== "mntzralghanm527@gmail.com"
-        ) {
+      case "dev-dashboard": {
+        const activeDevEmail = (
+          auth.currentUser?.email || 
+          userProfile?.email || 
+          user?.email || 
+          customAuth.getCurrentUser()?.email || 
+          ""
+        ).toLowerCase().trim();
+
+        const isAuthorizedDev = 
+          activeDevEmail === "mntzralghanm527@gmail.com" ||
+          activeDevEmail === "mntzr.alghanm527@gmail.com" ||
+          activeDevEmail === "mntzralghanm527@googlemail.com" ||
+          activeDevEmail === "abdulradhaalmayali@gmail.com" ||
+          userProfile?.role === "developer" ||
+          userProfile?.role === "dev" ||
+          userProfile?.role === "superadmin" ||
+          Boolean(userProfile?.isDeveloper);
+
+        if (!isAuthorizedDev) {
           return (
             <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-6 space-y-4" dir="rtl">
               <div className="text-5xl">🔒</div>
@@ -4694,6 +4778,7 @@ export default function App() {
             }} 
           />
         );
+      }
 
       default:
         return (
