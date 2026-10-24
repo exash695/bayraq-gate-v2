@@ -1337,18 +1337,39 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
       });
     }
 
-    // Include raw items not covered by specific academicLists
-    if (sectionsMap.size === 0 && rawAssignedRaw.size > 0) {
-      rawAssignedRaw.forEach(rawItem => {
-        if (!isArchivedList(rawItem)) {
-          sectionsMap.set(rawItem, {
-            name: rawItem,
-            grade: normGrade(rawItem) || rawItem,
-            studentCount: 0
-          });
+    // Include raw items not covered by specific academicLists entries
+    rawAssignedRaw.forEach(rawItem => {
+      if (isArchivedList(rawItem)) return;
+
+      const alreadyCovered = Array.from(sectionsMap.values()).some(sec => 
+        isSpecificMatch(sec.name, rawItem) || normArabic(sec.name) === normArabic(rawItem)
+      );
+
+      if (!alreadyCovered) {
+        let count = 0;
+        let matchedListId: string | undefined = undefined;
+
+        // Try to find count from academicLists
+        const matchedList = (academicLists || []).find((al: any) => 
+          !isArchivedList(al.name) && (isSpecificMatch(al.name, rawItem) || normArabic(al.name) === normArabic(rawItem))
+        );
+
+        if (matchedList && Array.isArray(matchedList.students) && matchedList.students.length > 0) {
+          count = matchedList.students.length;
+          matchedListId = matchedList.id;
+        } else if (topStudents && topStudents.length > 0) {
+          count = topStudents.filter((st: any) => normArabic(st.grade || '') === normArabic(rawItem)).length;
         }
-      });
-    }
+
+        sectionsMap.set(rawItem, {
+          name: rawItem,
+          grade: normGrade(rawItem) || rawItem,
+          studentCount: count,
+          listId: matchedListId
+        });
+      }
+    });
+
 
     // Final fallback
     if (sectionsMap.size === 0) {

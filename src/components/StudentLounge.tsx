@@ -224,10 +224,12 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
   const normalizeArabic = (s?: string | null): string => {
     if (!s) return "";
     return s
+      .replace(/[\u064B-\u065F\u0640]/g, "")
       .replace(/[أإآ]/g, "ا")
       .replace(/ة/g, "ه")
       .replace(/ى/g, "ي")
-      .replace(/[-/–]/g, " ")
+      .replace(/\bال/g, "")
+      .replace(/[-/–.,]/g, " ")
       .replace(/\s+/g, " ")
       .trim();
   };
@@ -381,13 +383,40 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
     return getGradeCore(cleanUser) === getGradeCore(cleanTarget);
   };
 
-  // Accurate student count per section
+  // Accurate student count per section from Code Center / academic_lists
   const getSectionStudentCount = (secName: string): number => {
+    if (!secName) return 0;
     const targetNorm = normalizeArabic(secName);
-    const matchedList = academicLists.find((al: any) => normalizeArabic(al.name) === targetNorm);
+
+    // 1. Direct or normalized match in academicLists
+    let matchedList = academicLists.find((al: any) => {
+      if (!al) return false;
+      const alNorm = normalizeArabic(al.name);
+      if (alNorm === targetNorm) return true;
+      if (al.grade && al.section) {
+        const combined = normalizeArabic(`${al.grade} شعبة ${al.section}`);
+        if (combined === targetNorm) return true;
+      }
+      return false;
+    });
+
+    // 2. Flexible section match if no direct normalized match
+    if (!matchedList && academicLists.length > 0) {
+      matchedList = academicLists.find((al: any) => {
+        if (!al || !al.name) return false;
+        return isSectionMatch(al.name, secName) || isSectionMatch(secName, al.name);
+      });
+    }
+
     if (matchedList && Array.isArray(matchedList.students) && matchedList.students.length > 0) {
       return matchedList.students.length;
     }
+
+    if (matchedList && typeof (matchedList as any).studentCount === 'number' && (matchedList as any).studentCount > 0) {
+      return (matchedList as any).studentCount;
+    }
+
+    // 3. Fallback: filter active registered knights matching section
     return knights.filter(k => isSectionMatch(k.grade, secName, k)).length;
   };
 
@@ -534,10 +563,13 @@ export const StudentLounge = React.forwardRef<HTMLDivElement, StudentLoungeProps
   // Count of students across all available sections (for teacher: strictly assigned sections)
   const allSectionsStudentCount = useMemo(() => {
     if (isTeacher) {
+      if (availableSections.length > 0) {
+        return availableSections.reduce((acc, sec) => acc + getSectionStudentCount(sec), 0);
+      }
       return teacherAssignedKnights.length;
     }
     return knights.length;
-  }, [isTeacher, teacherAssignedKnights, knights]);
+  }, [isTeacher, availableSections, teacherAssignedKnights, knights, academicLists]);
 
   // Memoized filtered knights based on selected section and search
   const filteredKnights = useMemo(() => {
