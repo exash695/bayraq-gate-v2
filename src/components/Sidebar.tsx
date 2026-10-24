@@ -258,22 +258,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   return (
     <>
-      {/* Mobile Overlay */}
-      <AnimatePresence>
-        {(isOpen || showLogoutConfirm || showDeleteConfirm) && (
-          <motion.div 
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            onClick={() => {
-              setIsOpen(false);
-              setShowLogoutConfirm(false);
-              setShowDeleteConfirm(false);
-            }}
-            className="fixed inset-0 bg-black/80 backdrop-blur-md z-[80] lg:hidden"
-          />
-        )}
-      </AnimatePresence>
+      {/* Mobile Overlay - Fail-safe Synchronous Removal */}
+      {(isOpen || showLogoutConfirm || showDeleteConfirm) ? (
+        <div 
+          onClick={() => {
+            setIsOpen(false);
+            setShowLogoutConfirm(false);
+            setShowDeleteConfirm(false);
+          }}
+          className="fixed inset-0 bg-black/80 backdrop-blur-md z-[80] lg:hidden cursor-pointer transition-opacity duration-200 animate-in fade-in"
+        />
+      ) : null}
 
       {/* Logout Confirmation Modal */}
       <AnimatePresence>
