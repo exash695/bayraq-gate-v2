@@ -231,31 +231,60 @@ export const TeachersSection: React.FC<TeachersSectionProps> = ({ showToast, sch
 
   const getTeacherSections = (teacher: Teacher | any): string[] => {
     if (!teacher) return [];
-    const rawClasses = Array.isArray(teacher.classes) ? teacher.classes : [];
-    if (rawClasses.length > 0) {
-      const result: string[] = [];
-      rawClasses.forEach((c: string) => {
-        if (!c || isArchivedList(c)) return;
-        const specificList = (savedLists || []).find(l => (l.name === c || normalizeArabicText(l.name) === normalizeArabicText(c)) && !isArchivedList(l));
-        const nameToUse = specificList ? specificList.name : c;
-        if (!result.includes(nameToUse)) {
-          result.push(nameToUse);
+    const sectionSet = new Set<string>();
+
+    // 1. Include specific section codes from classCodes (assigned in Code Center)
+    if (teacher.classCodes && typeof teacher.classCodes === 'object') {
+      Object.keys(teacher.classCodes).forEach(k => {
+        if (k && k !== 'default' && k !== 'master' && !isArchivedList(k)) {
+          const specificList = (savedLists || []).find(l => (l.name === k || normalizeArabicText(l.name) === normalizeArabicText(k)) && !isArchivedList(l));
+          sectionSet.add(specificList ? specificList.name : k.trim());
         }
       });
-      return result.filter(item => !isArchivedList(item));
     }
 
-    if (teacher.classCodes && typeof teacher.classCodes === 'object') {
-      const keys = Object.keys(teacher.classCodes).filter(k => k && k !== 'default' && k !== 'master' && !isArchivedList(k));
-      if (keys.length > 0) return keys;
+    // 2. Include raw classes from teacher.classes
+    const rawClasses = Array.isArray(teacher.classes) ? teacher.classes : [];
+    rawClasses.forEach((c: any) => {
+      const name = typeof c === 'string' ? c : (c?.name || c?.grade);
+      if (name && typeof name === 'string' && !isArchivedList(name)) {
+        const specificList = (savedLists || []).find(l => (l.name === name || normalizeArabicText(l.name) === normalizeArabicText(name)) && !isArchivedList(l));
+        sectionSet.add(specificList ? specificList.name : name.trim());
+      }
+    });
+
+    // 3. Include assignedGrades if present
+    if (Array.isArray(teacher.assignedGrades)) {
+      teacher.assignedGrades.forEach((g: any) => {
+        const name = typeof g === 'string' ? g : (g?.name || g?.grade);
+        if (name && typeof name === 'string' && !isArchivedList(name)) {
+          const specificList = (savedLists || []).find(l => (l.name === name || normalizeArabicText(l.name) === normalizeArabicText(name)) && !isArchivedList(l));
+          sectionSet.add(specificList ? specificList.name : name.trim());
+        }
+      });
     }
 
-    if (teacher.grade && typeof teacher.grade === 'string' && !isArchivedList(teacher.grade)) {
-      return [teacher.grade];
+    // 4. Fallback grade if nothing else
+    if (sectionSet.size === 0 && teacher.grade && typeof teacher.grade === 'string' && !isArchivedList(teacher.grade)) {
+      sectionSet.add(teacher.grade.trim());
     }
 
-    return [];
+    const result = Array.from(sectionSet).filter(item => !isArchivedList(item));
+
+    // If result has specific section names that belong to generic grades, prefer specific sections
+    const specificSections = result.filter(sec => extractSectionLetter(sec) !== null);
+    if (specificSections.length > 0) {
+      return result.filter(sec => {
+        if (extractSectionLetter(sec) !== null) return true;
+        const gNorm = normalizeGradeName(sec);
+        const hasSpecificForGrade = specificSections.some(s => normalizeGradeName(s) === gNorm);
+        return !hasSpecificForGrade;
+      });
+    }
+
+    return result;
   };
+
 
   // Helper to check if a class or section is currently selected in form
   const isSectionSelected = (targetSection: string, classesList: string[] = []): boolean => {

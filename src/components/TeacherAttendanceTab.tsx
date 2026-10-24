@@ -540,30 +540,38 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
   // Compute student counts per dynamic section for the switcher display
   const sectionCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    const norm = (s: string) => (s || '')
-      .replace(/[\s\-_()\/\\.]+/g, '')
-      .replace(/^(الصف|صف)/g, '')
-      .replace(/شعبة/g, '')
-      .replace(/ال/g, '')
-      .replace(/ة/g, 'ه')
-      .replace(/[أإآٱ]/g, 'ا')
-      .replace(/ى/g, 'ي')
-      .replace(/ـ/g, '')
-      .toLowerCase();
 
     dynamicClassesList.forEach(cls => {
-      const targetNorm = norm(cls);
-      const matchedList = (academicLists || []).find(l => !l.isArchived && (l.name === cls || norm(l.name) === targetNorm));
+      const targetNorm = normalizeArabicText(cls);
+      const targetLetter = extractSectionLetter(cls);
+
+      const matchedList = (academicLists || []).find(l => {
+        if (!l || l.isArchived) return false;
+        if ((l.name || '').trim() === cls.trim()) return true;
+        const lNorm = normalizeArabicText(l.name);
+        if (lNorm === targetNorm) return true;
+
+        const lLetter = extractSectionLetter(l.name);
+        if (targetLetter && lLetter && targetLetter !== lLetter) return false;
+
+        const lGrade = normalizeGradeName(l.name);
+        const targetGrade = normalizeGradeName(cls);
+        if (lGrade && targetGrade && lGrade !== targetGrade) return false;
+
+        return lNorm.includes(targetNorm) || targetNorm.includes(lNorm);
+      });
+
       if (matchedList && Array.isArray(matchedList.students) && matchedList.students.length > 0) {
         counts[cls] = matchedList.students.length;
         return;
       }
+
       const matched = allStudents.filter(st => {
         if (!st || st.status === 'deleted' || st.status === 'محذوف' || st.isDeleted === true) return false;
         const sGrade = (st.grade || '').trim();
         const sSec = ((st as any).section || '').trim();
-        const sGradeNorm = norm(sGrade);
-        const sSecNorm = norm(sSec);
+        const sGradeNorm = normalizeArabicText(sGrade);
+        const sSecNorm = normalizeArabicText(sSec);
         return sGradeNorm === targetNorm || sSecNorm === targetNorm || sGrade === cls ||
                (targetNorm.length >= 3 && (sGradeNorm.includes(targetNorm) || targetNorm.includes(sGradeNorm)));
       });
@@ -571,6 +579,7 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
     });
     return counts;
   }, [dynamicClassesList, academicLists, allStudents]);
+
 
   // Date selection state (YYYY-MM-DD)
   const [selectedDate, setSelectedDate] = useState<string>(() => {
@@ -861,18 +870,28 @@ export const TeacherAttendanceTab: React.FC<TeacherAttendanceTabProps> = ({
 
     // 1. Look for matching active list in academicLists (Primary Source of Truth from Code Center)
     const activeLists = (academicLists || []).filter(l => !l.isArchived);
+    const targetSectionLetter = extractSectionLetter(activeClass);
+    const targetGradeName = normalizeGradeName(activeClass);
     
     // Exact list name match first
     let matchingList = activeLists.find(l => (l.name || '').trim() === activeClass.trim());
     if (!matchingList) {
-      matchingList = activeLists.find(l => norm(l.name) === targetNorm);
+      matchingList = activeLists.find(l => normalizeArabicText(l.name) === normalizeArabicText(activeClass));
     }
     if (!matchingList) {
       matchingList = activeLists.find(l => {
-        const lNorm = norm(l.name);
-        return lNorm.length > 0 && targetNorm.length > 0 && (lNorm.includes(targetNorm) || targetNorm.includes(lNorm));
+        const lSecLetter = extractSectionLetter(l.name);
+        if (targetSectionLetter && lSecLetter && targetSectionLetter !== lSecLetter) return false;
+        
+        const lGrade = normalizeGradeName(l.name);
+        if (targetGradeName && lGrade && targetGradeName !== lGrade) return false;
+
+        const lNorm = normalizeArabicText(l.name);
+        const tNorm = normalizeArabicText(activeClass);
+        return lNorm.length > 0 && tNorm.length > 0 && (lNorm.includes(tNorm) || tNorm.includes(lNorm));
       });
     }
+
 
     if (matchingList && Array.isArray(matchingList.students) && matchingList.students.length > 0) {
       return matchingList.students

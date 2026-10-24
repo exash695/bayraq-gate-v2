@@ -1247,21 +1247,35 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
 
     // Collect all raw assigned grade/class strings (excluding archived)
     const rawAssignedRaw = new Set<string>();
-    const hasClasses = Array.isArray(tData.classes) && tData.classes.length > 0;
-    if (hasClasses) {
-      tData.classes.forEach((c: string) => {
-        if (c && typeof c === 'string' && !isArchivedList(c)) rawAssignedRaw.add(c.trim());
-      });
-    }
-    if (tData.grade && typeof tData.grade === 'string' && !hasClasses && !isArchivedList(tData.grade)) {
-      rawAssignedRaw.add(tData.grade.trim());
-    }
-    if (!hasClasses && tData.classCodes && typeof tData.classCodes === 'object') {
+
+    if (tData.classCodes && typeof tData.classCodes === 'object') {
       Object.keys(tData.classCodes).forEach(k => {
         if (k && k !== 'default' && k !== 'master' && !isArchivedList(k)) {
           rawAssignedRaw.add(k.trim());
         }
       });
+    }
+
+    if (Array.isArray(tData.classes) && tData.classes.length > 0) {
+      tData.classes.forEach((c: any) => {
+        const name = typeof c === 'string' ? c : (c?.name || c?.grade);
+        if (name && typeof name === 'string' && !isArchivedList(name)) {
+          rawAssignedRaw.add(name.trim());
+        }
+      });
+    }
+
+    if (Array.isArray(tData.assignedGrades) && tData.assignedGrades.length > 0) {
+      tData.assignedGrades.forEach((g: any) => {
+        const name = typeof g === 'string' ? g : (g?.name || g?.grade);
+        if (name && typeof name === 'string' && !isArchivedList(name)) {
+          rawAssignedRaw.add(name.trim());
+        }
+      });
+    }
+
+    if (rawAssignedRaw.size === 0 && tData.grade && typeof tData.grade === 'string' && !isArchivedList(tData.grade)) {
+      rawAssignedRaw.add(tData.grade.trim());
     }
 
     const sectionsMap = new Map<string, { name: string; grade: string; studentCount: number; listId?: string }>();
@@ -1271,23 +1285,40 @@ export const SchoolPlatform: React.FC<SchoolPlatformProps> = ({
       const lTrim = listName.trim();
       const aTrim = assigned.trim();
       if (lTrim === aTrim) return true;
-      if (normArabic(lTrim) === normArabic(aTrim)) return true;
-
-      // Grade MUST match strictly between assigned section and academic list name
-      const gList = normGrade(lTrim);
-      const gAssigned = normGrade(aTrim);
-      if (gList && gAssigned && gList !== gAssigned) return false;
 
       const normL = normArabic(lTrim);
       const normA = normArabic(aTrim);
       if (normL === normA) return true;
 
-      if (gList && gAssigned && gList === gAssigned) {
-        if (normL.includes(normA) || normA.includes(normL)) return true;
+      // Check section letters e.g. 'أ' vs 'ب'
+      const secL = extractSectionLetter(lTrim);
+      const secA = extractSectionLetter(aTrim);
+      if (secL && secA && secL !== secA) {
+        return false;
+      }
+
+      // Check grade names
+      const gList = normGrade(lTrim);
+      const gAssigned = normGrade(aTrim);
+      if (gList && gAssigned && gList !== gAssigned) {
+        return false;
+      }
+
+      // Substring match if letters and grades don't conflict
+      if (normL.includes(normA) || normA.includes(normL)) {
+        return true;
+      }
+
+      // Matching section letter + grade base
+      if (secL && secA && secL === secA) {
+        if (!gList || !gAssigned || gList === gAssigned) {
+          return true;
+        }
       }
 
       return false;
     };
+
 
     const isGenericGradeMatch = (listGrade: string, listName: string, assigned: string) => {
       if (!assigned || isArchivedList(assigned) || isArchivedList(listName) || isArchivedList(listGrade)) return false;

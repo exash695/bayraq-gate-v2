@@ -141,22 +141,33 @@ export const TeacherControlGradesTab: React.FC = () => {
     const target = (selectedSectionName || "").trim();
     if (!target) return academicLists[0];
 
-    const norm = (s: string) => (s || "").replace(/[\(\)\d\s]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').toLowerCase();
-    const targetNorm = norm(target);
-
     // 1. Exact match by name or ID
     const exact = academicLists.find((l: any) => l.name === target || l.id === target);
     if (exact) return exact;
 
-    // 2. Normalized match
+    const targetSectionLetter = extractSectionLetter(target);
+    const targetGradeName = normalizeGradeName(target);
+    const targetNorm = normalizeArabicText(target);
+
+    // 2. Normalized match with section letter safety
     const normMatch = academicLists.find((l: any) => {
-      const lNameNorm = norm(l.name || "");
-      return lNameNorm === targetNorm || lNameNorm.includes(targetNorm) || targetNorm.includes(lNameNorm) || l.id === target;
+      if (l.id === target) return true;
+      const lNorm = normalizeArabicText(l.name || "");
+      if (lNorm === targetNorm) return true;
+
+      const lSecLetter = extractSectionLetter(l.name);
+      if (targetSectionLetter && lSecLetter && targetSectionLetter !== lSecLetter) return false;
+
+      const lGrade = normalizeGradeName(l.name);
+      if (targetGradeName && lGrade && targetGradeName !== lGrade) return false;
+
+      return lNorm.includes(targetNorm) || targetNorm.includes(lNorm);
     });
     if (normMatch) return normMatch;
 
     return academicLists[0];
   }, [academicLists, selectedSectionName]);
+
 
   // Extract subjects for the class grade
   const targetGradeName = currentAcademicList?.students?.[0]?.grade || currentAcademicList?.grade || gradeName || grade || "";
