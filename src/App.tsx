@@ -4735,16 +4735,12 @@ export default function App() {
           ""
         ).toLowerCase().trim();
 
-        const isAuthorizedDev = STRICT_DEV_EMAILS.includes(activeDevEmail);
+        const isAuthorizedDev = Boolean(activeDevEmail && STRICT_DEV_EMAILS.includes(activeDevEmail));
 
         if (!isAuthorizedDev) {
-          return (
-            <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-6 space-y-4" dir="rtl">
-              <div className="w-16 h-16 rounded-full bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 text-2xl">🔒</div>
-              <h2 className="text-xl font-black text-rose-400">وصول غير مصرح به</h2>
-              <p className="text-white/60 text-xs font-bold max-w-sm">هذه اللوحة محمية وتقتصر حصرياً على البريد الإلكتروني الشخصي للمطور العام للمنظومة.</p>
-            </div>
-          );
+          // Stealth Mode: silently reset to main hub without rendering any dev error
+          setTimeout(() => setActiveSection("hub"), 0);
+          return null;
         }
 
         return (
@@ -4833,15 +4829,9 @@ export default function App() {
     );
   }
 
+  const activeEmailForBypass = (auth.currentUser?.email || userProfile?.email || "").toLowerCase().trim();
   const isDevBypassSection = Boolean(
-    activeSection === "admin-hub" || 
-    activeSection === "dev-dashboard" || 
-    portalType === "developer" || 
-    userProfile?.role === "dev" || 
-    userProfile?.role === "developer" || 
-    userProfile?.role === "superadmin" || 
-    auth.currentUser?.email?.toLowerCase() === "mntzralghanm527@gmail.com" || 
-    userProfile?.email?.toLowerCase() === "mntzralghanm527@gmail.com"
+    activeEmailForBypass && STRICT_DEV_EMAILS.includes(activeEmailForBypass)
   );
 
   return (
