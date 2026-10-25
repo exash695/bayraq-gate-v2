@@ -143,9 +143,11 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
     setCustomDate(tm.toISOString().split('T')[0]);
     setCustomTime('08:00');
 
-    // Default to all assigned sections for effortless one-click publishing
-    if (selectedPublishSections.length === 0) {
-      setSelectedPublishSections(assignedSectionsList);
+    // Set target sections based on active selectedClass switcher or fallback to all assigned sections
+    if (selectedClass && selectedClass !== 'ALL' && selectedClass !== 'all' && selectedClass !== 'كافة الشُعب') {
+      setSelectedPublishSections([selectedClass]);
+    } else {
+      setSelectedPublishSections([...assignedSectionsList]);
     }
 
     setShowPublishScheduleModal(true);
@@ -374,11 +376,13 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
     try {
       const targetSections = selectedPublishSections.length > 0 
         ? selectedPublishSections 
-        : (selectedClass && selectedClass !== 'ALL' && selectedClass !== 'كافة الشُعب' ? [selectedClass] : assignedSectionsList);
+        : (selectedClass && selectedClass !== 'ALL' && selectedClass !== 'all' && selectedClass !== 'كافة الشُعب' ? [selectedClass] : assignedSectionsList);
       
       const isAll = targetSections.length >= assignedSectionsList.length;
       const targetGrade = teacherData?.grade || "الكل";
-      const targetSectionLabel = isAll ? "كافة الشُعب الموكلة" : targetSections.join('، ');
+      const targetSectionLabel = isAll 
+        ? "كافة الشُعب الموكلة" 
+        : targetSections.map((s: string) => s.startsWith("شعبة") ? s : `شعبة ${s}`).join('، ');
       const subject = teacherData?.subject || "عام";
       
       const defaultTitle = activeToolData?.title ? `${activeToolData.title} - ${new Date().toLocaleDateString('ar-IQ')}` : 'ملف جديد';
@@ -535,16 +539,15 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
       const defaultTitle = `واجب ${teacherData?.subject || 'دراسي'} مصور - ${new Date().toLocaleDateString('ar-IQ')}`;
       const finalTitle = imageHwTitle.trim() || defaultTitle;
 
-      const isAll = !selectedClass || selectedClass === 'ALL' || selectedClass === 'كافة الشُعب' || selectedClass === 'all';
-      const rawClasses = teacherData?.classes;
-      const teacherSecNames = Array.isArray(rawClasses) 
-        ? rawClasses.filter(Boolean) 
-        : typeof rawClasses === 'string' && rawClasses.trim() 
-          ? [rawClasses.trim()] 
-          : [];
-      const targetGrade = isAll ? "الكل" : selectedClass;
-      const targetSections = isAll ? (teacherSecNames.length > 0 ? teacherSecNames : [selectedClass || "الكل"]) : [selectedClass];
-      const targetSectionLabel = isAll ? "كافة الشُعب" : selectedClass;
+      const targetSections = selectedPublishSections.length > 0 
+        ? selectedPublishSections 
+        : (selectedClass && selectedClass !== 'ALL' && selectedClass !== 'all' && selectedClass !== 'كافة الشُعب' ? [selectedClass] : assignedSectionsList);
+      
+      const isAll = targetSections.length >= assignedSectionsList.length;
+      const targetGrade = teacherData?.grade || "الكل";
+      const targetSectionLabel = isAll 
+        ? "كافة الشُعب الموكلة" 
+        : targetSections.map((s: string) => s.startsWith("شعبة") ? s : `شعبة ${s}`).join('، ');
       const subject = teacherData?.subject || "عام";
 
       await addDoc(collection(db, "schools", schoolId, "ai_materials"), {
@@ -556,7 +559,7 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
         tool: 'صناعة واجبات',
         subject: subject,
         targetGrade: targetGrade,
-        section: isAll ? null : selectedClass,
+        section: isAll ? null : targetSections.join(', '),
         targetSections: targetSections,
         targetSectionLabel: targetSectionLabel,
         teacherId: teacherData?.id || teacherData?.code || "unknown",
@@ -721,16 +724,15 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
       setGeneratedContent(mdContent);
       setSaveName(finalTitle);
 
-      const isAll = !selectedClass || selectedClass === 'ALL' || selectedClass === 'كافة الشُعب' || selectedClass === 'all';
-      const rawClasses = teacherData?.classes;
-      const teacherSecNames = Array.isArray(rawClasses) 
-        ? rawClasses.filter(Boolean) 
-        : typeof rawClasses === 'string' && rawClasses.trim() 
-          ? [rawClasses.trim()] 
-          : [];
-      const targetGrade = isAll ? "الكل" : selectedClass;
-      const targetSections = isAll ? (teacherSecNames.length > 0 ? teacherSecNames : [selectedClass || "الكل"]) : [selectedClass];
-      const targetSectionLabel = isAll ? "كافة الشُعب" : selectedClass;
+      const targetSections = selectedPublishSections.length > 0 
+        ? selectedPublishSections 
+        : (selectedClass && selectedClass !== 'ALL' && selectedClass !== 'all' && selectedClass !== 'كافة الشُعب' ? [selectedClass] : assignedSectionsList);
+      
+      const isAll = targetSections.length >= assignedSectionsList.length;
+      const targetGrade = teacherData?.grade || "الكل";
+      const targetSectionLabel = isAll 
+        ? "كافة الشُعب الموكلة" 
+        : targetSections.map((s: string) => s.startsWith("شعبة") ? s : `شعبة ${s}`).join('، ');
       const subject = teacherData?.subject || "عام";
 
       const newItem = {
@@ -757,7 +759,7 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
           subject: subject,
           targetGrade: targetGrade,
           grade: targetGrade,
-          section: isAll ? null : selectedClass,
+          section: isAll ? null : targetSections.join(', '),
           targetSections: targetSections,
           targetSectionLabel: targetSectionLabel,
           teacherId: teacherData?.id || teacherData?.code || "unknown",

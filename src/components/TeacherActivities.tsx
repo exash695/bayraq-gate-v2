@@ -49,19 +49,28 @@ export default function TeacherActivities({
   const handleDelete = async (id: string) => {
     if (!id || !schoolId) return;
     setIsDeleting(true);
+    // Instant optimistic UI update
+    setSubmissions(prev => prev.filter(s => s.id !== id));
+    if (selectedSubmission?.id === id) setSelectedSubmission(null);
+    setDeleteConfirmId(null);
+    setIsDeleting(false);
+
     try {
       await deleteDoc(doc(db, "schools", schoolId, "activities_submissions", id));
     } catch(e) {
       console.error(e);
     }
-    setIsDeleting(false);
-    setDeleteConfirmId(null);
-    if (selectedSubmission?.id === id) setSelectedSubmission(null);
   };
 
   const handleDeleteTask = async (taskId: string) => {
     if (!taskId || !schoolId) return;
     setIsDeleting(true);
+    // Instant optimistic UI update
+    setTasks(prev => prev.filter(t => t.id !== taskId));
+    setSubmissions(prev => prev.filter(s => s.taskId !== taskId));
+    setDeleteTaskConfirmId(null);
+    setIsDeleting(false);
+
     try {
       const batch = writeBatch(db);
       
@@ -78,13 +87,19 @@ export default function TeacherActivities({
     } catch(e) {
       console.error(e);
     }
-    setIsDeleting(false);
-    setDeleteTaskConfirmId(null);
   };
 
   const handleDeleteAll = async (type: 'homework' | 'competition') => {
     if (!schoolId) return;
     setIsDeleting(true);
+    const toolType = type === 'homework' ? 'صناعة واجبات' : 'مسابقات صفية';
+    // Instant optimistic UI update
+    setSubmissions(prev => prev.filter(s => s.type !== type));
+    setTasks(prev => prev.filter(t => t.tool !== toolType));
+    if (selectedSubmission?.type === type) setSelectedSubmission(null);
+    setDeleteAllConfirm(null);
+    setIsDeleting(false);
+
     try {
       const batch = writeBatch(db);
       
@@ -95,7 +110,6 @@ export default function TeacherActivities({
       });
       
       // Delete all tasks
-      const toolType = type === 'homework' ? 'صناعة واجبات' : 'مسابقات صفية';
       const tasksToDelete = tasks.filter(t => t.tool === toolType);
       tasksToDelete.forEach(t => {
         batch.delete(doc(db, "schools", schoolId, "ai_materials", t.id));
@@ -105,9 +119,6 @@ export default function TeacherActivities({
     } catch(e) {
       console.error(e);
     }
-    setIsDeleting(false);
-    setDeleteAllConfirm(null);
-    if (selectedSubmission?.type === type) setSelectedSubmission(null);
   };
 
   useEffect(() => {
