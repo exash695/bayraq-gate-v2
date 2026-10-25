@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Bot, FileUp, ClipboardCheck, HelpCircle, ScrollText, Edit2, Sparkles, Trophy, ChevronRight, Loader2, Copy, CheckCircle, Image as ImageIcon, X, Save, History, Trash2, Plus, Minus, Lock, Search, Camera, CheckCircle2, UploadCloud, Eye, ZoomIn, Clock, Calendar, Send } from 'lucide-react';
+import { Bot, FileUp, ClipboardCheck, HelpCircle, ScrollText, Edit2, Sparkles, Trophy, ChevronRight, Loader2, Copy, CheckCircle, Image as ImageIcon, X, Save, History, Trash2, Plus, Minus, Lock, Search, Camera, CheckCircle2, UploadCloud, Eye, ZoomIn, Clock, Calendar, Send, Users, Check } from 'lucide-react';
 
 import ReactMarkdown from 'react-markdown';
 import TeacherActivities from "./TeacherActivities";
@@ -106,6 +106,25 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
     };
   };
 
+  const assignedSectionsList = useMemo(() => {
+    const rawClasses = teacherData?.classes || teacherData?.assignedSections || teacherData?.sections;
+    let list: string[] = [];
+    if (Array.isArray(rawClasses)) {
+      list = rawClasses.map((item: any) => typeof item === 'string' ? item : (item?.name || item?.sectionName || String(item))).filter(Boolean);
+    } else if (typeof rawClasses === 'string' && rawClasses.trim()) {
+      list = rawClasses.split(',').map((s: string) => s.trim()).filter(Boolean);
+    }
+    if (selectedClass && selectedClass !== 'ALL' && selectedClass !== 'كافة الشُعب' && !list.includes(selectedClass)) {
+      list = [selectedClass, ...list];
+    }
+    if (list.length === 0) {
+      list = ['أ', 'ب', 'ج', 'د'];
+    }
+    return Array.from(new Set(list));
+  }, [teacherData, selectedClass]);
+
+  const [selectedPublishSections, setSelectedPublishSections] = useState<string[]>([]);
+
   const openPublishModal = (mode = 'regular') => {
     if (activeTool === 'summaries') {
       if (summaryMode === 'image' && !imageSummaryResult && summaryImageFiles.length > 0) {
@@ -123,6 +142,12 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
     tm.setDate(tm.getDate() + 1);
     setCustomDate(tm.toISOString().split('T')[0]);
     setCustomTime('08:00');
+
+    // Default to all assigned sections for effortless one-click publishing
+    if (selectedPublishSections.length === 0) {
+      setSelectedPublishSections(assignedSectionsList);
+    }
+
     setShowPublishScheduleModal(true);
   };
 
@@ -347,16 +372,13 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
     if (!contentToPublish) return;
     setIsPublishing(true);
     try {
-      const isAll = !selectedClass || selectedClass === 'ALL' || selectedClass === 'كافة الشُعب' || selectedClass === 'all' || selectedClass === 'الكل';
-      const rawClasses = teacherData?.classes;
-      const teacherSecNames = Array.isArray(rawClasses) 
-        ? rawClasses.filter(Boolean) 
-        : typeof rawClasses === 'string' && rawClasses.trim() 
-          ? [rawClasses.trim()] 
-          : [];
-      const targetGrade = isAll ? (teacherData?.grade || "الكل") : selectedClass;
-      const targetSections = isAll ? (teacherSecNames.length > 0 ? teacherSecNames : [selectedClass || "الكل"]) : [selectedClass];
-      const targetSectionLabel = isAll ? "كافة الشُعب" : selectedClass;
+      const targetSections = selectedPublishSections.length > 0 
+        ? selectedPublishSections 
+        : (selectedClass && selectedClass !== 'ALL' && selectedClass !== 'كافة الشُعب' ? [selectedClass] : assignedSectionsList);
+      
+      const isAll = targetSections.length >= assignedSectionsList.length;
+      const targetGrade = teacherData?.grade || "الكل";
+      const targetSectionLabel = isAll ? "كافة الشُعب الموكلة" : targetSections.join('، ');
       const subject = teacherData?.subject || "عام";
       
       const defaultTitle = activeToolData?.title ? `${activeToolData.title} - ${new Date().toLocaleDateString('ar-IQ')}` : 'ملف جديد';
@@ -371,7 +393,7 @@ export const TeacherAIAssistant: React.FC<TeacherAIAssistantProps> = ({
         subject: subject,
         targetGrade: targetGrade,
         grade: targetGrade,
-        section: isAll ? null : selectedClass,
+        section: isAll ? null : targetSections.join(', '),
         targetSections: targetSections,
         targetSectionLabel: targetSectionLabel,
         teacherId: teacherData?.id || teacherData?.code || "unknown",
@@ -2926,7 +2948,72 @@ ${baseFormatting}`;
               </div>
 
               {/* Scrollable Options List */}
-              <div className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-5 flex flex-col gap-3 min-h-0">
+              <div className="flex-1 overflow-y-auto overscroll-contain p-4 sm:p-5 flex flex-col gap-4 min-h-0">
+                {/* Section Selector: Allows choosing target sections at decision time */}
+                <div className="bg-white/5 border border-cyan-500/20 rounded-2xl p-4 flex flex-col gap-3 shadow-inner">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="w-7 h-7 rounded-lg bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+                        <Users size={14} />
+                      </div>
+                      <div>
+                        <span className="font-bold text-xs sm:text-sm text-white">تحديد الشعب الموكلة للنشر:</span>
+                        <span className="block text-[10px] text-cyan-300 font-medium">
+                          {selectedPublishSections.length === assignedSectionsList.length
+                            ? "محدد: كافة الشعب الموكلة ⚡"
+                            : `محدد: ${selectedPublishSections.length} شعبة من أصل ${assignedSectionsList.length}`}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (selectedPublishSections.length === assignedSectionsList.length) {
+                          setSelectedPublishSections(selectedClass && selectedClass !== 'ALL' && selectedClass !== 'كافة الشُعب' ? [selectedClass] : [assignedSectionsList[0]]);
+                        } else {
+                          setSelectedPublishSections([...assignedSectionsList]);
+                        }
+                      }}
+                      className="text-[11px] font-bold text-amber-300 hover:text-amber-200 bg-amber-500/10 hover:bg-amber-500/20 px-2.5 py-1 rounded-xl border border-amber-500/20 transition-all cursor-pointer"
+                    >
+                      {selectedPublishSections.length === assignedSectionsList.length ? "إلغاء تحديد الكل" : "تحديد كافة الشعب ⚡"}
+                    </button>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {assignedSectionsList.map((secName) => {
+                      const isChecked = selectedPublishSections.includes(secName);
+                      return (
+                        <button
+                          key={secName}
+                          type="button"
+                          onClick={() => {
+                            if (isChecked) {
+                              if (selectedPublishSections.length > 1) {
+                                setSelectedPublishSections(prev => prev.filter(s => s !== secName));
+                              }
+                            } else {
+                              setSelectedPublishSections(prev => [...prev, secName]);
+                            }
+                          }}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer border select-none ${
+                            isChecked
+                              ? "bg-gradient-to-r from-cyan-600 to-blue-600 text-white border-cyan-400/60 shadow-[0_0_12px_rgba(6,182,212,0.3)] scale-[1.02]"
+                              : "bg-black/30 text-white/50 border-white/10 hover:bg-white/10 hover:text-white"
+                          }`}
+                        >
+                          <div className={`w-4 h-4 rounded-md border flex items-center justify-center transition-colors ${
+                            isChecked ? "bg-white text-cyan-800 border-white" : "border-white/30 bg-transparent"
+                          }`}>
+                            {isChecked && <Check size={12} strokeWidth={3} />}
+                          </div>
+                          <span>{secName.startsWith("شعبة") ? secName : `شعبة ${secName}`}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
                 <div className="flex flex-col gap-2.5">
                   {[
                     { id: 'now', title: '⚡ نشر فوري الآن', desc: 'يصل الواجب مباشرة وتتم إتاحته للجميع حالاً' },
