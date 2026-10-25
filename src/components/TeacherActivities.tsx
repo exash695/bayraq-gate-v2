@@ -182,6 +182,22 @@ export default function TeacherActivities({
      t.content?.toLowerCase().includes(searchTerm.toLowerCase()))
   );
 
+  const getTaskSectionBadgeLabel = (task: any) => {
+    if (task.targetSectionLabel && task.targetSectionLabel.trim()) {
+      return task.targetSectionLabel.trim();
+    }
+    if (Array.isArray(task.targetSections) && task.targetSections.length > 0) {
+      return task.targetSections.map((s: string) => s.startsWith("شعبة") ? s : `شعبة ${s}`).join("، ");
+    }
+    if (task.section && task.section !== 'ALL' && task.section !== 'all' && task.section !== 'كافة الشُعب') {
+      return task.section.startsWith("شعبة") ? task.section : `شعبة ${task.section}`;
+    }
+    if (task.targetGrade && task.targetGrade !== 'all' && task.targetGrade !== 'ALL' && task.targetGrade !== 'الكل') {
+      return task.targetGrade;
+    }
+    return "كافة الشُعب الموكلة";
+  };
+
   const activeScopeLabel = (!selectedClass || selectedClass === 'ALL' || selectedClass === 'all' || selectedClass === 'كافة الشُعب')
     ? 'كافة الشُعب الموكلة'
     : selectedClass;
@@ -294,12 +310,12 @@ export default function TeacherActivities({
                                  {task.status === 'scheduled' && task.scheduledAt && new Date(task.scheduledAt).getTime() > Date.now() ? (
                                    <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-black flex items-center gap-1">
                                      <Clock size={11} className="animate-pulse" />
-                                     <span>مجدول</span>
+                                     <span>مجدول لـ: {getTaskSectionBadgeLabel(task)}</span>
                                    </span>
                                  ) : (
                                    <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-bold flex items-center gap-1">
                                      <CheckCircle size={10} />
-                                     <span>منشور للطلاب</span>
+                                     <span>منشور لـ: {getTaskSectionBadgeLabel(task)}</span>
                                    </span>
                                  )}
                                </div>
@@ -418,10 +434,16 @@ export default function TeacherActivities({
                         <div key={task.id} className="bg-gradient-to-br from-rose-500/5 to-fuchsia-500/5 border border-rose-500/10 rounded-2xl sm:rounded-3xl p-3.5 sm:p-5 flex flex-col gap-4 w-full">
                           <div className="flex justify-between items-start">
                              <div>
-                               <h4 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
-                                  <Trophy size={18} className="text-rose-400" />
-                                  {task.name || 'مسابقة صفية'}
-                               </h4>
+                               <div className="flex items-center gap-2 flex-wrap">
+                                  <h4 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
+                                     <Trophy size={18} className="text-rose-400" />
+                                     {task.name || 'مسابقة صفية'}
+                                  </h4>
+                                  <span className="px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30 text-[10px] font-bold flex items-center gap-1">
+                                    <CheckCircle size={10} />
+                                    <span>منشور لـ: {getTaskSectionBadgeLabel(task)}</span>
+                                  </span>
+                               </div>
                                <p className="text-xs sm:text-sm text-white/50 mt-1">تاريخ النشر: {(typeof task.timestamp?.toDate === 'function' ? (typeof task.timestamp?.toDate === 'function' ? task.timestamp.toDate() : new Date(task.timestamp)) : new Date(task.timestamp)).toLocaleDateString('ar-SA')}</p>
                              </div>
                              <button onClick={() => setDeleteTaskConfirmId(task.id)} className="text-red-400 hover:text-red-300 p-2 hover:bg-red-500/10 rounded-xl transition-colors cursor-pointer" title="حذف المسابقة ككل">

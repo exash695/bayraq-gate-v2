@@ -41,6 +41,8 @@ import { safeStorage } from '../lib/storage';
 import { getPrimaryUserSession } from '../lib/deviceSessionVault';
 import { realtimeManager } from '../lib/realtimeManager';
 import { printAttendanceReport } from '../utils/attendancePrint';
+import { normalizeArabicText, normalizeGradeName } from '../utils/studentUtils';
+import { extractSectionLetter } from '../utils/gradeMatcher';
 import { BerqCharacter } from './BerqCharacterManager';
 
 interface TeacherAttendanceTabProps {
