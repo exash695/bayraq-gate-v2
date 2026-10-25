@@ -101,6 +101,37 @@ const iraqRegions: Record<string, string[]> = {
 };
 
 export default function DevDashboard({ schoolId, userProfile, showToast, onBack }: DevDashboardProps) {
+  const STRICT_DEV_EMAILS = [
+    'mntzralghanm527@gmail.com',
+    'mntzr.alghanm527@gmail.com',
+    'mntzralghanm527@googlemail.com',
+    'mntzr.alghanm527@googlemail.com'
+  ];
+  const activeDevEmail = (userProfile?.email || auth.currentUser?.email || "").toLowerCase().trim();
+  const isAuthorizedDev = Boolean(activeDevEmail && STRICT_DEV_EMAILS.includes(activeDevEmail));
+
+  if (!isAuthorizedDev) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-[#02050F] text-white p-6" dir="rtl">
+        <div className="max-w-md w-full bg-[#0A0F1D] border border-red-500/30 rounded-3xl p-8 text-center shadow-2xl">
+          <ShieldAlert size={56} className="text-red-500 mx-auto mb-4 animate-bounce" />
+          <h2 className="text-2xl font-black text-white mb-2">وصول محظور ⛔</h2>
+          <p className="text-sm text-white/60 mb-6 font-bold">
+            لوحة المطور مخصصة حصرياً للمطور الرئيسي للنظام. حسابك غير مصرح له بالدخول.
+          </p>
+          {onBack && (
+            <button
+              onClick={onBack}
+              className="px-6 py-3 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl transition-all shadow-lg"
+            >
+              العودة للرئيسية
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   const [schools, setSchools] = useState<SchoolRecord[]>([]);
   const [loadingSchools, setLoadingSchools] = useState(true);
   const [configuringSchoolModules, setConfiguringSchoolModules] = useState<SchoolRecord | null>(null);

@@ -242,17 +242,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
     'mntzralghanm527@gmail.com',
     'mntzr.alghanm527@gmail.com',
     'mntzralghanm527@googlemail.com',
-    'mntzr.alghanm527@googlemail.com',
-    'abdulradhaalmayali@gmail.com'
+    'mntzr.alghanm527@googlemail.com'
   ];
-  const isDev = Boolean(
-    userProfile?.role === "developer" ||
-    userProfile?.role === "dev" ||
-    userProfile?.role === "superadmin" ||
-    userProfile?.isDeveloper ||
-    (userProfile?.email && DEV_EMAILS.includes(userProfile.email.toLowerCase().trim())) ||
-    (auth.currentUser?.email && DEV_EMAILS.includes(auth.currentUser.email.toLowerCase().trim()))
-  );
+  const activeSidebarEmail = (userProfile?.email || auth.currentUser?.email || '').toLowerCase().trim();
+  const isDev = Boolean(activeSidebarEmail && DEV_EMAILS.includes(activeSidebarEmail));
 
   const unreadCount = notifications.filter(n => !n.read).length;
 

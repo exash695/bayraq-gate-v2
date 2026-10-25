@@ -15,9 +15,9 @@ const DEVELOPER_EMAILS = [
   "mntzralghanm527@gmail.com",
   "mntzr.alghanm527@gmail.com",
   "mntzralghanm527@googlemail.com",
-  "mntzr.alghanm527@googlemail.com",
-  "abdulradhaalmayali@gmail.com"
+  "mntzr.alghanm527@googlemail.com"
 ];
+
 
 import express from "express";
 import { eq, ne, and, or, desc, asc, inArray, isNull, lt, ilike } from "drizzle-orm";
@@ -305,17 +305,14 @@ async function startServer() {
         const token = String(authHeader).startsWith('Bearer ') ? String(authHeader).split(' ')[1] : String(authHeader);
         try {
           const decoded = jwt.verify(token, JWT_SECRET) as any;
-          const isDev = (decoded.email && DEVELOPER_EMAILS.includes(decoded.email.toLowerCase())) ||
-                        decoded.role === 'developer' ||
-                        decoded.role === 'superadmin' ||
-                        decoded.isDeveloper === true;
+          const isDev = Boolean(decoded.email && DEVELOPER_EMAILS.includes(decoded.email.toLowerCase().trim()));
 
           req.user = {
             uid: decoded.uid || decoded.id,
             id: decoded.uid || decoded.id,
             email: decoded.email || null,
             name: decoded.name || decoded.displayName || null,
-            role: decoded.role || 'student',
+            role: isDev ? 'developer' : (decoded.role === 'developer' ? 'teacher' : (decoded.role || 'student')),
             schoolId: decoded.schoolId || null,
             isDeveloper: isDev
           };
@@ -335,22 +332,24 @@ async function startServer() {
           uid: 'dev_root',
           id: 'dev_root',
           email: headerEmail,
-          name: 'منذر الغانم (المطور الرئيسي)',
+          name: 'المهندس منتظر (المطور العام)',
           role: 'developer',
           schoolId: 'global',
           isDeveloper: true
         };
       } else if (headerEmail || headerRole) {
+        const isDevHeader = Boolean(headerEmail && DEVELOPER_EMAILS.includes(headerEmail));
         req.user = {
           uid: `usr_${Date.now()}`,
           id: `usr_${Date.now()}`,
           email: headerEmail || null,
           name: headerEmail ? headerEmail.split('@')[0] : 'User',
-          role: headerRole || 'student',
+          role: isDevHeader ? 'developer' : (headerRole === 'developer' ? 'teacher' : (headerRole || 'student')),
           schoolId: headerSchool || null,
-          isDeveloper: headerRole === 'developer' || (headerEmail && DEVELOPER_EMAILS.includes(headerEmail))
+          isDeveloper: isDevHeader
         };
       }
+
       next();
     } catch (err) {
       next();

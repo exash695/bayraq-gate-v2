@@ -429,27 +429,26 @@ export default function App() {
     } catch {}
   }, [userProfile]);
 
-  // Automatic Developer Profile Lock-in Effect: Protects main developer account from stale testing session overrides
+  const STRICT_DEV_EMAILS = useMemo(() => [
+    'mntzralghanm527@gmail.com',
+    'mntzr.alghanm527@gmail.com',
+    'mntzralghanm527@googlemail.com',
+    'mntzr.alghanm527@googlemail.com'
+  ], []);
+
+  // Profile Sanitizer: Ensures non-developer emails NEVER retain developer role or flags in state or storage
   useEffect(() => {
     const activeEmail = (
-      user?.email || 
       auth.currentUser?.email || 
+      user?.email || 
       userProfile?.email || 
       customAuth.getCurrentUser()?.email || 
       ""
     ).toLowerCase().trim();
 
-    const devMails = [
-      'mntzralghanm527@gmail.com',
-      'mntzr.alghanm527@gmail.com',
-      'mntzralghanm527@googlemail.com',
-      'mntzr.alghanm527@googlemail.com',
-      'abdulradhaalmayali@gmail.com'
-    ];
+    const isDevEmail = STRICT_DEV_EMAILS.includes(activeEmail);
 
-    const isDevMail = devMails.includes(activeEmail);
-
-    if (isDevMail) {
+    if (isDevEmail) {
       if (
         userProfile?.role !== 'developer' || 
         userProfile?.fullName !== 'المهندس منتظر (المطور العام)' || 
@@ -466,34 +465,34 @@ export default function App() {
           isAdmin: true
         }));
       }
+    } else if (userProfile && (userProfile.role === 'developer' || userProfile.role === 'dev' || userProfile.isDeveloper === true)) {
+      setUserProfile((prev: any) => {
+        if (!prev) return prev;
+        const cleaned = { ...prev };
+        delete cleaned.isDeveloper;
+        if (cleaned.role === 'developer' || cleaned.role === 'dev') {
+          cleaned.role = cleaned.originalRole || 'teacher';
+        }
+        try {
+          safeStorage.setItem('bayraq_cached_user_profile', JSON.stringify(cleaned));
+        } catch {}
+        return cleaned;
+      });
     }
-  }, [user, userProfile?.email, userProfile?.role, userProfile?.fullName]);
+  }, [user, userProfile?.email, userProfile?.role, userProfile?.fullName, userProfile?.isDeveloper, STRICT_DEV_EMAILS]);
 
   const isDevUserActive = useMemo(() => {
     const activeEmail = (
-      user?.email || 
       auth.currentUser?.email || 
+      user?.email || 
       userProfile?.email || 
       customAuth.getCurrentUser()?.email || 
       ""
     ).toLowerCase().trim();
 
-    const devMails = [
-      'mntzralghanm527@gmail.com',
-      'mntzr.alghanm527@gmail.com',
-      'mntzralghanm527@googlemail.com',
-      'mntzr.alghanm527@googlemail.com',
-      'abdulradhaalmayali@gmail.com'
-    ];
+    return STRICT_DEV_EMAILS.includes(activeEmail);
+  }, [user, userProfile?.email, STRICT_DEV_EMAILS]);
 
-    return (
-      devMails.includes(activeEmail) ||
-      userProfile?.role === "developer" ||
-      userProfile?.role === "dev" ||
-      userProfile?.role === "superadmin" ||
-      Boolean(userProfile?.isDeveloper)
-    );
-  }, [user, userProfile]);
   const [portalType, setPortalType] = useState<
     "student" | "parent" | "admin-boys" | "admin-girls" | "teacher" | "admin-observer" | "driver" | "developer" | "superadmin"
   >(() => {
@@ -513,7 +512,8 @@ export default function App() {
   // Sync portalType when userProfile loads
   useEffect(() => {
     if (userProfile) {
-      const isDevUser = userProfile.email?.toLowerCase() === 'mntzralghanm527@gmail.com' || userProfile.role === 'developer' || userProfile.role === 'dev' || userProfile.role === 'superadmin';
+      const activeDevEmail = (userProfile.email || auth.currentUser?.email || "").toLowerCase().trim();
+      const isDevUser = Boolean(activeDevEmail && STRICT_DEV_EMAILS.includes(activeDevEmail));
       const savedRole = safeStorage.getItem("bayraq_user_role");
       
        let adminBranchVal = userProfile.adminBranch;
@@ -601,7 +601,8 @@ export default function App() {
       new Map(notifications.map((n) => [n.id, n])).values(),
     );
     const isAdmin = portalType?.startsWith('admin');
-    const isDev = Boolean(userProfile?.isDeveloper || userProfile?.role === 'developer');
+    const activeNotifEmail = (userProfile?.email || auth.currentUser?.email || '').toLowerCase().trim();
+    const isDev = Boolean(activeNotifEmail && STRICT_DEV_EMAILS.includes(activeNotifEmail));
 
     return list.filter((n: any) => {
       // Role & portal isolation: block admin/developer audit & internal actions from students/parents/teachers/drivers
@@ -4729,31 +4730,23 @@ export default function App() {
       case "dev-dashboard": {
         const activeDevEmail = (
           auth.currentUser?.email || 
-          userProfile?.email || 
           user?.email || 
           customAuth.getCurrentUser()?.email || 
           ""
         ).toLowerCase().trim();
 
-        const isAuthorizedDev = 
-          activeDevEmail === "mntzralghanm527@gmail.com" ||
-          activeDevEmail === "mntzr.alghanm527@gmail.com" ||
-          activeDevEmail === "mntzralghanm527@googlemail.com" ||
-          activeDevEmail === "abdulradhaalmayali@gmail.com" ||
-          userProfile?.role === "developer" ||
-          userProfile?.role === "dev" ||
-          userProfile?.role === "superadmin" ||
-          Boolean(userProfile?.isDeveloper);
+        const isAuthorizedDev = STRICT_DEV_EMAILS.includes(activeDevEmail);
 
         if (!isAuthorizedDev) {
           return (
             <div className="flex flex-col items-center justify-center min-h-[60vh] text-center p-6 space-y-4" dir="rtl">
-              <div className="text-5xl">🔒</div>
+              <div className="w-16 h-16 rounded-full bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 text-2xl">🔒</div>
               <h2 className="text-xl font-black text-rose-400">وصول غير مصرح به</h2>
-              <p className="text-white/60 text-sm">هذه اللوحة مخصصة حصرياً لـ مطور المنصة الرئيسي.</p>
+              <p className="text-white/60 text-xs font-bold max-w-sm">هذه اللوحة محمية وتقتصر حصرياً على البريد الإلكتروني الشخصي للمطور العام للمنظومة.</p>
             </div>
           );
         }
+
         return (
           <DevDashboard 
             schoolId={selectedSchoolId || "global"} 
