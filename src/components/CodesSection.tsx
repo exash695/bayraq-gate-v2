@@ -1397,393 +1397,426 @@ export const CodesSection: React.FC<CodesSectionProps> = ({
                   </div>
                 </div>
 
-                {/* Slim, Edge-to-Edge Table Header & Rows */}
-                <div className="bg-[#080d1a] border border-white/10 rounded-2xl overflow-hidden shadow-xl overflow-x-auto">
-                  <div className="min-w-[850px]">
-                    {/* Desktop / Laptop / iPad Table Header */}
-                    <div className="hidden md:grid grid-cols-[45px_1.5fr_1fr_1fr_1fr_1.1fr_1fr_70px] gap-2 items-center px-4 py-3 bg-white/5 border-b border-white/10 text-[11px] font-black text-white/50 text-center uppercase tracking-wider">
-                      <span>#</span>
-                      <span className="text-right">اسم الطالب</span>
-                      <span>الصف</span>
-                      <span>كود الطالب</span>
-                      <span>كود ولي الأمر</span>
-                      <span>الخصم</span>
-                      <span>صافي القسط</span>
-                      <span>الإجراءات</span>
-                    </div>
+                {/* Slim, Edge-to-Edge Table Container */}
+                <div className="bg-[#080d1a] border border-white/10 rounded-2xl overflow-hidden shadow-xl w-full">
+                  {/* Table Wrapper for Desktop/Tablet Scroll */}
+                  <div className="w-full md:overflow-x-auto">
+                    <div className="w-full md:min-w-[850px]">
+                      {/* Desktop / Laptop / iPad Table Header */}
+                      <div className="hidden md:grid grid-cols-[45px_1.5fr_1fr_1fr_1fr_1.1fr_1fr_70px] gap-2 items-center px-4 py-3 bg-white/5 border-b border-white/10 text-[11px] font-black text-white/50 text-center uppercase tracking-wider">
+                        <span>#</span>
+                        <span className="text-right">اسم الطالب</span>
+                        <span>الصف</span>
+                        <span>كود الطالب</span>
+                        <span>كود ولي الأمر</span>
+                        <span>الخصم</span>
+                        <span>صافي القسط</span>
+                        <span>الإجراءات</span>
+                      </div>
 
-                    {/* Slim Student Rows */}
-                    <div className="max-h-[460px] overflow-y-auto no-scrollbar divide-y divide-white/5">
-                      {displayCodes.map((code: any, idx: number) => {
-                        const studentKey = `stu-code-${code.id || idx}`;
-                        const parentKey = `par-code-${code.id || idx}`;
-                        const isStuCopied = copiedCodeKey === studentKey;
-                        const isParCopied = copiedCodeKey === parentKey;
+                      {/* Student Rows Container */}
+                      <div className="max-h-[480px] overflow-y-auto no-scrollbar divide-y divide-white/5 p-2 md:p-0">
+                        {displayCodes.map((code: any, idx: number) => {
+                          const studentKey = `stu-code-${code.id || idx}`;
+                          const parentKey = `par-code-${code.id || idx}`;
+                          const isStuCopied = copiedCodeKey === studentKey;
+                          const isParCopied = copiedCodeKey === parentKey;
 
-                        return (
-                          <div 
-                            key={code.id || code.student || idx} 
-                            className="flex flex-col md:grid md:grid-cols-[45px_1.5fr_1fr_1fr_1fr_1.1fr_1fr_70px] gap-2 items-stretch md:items-center p-3 md:px-4 md:py-2.5 hover:bg-white/[0.03] transition-all group"
-                          >
-                            {/* 1. Row number (#) */}
-                            <div className="flex items-center justify-center">
-                              <span className="w-7 h-7 rounded-lg bg-white/5 text-white/40 text-xs font-mono font-black flex items-center justify-center shrink-0">
-                                {idx + 1}
-                              </span>
-                            </div>
-
-                            {/* 2. Student Name */}
-                            <div className="flex items-center gap-2">
-                              <span className="md:hidden text-[10px] text-white/30 font-bold block shrink-0">اسم الطالب:</span>
-                              <input 
-                                type="text"
-                                value={code.name || ''}
-                                onChange={(e) => {
-                                  const newCodes = [...generatedCodes];
-                                  const targetIdx = newCodes.findIndex(c => c.id === code.id || (code.student && c.student === code.student));
-                                  if (targetIdx !== -1) {
-                                    newCodes[targetIdx].name = e.target.value;
-                                    setGeneratedCodes(newCodes);
-                                  }
-                                }}
-                                className="w-full bg-transparent text-white text-xs font-black text-right border-b border-transparent focus:border-blue-500 outline-none truncate px-1 py-1"
-                                placeholder="اسم الطالب..."
-                              />
-                            </div>
-
-                            {/* 3. Grade / Class */}
-                            <div className="flex items-center justify-between md:justify-center">
-                              <span className="md:hidden text-[10px] text-white/30 font-bold">الصف:</span>
-                              <select
-                                value={code.grade || ''}
-                                onChange={(e) => {
-                                  const newGrade = e.target.value;
-                                  const newCodes = [...generatedCodes];
-                                  const targetIdx = newCodes.findIndex(c => c.id === code.id || (code.student && c.student === code.student));
-                                  if (targetIdx !== -1) {
-                                    newCodes[targetIdx].grade = newGrade;
-                                    
-                                    // Recalculate financial info for this student based on new grade
-                                    const byGrade = schoolSettings?.tuitionFeesByGrade || {};
-                                    const baseFee = (newGrade && byGrade[newGrade] !== undefined) ? Number(byGrade[newGrade]) : tuitionFee;
-                                    const currentRate = newCodes[targetIdx].discountRate || discountRates[newCodes[targetIdx].discountType || 'NONE'] || 0;
-                                    const amount = (baseFee * currentRate) / 100;
-                                    const total = baseFee - amount;
-                                    newCodes[targetIdx].discountAmount = amount;
-                                    newCodes[targetIdx].totalAmount = total;
-
-                                    // Update the finance object immediately
-                                    const discountFactor = (100 - currentRate) / 100; const installmentSum = (installmentPlan || []).reduce((sum, inst) => sum + (Number(inst.amount) || 0), 0); const gradeProportion = installmentSum > 0 ? (baseFee / installmentSum) : 1; const combinedFactor = gradeProportion * discountFactor;
-                                    const studentInstallments = installmentPlan.map((inst, idx) => ({
-                                      ...inst,
-                                      id: inst.id || `inst_${idx}`,
-                                      amount: Math.round((inst.amount || 0) * combinedFactor),
-                                      paid: false
-                                    }));
-
-                                    newCodes[targetIdx].finance = {
-                                      installments: studentInstallments,
-                                      totalTuition: total,
-                                      paidAmount: 0,
-                                      remainingAmount: total,
-                                      lastUpdated: new Date().toISOString()
-                                    };
-
-                                    const prefix = getPrefixForGrade(newGrade);
-                                    if (code.student) {
-                                      const parts = code.student.split('-');
-                                      parts[0] = prefix;
-                                      newCodes[targetIdx].student = parts.join('-');
-                                    }
-                                    setGeneratedCodes(newCodes);
-                                  }
-                                }}
-                                className="h-8 bg-black/40 text-white text-[11px] font-bold outline-none rounded-lg px-2 text-center cursor-pointer border border-white/5 max-w-full"
-                              >
-                                {availableGrades.map(g => <option key={g} value={g} className="bg-[#101935]">{g}</option>)}
-                              </select>
-                            </div>
-
-                            {/* 4. Student Code + Quick Copy */}
-                            <div className="flex items-center justify-between md:justify-center">
-                              <span className="md:hidden text-[10px] text-white/30 font-bold">كود الطالب:</span>
-                              <button
-                                onClick={() => handleQuickCopy(code.student, studentKey)}
-                                className="flex items-center gap-1.5 bg-black/50 hover:bg-[#FFD600]/10 border border-white/10 hover:border-[#FFD600]/30 px-2 py-1 rounded-lg transition-all group/btn"
-                                title="انقر لنسخ كود الطالب فورياً"
-                              >
-                                <span className="text-[#FFD600] font-mono text-[11px] font-black tracking-wider">{code.student || '---'}</span>
-                                {isStuCopied ? (
-                                  <Check size={12} className="text-emerald-400 animate-bounce" />
-                                ) : (
-                                  <Copy size={12} className="text-white/30 group-hover/btn:text-[#FFD600] transition-colors" />
-                                )}
-                              </button>
-                            </div>
-
-                            {/* 5. Parent Code + Quick Copy */}
-                            <div className="flex items-center justify-between md:justify-center">
-                              <span className="md:hidden text-[10px] text-white/30 font-bold">كود ولي الأمر:</span>
-                              <button
-                                onClick={() => handleQuickCopy(code.parent, parentKey)}
-                                className="flex items-center gap-1.5 bg-black/50 hover:bg-cyan-500/10 border border-white/10 hover:border-cyan-500/30 px-2 py-1 rounded-lg transition-all group/btn"
-                                title="انقر لنسخ كود ولي الأمر فورياً"
-                              >
-                                <span className="text-cyan-400 font-mono text-[11px] font-black tracking-wider">{code.parent || '---'}</span>
-                                {isParCopied ? (
-                                  <Check size={12} className="text-emerald-400 animate-bounce" />
-                                ) : (
-                                  <Copy size={12} className="text-white/30 group-hover/btn:text-cyan-400 transition-colors" />
-                                )}
-                              </button>
-                            </div>
-
-                            {/* 6. Discount selection */}
-                            <div className="flex flex-col sm:flex-row items-center gap-1.5 justify-center">
-                              <select
-                                value={code.discountType || 'NONE'}
-                                onChange={(e) => {
-                                  const type = e.target.value;
-                                  const byGrade = schoolSettings?.tuitionFeesByGrade || {};
-                                  const baseFee = (code.grade && byGrade[code.grade] !== undefined) ? Number(byGrade[code.grade]) : tuitionFee;
-                                  
-                                  let rate = 0;
-                                  let total = baseFee;
-                                  let amount = 0;
-
-                                  if (type === 'SPECIAL') {
-                                    if (code.totalAmount !== undefined && code.totalAmount !== null && code.totalAmount !== baseFee) {
-                                      total = Number(code.totalAmount);
-                                      amount = Math.max(0, baseFee - total);
-                                      rate = baseFee > 0 ? ((baseFee - total) / baseFee) * 100 : 0;
-                                    } else {
-                                      rate = code.discountRate || 0;
-                                      amount = Math.round((baseFee * rate) / 100);
-                                      total = Math.max(0, baseFee - amount);
-                                    }
-                                  } else {
-                                    rate = discountRates[type] || 0;
-                                    amount = Math.round((baseFee * rate) / 100);
-                                    total = Math.max(0, baseFee - amount);
-                                  }
-                                  
-                                  const newCodes = [...generatedCodes];
-                                  const targetIdx = newCodes.findIndex(c => c.id === code.id || (code.student && c.student === code.student));
-                                  if (targetIdx !== -1) {
-                                    newCodes[targetIdx].discountType = type;
-                                    newCodes[targetIdx].discountAmount = amount;
-                                    newCodes[targetIdx].totalAmount = total;
-                                    newCodes[targetIdx].discountRate = rate;
-
-                                    // Update the finance object immediately
-                                    const discountFactor = baseFee > 0 ? (total / baseFee) : ((100 - rate) / 100);
-                                    const installmentSum = (installmentPlan || []).reduce((sum, inst) => sum + (Number(inst.amount) || 0), 0);
-                                    const gradeProportion = installmentSum > 0 ? (baseFee / installmentSum) : 1;
-                                    const combinedFactor = gradeProportion * discountFactor;
-                                    const studentInstallments = (installmentPlan || []).map((inst, idx) => ({
-                                      ...inst,
-                                      id: inst.id || `inst_${idx}`,
-                                      amount: Math.round((inst.amount || 0) * combinedFactor),
-                                      paid: false
-                                    }));
-
-                                    newCodes[targetIdx].finance = {
-                                      installments: studentInstallments,
-                                      totalTuition: total,
-                                      paidAmount: 0,
-                                      remainingAmount: total,
-                                      lastUpdated: new Date().toISOString()
-                                    };
-
-                                    setGeneratedCodes(newCodes);
-                                  }
-                                }}
-                                className="h-8 bg-black/40 text-white text-[10px] font-bold outline-none rounded-lg px-2 text-center cursor-pointer border border-white/5 max-w-full"
-                              >
-                                <option value="NONE" className="bg-[#101935]">بدون (0%)</option>
-                                {Object.entries(discountLabels).filter(([t]) => t !== 'NONE').map(([t, l]) => (
-                                  <option key={t} value={t} className="bg-[#101935]">{l} ({discountRates[t]}%)</option>
-                                ))}
-                                <option value="SPECIAL" className="bg-[#101935]">خصم خاص ✍️</option>
-                              </select>
-
-                              {code.discountType === 'SPECIAL' && (
-                                <div className="flex items-center gap-1">
-                                  <div className="flex items-center bg-black/40 border border-amber-400/30 rounded-lg px-1.5 h-8 w-20" title="مبلغ الخصم د.ع">
-                                    <input 
-                                      type="number"
-                                      min="0"
-                                      value={code.discountAmount !== undefined && code.discountAmount !== null ? (code.discountAmount === 0 ? '' : code.discountAmount) : ''}
-                                      onFocus={(e) => e.target.select()}
-                                      onChange={(e) => {
-                                        const val = e.target.value;
-                                        const byGrade = schoolSettings?.tuitionFeesByGrade || {};
-                                        const baseFee = (code.grade && byGrade[code.grade] !== undefined) ? Number(byGrade[code.grade]) : tuitionFee;
-                                        const discountAmt = val === '' ? 0 : Math.max(0, Number(val));
-                                        const total = Math.max(0, baseFee - discountAmt);
-                                        const rate = baseFee > 0 ? (discountAmt / baseFee) * 100 : 0;
-                                        
-                                        const newCodes = [...generatedCodes];
-                                        const targetIdx = newCodes.findIndex(c => c.id === code.id || (code.student && c.student === code.student));
-                                        if (targetIdx !== -1) {
-                                          newCodes[targetIdx].discountRate = rate;
-                                          newCodes[targetIdx].discountAmount = discountAmt;
-                                          newCodes[targetIdx].totalAmount = total;
-                                          
-                                          const discountFactor = baseFee > 0 ? (total / baseFee) : 0;
-                                          const installmentSum = (installmentPlan || []).reduce((sum, inst) => sum + (Number(inst.amount) || 0), 0);
-                                          const gradeProportion = installmentSum > 0 ? (baseFee / installmentSum) : 1;
-                                          const combinedFactor = gradeProportion * discountFactor;
-                                          
-                                          newCodes[targetIdx].finance = {
-                                            ...newCodes[targetIdx].finance,
-                                            totalTuition: total,
-                                            remainingAmount: total,
-                                            installments: (installmentPlan || []).map((inst, idx) => ({
-                                              ...inst,
-                                              id: inst.id || `inst_${idx}`,
-                                              amount: Math.round((inst.amount || 0) * combinedFactor),
-                                              paid: false
-                                            }))
-                                          };
-                                          setGeneratedCodes(newCodes);
-                                        }
-                                      }}
-                                      className="w-full bg-transparent text-amber-300 text-center text-[10px] font-black outline-none font-mono"
-                                      placeholder="خصم"
-                                    />
-                                  </div>
-                                  <div className="flex items-center bg-black/40 border border-white/10 rounded-lg px-1.5 h-8 w-14" title="نسبة الخصم %">
-                                    <input 
-                                      type="number"
-                                      min="0"
-                                      max="100"
-                                      value={code.discountRate !== undefined && code.discountRate !== null ? (code.discountRate === 0 ? '' : (Math.round(code.discountRate * 10) / 10)) : ''}
-                                      onFocus={(e) => e.target.select()}
-                                      onChange={(e) => {
-                                        const val = e.target.value;
-                                        const rate = val === '' ? 0 : Number(val);
-                                        const byGrade = schoolSettings?.tuitionFeesByGrade || {};
-                                        const baseFee = (code.grade && byGrade[code.grade] !== undefined) ? Number(byGrade[code.grade]) : tuitionFee;
-                                        const amount = Math.round((baseFee * rate) / 100);
-                                        const total = Math.max(0, baseFee - amount);
-                                        
-                                        const newCodes = [...generatedCodes];
-                                        const targetIdx = newCodes.findIndex(c => c.id === code.id || (code.student && c.student === code.student));
-                                        if (targetIdx !== -1) {
-                                          newCodes[targetIdx].discountRate = rate;
-                                          newCodes[targetIdx].discountAmount = amount;
-                                          newCodes[targetIdx].totalAmount = total;
-                                          
-                                          const discountFactor = baseFee > 0 ? (total / baseFee) : 0;
-                                          const installmentSum = (installmentPlan || []).reduce((sum, inst) => sum + (Number(inst.amount) || 0), 0);
-                                          const gradeProportion = installmentSum > 0 ? (baseFee / installmentSum) : 1;
-                                          const combinedFactor = gradeProportion * discountFactor;
-                                          
-                                          newCodes[targetIdx].finance = {
-                                            ...newCodes[targetIdx].finance,
-                                            totalTuition: total,
-                                            remainingAmount: total,
-                                            installments: (installmentPlan || []).map((inst, idx) => ({
-                                              ...inst,
-                                              id: inst.id || `inst_${idx}`,
-                                              amount: Math.round((inst.amount || 0) * combinedFactor),
-                                              paid: false
-                                            }))
-                                          };
-                                          setGeneratedCodes(newCodes);
-                                        }
-                                      }}
-                                      className="w-full bg-transparent text-white text-center text-[10px] font-black outline-none font-mono"
-                                      placeholder="0"
-                                    />
-                                    <span className="text-white/30 text-[9px] font-bold">%</span>
-                                  </div>
+                          return (
+                            <div 
+                              key={code.id || code.student || idx} 
+                              className="flex flex-col md:grid md:grid-cols-[45px_1.5fr_1fr_1fr_1fr_1.1fr_1fr_70px] gap-2.5 md:gap-2 items-stretch md:items-center p-3.5 md:px-4 md:py-2.5 hover:bg-white/[0.03] transition-all group bg-white/[0.01] md:bg-transparent rounded-xl md:rounded-none my-1 md:my-0 border border-white/5 md:border-0"
+                            >
+                              {/* Mobile Row Header Bar (# & Actions) */}
+                              <div className="flex items-center justify-between pb-2 mb-1 border-b border-white/5 md:hidden">
+                                <div className="flex items-center gap-2">
+                                  <span className="w-6 h-6 rounded-lg bg-blue-500/20 text-blue-300 text-xs font-mono font-black flex items-center justify-center">
+                                    #{idx + 1}
+                                  </span>
+                                  <span className="text-[11px] font-bold text-white/60">تفاصيل الطالب</span>
                                 </div>
-                              )}
-                            </div>
+                                <div className="flex items-center gap-1.5">
+                                  <button 
+                                    onClick={() => handleOpenTransfer(code)}
+                                    className="p-1.5 rounded-lg bg-blue-500/20 text-blue-400 hover:bg-blue-500 hover:text-white transition-all border border-blue-500/20 flex items-center gap-1 text-[10px] font-bold"
+                                    title="نقل الطالب إلى شعبة أخرى"
+                                  >
+                                    <RefreshCw size={12} />
+                                    <span>نقل</span>
+                                  </button>
+                                  <button 
+                                    onClick={() => setConfirmDelete({ id: code.id })}
+                                    className="p-1.5 rounded-lg bg-rose-500/20 text-rose-400 hover:bg-rose-500 hover:text-white transition-all border border-rose-500/20 flex items-center gap-1 text-[10px] font-bold"
+                                    title="حذف الطالب من القائمة"
+                                  >
+                                    <Trash2 size={12} />
+                                    <span>حذف</span>
+                                  </button>
+                                </div>
+                              </div>
 
-                            {/* 7. Net Tuition Calculation */}
-                            <div className="flex flex-col items-center gap-1 justify-center">
-                              <span className="md:hidden text-[10px] text-white/30 font-bold">الصافي:</span>
-                              {code.discountType === 'SPECIAL' ? (
-                                 <div className="flex items-center bg-black/40 border border-white/10 rounded-lg px-1.5 h-8 w-24">
-                                 <input 
-                                   type="number"
-                                   min="0"
-                                   value={code.totalAmount !== undefined ? (code.totalAmount === 0 ? '0' : code.totalAmount) : ''}
-                                   onFocus={(e) => e.target.select()}
-                                   onChange={(e) => {
-                                     const val = e.target.value;
-                                     const total = val === '' ? 0 : Number(val);
-                                     const byGrade = schoolSettings?.tuitionFeesByGrade || {};
-                                     const baseFee = (code.grade && byGrade[code.grade] !== undefined) ? Number(byGrade[code.grade]) : tuitionFee;
-                                     const amount = Math.max(0, baseFee - total);
-                                     const rate = baseFee > 0 ? (amount / baseFee) * 100 : 0;
-                                     
-                                     const newCodes = [...generatedCodes];
-                                     const targetIdx = newCodes.findIndex(c => c.id === code.id || (code.student && c.student === code.student));
-                                     if (targetIdx !== -1) {
-                                       newCodes[targetIdx].totalAmount = total;
-                                       newCodes[targetIdx].discountAmount = amount;
-                                       newCodes[targetIdx].discountRate = rate;
-                                       
-                                       const discountFactor = baseFee > 0 ? (total / baseFee) : 0;
-                                       const installmentSum = (installmentPlan || []).reduce((sum, inst) => sum + (Number(inst.amount) || 0), 0);
-                                       const gradeProportion = installmentSum > 0 ? (baseFee / installmentSum) : 1;
-                                       const combinedFactor = gradeProportion * discountFactor;
-                                       
-                                       newCodes[targetIdx].finance = {
-                                         ...newCodes[targetIdx].finance,
-                                         totalTuition: total,
-                                         remainingAmount: total,
-                                         installments: (installmentPlan || []).map((inst, idx) => ({
-                                           ...inst,
-                                           id: inst.id || `inst_${idx}`,
-                                           amount: Math.round((inst.amount || 0) * combinedFactor),
-                                           paid: false
-                                         }))
-                                       };
-                                       setGeneratedCodes(newCodes);
-                                     }
-                                   }}
-                                   className="w-full bg-transparent text-emerald-400 text-center text-[10px] font-black outline-none"
-                                   placeholder="0"
-                                 />
-                               </div>
-                              ) : (
-                                <span className="text-emerald-400 font-mono font-black text-xs whitespace-nowrap">
-                                  {(() => {
-                                    if (code.totalAmount !== undefined) return Number(code.totalAmount).toLocaleString();
-                                    const byGrade = schoolSettings?.tuitionFeesByGrade || {};
-                                    const baseFee = (code.grade && byGrade[code.grade] !== undefined) ? Number(byGrade[code.grade]) : tuitionFee;
-                                    return (baseFee - ((baseFee * (code.discountRate || 0)) / 100)).toLocaleString();
-                                  })()}
-                                  <span className="text-[9px] opacity-60 mr-1">د.ع</span>
+                              {/* 1. Row number (# - Desktop Only) */}
+                              <div className="hidden md:flex items-center justify-center">
+                                <span className="w-7 h-7 rounded-lg bg-white/5 text-white/40 text-xs font-mono font-black flex items-center justify-center shrink-0">
+                                  {idx + 1}
                                 </span>
-                              )}
-                            </div>
+                              </div>
 
-                            {/* 8. Action Buttons */}
-                            <div className="flex items-center justify-end md:justify-center gap-1.5">
-                              <button 
-                                onClick={() => handleOpenTransfer(code)}
-                                className="w-8 h-8 rounded-lg bg-blue-500/20 text-blue-400 hover:bg-blue-500 hover:text-white flex items-center justify-center transition-all border border-blue-500/20"
-                                title="نقل الطالب إلى شعبة أخرى"
-                              >
-                                <RefreshCw size={14} />
-                              </button>
-                              <button 
-                                onClick={() => setConfirmDelete({ id: code.id })}
-                                className="w-8 h-8 rounded-lg bg-rose-500/20 text-rose-400 hover:bg-rose-500 hover:text-white flex items-center justify-center transition-all border border-rose-500/20"
-                                title="حذف الطالب من القائمة"
-                              >
-                                <Trash2 size={14} />
-                              </button>
+                              {/* 2. Student Name */}
+                              <div className="flex items-center gap-2 w-full">
+                                <span className="md:hidden text-[11px] text-white/40 font-bold shrink-0 w-24">اسم الطالب:</span>
+                                <input 
+                                  type="text"
+                                  value={code.name || ''}
+                                  onChange={(e) => {
+                                    const newCodes = [...generatedCodes];
+                                    const targetIdx = newCodes.findIndex(c => c.id === code.id || (code.student && c.student === code.student));
+                                    if (targetIdx !== -1) {
+                                      newCodes[targetIdx].name = e.target.value;
+                                      setGeneratedCodes(newCodes);
+                                    }
+                                  }}
+                                  className="flex-1 bg-black/30 md:bg-transparent text-white text-xs font-black text-right border border-white/10 md:border-0 md:border-b md:border-transparent focus:border-blue-500 outline-none truncate px-2.5 py-1.5 md:p-1 rounded-xl md:rounded-none"
+                                  placeholder="اسم الطالب..."
+                                />
+                              </div>
+
+                              {/* 3. Grade / Class */}
+                              <div className="flex items-center justify-between md:justify-center w-full">
+                                <span className="md:hidden text-[11px] text-white/40 font-bold shrink-0 w-24">الصف:</span>
+                                <select
+                                  value={code.grade || ''}
+                                  onChange={(e) => {
+                                    const newGrade = e.target.value;
+                                    const newCodes = [...generatedCodes];
+                                    const targetIdx = newCodes.findIndex(c => c.id === code.id || (code.student && c.student === code.student));
+                                    if (targetIdx !== -1) {
+                                      newCodes[targetIdx].grade = newGrade;
+                                      
+                                      const byGrade = schoolSettings?.tuitionFeesByGrade || {};
+                                      const baseFee = (newGrade && byGrade[newGrade] !== undefined) ? Number(byGrade[newGrade]) : tuitionFee;
+                                      const currentRate = newCodes[targetIdx].discountRate || discountRates[newCodes[targetIdx].discountType || 'NONE'] || 0;
+                                      const amount = (baseFee * currentRate) / 100;
+                                      const total = baseFee - amount;
+                                      newCodes[targetIdx].discountAmount = amount;
+                                      newCodes[targetIdx].totalAmount = total;
+
+                                      const discountFactor = (100 - currentRate) / 100; const installmentSum = (installmentPlan || []).reduce((sum, inst) => sum + (Number(inst.amount) || 0), 0); const gradeProportion = installmentSum > 0 ? (baseFee / installmentSum) : 1; const combinedFactor = gradeProportion * discountFactor;
+                                      const studentInstallments = installmentPlan.map((inst, idx) => ({
+                                        ...inst,
+                                        id: inst.id || `inst_${idx}`,
+                                        amount: Math.round((inst.amount || 0) * combinedFactor),
+                                        paid: false
+                                      }));
+
+                                      newCodes[targetIdx].finance = {
+                                        installments: studentInstallments,
+                                        totalTuition: total,
+                                        paidAmount: 0,
+                                        remainingAmount: total,
+                                        lastUpdated: new Date().toISOString()
+                                      };
+
+                                      const prefix = getPrefixForGrade(newGrade);
+                                      if (code.student) {
+                                        const parts = code.student.split('-');
+                                        parts[0] = prefix;
+                                        newCodes[targetIdx].student = parts.join('-');
+                                      }
+                                      setGeneratedCodes(newCodes);
+                                    }
+                                  }}
+                                  className="h-8 bg-black/40 text-white text-[11px] font-bold outline-none rounded-lg px-2 text-center cursor-pointer border border-white/10 max-w-full flex-1 md:flex-initial"
+                                >
+                                  {availableGrades.map(g => <option key={g} value={g} className="bg-[#101935]">{g}</option>)}
+                                </select>
+                              </div>
+
+                              {/* 4. Student Code + Quick Copy */}
+                              <div className="flex items-center justify-between md:justify-center w-full">
+                                <span className="md:hidden text-[11px] text-white/40 font-bold shrink-0 w-24">كود الطالب:</span>
+                                <button
+                                  onClick={() => handleQuickCopy(code.student, studentKey)}
+                                  className="flex items-center justify-between md:justify-center gap-1.5 bg-black/50 hover:bg-[#FFD600]/10 border border-white/10 hover:border-[#FFD600]/30 px-2.5 py-1.5 rounded-lg transition-all group/btn flex-1 md:flex-initial"
+                                  title="انقر لنسخ كود الطالب فورياً"
+                                >
+                                  <span className="text-[#FFD600] font-mono text-[11px] font-black tracking-wider">{code.student || '---'}</span>
+                                  {isStuCopied ? (
+                                    <Check size={12} className="text-emerald-400 animate-bounce" />
+                                  ) : (
+                                    <Copy size={12} className="text-white/30 group-hover/btn:text-[#FFD600] transition-colors" />
+                                  )}
+                                </button>
+                              </div>
+
+                              {/* 5. Parent Code + Quick Copy */}
+                              <div className="flex items-center justify-between md:justify-center w-full">
+                                <span className="md:hidden text-[11px] text-white/40 font-bold shrink-0 w-24">كود ولي الأمر:</span>
+                                <button
+                                  onClick={() => handleQuickCopy(code.parent, parentKey)}
+                                  className="flex items-center justify-between md:justify-center gap-1.5 bg-black/50 hover:bg-cyan-500/10 border border-white/10 hover:border-cyan-500/30 px-2.5 py-1.5 rounded-lg transition-all group/btn flex-1 md:flex-initial"
+                                  title="انقر لنسخ كود ولي الأمر فورياً"
+                                >
+                                  <span className="text-cyan-400 font-mono text-[11px] font-black tracking-wider">{code.parent || '---'}</span>
+                                  {isParCopied ? (
+                                    <Check size={12} className="text-emerald-400 animate-bounce" />
+                                  ) : (
+                                    <Copy size={12} className="text-white/30 group-hover/btn:text-cyan-400 transition-colors" />
+                                  )}
+                                </button>
+                              </div>
+
+                              {/* 6. Discount selection */}
+                              <div className="flex items-center justify-between md:justify-center w-full">
+                                <span className="md:hidden text-[11px] text-white/40 font-bold shrink-0 w-24">الخصم:</span>
+                                <div className="flex flex-col sm:flex-row items-center gap-1.5 justify-end md:justify-center flex-1 md:flex-initial">
+                                  <select
+                                    value={code.discountType || 'NONE'}
+                                    onChange={(e) => {
+                                      const type = e.target.value;
+                                      const byGrade = schoolSettings?.tuitionFeesByGrade || {};
+                                      const baseFee = (code.grade && byGrade[code.grade] !== undefined) ? Number(byGrade[code.grade]) : tuitionFee;
+                                      
+                                      let rate = 0;
+                                      let total = baseFee;
+                                      let amount = 0;
+
+                                      if (type === 'SPECIAL') {
+                                        if (code.totalAmount !== undefined && code.totalAmount !== null && code.totalAmount !== baseFee) {
+                                          total = Number(code.totalAmount);
+                                          amount = Math.max(0, baseFee - total);
+                                          rate = baseFee > 0 ? ((baseFee - total) / baseFee) * 100 : 0;
+                                        } else {
+                                          rate = code.discountRate || 0;
+                                          amount = Math.round((baseFee * rate) / 100);
+                                          total = Math.max(0, baseFee - amount);
+                                        }
+                                      } else {
+                                        rate = discountRates[type] || 0;
+                                        amount = Math.round((baseFee * rate) / 100);
+                                        total = Math.max(0, baseFee - amount);
+                                      }
+                                      
+                                      const newCodes = [...generatedCodes];
+                                      const targetIdx = newCodes.findIndex(c => c.id === code.id || (code.student && c.student === code.student));
+                                      if (targetIdx !== -1) {
+                                        newCodes[targetIdx].discountType = type;
+                                        newCodes[targetIdx].discountAmount = amount;
+                                        newCodes[targetIdx].totalAmount = total;
+                                        newCodes[targetIdx].discountRate = rate;
+
+                                        const discountFactor = baseFee > 0 ? (total / baseFee) : ((100 - rate) / 100);
+                                        const installmentSum = (installmentPlan || []).reduce((sum, inst) => sum + (Number(inst.amount) || 0), 0);
+                                        const gradeProportion = installmentSum > 0 ? (baseFee / installmentSum) : 1;
+                                        const combinedFactor = gradeProportion * discountFactor;
+                                        const studentInstallments = (installmentPlan || []).map((inst, idx) => ({
+                                          ...inst,
+                                          id: inst.id || `inst_${idx}`,
+                                          amount: Math.round((inst.amount || 0) * combinedFactor),
+                                          paid: false
+                                        }));
+
+                                        newCodes[targetIdx].finance = {
+                                          installments: studentInstallments,
+                                          totalTuition: total,
+                                          paidAmount: 0,
+                                          remainingAmount: total,
+                                          lastUpdated: new Date().toISOString()
+                                        };
+
+                                        setGeneratedCodes(newCodes);
+                                      }
+                                    }}
+                                    className="h-8 bg-black/40 text-white text-[10px] font-bold outline-none rounded-lg px-2 text-center cursor-pointer border border-white/10 max-w-full w-full sm:w-auto"
+                                  >
+                                    <option value="NONE" className="bg-[#101935]">بدون (0%)</option>
+                                    {Object.entries(discountLabels).filter(([t]) => t !== 'NONE').map(([t, l]) => (
+                                      <option key={t} value={t} className="bg-[#101935]">{l} ({discountRates[t]}%)</option>
+                                    ))}
+                                    <option value="SPECIAL" className="bg-[#101935]">خصم خاص ✍️</option>
+                                  </select>
+
+                                  {code.discountType === 'SPECIAL' && (
+                                    <div className="flex items-center gap-1">
+                                      <div className="flex items-center bg-black/40 border border-amber-400/30 rounded-lg px-1.5 h-8 w-20" title="مبلغ الخصم د.ع">
+                                        <input 
+                                          type="number"
+                                          min="0"
+                                          value={code.discountAmount !== undefined && code.discountAmount !== null ? (code.discountAmount === 0 ? '' : code.discountAmount) : ''}
+                                          onFocus={(e) => e.target.select()}
+                                          onChange={(e) => {
+                                            const val = e.target.value;
+                                            const byGrade = schoolSettings?.tuitionFeesByGrade || {};
+                                            const baseFee = (code.grade && byGrade[code.grade] !== undefined) ? Number(byGrade[code.grade]) : tuitionFee;
+                                            const discountAmt = val === '' ? 0 : Math.max(0, Number(val));
+                                            const total = Math.max(0, baseFee - discountAmt);
+                                            const rate = baseFee > 0 ? (discountAmt / baseFee) * 100 : 0;
+                                            
+                                            const newCodes = [...generatedCodes];
+                                            const targetIdx = newCodes.findIndex(c => c.id === code.id || (code.student && c.student === code.student));
+                                            if (targetIdx !== -1) {
+                                              newCodes[targetIdx].discountRate = rate;
+                                              newCodes[targetIdx].discountAmount = discountAmt;
+                                              newCodes[targetIdx].totalAmount = total;
+                                              
+                                              const discountFactor = baseFee > 0 ? (total / baseFee) : 0;
+                                              const installmentSum = (installmentPlan || []).reduce((sum, inst) => sum + (Number(inst.amount) || 0), 0);
+                                              const gradeProportion = installmentSum > 0 ? (baseFee / installmentSum) : 1;
+                                              const combinedFactor = gradeProportion * discountFactor;
+                                              
+                                              newCodes[targetIdx].finance = {
+                                                ...newCodes[targetIdx].finance,
+                                                totalTuition: total,
+                                                remainingAmount: total,
+                                                installments: (installmentPlan || []).map((inst, idx) => ({
+                                                  ...inst,
+                                                  id: inst.id || `inst_${idx}`,
+                                                  amount: Math.round((inst.amount || 0) * combinedFactor),
+                                                  paid: false
+                                                }))
+                                              };
+                                              setGeneratedCodes(newCodes);
+                                            }
+                                          }}
+                                          className="w-full bg-transparent text-amber-300 text-center text-[10px] font-black outline-none font-mono"
+                                          placeholder="خصم"
+                                        />
+                                      </div>
+                                      <div className="flex items-center bg-black/40 border border-white/10 rounded-lg px-1.5 h-8 w-14" title="نسبة الخصم %">
+                                        <input 
+                                          type="number"
+                                          min="0"
+                                          max="100"
+                                          value={code.discountRate !== undefined && code.discountRate !== null ? (code.discountRate === 0 ? '' : (Math.round(code.discountRate * 10) / 10)) : ''}
+                                          onFocus={(e) => e.target.select()}
+                                          onChange={(e) => {
+                                            const val = e.target.value;
+                                            const rate = val === '' ? 0 : Number(val);
+                                            const byGrade = schoolSettings?.tuitionFeesByGrade || {};
+                                            const baseFee = (code.grade && byGrade[code.grade] !== undefined) ? Number(byGrade[code.grade]) : tuitionFee;
+                                            const amount = Math.round((baseFee * rate) / 100);
+                                            const total = Math.max(0, baseFee - amount);
+                                            
+                                            const newCodes = [...generatedCodes];
+                                            const targetIdx = newCodes.findIndex(c => c.id === code.id || (code.student && c.student === code.student));
+                                            if (targetIdx !== -1) {
+                                              newCodes[targetIdx].discountRate = rate;
+                                              newCodes[targetIdx].discountAmount = amount;
+                                              newCodes[targetIdx].totalAmount = total;
+                                              
+                                              const discountFactor = baseFee > 0 ? (total / baseFee) : 0;
+                                              const installmentSum = (installmentPlan || []).reduce((sum, inst) => sum + (Number(inst.amount) || 0), 0);
+                                              const gradeProportion = installmentSum > 0 ? (baseFee / installmentSum) : 1;
+                                              const combinedFactor = gradeProportion * discountFactor;
+                                              
+                                              newCodes[targetIdx].finance = {
+                                                ...newCodes[targetIdx].finance,
+                                                totalTuition: total,
+                                                remainingAmount: total,
+                                                installments: (installmentPlan || []).map((inst, idx) => ({
+                                                  ...inst,
+                                                  id: inst.id || `inst_${idx}`,
+                                                  amount: Math.round((inst.amount || 0) * combinedFactor),
+                                                  paid: false
+                                                }))
+                                              };
+                                              setGeneratedCodes(newCodes);
+                                            }
+                                          }}
+                                          className="w-full bg-transparent text-white text-center text-[10px] font-black outline-none font-mono"
+                                          placeholder="0"
+                                        />
+                                        <span className="text-white/30 text-[9px] font-bold">%</span>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* 7. Net Tuition Calculation */}
+                              <div className="flex items-center justify-between md:justify-center w-full">
+                                <span className="md:hidden text-[11px] text-white/40 font-bold shrink-0 w-24">صافي القسط:</span>
+                                <div className="flex flex-col items-end md:items-center gap-1 justify-center flex-1 md:flex-initial">
+                                  {code.discountType === 'SPECIAL' ? (
+                                     <div className="flex items-center bg-black/40 border border-white/10 rounded-lg px-1.5 h-8 w-24">
+                                     <input 
+                                       type="number"
+                                       min="0"
+                                       value={code.totalAmount !== undefined ? (code.totalAmount === 0 ? '0' : code.totalAmount) : ''}
+                                       onFocus={(e) => e.target.select()}
+                                       onChange={(e) => {
+                                         const val = e.target.value;
+                                         const total = val === '' ? 0 : Number(val);
+                                         const byGrade = schoolSettings?.tuitionFeesByGrade || {};
+                                         const baseFee = (code.grade && byGrade[code.grade] !== undefined) ? Number(byGrade[code.grade]) : tuitionFee;
+                                         const amount = Math.max(0, baseFee - total);
+                                         const rate = baseFee > 0 ? (amount / baseFee) * 100 : 0;
+                                         
+                                         const newCodes = [...generatedCodes];
+                                         const targetIdx = newCodes.findIndex(c => c.id === code.id || (code.student && c.student === code.student));
+                                         if (targetIdx !== -1) {
+                                           newCodes[targetIdx].totalAmount = total;
+                                           newCodes[targetIdx].discountAmount = amount;
+                                           newCodes[targetIdx].discountRate = rate;
+                                           
+                                           const discountFactor = baseFee > 0 ? (total / baseFee) : 0;
+                                           const installmentSum = (installmentPlan || []).reduce((sum, inst) => sum + (Number(inst.amount) || 0), 0);
+                                           const gradeProportion = installmentSum > 0 ? (baseFee / installmentSum) : 1;
+                                           const combinedFactor = gradeProportion * discountFactor;
+                                           
+                                           newCodes[targetIdx].finance = {
+                                             ...newCodes[targetIdx].finance,
+                                             totalTuition: total,
+                                             remainingAmount: total,
+                                             installments: (installmentPlan || []).map((inst, idx) => ({
+                                               ...inst,
+                                               id: inst.id || `inst_${idx}`,
+                                               amount: Math.round((inst.amount || 0) * combinedFactor),
+                                               paid: false
+                                             }))
+                                           };
+                                           setGeneratedCodes(newCodes);
+                                         }
+                                       }}
+                                       className="w-full bg-transparent text-emerald-400 text-center text-[10px] font-black outline-none"
+                                       placeholder="0"
+                                     />
+                                   </div>
+                                  ) : (
+                                    <span className="text-emerald-400 font-mono font-black text-xs whitespace-nowrap">
+                                      {(() => {
+                                        if (code.totalAmount !== undefined) return Number(code.totalAmount).toLocaleString();
+                                        const byGrade = schoolSettings?.tuitionFeesByGrade || {};
+                                        const baseFee = (code.grade && byGrade[code.grade] !== undefined) ? Number(byGrade[code.grade]) : tuitionFee;
+                                        return (baseFee - ((baseFee * (code.discountRate || 0)) / 100)).toLocaleString();
+                                      })()}
+                                      <span className="text-[9px] opacity-60 mr-1">د.ع</span>
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* 8. Action Buttons (Desktop Only) */}
+                              <div className="hidden md:flex items-center justify-center gap-1.5">
+                                <button 
+                                  onClick={() => handleOpenTransfer(code)}
+                                  className="w-8 h-8 rounded-lg bg-blue-500/20 text-blue-400 hover:bg-blue-500 hover:text-white flex items-center justify-center transition-all border border-blue-500/20"
+                                  title="نقل الطالب إلى شعبة أخرى"
+                                >
+                                  <RefreshCw size={14} />
+                                </button>
+                                <button 
+                                  onClick={() => setConfirmDelete({ id: code.id })}
+                                  className="w-8 h-8 rounded-lg bg-rose-500/20 text-rose-400 hover:bg-rose-500 hover:text-white flex items-center justify-center transition-all border border-rose-500/20"
+                                  title="حذف الطالب من القائمة"
+                                >
+                                  <Trash2 size={14} />
+                                </button>
+                              </div>
                             </div>
-                          </div>
-                        );
-                      })}
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 </div>
